@@ -154,9 +154,10 @@ struct KernelEntryRewriteContext {
 
 /// @brief Position-independent client words executed at every hardware kernel entry.
 ///
-/// @details The translator appends these words to its own descriptor-ABI prologue and emits the
-/// final branch into the relocated body. Markers are relative to the beginning of the client words
-/// and are published once for each hardware-visible entry.
+/// @details The translator keeps these words outside its fixed descriptor-ABI launch window. Each
+/// hardware entry runs the translator-owned ABI prologue, branches to its client-prefix copy, and
+/// then branches to the corresponding relocated body entry. Markers are relative to the beginning
+/// of the client words and are published once for each hardware-visible entry.
 struct KernelEntryRewrite {
   std::vector<uint32_t> prefix_words;
   std::vector<InstructionRewriteMarker> markers;

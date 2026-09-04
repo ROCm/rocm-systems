@@ -3993,13 +3993,15 @@ TEST(BinaryTranslator, ClientKernelEntryPrefixCoversBothKernargPreloadEntries) {
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
   const uint32_t prefix_nop = build_s_nop(9, ROCJITSU_CODE_ARCH_CDNA3);
+  const std::vector<uint32_t> prefix_words(80u, prefix_nop);
+  const uint32_t prefix_bytes = prefix_words.size() * sizeof(uint32_t);
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   translator.set_kernel_entry_rewrite_callback(
       [&](const KernelEntryRewriteContext &context) -> std::optional<KernelEntryRewrite> {
         EXPECT_TRUE(context.has_kernarg_preload_firmware_skip);
         return KernelEntryRewrite{
-            .prefix_words = {prefix_nop},
-            .markers = {{.id = 61, .byte_offset = 0}, {.id = 62, .byte_offset = sizeof(uint32_t)}}};
+            .prefix_words = prefix_words,
+            .markers = {{.id = 61, .byte_offset = 0}, {.id = 62, .byte_offset = prefix_bytes}}};
       });
   const auto result = translator.translate(source);
 
@@ -4011,21 +4013,33 @@ TEST(BinaryTranslator, ClientKernelEntryPrefixCoversBothKernargPreloadEntries) {
   const auto target_words = std::span<const uint32_t>(
       reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
   ASSERT_GT(target_words.size(), kKernargPreloadSkipBytes / sizeof(uint32_t) + 1u);
-  EXPECT_EQ(target_words[0], prefix_nop);
-  EXPECT_EQ(target_words[kKernargPreloadSkipBytes / sizeof(uint32_t)], prefix_nop);
+  EXPECT_EQ(target_words[0] & 0xffff0000u,
+            build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3) & 0xffff0000u);
+  EXPECT_EQ(target_words[kKernargPreloadSkipBytes / sizeof(uint32_t)] & 0xffff0000u,
+            build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3) & 0xffff0000u);
 
   ASSERT_EQ(result.client_marker_placements.size(), 4u);
-  const auto marker_at = [&](uint64_t id, uint64_t source_offset, uint64_t target_offset) {
-    return std::ranges::any_of(result.client_marker_placements, [&](const auto &marker) {
-      return marker.id == id && marker.source_offset == source_offset &&
-             marker.target_offset == target_offset;
-    });
+  const auto marker_target = [&](uint64_t id, uint64_t source_offset) -> std::optional<uint64_t> {
+    const auto marker =
+        std::ranges::find_if(result.client_marker_placements, [&](const auto &placement) {
+          return placement.id == id && placement.source_offset == source_offset;
+        });
+    return marker == result.client_marker_placements.end()
+               ? std::nullopt
+               : std::optional<uint64_t>{marker->target_offset};
   };
-  EXPECT_TRUE(marker_at(61u, 0u, 0u));
-  EXPECT_TRUE(marker_at(62u, 0u, sizeof(uint32_t)));
-  EXPECT_TRUE(marker_at(61u, kKernargPreloadSkipBytes, kKernargPreloadSkipBytes));
-  EXPECT_TRUE(
-      marker_at(62u, kKernargPreloadSkipBytes, kKernargPreloadSkipBytes + sizeof(uint32_t)));
+  const auto primary_begin = marker_target(61u, 0u);
+  const auto primary_end = marker_target(62u, 0u);
+  const auto secondary_begin = marker_target(61u, kKernargPreloadSkipBytes);
+  const auto secondary_end = marker_target(62u, kKernargPreloadSkipBytes);
+  ASSERT_TRUE(primary_begin && primary_end && secondary_begin && secondary_end);
+  EXPECT_GT(*primary_begin, kKernargPreloadSkipBytes)
+      << "the oversized client program must live outside the fixed launch window";
+  EXPECT_EQ(*primary_end - *primary_begin, prefix_bytes);
+  EXPECT_EQ(*secondary_end - *secondary_begin, prefix_bytes);
+  EXPECT_EQ(*secondary_begin - *primary_begin, prefix_bytes + sizeof(uint32_t));
+  EXPECT_EQ(target_words[*primary_begin / sizeof(uint32_t)], prefix_nop);
+  EXPECT_EQ(target_words[*secondary_begin / sizeof(uint32_t)], prefix_nop);
 }
 
 TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPrologue) {

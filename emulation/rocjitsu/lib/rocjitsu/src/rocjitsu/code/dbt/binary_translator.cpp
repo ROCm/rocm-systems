@@ -3005,13 +3005,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       }
     }
   }
-  const auto append_client_kernel_entry_rewrite = [&](KdTranslation &translation) {
+  const auto client_kernel_entry_words = [&](const KdTranslation &translation) {
     const auto rewrite = client_kernel_entry_rewrites.find(translation.descriptor_file_offset);
     if (rewrite == client_kernel_entry_rewrites.end())
-      return;
-    translation.prologue_words.insert(translation.prologue_words.end(),
-                                      rewrite->second.prefix_words.begin(),
-                                      rewrite->second.prefix_words.end());
+      return std::span<const uint32_t>{};
+    return std::span<const uint32_t>(rewrite->second.prefix_words);
   };
 
   // A device function whose address is produced only by a data relocation -- a C++ vtable slot is
@@ -3552,13 +3550,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         return leave_unchanged();
       }
     }
-    append_client_kernel_entry_rewrite(*scope.translation);
-
     layout.entry_plan = {
         .has_kernarg_preload_firmware_skip = scope.translation->has_kernarg_preload_firmware_skip,
         .kernarg_preload_firmware_entry_text_offset =
             scope.translation->kernarg_preload_firmware_entry_text_offset,
         .prologue_words = scope.translation->prologue_words,
+        .client_prefix_words =
+            [&] {
+              const auto words = client_kernel_entry_words(*scope.translation);
+              return std::vector<uint32_t>(words.begin(), words.end());
+            }(),
     };
     if (!kernarg_preload_launch_window_fits(layout.entry_plan)) {
       auto failure = make_kernel_failure(
@@ -5023,16 +5024,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       const auto rewrite = client_kernel_entry_rewrites.find(translation.descriptor_file_offset);
       if (rewrite == client_kernel_entry_rewrites.end())
         continue;
-      if (rewrite->second.prefix_words.size() > scope.translation->prologue_words.size()) {
+      if (layout.target_client_prefixes.empty()) {
         append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                     "client kernel-entry prefix exceeds the emitted descriptor prologue",
+                     "client kernel-entry prefix has no emitted placement",
                      translation.entry_text_offset);
         return leave_unchanged();
       }
-      const uint64_t client_begin =
-          layout.target_entry +
-          (scope.translation->prologue_words.size() - rewrite->second.prefix_words.size()) *
-              sizeof(uint32_t);
       const auto publish_entry_markers = [&](uint64_t source_entry, uint64_t target_entry) {
         for (const InstructionRewriteMarker &marker : rewrite->second.markers) {
           client_marker_placements.push_back(
@@ -5042,12 +5039,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .owner_descriptor_file_offset = translation.descriptor_file_offset});
         }
       };
-      publish_entry_markers(translation.entry_text_offset, client_begin);
+      publish_entry_markers(translation.entry_text_offset, layout.target_client_prefixes[0]);
       if (translation.has_kernarg_preload_firmware_skip) {
+        if (layout.target_client_prefixes.size() != 2u) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernarg-preload client prefix has no secondary emitted placement",
+                       translation.kernarg_preload_firmware_entry_text_offset);
+          return leave_unchanged();
+        }
         publish_entry_markers(translation.kernarg_preload_firmware_entry_text_offset,
-                              client_begin +
-                                  (translation.kernarg_preload_firmware_entry_text_offset -
-                                   translation.entry_text_offset));
+                              layout.target_client_prefixes[1]);
       }
     }
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
@@ -5259,8 +5260,6 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           return leave_unchanged();
         }
-        append_client_kernel_entry_rewrite(*updated);
-
         if (!updated->supported) {
           if (skip_failed_kernels) {
             auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,

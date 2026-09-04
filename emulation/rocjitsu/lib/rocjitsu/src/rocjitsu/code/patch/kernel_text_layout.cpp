@@ -125,6 +125,10 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
   return translation.prologue_words.size() * sizeof(uint32_t) + sizeof(uint32_t);
 }
 
+[[nodiscard]] uint64_t client_entry_stub_bytes(const KernelEntryLayoutPlan &translation) {
+  return translation.client_prefix_words.size() * sizeof(uint32_t) + sizeof(uint32_t);
+}
+
 void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const uint32_t> words) {
   if (words.empty())
     return;
@@ -137,6 +141,22 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
   uint64_t cursor = stub_offset;
   write_words_at(text, cursor, translation.prologue_words);
   cursor += translation.prologue_words.size() * sizeof(uint32_t);
+
+  const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
+  if (!branch_dwords)
+    return false;
+  const uint32_t branch = build_s_branch(*branch_dwords, arch);
+  write_words_at(text, cursor, std::span<const uint32_t>(&branch, 1));
+  return true;
+}
+
+[[nodiscard]] bool write_client_entry_stub(std::vector<uint8_t> &text,
+                                           const KernelEntryLayoutPlan &translation,
+                                           uint64_t stub_offset, uint64_t target_offset,
+                                           rj_code_arch_t arch) {
+  uint64_t cursor = stub_offset;
+  write_words_at(text, cursor, translation.client_prefix_words);
+  cursor += translation.client_prefix_words.size() * sizeof(uint32_t);
 
   const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
   if (!branch_dwords)
@@ -253,6 +273,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   }
 
   const bool has_descriptor_prologue = !layout.entry_plan.prologue_words.empty();
+  const bool has_client_prefix = !layout.entry_plan.client_prefix_words.empty();
   uint64_t target_delta = 0;
   if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     // Kernarg-preload kernels have two hardware-visible entries separated by
@@ -265,8 +286,14 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     const uint64_t launch_end =
         layout.target_entry + kKernargPreloadSkipBytes + kernel_entry_stub_bytes(layout.entry_plan);
     append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
+    if (has_client_prefix) {
+      layout.target_client_prefixes.push_back(translated_text.size());
+      append_nop_padding(translated_text, client_entry_stub_bytes(layout.entry_plan), arch);
+      layout.target_client_prefixes.push_back(translated_text.size());
+      append_nop_padding(translated_text, client_entry_stub_bytes(layout.entry_plan), arch);
+    }
     target_delta = translated_text.size();
-  } else if (has_descriptor_prologue) {
+  } else if (has_descriptor_prologue || has_client_prefix) {
     // Descriptor ABI prologues are hardware-visible entry stubs. Place the stub
     // before the relocated body so large kernels do not depend on a single
     // SOPP branch reaching backward across the entire emitted body. Keep both
@@ -277,8 +304,14 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
         padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
     append_nop_padding(translated_text, launch_padding, arch);
     layout.target_entry = translated_text.size();
-    const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
-    append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
+    if (has_descriptor_prologue) {
+      const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
+      append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
+    }
+    if (has_client_prefix) {
+      layout.target_client_prefixes.push_back(translated_text.size());
+      append_nop_padding(translated_text, client_entry_stub_bytes(layout.entry_plan), arch);
+    }
     const uint64_t body_padding = padding_for_residue(
         translated_text.size() + layout.target_body_entry, layout.source_entry % 256, 256);
     append_nop_padding(translated_text, body_padding, arch);
@@ -295,26 +328,57 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 
   if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     assert(preload_body_entry && "preload body entry was checked before rebase");
-    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
-                           layout.target_body_entry, arch)) {
+    const uint64_t primary_target =
+        has_client_prefix ? layout.target_client_prefixes[0] : layout.target_body_entry;
+    const uint64_t secondary_target =
+        has_client_prefix ? layout.target_client_prefixes[1] : *preload_body_entry + target_delta;
+    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry, primary_target,
+                           arch)) {
       return kernel_text_append_error(layout.source_entry,
                                       "kernarg preload launch branch cannot encode target body",
                                       TextLayoutFailureCategory::ResourceLimit);
     }
     if (!write_launch_stub(translated_text, layout.entry_plan,
-                           layout.target_entry + kKernargPreloadSkipBytes,
-                           *preload_body_entry + target_delta, arch)) {
+                           layout.target_entry + kKernargPreloadSkipBytes, secondary_target,
+                           arch)) {
       return kernel_text_append_error(
           layout.entry_plan.kernarg_preload_firmware_entry_text_offset,
           "kernarg preload firmware launch branch cannot encode target body",
           TextLayoutFailureCategory::ResourceLimit);
     }
+    if (has_client_prefix && (!write_client_entry_stub(translated_text, layout.entry_plan,
+                                                       layout.target_client_prefixes[0],
+                                                       layout.target_body_entry, arch) ||
+                              !write_client_entry_stub(translated_text, layout.entry_plan,
+                                                       layout.target_client_prefixes[1],
+                                                       *preload_body_entry + target_delta, arch))) {
+      return kernel_text_append_error(layout.source_entry,
+                                      "client kernel-entry prefix branch cannot encode target body",
+                                      TextLayoutFailureCategory::ResourceLimit);
+    }
   } else if (has_descriptor_prologue) {
-    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
-                           layout.target_body_entry, arch)) {
+    const uint64_t launch_target =
+        has_client_prefix ? layout.target_client_prefixes[0] : layout.target_body_entry;
+    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry, launch_target,
+                           arch)) {
       return kernel_text_append_error(
           layout.source_entry, "kernel descriptor prologue branch range exceeds s_branch simm16",
           TextLayoutFailureCategory::ResourceLimit);
+    }
+    if (has_client_prefix && !write_client_entry_stub(translated_text, layout.entry_plan,
+                                                      layout.target_client_prefixes[0],
+                                                      layout.target_body_entry, arch)) {
+      return kernel_text_append_error(layout.source_entry,
+                                      "client kernel-entry prefix branch cannot encode target body",
+                                      TextLayoutFailureCategory::ResourceLimit);
+    }
+  } else if (has_client_prefix) {
+    if (!write_client_entry_stub(translated_text, layout.entry_plan,
+                                 layout.target_client_prefixes[0], layout.target_body_entry,
+                                 arch)) {
+      return kernel_text_append_error(layout.source_entry,
+                                      "client kernel-entry prefix branch cannot encode target body",
+                                      TextLayoutFailureCategory::ResourceLimit);
     }
   } else {
     layout.target_entry = layout.target_body_entry;

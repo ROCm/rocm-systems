@@ -174,8 +174,19 @@ struct KernelEntryLayoutPlan {
   /// @brief Source `.text` offset of the compatible-firmware preload entry.
   uint64_t kernarg_preload_firmware_entry_text_offset = 0;
 
-  /// @brief Target instructions that must execute before the relocated body.
+  /// @brief Translator-owned ABI instructions that must execute at each hardware entry.
+  ///
+  /// @details For a kernarg-preload kernel these words must fit, together with the final branch,
+  /// in the fixed 256-byte compatibility window. Client instrumentation is deliberately kept out
+  /// of that window by @ref client_prefix_words.
   std::vector<uint32_t> prologue_words;
+
+  /// @brief Position-independent client instructions that run after the ABI prologue.
+  ///
+  /// @details Each hardware entry branches to a private copy outside the fixed launch window.
+  /// The copy then branches to that entry's relocated source body, so client size is independent
+  /// of the 256-byte kernarg-preload ABI constraint.
+  std::vector<uint32_t> client_prefix_words;
 };
 
 /// @brief Minimal placement facts needed to emit a skipped-kernel no-op stub.
@@ -213,8 +224,10 @@ struct KernelTextLayout {
   uint64_t source_entry = 0;        ///< Original descriptor entry offset.
   uint64_t target_entry = 0;        ///< Final descriptor entry offset.
   uint64_t target_body_entry = 0;   ///< Relocated original entry offset.
-  uint64_t body_begin = 0;          ///< First emitted body byte.
-  uint64_t body_end = 0;            ///< One-past-end of emitted body.
+  /// Client-prefix placements in hardware-entry order (primary, then kernarg-preload secondary).
+  std::vector<uint64_t> target_client_prefixes;
+  uint64_t body_begin = 0; ///< First emitted body byte.
+  uint64_t body_end = 0;   ///< One-past-end of emitted body.
   /// SGPR pair reserved by the descriptor for out-of-range direct branches.
   ///
   /// Direct branches normally patch in place as one SOPP/SOPK instruction. When
