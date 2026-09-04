@@ -46,7 +46,10 @@ void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
     previous = std::exchange(interrupt_cb_state_, std::move(replacement));
   }
   std::unique_lock<std::mutex> previous_lock(previous->mutex);
-  previous->cv.wait(previous_lock, [&previous] { return previous->active_calls == 0; });
+  const auto self = previous->calls_by_thread.find(std::this_thread::get_id());
+  const size_t self_calls = self == previous->calls_by_thread.end() ? 0 : self->second;
+  previous->cv.wait(previous_lock,
+                    [&previous, self_calls] { return previous->active_calls == self_calls; });
 }
 
 CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_callback() {
@@ -55,8 +58,10 @@ CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_cal
   if (!state->callback)
     return {};
   std::lock_guard<std::mutex> state_lock(state->mutex);
+  const std::thread::id thread_id = std::this_thread::get_id();
   ++state->active_calls;
-  return InterruptCallbackLease(std::move(state));
+  ++state->calls_by_thread[thread_id];
+  return InterruptCallbackLease(std::move(state), thread_id);
 }
 
 void CommandProcessor::invoke_interrupt_callback(uint32_t process_id, uint32_t event_id) {

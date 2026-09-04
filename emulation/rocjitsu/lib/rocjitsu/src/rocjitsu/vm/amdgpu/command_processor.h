@@ -391,6 +391,11 @@ public:
   void invoke_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
     invoke_interrupt_callback(process_id, event_id);
   }
+  /// @brief Exercise CompletionTracker's forwarding path after startup.
+  void invoke_completion_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
+    assert(completion_ != nullptr);
+    completion_->invoke_interrupt_callback_for_test(process_id, event_id);
+  }
 
 private:
   struct InterruptCallbackState {
@@ -401,24 +406,27 @@ private:
     std::mutex mutex;
     std::condition_variable cv;
     size_t active_calls = 0;
+    std::unordered_map<std::thread::id, size_t> calls_by_thread;
   };
 
   class InterruptCallbackLease {
   public:
     InterruptCallbackLease() = default;
-    explicit InterruptCallbackLease(std::shared_ptr<InterruptCallbackState> state)
-        : state_(std::move(state)) {}
+    InterruptCallbackLease(std::shared_ptr<InterruptCallbackState> state, std::thread::id thread_id)
+        : state_(std::move(state)), thread_id_(thread_id) {}
     InterruptCallbackLease(const InterruptCallbackLease &) = delete;
     InterruptCallbackLease &operator=(const InterruptCallbackLease &) = delete;
     InterruptCallbackLease(InterruptCallbackLease &&other) noexcept
-        : state_(std::move(other.state_)) {}
+        : state_(std::move(other.state_)), thread_id_(other.thread_id_) {}
     ~InterruptCallbackLease() {
       if (!state_)
         return;
       std::lock_guard<std::mutex> lock(state_->mutex);
       --state_->active_calls;
-      if (state_->active_calls == 0)
-        state_->cv.notify_all();
+      auto calls = state_->calls_by_thread.find(thread_id_);
+      if (--calls->second == 0)
+        state_->calls_by_thread.erase(calls);
+      state_->cv.notify_all();
     }
 
     explicit operator bool() const { return static_cast<bool>(state_); }
@@ -428,6 +436,7 @@ private:
 
   private:
     std::shared_ptr<InterruptCallbackState> state_;
+    std::thread::id thread_id_;
   };
 
   struct ClusterWorkgroupPlacement;
