@@ -185,6 +185,8 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
     if(!validateTestPrerequisites(kMinProcessesForMPI))
         GTEST_SKIP() << "Need at least 2 MPI ranks";
 
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "2097152");
+
     int nRanks = MPIEnvironment::world_size;
     const size_t count = twoShotCountForRanks(nRanks);
     if(count == 0)
