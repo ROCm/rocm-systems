@@ -6,6 +6,7 @@
 import argparse
 from io import StringIO
 from types import SimpleNamespace
+from typing import Optional
 
 import pandas as pd
 import pytest
@@ -51,9 +52,26 @@ def _build_summary_from_dataframe(rows):
     return build_operator_summary(call_trees)
 
 
-def make_args() -> argparse.Namespace:
+def make_args(view: Optional[str] = None) -> argparse.Namespace:
     """Minimal args for the plain-table render path."""
-    return argparse.Namespace(decimal=2, view=None, normal_unit="per_wave")
+    return argparse.Namespace(decimal=2, view=view, normal_unit="per_wave")
+
+
+def make_show_all_args(
+    view: Optional[str] = None,
+    membw_analysis: bool = False,
+) -> argparse.Namespace:
+    """Minimal args for the show_all panel render path."""
+    return argparse.Namespace(
+        decimal=2,
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=membw_analysis,
+        normal_unit="per_wave",
+        path=[["fixture"]],
+        time_unit="ns",
+        view=view,
+    )
 
 
 def _sample_time_data() -> pd.DataFrame:
@@ -308,16 +326,7 @@ def test_show_all_membw_analysis_panel_gate(
     membw_analysis: bool,
 ) -> None:
     """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
-    args = argparse.Namespace(
-        decimal=2,
-        filter_metrics=None,
-        include_cols=None,
-        membw_analysis=membw_analysis,
-        normal_unit="per_wave",
-        path=[["fixture"]],
-        time_unit="ns",
-        view=None,
-    )
+    args = make_show_all_args(membw_analysis=membw_analysis)
     metric_dataframe = pd.DataFrame({
         "Metric": ["EA read request fraction - HBM"],
         "Avg": [50.0],
@@ -661,3 +670,159 @@ def test_show_operator_summary_renders_na_for_nan_cells(capsys):
     show_operator_summary(summary)
     output = capsys.readouterr().out
     assert "N/A" in output
+
+
+# ---------------------------------------------------------------------------
+# --view table
+# ---------------------------------------------------------------------------
+
+MEM_CHART_MARKER = "rendered memory chart"
+MEM_CHART_TABLE_CONFIG = {
+    "id": 301,
+    "title": "Memory Chart",
+    "cli_style": "mem_chart",
+    "header": {"metric": "Metric", "value": "Value"},
+}
+ROOFLINE_TABLE_CONFIG = {
+    "id": 401,
+    "title": "Empirical Roofline",
+    "cli_style": "Roofline",
+    "header": {"metric": "Metric", "value": "Value"},
+}
+
+
+def single_panel_configs(
+    panel_id: int, title: str, table_config: dict
+) -> SimpleNamespace:
+    """arch_configs holding one panel with one metric table."""
+    return SimpleNamespace(
+        panel_configs={
+            panel_id: {
+                "id": panel_id,
+                "title": title,
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+
+
+def single_run(table_id: int, df: pd.DataFrame, gpu_arch: str) -> dict:
+    """One workload run exposing *df* under *table_id* with valid roofline data."""
+    return {
+        "fixture": SimpleNamespace(
+            dfs={table_id: df},
+            sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]),
+            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
+        )
+    }
+
+
+@pytest.mark.parametrize(
+    "gpu_arch",
+    [
+        pytest.param("gfx1151", id="rdna35"),
+        pytest.param("gfx942", id="cdna"),
+    ],
+)
+def test_format_table_output_view_table_skips_memory_chart_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+    gpu_arch: str,
+) -> None:
+    """--view table renders a mem_chart table as a plain titled table."""
+
+    def unexpected_renderer(*_args, **_kwargs) -> str:
+        raise AssertionError("memory chart renderer ran despite --view table")
+
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx11.plot_mem_chart",
+        unexpected_renderer,
+    )
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        unexpected_renderer,
+    )
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+
+    content = format_table_output(
+        make_args(view="table"),
+        {"id": 701, "title": "Memory Chart", "cli_style": "mem_chart"},
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch=gpu_arch,
+    )
+
+    assert content.startswith("7.1 Memory Chart")
+    assert "Metric A" in content
+    assert "Normalization:" not in content
+
+
+@pytest.mark.parametrize(
+    "view,expect_chart",
+    [
+        pytest.param(None, True, id="default"),
+        pytest.param("table", False, id="view_table"),
+    ],
+)
+def test_show_all_view_table_replaces_merged_memory_chart(
+    monkeypatch: pytest.MonkeyPatch,
+    view: Optional[str],
+    expect_chart: bool,
+) -> None:
+    """A mem_chart-only panel emits the merged chart, or tables under --view table."""
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        lambda *_a, **_k: MEM_CHART_MARKER,
+    )
+    rendered_output = StringIO()
+
+    show_all(
+        make_show_all_args(view=view),
+        single_run(301, df, "gfx950"),
+        single_panel_configs(300, "Memory Chart", MEM_CHART_TABLE_CONFIG),
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    output = rendered_output.getvalue()
+    assert (MEM_CHART_MARKER in output) is expect_chart
+    assert ("3.1 Memory Chart" in output) is not expect_chart
+    assert ("-" * 80 in output) is not expect_chart
+
+
+@pytest.mark.parametrize(
+    "view,expect_roofline_plot",
+    [
+        pytest.param(None, True, id="default"),
+        pytest.param("table", False, id="view_table"),
+    ],
+)
+def test_show_all_view_table_renders_roofline_tables(
+    monkeypatch: pytest.MonkeyPatch,
+    view: Optional[str],
+    expect_roofline_plot: bool,
+) -> None:
+    """--view table skips the roofline plot and prints tables 401/402 instead."""
+    roofline_calls: list[int] = []
+    monkeypatch.setattr(
+        "utils.tty.is_roofline_shown",
+        lambda *_a, **_k: roofline_calls.append(1) or False,
+    )
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
+    rendered_output = StringIO()
+
+    show_all(
+        make_show_all_args(view=view),
+        single_run(401, df, "gfx950"),
+        single_panel_configs(400, "Roofline", ROOFLINE_TABLE_CONFIG),
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    output = rendered_output.getvalue()
+    assert bool(roofline_calls) is expect_roofline_plot
+    assert ("4.1 Empirical Roofline" in output) is not expect_roofline_plot
+    assert ("4. Roofline" in output) is not expect_roofline_plot
