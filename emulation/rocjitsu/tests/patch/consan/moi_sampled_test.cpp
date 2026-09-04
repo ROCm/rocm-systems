@@ -445,9 +445,6 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesRelocateAcrossLargeKernel) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             2u * kAccessesPerWindow);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
@@ -456,9 +453,6 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesRelocateAcrossLargeKernel) {
     EXPECT_LT(*patch.relocated_guest_instruction_offset,
               patch.trampoline_offset + patch.trampoline_size);
   }
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
@@ -1093,9 +1087,6 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_LT(*patch->relocated_guest_instruction_offset,
             patch->trampoline_offset + patch->trampoline_size);
   EXPECT_TRUE(result.text_relocation.has_value());
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &candidate) {
-    return candidate.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  }));
   const ConSanMoiReportBufferLayout layout =
       consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
   const uint64_t metadata =
@@ -2965,9 +2956,6 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
                                         ROCJITSU_CODE_ARCH_CDNA5);
       }
     }
-    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                                 &ConSanPatchInfo::kind),
-              0u);
     if (uses_dynamic_stack) {
       EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
@@ -3020,9 +3008,6 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
     EXPECT_LT(*patch.relocated_guest_instruction_offset,
               patch.trampoline_offset + patch.trampoline_size);
   }
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3080,9 +3065,6 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
     ++patched_barriers;
   }
   EXPECT_EQ(patched_barriers, kBarrierCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3132,9 +3114,6 @@ TEST(ConSanMoi, Rdna4SampledSpillBackedRelocationKeepsCompleteCoverage) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3175,9 +3154,6 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedRelocationKeepsCompleteCoverage) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -5469,9 +5445,6 @@ TEST(ConSanMoi, SampledRuntimeGateUsesWholeTextRelocation) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             9);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
@@ -6471,9 +6444,6 @@ TEST(ConSanMoi, SampledFarBarrierUsesWholeTextRelocation) {
            patch.anchor_offset == barrier_offset + sizeof(uint32_t);
   });
   ASSERT_NE(sync_patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_FALSE(
       compute_sopp_branch_simm16(sync_patch->anchor_offset, sync_patch->trampoline_offset));
   ASSERT_TRUE(sync_patch->relocated_guest_instruction_offset);
@@ -6544,9 +6514,6 @@ TEST(ConSanMoi, Cdna4SampledAtomicAndBarrierShareWholeTextTransaction) {
   ASSERT_NE(barrier_sync, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.text_relocation.has_value());
   EXPECT_NE(atomic_sync->trampoline_offset, barrier_sync->trampoline_offset);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  }));
 }
 
 TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicNeedsNoSpillBootstrapRoute) {
@@ -6620,9 +6587,6 @@ TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicNeedsNoSpillBootstrapRoute) {
   EXPECT_NE(*atomic_patch->relocated_guest_instruction_offset, atomic_offset);
 
   EXPECT_TRUE(result.text_relocation.has_value());
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  }));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -6675,9 +6639,6 @@ TEST(ConSanMoi, SampledWholeTextRelocationPreservesReconvergenceEntry) {
             patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore) &&
            patch.anchor_offset == kAccessWord * sizeof(uint32_t);
   })) << testing::PrintToString(result.patches);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("entry island is unreachable") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Cdna4SampledWholeTextRelocationKeepsFarOrderedEdgeComplete) {
@@ -6737,12 +6698,6 @@ TEST(ConSanMoi, Cdna4SampledWholeTextRelocationKeepsFarOrderedEdgeComplete) {
   });
   ASSERT_NE(atomic_sync, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.text_relocation.has_value());
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  }));
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -6779,17 +6734,11 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesUseWholeTextRelocation) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
     ASSERT_TRUE(patch.relocated_guest_instruction_offset);
   }
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, Cdna4DenseSampledAccessesUseWholeTextRelocation) {
@@ -6827,13 +6776,6 @@ TEST(ConSanMoi, Cdna4DenseSampledAccessesUseWholeTextRelocation) {
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos ||
-           warning.find("entry island is unreachable") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Cdna4DenseSampledRelocationPreservesEveryAccess) {
@@ -6884,9 +6826,6 @@ TEST(ConSanMoi, Cdna4DenseSampledRelocationPreservesEveryAccess) {
                                &ConSanPatchInfo::kind),
             kAccessCount);
 
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
 }
@@ -6969,9 +6908,6 @@ TEST(ConSanMoi, Cdna4SampledWholeTextRelocationPreservesLaterGroup) {
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
 }
@@ -7027,9 +6963,6 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedRelocationPreservesEveryAccess) {
             kAccessCount)
       << testing::PrintToString(result.warnings);
 
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -7098,9 +7031,6 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   ASSERT_TRUE(guard);
   EXPECT_EQ(body.front(), *guard);
 
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSanMoi, Cdna4SampledSpillSafeRuntimeSelectionUsesBodyGate) {
@@ -7324,12 +7254,6 @@ TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
                                &ConSanPatchInfo::kind),
             kBarrierCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -7402,9 +7326,6 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
   });
   ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(sync->relocated_guest_instruction_offset);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -7449,16 +7370,9 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesRelocateInsideCalledFunction) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos ||
-           warning.find("entry island is unreachable") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFallsBack) {
+TEST(ConSanMoi, Gfx1250SampledRelocatesAllAccessesWithTransientSgprReferences) {
   constexpr uint32_t kAccessCount = 9u;
   const uint32_t router_reference =
       build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_CDNA5);
@@ -7468,9 +7382,8 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
     words[8u + 2u * index] = store[0];
     words[9u + 2u * index] = store[1];
   }
-  // Dense gfx1250 anchors normally share a compact call relay. Make every
-  // otherwise viable host reference its transient router state; the ordinary
-  // per-site appended relays remain directly reachable.
+  // Whole-text relocation does not need a separate host whose scalar
+  // liveness excludes this transient state.
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -7492,14 +7405,10 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  }));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
+TEST(ConSanMoi, SampledWholeTextTransactionPreservesFarBarrierWithManyAccesses) {
   std::vector<uint32_t> kernel_words;
   for (uint32_t i = 0; i < 9u; ++i) {
     kernel_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
@@ -7511,9 +7420,8 @@ TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::array function_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
   std::vector<uint32_t> far_tail(40000u, build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4));
-  // There are only eight local islands for nine accesses plus the barrier.
-  // Dense access routing must share one relay so the qualified barrier still
-  // receives an island instead of becoming a placement gap.
+  // Exercise enough accesses and distance that the former local-island
+  // pipeline had to compete with the qualified barrier for routing space.
   std::fill_n(far_tail.begin(), 8u * 8u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
@@ -7535,9 +7443,6 @@ TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   const ConSanBarrierSiteDecision *barrier =
       consan_barrier_decision_at(result, barrier_offset + sizeof(uint32_t));
   ASSERT_NE(barrier, nullptr);
@@ -7580,9 +7485,6 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             kBarrierCount);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -7616,12 +7518,6 @@ TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesWholeTextRelocation) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             result.observation_plan().barrier_site_decisions.size());
@@ -7664,12 +7560,6 @@ TEST(ConSanMoi, Gfx1250SampledRelocatesBarriersAcrossKernels) {
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("fell back from dense relay") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             result.observation_plan().barrier_site_decisions.size());
@@ -8110,14 +8000,9 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
            item.anchor_offset == 401u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  // A nearby single barrier must use the direct cave route. An absolute-PC
-  // dense dispatcher is not owner-stable when B0-to-A0 translation clones a
-  // shared helper, because every owner receives a different caller PC.
+  // This modest transaction keeps the relocated barrier body directly
+  // representable from its source coordinate.
   EXPECT_TRUE(compute_sopp_branch_simm16(patch->anchor_offset, patch->trampoline_offset));
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &candidate) {
-    return candidate.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           candidate.anchor_offset == patch->anchor_offset;
-  }));
   expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_CDNA5);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());

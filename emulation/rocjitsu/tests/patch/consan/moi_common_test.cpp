@@ -983,9 +983,6 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   patch.kind = ConSanPatchKind::InlineMalformedBarrierAbort;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
-  patch.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
 
   patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(

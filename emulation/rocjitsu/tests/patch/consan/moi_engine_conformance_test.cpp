@@ -10,7 +10,6 @@ struct MoiEngineConformanceCase {
   ConSanMoiEngine engine;
   ConSanPatchKind access_patch_kind;
   uint32_t access_body_words;
-  uint32_t expected_island_bytes;
   const char *name;
 };
 
@@ -64,20 +63,11 @@ TEST_P(MoiEngineConformanceTest, InstrumentsManyLargeAccessBodies) {
       << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), kAccessCount);
   for (const ConSanCommittedLowering &commit : result.coverage_ledger.lowering_commits()) {
     EXPECT_EQ(commit.outcome, ConSanLoweringOutcomeKind::Instrumented);
     EXPECT_EQ(commit.intent_ids.size(), 1u);
     EXPECT_EQ(commit.locations.size(), 1u);
-  }
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
-      continue;
-    EXPECT_EQ(patch.trampoline_size, test_case.expected_island_bytes);
-    EXPECT_TRUE(compute_sopp_branch_simm16(patch.anchor_offset, patch.trampoline_offset));
   }
 }
 
@@ -262,9 +252,6 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->anchor_offset, 28u);
   EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0);
 }
 
 TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationRange) {
@@ -349,21 +336,18 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RelocatesSparseAccessesAcrossLargeText) 
                                     }))
         << "missing access patch at byte offset " << anchor_offset;
   }
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     AllEngines, MoiEngineConformanceTest,
     testing::Values(MoiEngineConformanceCase{ConSanMoiEngine::RecordReplay,
-                                             ConSanPatchKind::TrampolineMoiAccessRecordStore, 7, 40,
+                                             ConSanPatchKind::TrampolineMoiAccessRecordStore, 7,
                                              "RecordReplay"},
                     MoiEngineConformanceCase{ConSanMoiEngine::Sampled,
                                              ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
-                                             7, 28, "Sampled"},
+                                             7, "Sampled"},
                     MoiEngineConformanceCase{ConSanMoiEngine::InlineShadow,
-                                             ConSanPatchKind::TrampolineMoiExactShadowStore, 8, 32,
+                                             ConSanPatchKind::TrampolineMoiExactShadowStore, 8,
                                              "InlineShadow"}),
     [](const testing::TestParamInfo<MoiEngineConformanceCase> &info) { return info.param.name; });
 

@@ -1041,9 +1041,6 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
   });
   ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-  }));
   ASSERT_TRUE(atomic_patch->relocated_guest_instruction_offset);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -5132,9 +5129,6 @@ TEST(ConSanMoi, InlineAtomicRelocatesFarHelpersWithoutIndirectIslands) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);

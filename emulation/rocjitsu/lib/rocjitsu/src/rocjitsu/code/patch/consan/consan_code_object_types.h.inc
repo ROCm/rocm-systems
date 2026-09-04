@@ -121,7 +121,6 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineMoiFenceRecord,
   InlineMalformedBarrierAbort,
   TrampolineScPerturbation,
-  TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
   /// An s_clause scheduling hint neutralized because one of its covered
   /// memory instructions is replaced by an instrumentation trampoline.

@@ -64,7 +64,6 @@ namespace {
       consan_enum(E::InlineMalformedBarrierAbort, "inline-malformed-barrier-abort"),
       consan_enum(E::TrampolineScPerturbation, "trampoline-sc-perturbation"),
       consan_enum(E::InlineScalarClauseNopRewrite, "inline-scalar-clause-nop-rewrite"),
-      consan_enum(E::TrampolineMoiIndirectBranchIsland, "trampoline-moi-indirect-branch-island"),
       consan_enum(E::TrampolineNop, "trampoline-nop"));
   return vocabulary.name(kind).data();
 }

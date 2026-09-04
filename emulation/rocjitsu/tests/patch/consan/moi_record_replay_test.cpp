@@ -10383,9 +10383,6 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneRelocationTransaction) {
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                  &ConSanPatchInfo::kind),
               kAccessCount);
-    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                                 &ConSanPatchInfo::kind),
-              0u);
     expect_record_replay_text_transaction(result);
   }
 }
@@ -10807,9 +10804,6 @@ TEST(ConSanMoi, Rdna4AccessHeavyCompactSplitBarrierReservesEveryMemberEntry) {
                                &ConSanPatchInfo::kind),
             kBarrierCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, CdnaSparseAccessDenseSpillRetainsEveryAccessAcrossTargets) {
@@ -10976,9 +10970,6 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
     EXPECT_NE(std::ranges::search(entry_body, *save_semantic_workgroup_x).begin(), entry_body.end())
         << "the private prologue must back up guest-semantic workgroup X, not the raw "
            "dispatch-preload value occupying its ABI slot";
-    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                                 &ConSanPatchInfo::kind),
-              0u);
     expect_record_replay_text_transaction(result);
   }
 }
@@ -11058,9 +11049,6 @@ TEST(ConSanMoi, Cdna4OrdinaryAndScalarSpillBodiesShareRelocationTransaction) {
                                &ConSanPatchInfo::kind),
             1u)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   expect_record_replay_text_transaction(result);
 }
 
@@ -11112,9 +11100,6 @@ TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountL
                                &ConSanPatchInfo::kind),
             kSiteCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesReservedBarrierAndFenceRelays) {
@@ -11191,9 +11176,6 @@ TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesReservedBarrierAndFenceRela
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, Rdna4DenseFunctionBarriersShareRelocationTransaction) {
@@ -11295,13 +11277,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesRelocateAcrossLargeKernel) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u * kAccessesPerWindow);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   expect_record_replay_text_transaction(result);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos;
-  }));
 }
 
 TEST(ConSanMoi, RecordReplayAllSupportedPolicyIgnoresNominalPatchLimit) {
@@ -11373,9 +11349,6 @@ TEST(ConSanMoi, Gfx1250DenseAccessesRelocatePastKernelEntryBranch) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   expect_record_replay_text_transaction(result);
 }
 
@@ -11443,15 +11416,6 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
                                &ConSanPatchInfo::kind),
             1u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &patch) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
-        patch.original_size == 0u)
-      return false;
-    const uint64_t patch_end = patch.anchor_offset + patch.original_size;
-    return patch.anchor_offset <
-               result.program_inventory.sync().sync_sequences.front().end_text_offset &&
-           kAcquireOffset < patch_end;
-  })) << testing::PrintToString(result.patches);
   const ConSanAtomicSiteDecision *acquire_decision =
       consan_atomic_decision_at(result, kAcquireOffset);
   ASSERT_NE(acquire_decision, nullptr);
@@ -11499,13 +11463,6 @@ TEST(ConSanMoi, Gfx1250DenseAccessesRejectUnreachableHostWhenOwnerUsesRouterStat
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  constexpr uint64_t kUnreachableBegin = kUnreachableBeginWord * sizeof(uint32_t);
-  constexpr uint64_t kUnreachableEnd = kUnreachableEndWord * sizeof(uint32_t);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u && patch.anchor_offset >= kUnreachableBegin &&
-           patch.anchor_offset < kUnreachableEnd;
-  })) << testing::PrintToString(result.patches);
 }
 
 TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
@@ -11785,9 +11742,6 @@ TEST(ConSanMoi, AtomicRecordRelocatesFarWithoutLocalIndirectIsland) {
                                       &ConSanPatchInfo::kind);
   ASSERT_NE(body, result.patches.end());
   EXPECT_GE(body->trampoline_offset, original_text_size);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   expect_record_replay_text_transaction(result);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
@@ -11836,9 +11790,6 @@ TEST(ConSanMoi, FenceRecordRelocatesSccDeadPrefixInWholeTextTransaction) {
   EXPECT_EQ(fence->anchor_offset, 0u);
   EXPECT_GE(fence->trampoline_offset, original_text_size);
   EXPECT_FALSE(compute_sopp_branch_simm16(fence->anchor_offset, fence->trampoline_offset));
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   expect_record_replay_text_transaction(result);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());

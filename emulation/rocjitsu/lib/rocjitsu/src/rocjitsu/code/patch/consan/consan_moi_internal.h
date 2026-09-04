@@ -963,8 +963,7 @@ patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_
              patch.private_state_layout->exact_workgroup_offsets.complete()));
   }
   return (patch.kind >= ConSanPatchKind::InlineMoiAccessRecordStore &&
-          patch.kind <= ConSanPatchKind::TrampolineMoiFenceRecord) ||
-         patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+          patch.kind <= ConSanPatchKind::TrampolineMoiFenceRecord);
 }
 
 /// Release-active outcome from recovering one guest VGPR out of an

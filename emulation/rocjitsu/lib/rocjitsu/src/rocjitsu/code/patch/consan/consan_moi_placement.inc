@@ -778,8 +778,8 @@ struct MoiResourcePlanningState {
     // kernel entries. Keeping a snapshot for every decoded instruction makes
     // large generated libraries scale with their complete instruction count,
     // even though most instructions are never queried. Per-owner transient
-    // assignments are the one exception: their dense relay search may inspect
-    // any relocatable instruction in an owning block.
+    // assignments are the one exception: deriving a component-wide safe
+    // window may inspect any relocatable instruction in an owning block.
     const bool restrict_liveness_queries = register_allocation.owner_transient_sgprs.empty();
     const SynchronizationInventoryView sync = problem.inventory().sync();
     std::unordered_map<BasicBlock *, std::vector<const Instruction *>> liveness_queries_by_block;
@@ -2296,10 +2296,9 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         spill_scc = domain.select_first(0u, 1u);
       if (spill_scc)
         spill_key = domain.select_first(0u, 1u);
-      // Dense s_call anchors first write their return PC into this pair.  The
-      // entry island copies its low word into the key before reusing the pair
-      // for the long jump, and the body reconstructs its known continuation.
-      // One dead pair is therefore sufficient for both transient roles.
+      // The compact spill ABI can reuse the indirect-PC pair as its call-return
+      // pair: the generated body has a statically known continuation and does
+      // not need both values live at once.
       if (spill_key)
         spill_call_return = spill_pc;
       const uint16_t spilled_scalar_count =
@@ -2312,8 +2311,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       }
     }
     // Fixed-stack Inline/compact owners can preserve the complete borrowed
-    // window in private state and reach the body with direct branch relays.
-    // RDNA dynamic-stack owners additionally reserve one bootstrap pair.
+    // window in private state. RDNA dynamic-stack owners additionally reserve
+    // one bootstrap pair.
     const bool cdna_branch_only =
         supports_compact_scalar_spill && consan_arch_is_cdna(arch) && all_owners_use_fixed_stack;
     if (!selected && consan_address_free_private_limit(arch) &&

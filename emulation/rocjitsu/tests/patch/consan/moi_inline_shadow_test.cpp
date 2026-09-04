@@ -6242,9 +6242,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneTextTransaction) {
     EXPECT_GT(patch.private_state_layout->ephemeral_base, patch.private_state_layout->epoch_offset);
     EXPECT_GE(patch.required_private_segment_size, patch.private_state_layout->ephemeral_base);
   }
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
 }
 
@@ -6335,9 +6332,6 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowNeedsNoRelocatedHostArm) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore ||
@@ -6377,13 +6371,6 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesRelocateWithoutKeyRelay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos;
-  }));
-
   constexpr uint64_t kFirstAccessOffset = 8u * sizeof(uint32_t);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6441,9 +6428,6 @@ TEST(ConSanMoi, Cdna4FarInlineShadowAccessesShareOneTextTransaction) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("skipped access site") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore ||
@@ -6541,9 +6525,6 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessDoesNotIntroduceSccMutatingRelay) {
             1u);
 
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
            patch.anchor_offset == kFirstAccessOffset &&
@@ -6610,9 +6591,6 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowRelocatesLiveGuestSccWithoutRoute) {
             kAccessCount);
 
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore ||
            patch.relocated_guest_instruction_offset.has_value();
@@ -6660,14 +6638,7 @@ TEST(ConSanMoi, Rdna4DenseCalledFunctionAccessesShareTextTransaction) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("inside a relocated prefix") != std::string::npos ||
-           warning.find("entry island is unreachable") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionUsesGeneralDenseRouting) {
@@ -6907,9 +6878,6 @@ TEST(ConSanMoi, Cdna4FarEntryPrefixNeedsNoOverlappingIndirectIsland) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(prologue->anchor_offset, 0u);
   EXPECT_EQ(prologue->original_size, 0u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
@@ -6944,9 +6912,6 @@ TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                               &ConSanPatchInfo::kind),
             result.patches.end());
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersShareTextTransaction) {
@@ -6994,9 +6959,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersShareTextTransaction) {
             kAccessCount) // One epoch advance after each signal/wait pair completes.
       << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
         patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier)
@@ -7095,9 +7057,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessAndBarrierShareTextTransaction) {
       result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier, result.patches.end());
   EXPECT_TRUE(barrier->relocated_guest_instruction_offset);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7143,9 +7102,6 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersShareTextTransaction) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
 }
 
@@ -7198,9 +7154,6 @@ TEST(ConSanMoi, Gfx1250DenseBarrierNeedsNoDispatcherReservation) {
       result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
   ASSERT_NE(first_barrier, result.patches.end());
   EXPECT_TRUE(first_barrier->relocated_guest_instruction_offset);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());

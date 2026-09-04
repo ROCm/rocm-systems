@@ -1964,8 +1964,7 @@ void try_apply_owner_epoch_prologue_patch(
     const bool owns_non_barrier_instrumentation =
         find_moi_patch(result, [&](const ConSanPatchInfo &patch) {
           return kernel_owns_patch(kernel, patch) &&
-                 patch.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
-                 patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+                 patch.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
         }) != nullptr;
     if (mode_policy.skip_unobserved_barrier_only_initialization &&
         kernel_point.automatic_moi_persistent_vgprs && owns_inline_barrier &&
