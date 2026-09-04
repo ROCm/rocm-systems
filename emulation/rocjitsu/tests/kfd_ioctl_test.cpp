@@ -4947,6 +4947,14 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
       << strerror(errno);
   EXPECT_EQ(notifications, 1u);
 
+  // Changing the subscription affects future exceptions, but cannot revoke
+  // the event that was already claimed and used to wake the debugger.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
   kfd_ioctl_dbg_trap_args query{};
   query.pid = static_cast<uint32_t>(getpid());
   query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;

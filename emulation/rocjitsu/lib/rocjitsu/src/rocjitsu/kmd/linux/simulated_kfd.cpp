@@ -3015,25 +3015,6 @@ void prepare_cwsr_wave_states(std::vector<kmd::CwsrWaveState> &waves) {
 
 } // namespace
 
-void SimulatedKfd::raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                                     uint32_t gpu_id, uint64_t exception_mask) {
-  if (!proc)
-    return;
-  uint64_t report_mask = exception_mask;
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    auto queue = proc->queue_snapshot_map_.find(queue_id);
-    if (queue != proc->queue_snapshot_map_.end()) {
-      queue->second.exception_status |= exception_mask;
-      report_mask |= queue->second.exception_status & KFD_EC_MASK(EC_QUEUE_NEW);
-    }
-  }
-  std::lock_guard<std::mutex> lk(debug_events_mutex_);
-  auto &queue = debug_events_[proc->client_pid()][queue_id];
-  queue.gpu_id = gpu_id;
-  queue.mask |= report_mask;
-}
-
 bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
                                                uint32_t gpu_id, uint64_t ctx_base,
                                                uint32_t ctx_size) {
@@ -3198,9 +3179,16 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
   // request publishes the authoritative full-queue CWSR snapshot.
-  notify_debug_event(proc, queue_id, gpu_id,
-                     queue_exception_status != 0 ? debugger_status
-                                                 : KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+  const bool notified = notify_debug_event(
+      proc, queue_id, gpu_id,
+      queue_exception_status != 0 ? debugger_status : KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+  if (!notified) {
+    const uint64_t unreported = queue_exception_status & ~wave.trap_runtime_exception_status();
+    if (unreported != 0 && wave.cu().signal_queue_exception(queue_id, process_id, unreported))
+      wave.add_trap_runtime_exception_status(unreported);
+    wave.set_debug_halted(false);
+    wave.set_status_halt(false);
+  }
 }
 
 uint64_t SimulatedKfd::debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc,
@@ -3394,7 +3382,7 @@ bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
 bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                        uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                                        uint64_t exception_mask) {
-  // Serialization must succeed before the debugger is woken. raise_debug_event
+  // Serialization must succeed before the debugger is woken. Event publication
   // latches per-queue exception status and queues an event the debugger will
   // answer with SUSPEND_QUEUES; without a record that request can only come
   // back as a queue error, and the wave stays halted with nothing able to
@@ -3402,29 +3390,43 @@ bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, 
   // the serializer selects waves by debug_stopped() -- so the caller undoes it.
   if (!serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size))
     return false;
-  notify_debug_event(proc, queue_id, gpu_id, exception_mask);
-  return true;
+  return notify_debug_event(proc, queue_id, gpu_id, exception_mask);
 }
 
-void SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                       uint32_t gpu_id, uint64_t exception_mask) {
   const pid_t target_pid = proc->client_pid();
-  raise_debug_event(proc, queue_id, gpu_id, exception_mask);
+  uint64_t report_mask = exception_mask;
+  {
+    std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue != proc->queue_snapshot_map_.end()) {
+      queue->second.exception_status |= exception_mask;
+      report_mask |= queue->second.exception_status & KFD_EC_MASK(EC_QUEUE_NEW);
+    }
+  }
 
-  // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
-  // the descriptor, then perform notifier I/O without holding a driver lock.
+  // Claim and latch the event under one session snapshot. A concurrent mask
+  // update may affect future events, but it cannot revoke an event that has
+  // already been assigned to the debugger.
   UniqueDriverFd notifier;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
-    if (session != debug_sessions_.end() && session->second.dbg_fd >= 0 &&
-        (session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+    if (session == debug_sessions_.end() || !session->second.enabled ||
+        session->second.dbg_fd < 0 || (session->second.exception_enable_mask & exception_mask) == 0)
+      return false;
+    notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+    if (notifier.get() < 0)
+      return false;
+    std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
+    auto &event = debug_events_[target_pid][queue_id];
+    event.gpu_id = gpu_id;
+    event.mask |= report_mask;
   }
-  if (notifier.get() >= 0) {
-    const uint64_t one = 1;
-    [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
-  }
+  const uint64_t one = 1;
+  [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
+  return true;
 }
 
 bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
@@ -3464,8 +3466,7 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // queue. The debugger's ensuing SUSPEND_QUEUES request publishes one stable,
   // authoritative CWSR snapshot instead of redundantly serializing every
   // resident wave here first.
-  notify_debug_event(proc, wave.queue_id(), gpu_id);
-  return true;
+  return notify_debug_event(proc, wave.queue_id(), gpu_id);
 }
 
 bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address, uint32_t bytes,
@@ -4187,7 +4188,6 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
 }
 
 int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
-                                    uint64_t enabled_mask,
                                     kfd_ioctl_dbg_trap_query_debug_event_args &args) {
   const uint64_t clear_mask = args.exception_mask;
   std::lock_guard<std::mutex> lk(debug_events_mutex_);
@@ -4196,8 +4196,6 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
     return -EAGAIN;
   auto &queues = process->second;
   for (auto queue = queues.begin(); queue != queues.end(); ++queue) {
-    if ((queue->second.mask & enabled_mask) == 0)
-      continue;
     args.exception_mask = queue->second.mask;
     args.queue_id = queue->first;
     args.gpu_id = queue->second.gpu_id;
@@ -4221,21 +4219,19 @@ void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exceptio
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
-    if (session == debug_sessions_.end() || !session->second.enabled)
+    if (session == debug_sessions_.end() || !session->second.enabled ||
+        session->second.dbg_fd < 0 || (session->second.exception_enable_mask & exception_mask) == 0)
       return;
-    if ((session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
-  }
-  {
-    std::lock_guard<std::mutex> lk(debug_events_mutex_);
+    notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+    if (notifier.get() < 0)
+      return;
+    std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
     auto &event = debug_events_[target_pid][0];
     event.gpu_id = 0;
     event.mask |= exception_mask;
   }
-  if (notifier.get() >= 0) {
-    const uint64_t one = 1;
-    [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
-  }
+  const uint64_t one = 1;
+  [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
 }
 
 void SimulatedKfd::cancel_runtime_handshake(pid_t target_pid) {
@@ -4867,8 +4863,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     return 0;
   }
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
-    return debug_query_event(target_pid, target_proc, session_it->second.exception_enable_mask,
-                             args->query_debug_event);
+    return debug_query_event(target_pid, target_proc, args->query_debug_event);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES: {
     if (args->suspend_queues.num_queues != 0 && args->suspend_queues.queue_array_ptr == 0)
       return -EFAULT;
