@@ -198,6 +198,16 @@ _ROW_RE = re.compile(
 )
 _OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
 
+# "#[bcast-tier] <name>", emitted once per distinct tier by BroadcastRunColl when
+# RCCL_TESTS_BCAST_TIER_LOG is set. Named tiers are the contract between the -D 3
+# dispatch and the tier assertions below; see bcastReportTier in broadcast.cu.
+_TIER_RE = re.compile(r"^#\[bcast-tier\]\s+(\S+)", re.M)
+
+
+def _bcast_tiers(out):
+    """Set of -D 3 tier names the run reported."""
+    return set(_TIER_RE.findall(out or ""))
+
 
 def _bcast_rows(out):
     """Measured rows as (size, root, wrong_out_of_place, wrong_in_place)."""
@@ -245,11 +255,17 @@ def _read_debug_logs(debug_dir):
     return "\n".join(chunks)
 
 
-def _assert_bcast_ok(rc, out, debug, ctx):
+def _assert_bcast_ok(rc, out, debug, ctx, expect_tier=None):
     """Assert the run bound GIN-SDMA, measured something, and checked clean.
 
     Exit status alone is not enough: it stays 0 for a run that binds a different
     backend, and for one that produces no measured rows at all.
+
+    Nor is the data check enough to say which tier ran. Every -D 3 tier produces
+    a correct broadcast, so #wrong stays 0 when a tier is deleted and its
+    messages fall through to the next one -- the test keeps passing while the
+    kernel it named is no longer reached. expect_tier pins the tier that has to
+    have run, so removing it fails here instead of silently going uncovered.
     """
     tail = (out or "")[-2000:]
     assert rc == 0, "Broadcast {} failed (exit {}). Output tail:\n{}".format(
@@ -284,6 +300,32 @@ def _assert_bcast_ok(rc, out, debug, ctx):
     assert m and m.group(1) == "0", "Broadcast {} out-of-bounds count is {}".format(
         ctx, m.group(1) if m else "absent"
     )
+    if expect_tier is not None:
+        # A string pins one tier; a collection allows a set of equivalent ones.
+        # The ring tier needs the latter: it reports ring-table where an
+        # edge-disjoint decomposition exists and ring-multi where none does
+        # (N=4 and N=6), and BCAST_NP follows whatever GPUs the host has.
+        #
+        # The ring also requires the LSA team to cover the world, so a multi-node
+        # launch takes scatter+allgather instead and fails here. That is the
+        # intent: such a run is not exercising the ring the caller asked for.
+        allowed = (
+            {expect_tier} if isinstance(expect_tier, str) else set(expect_tier)
+        )
+        tiers = _bcast_tiers(out)
+        assert tiers, (
+            "Broadcast {} reported no #[bcast-tier] line, so which tier ran is "
+            "unverified. Is RCCL_TESTS_BCAST_TIER_LOG set for this launch, and is "
+            "the binary new enough to emit it? Output tail:\n{}".format(ctx, tail)
+        )
+        # Exactly one tier, and an allowed one. These launches pin a single size,
+        # so a second tier means some roots took a different kernel; merely
+        # intersecting `allowed` would let that through.
+        assert len(tiers) == 1 and tiers <= allowed, (
+            "Broadcast {} ran tier(s) {} but expected exactly one of {}. The tier "
+            "gate moved, or the tier under test fell through to another "
+            "kernel.".format(ctx, sorted(tiers), sorted(allowed))
+        )
 
 
 def _launch_bcast_gin_sdma(
@@ -309,6 +351,10 @@ def _launch_bcast_gin_sdma(
         "NCCL_DEBUG=INFO",
         "NCCL_DEBUG_SUBSYS=INIT,NET",
         "NCCL_DEBUG_FILE={}/nccl-debug.%h.%p.log".format(debug_dir),
+        # Makes BroadcastRunColl name the tier it launched, which is what lets
+        # _assert_bcast_ok tell the -D 3 tiers apart. One line from the main
+        # proc, so the results table stays parseable.
+        "RCCL_TESTS_BCAST_TIER_LOG=1",
     ]
     if force_flat_gin:
         gin_env += [
@@ -429,7 +475,11 @@ def test_BroadcastGinSdmaLargeSegmented(request, msg_mib, dtype):
         request, msg_mib * MiB, dtype, force_flat_gin=True
     )
     _assert_bcast_ok(
-        rc, out, debug, "flat-segmented {} MiB dtype={}".format(msg_mib, dtype)
+        rc,
+        out,
+        debug,
+        "flat-segmented {} MiB dtype={}".format(msg_mib, dtype),
+        expect_tier="flat-gin",
     )
 
 
@@ -439,7 +489,9 @@ def test_BroadcastGinSdmaScatterAllgather(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 256 * MiB, "int32", force_sag_gin=True
     )
-    _assert_bcast_ok(rc, out, debug, "SAG 256 MiB")
+    _assert_bcast_ok(
+        rc, out, debug, "SAG 256 MiB", expect_tier="scatter-allgather"
+    )
 
 
 @_bcast_skip
@@ -448,7 +500,13 @@ def test_BroadcastGinSdma2GiBHangGuard(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 2 * GiB, "int32", force_flat_gin=False
     )
-    _assert_bcast_ok(rc, out, debug, "2 GiB default-tier")
+    _assert_bcast_ok(
+        rc,
+        out,
+        debug,
+        "2 GiB default-tier",
+        expect_tier=("ring-table", "ring-multi"),
+    )
 
 
 @_bcast_skip
@@ -457,7 +515,13 @@ def test_BroadcastGinSdma4GiBHangGuard(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 4 * GiB, "int32", force_flat_gin=False
     )
-    _assert_bcast_ok(rc, out, debug, "4 GiB default-tier")
+    _assert_bcast_ok(
+        rc,
+        out,
+        debug,
+        "4 GiB default-tier",
+        expect_tier=("ring-table", "ring-multi"),
+    )
 
 
 # Offline parsing guards: no GIN hardware required. These pin the regression where
@@ -497,6 +561,69 @@ def test_bcast_data_failed_treats_na_as_unchecked_not_failed():
         "  12.34  1.00  1.00  0"
     )
     assert not _data_failed(line)
+
+
+def _clean_bcast_output(tier):
+    """A minimal healthy -D 3 run reporting `tier`, for the guards below."""
+    return "\n".join(
+        [
+            "#[bcast-tier] {}".format(tier),
+            "  268435456  268435456  int32  none  0"
+            "  12.34  1.00  1.00  0"
+            "  12.34  1.00  1.00  0",
+            "# Out of bounds values : 0 OK",
+        ]
+    )
+
+
+# These four need no GPU, but they carry GinSdma in the name on purpose: the CI
+# job runs `-k GinSdma` (rccl-gin-bcast-pytest in gin-tests.json), and the runner
+# expands its args unquoted, so a filter with a space in it is not available.
+# Naming them into the existing filter is what gets them collected -- the
+# snake_case guards above are, for the same reason, run by nothing in CI today.
+def test_BroadcastGinSdmaTierGuardLineIsNotAResultsRow():
+    """The tier line shares stdout with the table it must not corrupt."""
+    assert _bcast_rows("#[bcast-tier] scatter-allgather") == []
+    assert _bcast_tiers(_clean_bcast_output("ring-table")) == {"ring-table"}
+    assert _bcast_rows(_clean_bcast_output("ring-table"))
+
+
+def test_BroadcastGinSdmaTierGuardAcceptsExpectedTier():
+    out = _clean_bcast_output("scatter-allgather")
+    _assert_bcast_ok(0, out, "gin-anvil-sdma", "guard", expect_tier="scatter-allgather")
+    # Ring passes against either decomposition outcome.
+    _assert_bcast_ok(
+        0,
+        _clean_bcast_output("ring-multi"),
+        "gin-anvil-sdma",
+        "guard",
+        expect_tier=("ring-table", "ring-multi"),
+    )
+
+
+def test_BroadcastGinSdmaTierGuardRejectsFallThrough():
+    """The regression this tier check exists for.
+
+    Deleting the scatter+allgather arm sends its messages to the flat kernel,
+    which still broadcasts correctly and still reports #wrong 0. Everything
+    except the tier check passes on that output, so without this the SAG test
+    would go green while covering nothing.
+    """
+    fell_through = _clean_bcast_output("flat-gin")
+    _assert_bcast_ok(0, fell_through, "gin-anvil-sdma", "guard", expect_tier="flat-gin")
+    with pytest.raises(AssertionError, match="expected exactly one of"):
+        _assert_bcast_ok(
+            0, fell_through, "gin-anvil-sdma", "guard", expect_tier="scatter-allgather"
+        )
+
+
+def test_BroadcastGinSdmaTierGuardRejectsMissingTierLine():
+    """A binary predating the tier log must fail loudly, not pass vacuously."""
+    no_tier = "\n".join(_clean_bcast_output("flat-gin").splitlines()[1:])
+    with pytest.raises(AssertionError, match="no .*bcast-tier.* line"):
+        _assert_bcast_ok(
+            0, no_tier, "gin-anvil-sdma", "guard", expect_tier="flat-gin"
+        )
 
 
 @pytest.mark.parametrize(
