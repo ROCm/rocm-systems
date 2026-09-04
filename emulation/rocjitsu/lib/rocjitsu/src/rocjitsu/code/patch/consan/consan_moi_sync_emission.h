@@ -32,15 +32,6 @@ template <typename EvidencePlan>
                                                 probe_name, commits);
 }
 
-/// Atomically publish one completed synchronization mutation. Mode owners
-/// build bytes, patch proof, and intent-bound commits; this shared boundary
-/// applies growth policy and publishes their inseparable terminal result.
-[[nodiscard]] bool publish_moi_sync_patch(
-    ConSanTransformArtifacts &result, CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
-    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view replacement_name,
-    std::string_view probe_name, std::vector<ConSanCommittedLowering> commits,
-    std::vector<ConSanPatchInfo> patches);
-
 enum class SampledAtomicSemanticsReason : uint8_t {
   None,
   UnqualifiedSharedSyncSequence,

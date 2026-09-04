@@ -42,11 +42,6 @@ void append_words_bytes(std::vector<uint8_t> &bytes, std::span<const uint32_t> w
     std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
     uint16_t pc_sgpr, uint16_t saved_scc_sgpr, rj_code_arch_t arch);
 
-[[nodiscard]] std::optional<DbiPatchPlacement>
-plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_offset,
-                            uint32_t original_size, std::span<const uint32_t> cave_words,
-                            std::vector<std::string> &errors, std::string_view probe_name);
-
 } // namespace rocjitsu::consan_moi_detail
 
 namespace rocjitsu::consan_moi_impl {

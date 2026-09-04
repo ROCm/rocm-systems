@@ -165,30 +165,6 @@ bool append_moi_prepare_scc_preserving_indirect_jump(std::vector<uint32_t> &word
   return true;
 }
 
-std::optional<DbiPatchPlacement>
-plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_offset,
-                            uint32_t original_size, std::span<const uint32_t> cave_words,
-                            std::vector<std::string> &errors, std::string_view probe_name) {
-  if (cave_words.empty()) {
-    errors.emplace_back(std::string(probe_name) + " produced an empty cave");
-    return std::nullopt;
-  }
-  DbiPatchPlacementRequest request;
-  request.anchor_offset = anchor_offset;
-  request.original_size = original_size;
-  request.body_size = static_cast<uint64_t>(cave_words.size() - 1u) * sizeof(uint32_t);
-  request.inline_capacity = 0;
-  std::string placement_error;
-  const auto placement = planner.plan(request, &placement_error);
-  if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave ||
-      placement->return_branch_offset !=
-          placement->body_offset + (cave_words.size() - 1u) * sizeof(uint32_t)) {
-    errors.emplace_back(std::string(probe_name) + " placement failed: " + placement_error);
-    return std::nullopt;
-  }
-  return placement;
-}
-
 } // namespace rocjitsu::consan_moi_detail
 
 namespace rocjitsu::consan_moi_impl {

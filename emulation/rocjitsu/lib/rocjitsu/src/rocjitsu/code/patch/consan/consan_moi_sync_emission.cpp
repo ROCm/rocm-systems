@@ -70,27 +70,6 @@ namespace consan_moi_impl {
   return true;
 }
 
-[[nodiscard]] bool publish_moi_sync_patch(
-    ConSanTransformArtifacts &result, CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
-    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view replacement_name,
-    std::string_view probe_name, std::vector<ConSanCommittedLowering> commits,
-    std::vector<ConSanPatchInfo> patches) {
-  if (!replace_consan_text(patcher, new_text, growth_limit, replacement_name,
-                           result.program_inventory.code_object_id(), result.errors,
-                           &result.transform_failure_cause))
-    return false;
-  if (!result.coverage_ledger.publish_coalescing_instrumented_commits(std::move(commits))) {
-    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                               " could not publish its semantic lowerings");
-    return false;
-  }
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
-                        std::make_move_iterator(patches.end()));
-  result.mark_modified();
-  return true;
-}
-
 [[nodiscard]] SampledAtomicSemanticsResult
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
                                   const MoiAtomicEvidenceSitePlan &plan) {
