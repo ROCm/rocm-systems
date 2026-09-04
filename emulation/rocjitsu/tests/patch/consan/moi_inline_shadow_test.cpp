@@ -1213,7 +1213,6 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   options.moi_exec_save_sgpr = 4u;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{48u, 50u},
-      .call = ConSanMoiRouterCallSgprs{50u, 48u},
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1226,7 +1225,6 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       .scalar_router =
           ConSanMoiScalarRouterAllocation{
               .jump = ConSanIndirectJumpSgprs{48u, 50u},
-              .call = ConSanMoiRouterCallSgprs{50u, 48u},
           },
       .branch_only_spill = std::nullopt,
   };
@@ -1436,7 +1434,6 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   options.moi_exec_save_sgpr = 4u;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{48u, 50u},
-      .call = ConSanMoiRouterCallSgprs{50u, 48u},
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1449,7 +1446,6 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       .scalar_router =
           ConSanMoiScalarRouterAllocation{
               .jump = ConSanIndirectJumpSgprs{48u, 50u},
-              .call = ConSanMoiRouterCallSgprs{50u, 48u},
           },
       .branch_only_spill = std::nullopt,
   };
@@ -6245,49 +6241,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneTextTransaction) {
   ASSERT_TRUE(result.text_relocation);
 }
 
-TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
-  constexpr uint32_t kAccessCount = 9u;
-  std::vector<uint32_t> text_words(
-      9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
-  for (uint32_t index = 0; index < kAccessCount; ++index) {
-    const auto store = cdna5::build_vds(
-        cdna5::kDsStoreB32Vds,
-        {.offset0 = static_cast<uint8_t>(index * sizeof(uint32_t)), .addr = 0u, .data0 = 0u});
-    text_words.insert(text_words.end(), store.begin(), store.end());
-  }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
-
-  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.scratch_vgpr = 82u;
-  options.set_moi_owner_epoch_vgprs(80u, 81u);
-  options.moi_exec_save_sgpr = 60u;
-  options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{88u, 90u},
-  };
-  options.moi_report_buffer_address = 0x100000000ull;
-  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.moi_track_barriers = false;
-  options.moi_track_atomics = false;
-  options.max_patches = kAccessCount;
-
-  const std::vector<uint8_t> bytes =
-      make_gfx1250_code_object(text_words, "gfx1250_architectural_call_return");
-  for (uint16_t call_return : {uint16_t{102u}, uint16_t{104u}}) {
-    // These encodable scalar pairs alias FLAT_SCRATCH and XNACK_MASK. An
-    // s_call_i64 return in either pair corrupts architectural state rather
-    // than an ordinary guest register.
-    options.moi_scalar_router->call = ConSanMoiRouterCallSgprs{91u, call_return};
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-
-    EXPECT_FALSE(result.modified());
-    EXPECT_TRUE(result.replacement.empty());
-    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-      return warning.find("scalar instrumentation state aliases an architectural special SGPR") !=
-             std::string::npos;
-    })) << testing::PrintToString(result.warnings);
-  }
-}
-
 TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowNeedsNoRelocatedHostArm) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kFirstWindowAccessCount = 2u;
@@ -6488,7 +6441,6 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessDoesNotIntroduceSccMutatingRelay) {
   options.moi_exec_save_sgpr = 4u;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
-      .call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -6501,7 +6453,6 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessDoesNotIntroduceSccMutatingRelay) {
       .scalar_router =
           ConSanMoiScalarRouterAllocation{
               .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
-              .call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
           },
       .branch_only_spill = std::nullopt,
   };
@@ -6937,7 +6888,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersShareTextTransaction) {
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{30, 29},
-      .call = ConSanMoiRouterCallSgprs{25, 26},
       .visible_evidence_sgpr = 28,
   };
   options.moi_report_buffer_address = 0x100000000ull;
@@ -7037,7 +6987,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessAndBarrierShareTextTransaction) {
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{30, 29},
-      .call = ConSanMoiRouterCallSgprs{25, 26},
       .visible_evidence_sgpr = 28,
   };
   options.moi_report_buffer_address = 0x100000000ull;
@@ -7129,7 +7078,6 @@ TEST(ConSanMoi, Gfx1250DenseBarrierNeedsNoDispatcherReservation) {
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{30, 29},
-      .call = ConSanMoiRouterCallSgprs{25, 26},
       .visible_evidence_sgpr = 28,
   };
   options.moi_report_buffer_address = 0x100000000ull;
@@ -7219,7 +7167,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{30, 29},
-      .call = ConSanMoiRouterCallSgprs{25, 26},
       .visible_evidence_sgpr = 28,
   };
   options.moi_report_buffer_address = 0x100000000ull;
@@ -7525,7 +7472,6 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   EXPECT_EQ(assignment.dispatch_id_sgpr, test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(assignment.scalar_router);
   ASSERT_TRUE(assignment.scalar_router->visible_evidence_sgpr);
-  ASSERT_TRUE(assignment.scalar_router->call);
 
   constexpr uint16_t kInitializedEnd = 8u;
   constexpr uint16_t kOriginalPhysicalVcc = 90u;
@@ -7535,8 +7481,6 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
       std::pair{*assignment.scalar_router->visible_evidence_sgpr, uint16_t{1u}},
       std::pair{assignment.scalar_router->jump.pc_sgpr, uint16_t{2u}},
       std::pair{assignment.scalar_router->jump.scc_save_sgpr, uint16_t{1u}},
-      std::pair{assignment.scalar_router->call->dispatch_key_sgpr, uint16_t{1u}},
-      std::pair{assignment.scalar_router->call->call_return_sgpr, uint16_t{2u}},
   };
   for (const auto &[base, width] : ranges) {
     EXPECT_GE(base, kInitializedEnd);
@@ -7630,11 +7574,6 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.scalar_router);
   EXPECT_FALSE(assignment.scalar_router->visible_evidence_sgpr);
-  ASSERT_TRUE(assignment.scalar_router->call);
-  EXPECT_EQ(assignment.scalar_router->call->dispatch_key_sgpr,
-            assignment.scalar_router->jump.scc_save_sgpr);
-  EXPECT_EQ(assignment.scalar_router->call->call_return_sgpr,
-            assignment.scalar_router->jump.pc_sgpr);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };

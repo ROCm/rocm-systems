@@ -18,20 +18,6 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_moi_detail::moi_bound_dispatch_id_sources;
 
-[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanRequest &request, MoiOwnerAssignments assignments,
-    std::span<const uint64_t> owner_descriptor_offsets) {
-  return request.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
-         std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
-           const auto assignment =
-               std::ranges::find(assignments.transient_sgprs, descriptor_offset,
-                                 &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-           return assignment != assignments.transient_sgprs.end() &&
-                  assignment->branch_only_spill && assignment->scalar_router &&
-                  !assignment->scalar_router->call;
-         });
-}
-
 [[nodiscard]] bool
 apply_record_replay_entry_workgroup_assignment(ConSanMoiOperatingPoint &point,
                                                MoiOwnerAssignments assignments,

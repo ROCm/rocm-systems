@@ -2932,10 +2932,6 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     ASSERT_TRUE(assignment.scalar_router);
     EXPECT_EQ(assignment.scalar_router->jump.pc_sgpr, 0u);
     EXPECT_EQ(assignment.scalar_router->jump.scc_save_sgpr, 4u);
-    ASSERT_TRUE(assignment.scalar_router->call);
-    EXPECT_EQ(assignment.scalar_router->call->dispatch_key_sgpr, 6u);
-    EXPECT_EQ(assignment.scalar_router->call->call_return_sgpr,
-              assignment.scalar_router->jump.pc_sgpr);
     EXPECT_EQ(std::ranges::count(result.patches,
                                  ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                  &ConSanPatchInfo::kind),
@@ -3205,15 +3201,12 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.scalar_router);
-  ASSERT_TRUE(assignment.scalar_router->call);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };
   EXPECT_FALSE(overlaps_dynamic_stack(assignment.exec_save_sgpr, 8u));
   EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->jump.pc_sgpr, 2u));
   EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->jump.scc_save_sgpr, 1u));
-  EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->call->dispatch_key_sgpr, 1u));
-  EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->call->call_return_sgpr, 2u));
 
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
@@ -7310,7 +7303,6 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       .scalar_router =
           ConSanMoiScalarRouterAllocation{
               .jump = ConSanIndirectJumpSgprs{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
-              .call = ConSanMoiRouterCallSgprs{5u, kLocalIndirectPcSgpr},
           },
       .branch_only_spill = std::nullopt,
   };

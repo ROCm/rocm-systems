@@ -368,44 +368,22 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
-/// Scalar key and return pair retained across one generated router call.
-/// These registers are selected and consumed together; representing them as
-/// one allocation prevents accepted operating points from carrying a partial
-/// mode-specific routing ABI.
-struct ConSanMoiRouterCallSgprs {
-  uint16_t dispatch_key_sgpr = 0;
-  uint16_t call_return_sgpr = 0;
-
-  auto operator<=>(const ConSanMoiRouterCallSgprs &) const = default;
-};
-
-/// Complete scalar state of one spill-backed generated router. Every router
-/// has an indirect jump; dense call state and Inline visible evidence are
-/// optional facets that cannot survive independently of that jump.
+/// Scalar temporaries needed while a spill-backed probe establishes its
+/// private frame and reloads owner-local state.
 struct ConSanMoiScalarRouterAllocation {
   ConSanIndirectJumpSgprs jump;
-  std::optional<ConSanMoiRouterCallSgprs> call = std::nullopt;
   std::optional<uint16_t> visible_evidence_sgpr = std::nullopt;
 
   template <typename Visitor>
-  void for_each_sgpr_range(bool include_call, bool include_visible, Visitor &&visit) const {
+  void for_each_sgpr_range(bool include_visible, Visitor &&visit) const {
     visit(jump.pc_sgpr, 2u);
     visit(jump.scc_save_sgpr, 1u);
-    if (include_call && call) {
-      visit(call->dispatch_key_sgpr, 1u);
-      visit(call->call_return_sgpr, 2u);
-    }
     if (include_visible && visible_evidence_sgpr)
       visit(*visible_evidence_sgpr, 1u);
   }
 
   auto operator<=>(const ConSanMoiScalarRouterAllocation &) const = default;
 };
-
-[[nodiscard]] inline const ConSanMoiRouterCallSgprs *
-moi_scalar_router_call(const std::optional<ConSanMoiScalarRouterAllocation> &allocation) {
-  return allocation && allocation->call ? &*allocation->call : nullptr;
-}
 
 /// Inline spill state reached through branch-only relays. A dynamic-stack
 /// bootstrap may additionally borrow one live ordinary pair, but that pair
@@ -967,9 +945,9 @@ struct ConSanMoiOperatingPoint {
   /// Internal marker set when a probe needs the base scalar save slot for a
   /// site-local dynamic-stack spill frame.
   bool moi_dynamic_stack_spill = false;
-  /// Explicit scalar-router ABI selected when a spill-backed transient window
+  /// Explicit scalar setup state selected when a spill-backed transient window
   /// cannot use the mode's fixed register layout. Inline, Record/Replay, and
-  /// Sampled share the jump and optional call mechanism; Inline's optional
+  /// Sampled share the frame pair and SCC-save temporary; Inline's optional
   /// visible-evidence temporary remains a facet of that exact allocation.
   std::optional<ConSanMoiScalarRouterAllocation> moi_scalar_router;
   /// Inline component whose saved scalar window is reached through branch-only
@@ -1015,7 +993,7 @@ struct ConSanMoiOperatingPoint {
   /// separate lifetime rules and are intentionally not part of this view.
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
     if (moi_scalar_router)
-      moi_scalar_router->for_each_sgpr_range(true, true, visit);
+      moi_scalar_router->for_each_sgpr_range(true, visit);
     visit(moi_branch_only_spill ? moi_branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt,
           2u);
   }

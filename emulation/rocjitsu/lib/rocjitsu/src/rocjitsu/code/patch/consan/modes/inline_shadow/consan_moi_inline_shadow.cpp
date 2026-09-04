@@ -134,10 +134,10 @@ bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &sta
   if (!state.exec_save_sgpr)
     return true;
   if (state.inline_scalar_spill && inline_access_present &&
-      ((!state.scalar_router || !state.scalar_router->call) && !state.branch_only_spill)) {
+      (!state.scalar_router && !state.branch_only_spill)) {
     errors.emplace_back(
-        "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
-        "scalar spill");
+        "ConSan MOI spill-backed inline-shadow probes require planned scalar temporaries or "
+        "private preservation");
     return false;
   }
   const uint16_t ordinary_sgpr_count = consan_arch_is_cdna3_or_cdna4(arch) ? 102u : kMaxSgprs;

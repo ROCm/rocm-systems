@@ -1008,7 +1008,6 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
   options.moi_exec_save_sgpr = 4u;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
-      .call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1021,7 +1020,6 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
       .scalar_router =
           ConSanMoiScalarRouterAllocation{
               .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
-              .call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
           },
       .branch_only_spill = std::nullopt,
   };
@@ -4902,7 +4900,6 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   atomic_only_options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{42u, 46u},
-      .call = ConSanMoiRouterCallSgprs{41u, 44u},
       .visible_evidence_sgpr = 40u,
   };
   const ConSanTransformArtifacts atomic_only = test_lower_consan(
@@ -4944,7 +4941,6 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{42u, 46u},
-      .call = ConSanMoiRouterCallSgprs{41u, 44u},
       .visible_evidence_sgpr = 40u,
   };
   options.moi_report_buffer_address = 0x123456780000ull;

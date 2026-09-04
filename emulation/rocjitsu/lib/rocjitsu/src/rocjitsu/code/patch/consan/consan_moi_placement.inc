@@ -461,7 +461,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
            (point.has_inline_moi_scalar_spill() &&
-            (moi_scalar_router_call(point.moi_scalar_router) || point.moi_branch_only_spill));
+            (point.moi_scalar_router || point.moi_branch_only_spill));
   }
   if (saw_unassigned_owner)
     return false;
@@ -1460,7 +1460,7 @@ void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
     domain.occupy(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount);
     if (assignment.scalar_router) {
       assignment.scalar_router->for_each_sgpr_range(
-          true, true, [&](uint16_t base, uint16_t width) { domain.occupy(base, width); });
+          true, [&](uint16_t base, uint16_t width) { domain.occupy(base, width); });
     }
     if (assignment.branch_only_spill)
       domain.occupy(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u);
@@ -2107,8 +2107,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   const std::vector<std::vector<uint64_t>> owner_components =
       moi_scalar_owner_components(site_plans);
   // Inline's component-local transient window is established only inside an
-  // access or synchronization body. Its RDNA entry relay and return use
-  // special state, while persistent owner/epoch values live in VGPRs. Do not
+  // access or synchronization body. Its frame setup uses separate scalar
+  // temporaries, while persistent owner/epoch values live in VGPRs. Do not
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
   const MoiScalarSiteAvailability availability = collect_moi_scalar_site_availability(
@@ -2166,9 +2166,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       selected = options.moi_exec_save_sgpr;
     }
     std::optional<uint16_t> spill_pc;
-    std::optional<uint16_t> spill_call_return;
     std::optional<uint16_t> spill_scc;
-    std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
     std::optional<uint16_t> inline_dead_fallback;
     bool branch_only_scalar_spill = false;
@@ -2205,13 +2203,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                        : component_contexts->tail_floor;
       // The Inline scalar window is saved after the VGPR frame is established
       // and restored before that frame is released. RDNA4 may therefore
-      // borrow initialized guest SGPRs; only the live-through router state
+      // borrow initialized guest SGPRs; only the frame-bootstrap temporaries
       // must remain liveness-dead. CDNA retains its stricter preload boundary.
       const uint32_t scalar_spill_begin = consan_arch_is_rdna4_or_cdna5(arch)
                                               ? 0u
                                               : std::max(initialized_end, liveness_search_floor);
-      const uint32_t router_begin =
-          consan_arch_is_rdna4_or_cdna5(arch) ? liveness_search_floor : fresh_begin;
       for (uint32_t base = util::align_up(scalar_spill_begin, 2u);
            !selected && base + count <= limit; base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
@@ -2222,53 +2218,32 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         spill_pc = attempt.select_first(liveness_search_floor, 2u, 2u);
         if (spill_pc)
           spill_scc = attempt.select_first(liveness_search_floor, 1u);
-        // CDNA access and barrier sites retain independent local entry
-        // islands. They need only the dead indirect-PC pair and SCC slot; if
-        // no fresh cross-site latch exists, use the external exact-shadow
-        // table and let the unused dense-router fields alias that bootstrap
-        // state.
-        if (!spill_visible && spill_pc && spill_scc && (consan_arch_is_cdna3_or_cdna4(arch))) {
-          spill_key = spill_scc;
-          spill_call_return = spill_pc;
-          selected = spill_base;
-          break;
-        }
-        if (spill_scc) {
-          spill_key = attempt.select_first(router_begin, 1u);
-        }
-        if (spill_key) {
-          spill_call_return = attempt.select_first(router_begin, 2u, 2u);
-        }
-        if (spill_call_return)
+        if (spill_scc)
           selected = spill_base;
         else
-          spill_visible = spill_pc = spill_scc = spill_key = std::nullopt;
+          spill_visible = spill_pc = std::nullopt;
       }
       // A full-pressure owner may have no scalar register that remains dead
-      // from an access anchor through an appended router. Route with
-      // branch-only hops instead and preserve the complete Inline window
-      // before using it. Prefer this path to a site-local dead window because
-      // the latter cannot retain the entry-to-probe visible-evidence latch and
-      // therefore cannot preserve local LDS exact-shadow eligibility.
+      // from an access anchor through the complete probe. Preserve the
+      // complete Inline window at entry instead. Prefer this path to a
+      // site-local dead window because the latter cannot retain the
+      // entry-to-probe visible-evidence latch and therefore cannot preserve
+      // local LDS exact-shadow eligibility.
       // Dynamic-stack owners additionally need one ordinary bootstrap pair
       // while establishing their private frame. Every choice stays inside
       // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
-      // Fixed-stack RDNA4-family owners can return through direct SOPP relay
-      // hops without borrowing any live-through router SGPR. Prefer that
-      // stronger contract even when a compact indirect router happens to fit:
-      // an empty EXEC cannot use per-lane private storage to preserve the
-      // latter's call/PC state. The branch-only prologue backup remains valid
-      // for both empty and partially active waves.
+      // Fixed-stack RDNA4-family owners prefer entry-time scalar backup even
+      // when probe-local temporaries happen to fit: an empty EXEC cannot use
+      // per-lane private storage. The prologue backup remains valid for both
+      // empty and partially active waves.
       if (consan_arch_is_rdna4_or_cdna5(arch) && all_owners_use_fixed_stack) {
         selected.reset();
         spill_pc.reset();
-        spill_call_return.reset();
         spill_scc.reset();
-        spill_key.reset();
         spill_visible.reset();
       }
-      // If no complete spill router exists, an owner-local window that is
+      // If no complete temporary set exists, an owner-local window that is
       // dead at every instrumentation site remains useful for external-shadow
       // probes.  It cannot carry the entry-to-probe visible-evidence latch;
       // access selection therefore keeps such owners off the local LDS mirror.
@@ -2294,16 +2269,9 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       spill_pc = domain.select_first(0u, 2u, 2u);
       if (spill_pc)
         spill_scc = domain.select_first(0u, 1u);
-      if (spill_scc)
-        spill_key = domain.select_first(0u, 1u);
-      // The compact spill ABI can reuse the indirect-PC pair as its call-return
-      // pair: the generated body has a statically known continuation and does
-      // not need both values live at once.
-      if (spill_key)
-        spill_call_return = spill_pc;
       const uint16_t spilled_scalar_count =
           placement.compact_spill_scalar_count ? placement.compact_spill_scalar_count : count;
-      if (spill_call_return) {
+      if (spill_scc) {
         const auto spill_window =
             domain.select_first(0u, spilled_scalar_count, 2u, /*require_dead=*/false);
         if (spill_window)
@@ -2352,8 +2320,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         spill_pc.reset();
         spill_scc.reset();
       }
-      spill_call_return.reset();
-      spill_key.reset();
       spill_visible.reset();
     }
     if (!selected)
@@ -2363,8 +2329,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       continue;
     }
     const uint16_t selected_sgpr = *selected;
-    const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
-                              branch_only_scalar_spill || dynamic_stack_borrowed_sgpr.has_value();
+    const bool spill_backed = (spill_pc && spill_scc) || branch_only_scalar_spill ||
+                              dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_identity.sgpr() &&
                 moi_scalar_contexts_admit_reserved_window(component_contexts->summaries,
@@ -2388,10 +2354,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
            .scalar_router = spill_pc && spill_scc
                                 ? std::optional{ConSanMoiScalarRouterAllocation{
                                       .jump = ConSanIndirectJumpSgprs{*spill_pc, *spill_scc},
-                                      .call = spill_key && spill_call_return
-                                                  ? std::optional{ConSanMoiRouterCallSgprs{
-                                                        *spill_key, *spill_call_return}}
-                                                  : std::nullopt,
                                       .visible_evidence_sgpr = spill_visible}}
                                 : std::nullopt,
            .branch_only_spill =
@@ -2615,21 +2577,12 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   }
 
   // RDNA4 Inline probes may preserve their wide transient window in private
-  // memory, but entry routing still needs one object-wide dead scalar tuple.
+  // memory, but frame setup still needs one object-wide dead scalar tuple.
   // Establish both parts as one transaction so later component overrides do
-  // not accidentally overlap the persistent router ABI.
+  // not accidentally overlap the persistent setup state.
   if (consan_arch_is_rdna4_or_cdna5(arch) && inline_layout &&
-      problem.mode_semantics().inline_access_present && state.valid && availability.saw_site) {
-    const bool dense_router =
-        std::ranges::count_if(problem.candidates(),
-                              [](const ConSanMoiCandidate &candidate) {
-                                return candidate.kind == ConSanLdsAccessKind::Read ||
-                                       candidate.kind == ConSanLdsAccessKind::Write;
-                              }) >= 8u ||
-        std::ranges::any_of(problem.candidates(), [](const ConSanMoiCandidate &candidate) {
-          return !candidate.container.is_kernel() && (candidate.kind == ConSanLdsAccessKind::Read ||
-                                                      candidate.kind == ConSanLdsAccessKind::Write);
-        });
+      scalar_contexts.all_use_dynamic_stack && problem.mode_semantics().inline_access_present &&
+      state.valid && availability.saw_site) {
     MoiScalarPlacementDomain domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries,
                                     &unavailable);
     domain.occupy(options.moi_owner_sgpr.base(), 1u);
@@ -2640,18 +2593,12 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                            /*require_dead=*/false);
     const auto visible = spill ? domain.select_first(first, 1u) : std::nullopt;
     const auto pc = spill ? domain.select_first(0u, 2u, 2u) : std::nullopt;
-    auto call_return = dense_router && pc ? domain.select_first(first, 2u, 2u) : pc;
-    auto key = dense_router && call_return ? domain.select_first(first, 1u) : visible;
     const auto scc = spill ? domain.select_first(0u, 1u) : std::nullopt;
-    if (!dense_router && scc)
-      key = scc;
-    if (spill && pc && call_return && key && scc) {
+    if (spill && pc && scc) {
       options.moi_exec_save_sgpr = spill;
       options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-      options.moi_scalar_router =
-          ConSanMoiScalarRouterAllocation{.jump = ConSanIndirectJumpSgprs{*pc, *scc},
-                                          .call = ConSanMoiRouterCallSgprs{*key, *call_return},
-                                          .visible_evidence_sgpr = visible};
+      options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+          .jump = ConSanIndirectJumpSgprs{*pc, *scc}, .visible_evidence_sgpr = visible};
       warnings.emplace_back("ConSan MOI automatically assigned spill-backed Inline SGPRs");
       return true;
     }
@@ -2663,7 +2610,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // window that at least one owner can preserve.  Resource-plan rebuilding
   // rejects every owner group whose compiler allocation reaches the window.
   // This is deliberately more conservative than site-local liveness: the
-  // retained window is safe across entry relays and every guest instruction
+  // retained window is safe across entry setup and every guest instruction
   // in each admitted kernel.
   if (consan_arch_is_rdna4_or_cdna5(arch)) {
     const std::span<const consan_detail::ScalarOwnerContextSummary> no_contexts;

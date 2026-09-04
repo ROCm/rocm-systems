@@ -380,7 +380,6 @@ TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{40u, 42u},
-      .call = ConSanMoiRouterCallSgprs{44u, 46u},
   };
   point.moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{};
 
@@ -418,7 +417,6 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
       .jump = ConSanIndirectJumpSgprs{40u, 42u},
-      .call = ConSanMoiRouterCallSgprs{44u, 46u},
   };
   scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
   emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
