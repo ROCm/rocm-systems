@@ -3335,10 +3335,10 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     return true;
 
   // The ROCr trap-handler ABI packs the 10-bit doorbell id below six KFD queue
-  // exception bits in M0. A debugger owns exception routing while attached; its
-  // CWSR publication is deferred until s_rfe applies the handler's STATUS.HALT.
-  // Without a debugger, deliver the exception to ROCr's queue error event. The
-  // CU defers the CP call until its wave-state lock is released.
+  // exception bits in M0. A subscribed debugger owns the complete event and its
+  // CWSR publication is deferred until s_rfe applies the handler's STATUS.HALT;
+  // otherwise ROCr owns it. The CU defers the CP call until its wave-state lock
+  // is released.
   const uint64_t exception_status = (wave.m0() >> kDoorbellIdBits) & kRuntimeQueueExceptionMask;
   if (exception_status != 0) {
     wave.add_trap_queue_exception_status(exception_status);

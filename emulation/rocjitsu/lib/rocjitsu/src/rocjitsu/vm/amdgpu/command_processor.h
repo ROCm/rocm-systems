@@ -398,6 +398,11 @@ public:
     assert(completion_ != nullptr);
     completion_->invoke_interrupt_callback_for_test(process_id, event_id);
   }
+  /// @brief Observe an external callback replacement immediately before it drains.
+  /// @details Tests must install this hook before starting the replacing thread.
+  void set_interrupt_callback_drain_hook_for_testing(std::function<void()> hook) {
+    interrupt_callback_drain_hook_for_testing_ = std::move(hook);
+  }
 
 private:
   struct InterruptCallbackState {
@@ -785,6 +790,7 @@ private:
   std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
       std::make_shared<InterruptCallbackState>();
   std::vector<std::shared_ptr<InterruptCallbackState>> retired_interrupt_cb_states_;
+  std::function<void()> interrupt_callback_drain_hook_for_testing_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;

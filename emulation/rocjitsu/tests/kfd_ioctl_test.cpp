@@ -94,28 +94,21 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
 
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
   callback_removed_itself.get_future().wait();
-  std::atomic<bool> replacement_seen = false;
-  auto external_replacement = std::async(std::launch::async, [&] {
-    cp.set_interrupt_callback(
-        [&](uint32_t, uint32_t) { replacement_seen.store(true, std::memory_order_release); });
-  });
+  std::promise<void> drain_reached;
+  cp.set_interrupt_callback_drain_hook_for_testing([&] { drain_reached.set_value(); });
+  auto external_replacement =
+      std::async(std::launch::async, [&] { cp.set_interrupt_callback([](uint32_t, uint32_t) {}); });
 
-  // Observing the replacement proves its setter has published the new
-  // generation and reached the old-generation drain. A timeout before this
-  // handshake could merely mean the async worker had not been scheduled.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-  while (!replacement_seen.load(std::memory_order_acquire) &&
-         std::chrono::steady_clock::now() < deadline) {
-    cp.invoke_interrupt_callback_for_test(1, 2);
-    std::this_thread::yield();
-  }
-  ASSERT_TRUE(replacement_seen.load(std::memory_order_acquire));
+  // The hook runs after the reentrancy scan and immediately before the drain,
+  // so the timeout cannot be explained by delayed async-worker scheduling.
+  drain_reached.get_future().wait();
   EXPECT_EQ(external_replacement.wait_for(std::chrono::milliseconds(20)),
             std::future_status::timeout);
 
   release_callback.set_value();
   EXPECT_EQ(external_replacement.wait_for(std::chrono::seconds(1)), std::future_status::ready);
   caller.join();
+  cp.set_interrupt_callback_drain_hook_for_testing({});
   cp.invoke_interrupt_callback_for_test(1, 2);
   EXPECT_EQ(calls.load(), 1u);
 }

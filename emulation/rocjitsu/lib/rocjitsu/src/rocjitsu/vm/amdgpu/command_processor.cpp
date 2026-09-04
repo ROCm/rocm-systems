@@ -52,6 +52,8 @@ void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
     return state->calls_by_thread.contains(std::this_thread::get_id());
   });
   if (!reentrant) {
+    if (interrupt_callback_drain_hook_for_testing_)
+      interrupt_callback_drain_hook_for_testing_();
     for (const auto &state : retired) {
       std::unique_lock<std::mutex> state_lock(state->mutex);
       state->cv.wait(state_lock, [&state] { return state->active_calls == 0; });
