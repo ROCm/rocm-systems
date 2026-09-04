@@ -142,17 +142,23 @@ NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, boo
   if (hasCounter) {
     if (sdmaDataPath && handle != nullptr) {
       ::sdma_anvil::quiet(*handle);
+      // Earlier small puts and PutValue operations use IPC rather than this
+      // queue, so quiet alone does not order all traffic before the signal.
+      NCCL_GIN_THREADFENCE_SYSTEM();
     } else {
-      __threadfence_system();
+      NCCL_GIN_THREADFENCE_SYSTEM();
     }
   } else if (sdmaDataPath && handle != nullptr) {
     ::sdma_anvil::quiet(*handle);
+    // A standalone barrier signal must follow both queued SDMA traffic and
+    // sub-threshold IPC puts issued on the same context.
+    NCCL_GIN_THREADFENCE_SYSTEM();
   } else if (sdmaDataPath) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else {
-    __threadfence_system();
+    NCCL_GIN_THREADFENCE_SYSTEM();
   }
 }
 

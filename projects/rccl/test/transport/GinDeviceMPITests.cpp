@@ -59,6 +59,8 @@ std::string ginTypeReason() {
   if (!ginType)
     return "GIN type not set (" + ginTypeUsage() + ")";
   int t = requestedGinType();
+  // TYPE=5 (rocSHMEM GDA) remains intentionally gated until this suite can be
+  // validated on a machine with that backend available.
   if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return std::string("Invalid GIN type: ") + ginType + " (" + ginTypeUsage() + ")";
   return "";
@@ -1664,6 +1666,10 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// For non-self traffic, even a None barrier emits a windowless arrival signal
+// that drains the peer queue used by the payload. These tests assert the
+// documented visibility outcomes; the self-put case below is the one that
+// directly distinguishes Put from None because None omits the self slot.
 TEST_F(GinMPIDeviceTests, BarrierFence_PutMakesInboundPutVisible_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Put, /*allContexts=*/false, /*defaultFence=*/false);
 }
@@ -1676,8 +1682,11 @@ TEST_F(GinMPIDeviceTests, BarrierFence_GetMakesLocalGetVisible_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Get, /*allContexts=*/false, /*defaultFence=*/false);
 }
 
-TEST_F(GinMPIDeviceTests, BarrierFence_DefaultIsPutAndGet_SingleNode) {
+TEST_F(GinMPIDeviceTests, BarrierFence_DefaultIncludesGet_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Get, /*allContexts=*/false, /*defaultFence=*/true);
+}
+
+TEST_F(GinMPIDeviceTests, BarrierFence_DefaultIncludesPut_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Put, /*allContexts=*/false, /*defaultFence=*/true);
 }
 
