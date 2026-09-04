@@ -129,6 +129,7 @@
           "name": "BarrierSession_LsaOnly", "description": "ncclBarrierSession LSA-only (2 ranks/node, non-trivial LSA team)", "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly",
           "num_ranks": 4, "num_gpus": 2
         },
+        { "name": "WindowRegister_AfterDevCommCreate", "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)", "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate" },
         {
           "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
           "num_ranks": 4, "num_gpus": 2
