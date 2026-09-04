@@ -170,9 +170,11 @@ corresponding create or registration operation is collective.
 Version and backend notes
 =========================
 
-``ncclDevComm`` is versioned. The upstream NCCL 2.30.7 release notes add
-``ncclGinFenceLevel`` semantics for GIN barriers (``None``, ``Put``, ``Get``,
-default ``Put | Get``). RCCL accepts compatible layouts within the 2.30 family,
+``ncclDevComm`` is versioned. The upstream NCCL 2.30.3 and 2.30.4 release notes
+require applications using GIN APIs to be rebuilt with the matching release.
+The upstream NCCL 2.30.7 release notes add ``ncclGinFenceLevel`` semantics for
+GIN barriers (``None``, ``Put``, ``Get``, default ``Put | Get``). RCCL accepts
+compatible layouts within the 2.30 family,
 but applications using pre-2.30 GIN device code must be rebuilt with compatible
 RCCL headers. The runtime rejects pre-2.30 requirements that request indexed GIN
 resources.

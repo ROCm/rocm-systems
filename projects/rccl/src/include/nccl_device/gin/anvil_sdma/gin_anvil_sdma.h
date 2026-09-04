@@ -479,6 +479,7 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     const int blockId = blockIdx.x + blockIdx.y * gridDim.x;
     ncclGinAnvilSdmaMemHandle* remoteMh = (ncclGinAnvilSdmaMemHandle*)remoteWin;
     ncclGinAnvilSdmaMemHandle* localMh = (ncclGinAnvilSdmaMemHandle*)localWin;
+    if (remoteMh == nullptr || localMh == nullptr) return;
     void* remoteSrc = resolveRemotePeerVa(rsCtx, remoteMh, peer, remoteOff);
     void* localDst = reinterpret_cast<void*>(loadConst(&localMh->baseAddr) + localOff);
     if (remoteSrc == nullptr || localDst == nullptr) return;
@@ -542,6 +543,8 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     (void)ord;
     (void)abortFlag;
     auto& sdmaRequest = reinterpret_cast<nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest&>(request);
+    // FlushAsync completes inline on this backend, so Wait only fences once the
+    // request is already marked complete; there is no async poll loop here.
     if (sdmaRequest.complete) NCCL_GIN_THREADFENCE_SYSTEM();
   }
 };
