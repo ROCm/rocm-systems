@@ -450,6 +450,7 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
+    }
 
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
