@@ -399,8 +399,8 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
 // Health fields with an alternate source when the primary cannot be read on
 // this platform. The primary is tried first so existing platforms are unchanged.
 static const std::map<rdc_field_t, rdc_field_t> kHealthFieldFallbacks = {
-    // xgmi_error sysfs is unreadable on gfx950+; XGMI faults surface as RAS
-    // errors on the XGMI_WAFL block instead.
+    // xgmi_error sysfs is unreadable on MI300-series and later (DF 4.x has no
+    // FICA access); XGMI faults surface as RAS errors on the XGMI_WAFL block.
     {RDC_HEALTH_XGMI_ERROR, RDC_FI_ECC_XGMI_WAFL_UE},
 };
 
