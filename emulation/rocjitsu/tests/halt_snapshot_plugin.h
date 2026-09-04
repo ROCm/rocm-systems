@@ -152,11 +152,12 @@ public:
     s.vgpr_block = wf.cu().vgpr_allocation_block_size();
     const uint32_t vbase = wf.vgpr_alloc().base;
     s.vgprs.resize(static_cast<size_t>(s.vgpr_block) * s.wf_size, 0);
-    const uint32_t ordinary_end = std::min(s.num_vgprs, s.vgpr_block);
+    const uint32_t ordinary_end = std::min(wf.num_ordinary_vgprs(), s.vgpr_block);
     const uint32_t acc_begin =
         std::min(isa_properties(wf.cu().arch()).max_addressable_vgprs_per_wf, s.vgpr_block);
+    const uint32_t acc_end = std::min(s.vgpr_block, acc_begin + wf.num_accvgprs());
     for (uint32_t r = 0; r < s.vgpr_block; ++r) {
-      if (r >= ordinary_end && r < acc_begin)
+      if (r >= ordinary_end && (r < acc_begin || r >= acc_end))
         continue;
       for (uint32_t lane = 0; lane < s.wf_size; ++lane)
         s.vgprs[static_cast<size_t>(r) * s.wf_size + lane] = regs.read_vgpr(vbase + r, lane);
