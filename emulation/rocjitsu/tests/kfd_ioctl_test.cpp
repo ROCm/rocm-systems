@@ -49,6 +49,7 @@ namespace {
 
 TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   rocjitsu::amdgpu::CommandProcessor cp("cp");
+  cp.startup();
   std::promise<void> callback_entered;
   std::promise<void> release_callback;
   std::atomic<uint32_t> calls = 0;
@@ -71,6 +72,20 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   release_callback.set_value();
   EXPECT_EQ(removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
   caller.join();
+  cp.invoke_completion_interrupt_callback_for_test(1, 2);
+  EXPECT_EQ(calls.load(), 1u);
+  cp.shutdown();
+}
+
+TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  std::atomic<uint32_t> calls = 0;
+  cp.set_interrupt_callback([&](uint32_t, uint32_t) {
+    ++calls;
+    cp.set_interrupt_callback(nullptr);
+  });
+
+  cp.invoke_interrupt_callback_for_test(1, 2);
   cp.invoke_interrupt_callback_for_test(1, 2);
   EXPECT_EQ(calls.load(), 1u);
 }
