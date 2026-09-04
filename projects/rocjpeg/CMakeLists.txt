@@ -381,6 +381,18 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     # through a custom LIST_SEPARATOR that the sub-build restores to ';'.
     string(REPLACE ";" "|" ROCJPEG_TEST_PREFIX_PATH_ALT "${ROCJPEG_TEST_PREFIX_PATH}")
 
+    # Forward the toolchain only when the top-level build set one, and as an
+    # absolute path: a relative CMAKE_TOOLCHAIN_FILE is resolved against the
+    # top-level build dir, but each ExternalProject configures in its own build
+    # dir where that relative path would not resolve. Empty expands to no argument.
+    set(ROCJPEG_TEST_TOOLCHAIN_ARG "")
+    if(CMAKE_TOOLCHAIN_FILE)
+      get_filename_component(ROCJPEG_TEST_TOOLCHAIN_FILE
+        "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_BINARY_DIR}")
+      set(ROCJPEG_TEST_TOOLCHAIN_ARG
+        "-DCMAKE_TOOLCHAIN_FILE=${ROCJPEG_TEST_TOOLCHAIN_FILE}")
+    endif()
+
     # RPATH for the installed test binaries. They install under
     # ${ROCJPEG_TEST_BIN_DIR} (share/<project>/bin) while librocjpeg, HIP and
     # the bundled sysdeps install to ${CMAKE_INSTALL_LIBDIR} -- so at runtime they
@@ -406,7 +418,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
         SOURCE_DIR ${TEST_SOURCE_DIR}
         LIST_SEPARATOR "|"
         CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
-                   -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+                   ${ROCJPEG_TEST_TOOLCHAIN_ARG}
                    "-DCMAKE_PREFIX_PATH=${ROCJPEG_TEST_PREFIX_PATH_ALT}"
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
