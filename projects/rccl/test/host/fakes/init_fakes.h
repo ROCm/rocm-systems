@@ -29,6 +29,7 @@ struct ncclTopoSystem;
 // hipified copy init.cc includes, and the two enum definitions collide.
 struct ncclBootstrapHandle;
 
+struct ncclTopoRanks;
 struct amdsmiFabricDeviceInfo;
 struct ncclComm;
 
@@ -199,6 +200,33 @@ extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
 extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
+// AllGather3 seams (:1786-2213), rung 4; ncclTopoPostset ends it with ncclInvalidUsage, not rung 3's ncclTimeout.
+extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
+extern int g_ncclTopoPresetCalls;
+extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
+extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
+// What :1999's three lambdas answer for rank 0, i.e. the romeTopoModelIdx and hostname :1974-1975 marshalled.
+extern int g_rcclRomeConsensusNranks;
+extern int g_rcclRomeConsensusIdx0;
+extern std::string g_rcclRomeConsensusHost0;
+extern ncclResult_t g_ncclCudaContextTrackResult;
+extern int g_ncclCudaContextTrackCalls;
+extern ncclResult_t g_ncclNvlsTuningResult;
+extern int g_ncclNvlsTuningCalls;
+extern ncclResult_t g_ncclTreeBasePostsetResult;
+extern int g_ncclTreeBasePostsetCalls;
+// The graph :2215 passed. Only the tree graph is correct here, and a result-only seam cannot see a swap.
+extern struct ncclTopoGraph* g_ncclTreeBasePostsetGraph;
+extern ncclResult_t g_ncclTopoPostsetResult;
+extern int g_ncclTopoPostsetCalls;
+// The seven graph slots :2213 passed, in order; the aliasing between them is part of the contract.
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoPostsetGraphs;
+// The `nc` :2213 passed, i.e. the min over every rank's allGather3Data[].nc. -1 until postset runs.
+extern int g_ncclTopoPostsetNc;
 
 void InstallCommAllocSuccess();
 

@@ -79,6 +79,8 @@ extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
+// Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
+extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
 
 // Deep-path result seams. Default to hipErrorInvalidValue so any call a test
 // hasn't opted into surfaces as an unexpected call; set to hipSuccess to enable
@@ -94,6 +96,10 @@ extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
 extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
+// Backs hipDeviceGetAttribute(hipDeviceAttributeDirectManagedMemAccessFromHost); 1 is the MI300A answer.
+extern int g_hipDirectManagedMemAccess;
+// hipMemcpyAsync ignores its arguments, so the call count is the only observable a device copy leaves.
+extern int g_hipMemcpyAsyncCalls;
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

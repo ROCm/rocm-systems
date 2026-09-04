@@ -11,18 +11,22 @@
 
 #include <cstdlib>
 #include <functional>
+#include <string>
 #include <vector>
 #include <sched.h>
 
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
+#include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
 
 struct ncclComm;
 struct ncclTopoGraph;
 struct ncclTopoRanks;
 struct ncclTopoSystem;
 
-ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
+// Controllable (was fail-loud). :1982; the value reaches the AllGather3 payload, so the default is deterministic.
+extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
+ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { return g_ncclTopoCheckNicFused(comm, fused); }
 // Controllable (was fail-loud). Defaults to FAILURE: this is the rung-2 ladder terminator at :1648. Its
 // four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are driven by the
 // rung-3 tests. Records the graph pointer: without it, :1648 being handed treeGraph instead of
@@ -80,8 +84,15 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
   g_ncclTopoGetCpuAffinityLastRank = rank;
   return g_ncclTopoGetCpuAffinity(system, rank, affinity);
 }
-ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw) { ::abort(); }
-ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw) { ::abort(); }
+// Controllable (was fail-loud). :1983 and :1953; both feed the AllGather3 payload.
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw) {
+  return g_ncclTopoGetMinNetBw(system, rank, bw);
+}
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
+ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw) {
+  return g_ncclTopoGetLocalNetCountByBw(system, gpu, count, bw);
+}
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
 // Controllable (was fail-loud). This is the FIRST call after initTransportsRank's MNNVL/intra-proc block, so arming it
@@ -94,7 +105,11 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
 }
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected) { ::abort(); }
-ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink) { ::abort(); }
+// Controllable (was fail-loud). :1985 writes comm->isAllNvlink, which :2037 then folds across ranks.
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
+ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink) {
+  return g_ncclTopoPathAllNVLink(system, allNvLink);
+}
 extern ncclResult_t g_ncclTopoPrintResult;
 ncclResult_t ncclTopoPrint(struct ncclTopoSystem* system) { return g_ncclTopoPrintResult; }
 // Controllable (was fail-loud). Five call sites (:1649, :1674, :1691, :1693, :1703), each paired with an
@@ -113,8 +128,41 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   return g_ncclTopoTrimSystemResult;
 }
 ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs) { ::abort(); }
-ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks**, int*, struct ncclTopoGraph**, struct ncclComm*, int) { ::abort(); }
-ncclResult_t ncclTopoPreset(struct ncclComm*, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks*) { ::abort(); }
-ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int, std::function<int(int)>,
-                                                std::function<const char*(int)>,
-                                                std::function<unsigned long(int)>) { ::abort(); }
+// Controllable (was fail-loud). Rung-4 terminator at :2213; records nc, the :2163 min that nothing on comm exposes.
+extern ncclResult_t g_ncclTopoPostsetResult;
+extern int g_ncclTopoPostsetCalls;
+extern int g_ncclTopoPostsetNc;
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoPostsetGraphs;
+ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks**, int*,
+                             struct ncclTopoGraph** graphs, struct ncclComm*, int nc) {
+  g_ncclTopoPostsetCalls++;
+  g_ncclTopoPostsetNc = nc;
+  if (graphs) {
+    g_ncclTopoPostsetGraphs.assign(graphs, graphs + NCCL_NUM_ALGORITHMS);
+  }
+  return g_ncclTopoPostsetResult;
+}
+// Controllable (was fail-loud). :1994 fills this rank's topoRanks slot in the AllGather3 payload.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
+extern int g_ncclTopoPresetCalls;
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks* topoRanks) {
+  g_ncclTopoPresetCalls++;
+  return g_ncclTopoPreset(comm, topoRanks);
+}
+// Controllable (was fail-loud). :1999, gated on uniformRanksPerHost.
+extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
+extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
+extern int g_rcclRomeConsensusNranks;
+extern int g_rcclRomeConsensusIdx0;
+extern std::string g_rcclRomeConsensusHost0;
+ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int nranks, std::function<int(int)> modelIdx,
+                                                std::function<const char*(int)> hostname,
+                                                std::function<unsigned long(int)>) {
+  g_rcclCheckRomeTopoModelIdxConsensusCalls++;
+  g_rcclRomeConsensusNranks = nranks;
+  if (nranks > 0) {
+    g_rcclRomeConsensusIdx0 = modelIdx(0);
+    g_rcclRomeConsensusHost0 = hostname(0);
+  }
+  return g_rcclCheckRomeTopoModelIdxConsensusResult;
+}

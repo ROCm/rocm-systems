@@ -181,6 +181,13 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
 
+static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
+{
+    if (canAccessPeer) *canAccessPeer = 0;
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(int*, int, int)> g_hipDeviceCanAccessPeer = DefaultHipDeviceCanAccessPeer;
+
 // --- deep-path result seams (commAlloc/devCommSetup) --------------------
 // Default to failure so any call a test hasn't opted into surfaces as an
 // unexpected call; a test sets the relevant seam to hipSuccess to enable the
@@ -192,6 +199,8 @@ hipError_t g_hipMemPoolResult            = hipErrorInvalidValue;
 hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
+int        g_hipDirectManagedMemAccess   = 1;
+int        g_hipMemcpyAsyncCalls        = 0;
 
 // Restore every HIP hook to its default.
 void ResetHipFakes()
@@ -212,10 +221,11 @@ void ResetHipFakes()
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_deviceCount                   = 8;
+    g_currentDevice                 = 0;
     g_hipDeviceGetAttribute         = DefaultHipDeviceGetAttribute;
     g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
-    g_currentDevice                 = 0;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
     g_hipEventCreateResult          = hipErrorInvalidValue;
@@ -223,6 +233,8 @@ void ResetHipFakes()
     g_hipStreamCreateResult         = hipErrorInvalidValue;
     g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
+    g_hipDirectManagedMemAccess     = 1;
+    g_hipMemcpyAsyncCalls           = 0;
 }
 
 // ===========================================================================
@@ -250,10 +262,9 @@ hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
 }
 
 // --- plain link-satisfying stubs (unexercised paths) --------------------
-hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int, int)
+hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int dev1, int dev2)
 {
-    if (canAccessPeer) *canAccessPeer = 0;
-    return hipErrorInvalidValue;
+    return g_hipDeviceCanAccessPeer(canAccessPeer, dev1, dev2);
 }
 
 hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
@@ -282,7 +293,7 @@ static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
         case hipDeviceAttributeWarpSize:
             *pi = g_hipWarpSize; break;
         case hipDeviceAttributeDirectManagedMemAccessFromHost:
-            *pi = 1; break;   // report managed -> ncclCudaHostCalloc takes the extMalloc arm
+            *pi = g_hipDirectManagedMemAccess; break;   // 1 -> ncclCudaHostCalloc takes the extMalloc arm
         default:
             *pi = 0; break;
     }
@@ -400,6 +411,7 @@ hipError_t hipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
 hipError_t hipMemcpyAsync(void*, const void*, size_t, hipMemcpyKind,
                           hipStream_t)
 {
+    g_hipMemcpyAsyncCalls++;
     return g_hipAsyncOpsResult;
 }
 

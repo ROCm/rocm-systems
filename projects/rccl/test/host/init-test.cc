@@ -8404,3 +8404,1425 @@ TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDevice
     EXPECT_FALSE(recycled) << "the fail path released the job: its heap slot was reused";
   }
 }
+
+// initTransportsRank (:1786-2213), rung 4: arming ncclTopoComputeP2pChannelsPerPeer opens it, ncclTopoPostset ends it.
+namespace {
+
+// Mirrors the allGatherInfo declared INSIDE initTransportsRank (:1487); Tr_InstallGathers checks sizeof and 3 fields.
+struct Tr_GraphInfo {
+  int pattern;
+  int nChannels;
+  int sameChannels;
+  float bwIntra;
+  float bwInter;
+  int typeIntra;
+  int typeInter;
+  int crossNic;
+};
+
+struct Tr_AllGatherInfo {
+  Tr_GraphInfo graphInfo[NCCL_NUM_ALGORITHMS];
+  struct ncclTopoRanks topoRanks;
+  int cpuArch;
+  int cpuVendor;
+  int localRanks;
+  int nc;
+  int romeTopoModelIdx;
+  bool pivotA2AEnabled;
+  bool ll128Enabled;
+  char hostname[128];
+  int p2pnChannelsPerPeer;
+  int p2pMaxPeers;
+  float minNetBw;
+  int localNetDeviceCount;
+  int localNetDeviceBw;
+  int localCollNetCount;
+  int isAllNvlink;
+  bool nicFused;
+};
+
+// One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
+void Tr_InstallGpuNodes(ncclTopoSystem* topo, int nRanks, const char* gcn) {
+  topo->nodes[GPU].count = nRanks;
+  for (int i = 0; i < nRanks; i++) {
+    topo->nodes[GPU].nodes[i].gpu.rank = i;
+    std::snprintf(topo->nodes[GPU].nodes[i].gpu.gcn, sizeof(topo->nodes[GPU].nodes[i].gpu.gcn), "%s", gcn);
+  }
+}
+
+// Scripts both allgathers; AllGather3 broadcasts this rank's row so the :2161 folds read back what the UUT computed.
+void Tr_InstallGathers(TransportsRankComm& c, std::vector<PeerSpec> specs,
+                       std::function<void(int, Tr_AllGatherInfo&)> patch = nullptr) {
+  InstallPeerInfoAllGather(c, std::move(specs));
+  std::function<ncclResult_t(void*, void*, int)> peerFn = g_bootstrapAllGather;
+  const int selfRank = c.rank();
+  const int nranks = c.nRanks();
+  ncclComm* comm = c.get();
+  g_bootstrapAllGather = [peerFn, patch, selfRank, nranks, comm](void* bs, void* allData,
+                                                                int size) -> ncclResult_t {
+    if (size == static_cast<int>(sizeof(ncclPeerInfo))) return peerFn(bs, allData, size);
+    if (size != static_cast<int>(sizeof(Tr_AllGatherInfo))) {
+      ADD_FAILURE() << "AllGather3 payload is " << size << " bytes, the mirror is "
+                    << sizeof(Tr_AllGatherInfo) << " -- init.cc:1487 changed shape";
+      return ncclInvalidArgument;
+    }
+    auto* rows = static_cast<Tr_AllGatherInfo*>(allData);
+    const Tr_AllGatherInfo self = rows[selfRank];
+    if (self.p2pnChannelsPerPeer != comm->p2pnChannelsPerPeer || self.cpuArch != comm->cpuArch ||
+        self.cpuVendor != comm->cpuVendor) {
+      ADD_FAILURE() << "AllGather3 mirror does not line up with init.cc:1487; the fields are misread";
+      return ncclInvalidArgument;
+    }
+    for (int r = 0; r < nranks; r++) {
+      if (r != selfRank) rows[r] = self;
+      if (patch) patch(r, rows[r]);
+    }
+    return ncclSuccess;
+  };
+}
+
+// Rung 3's terminator opened, one GPU node per rank, and a ring channel count below the :1883 clamp.
+ncclTopoSystem* Tr_ReachAllGather3(TransportsRankComm& c, const char* gcn, int ringChannels = 4) {
+  ncclTopoSystem* topo = c.installTopo();
+  Tr_InstallGpuNodes(topo, c.nRanks(), gcn);
+  InstallTopoComputeSuccess(ringChannels);
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclSuccess;
+  return topo;
+}
+
+constexpr ncclResult_t kTrPostsetReached = ncclInvalidUsage;
+
+}  // namespace
+
+// --- The clique probe (init.cc:1786-1836) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_WarnsAndProbesNoPeerLinks) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;  // :1801 needs getBusId to answer, or every pair is -1
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  ScopedHook devCount(g_hipGetDeviceCount, [](int*) { return hipErrorInvalidValue; });
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers())); });
+  EXPECT_TRUE(LogHas(log, "treating all peers as non-accessible")) << "actual log:\n" << log;
+  EXPECT_EQ(1, devCount.calls);
+  EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // localDevCount 0 fails :1817 for every pair
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerAccessDenied_ProbesNoLinkTypes) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // g_hipDeviceCanAccessPeer defaults to a hip error
+}
+
+// The positive anchor for the two above: every ordered pair i != j is probed exactly once.
+TEST_F(InitMicrotest, InitTransportsRank_PeerAccessGranted_ProbesEveryOrderedPairOnce) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks * (kNRanks - 1), canAccess.calls);
+  EXPECT_EQ(kNRanks * (kNRanks - 1), g_ncclTopoGetLinkTypeCalls);
+}
+
+// Only this rank's busId disagrees, and i == j skips it, so :1823 breaks on the second row rather than the first.
+TEST_F(InitMicrotest, InitTransportsRank_SelfBusIdNotLocallyVisible_StopsAfterTheFirstRow) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;  // getBusId now answers 0 for every device
+  c.get()->busId = 0x1234;                    // ... but fillInfo reports this one for rank 0
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks - 1, canAccess.calls);
+  EXPECT_EQ(kNRanks - 1, g_ncclTopoGetLinkTypeCalls);
+}
+
+// allXgmi never lands on comm; :1871-1873 is its one consumer, needing gfx906 AND a local topology AND all-XGMI links.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx906AllXgmi_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx906");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  ScopedHook linkType(g_ncclTopoGetLinkType, [](int, int, bool* isXGMI) {
+    *isXGMI = true;
+    return ncclSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx906OneNonXgmiLink_KeepsTwoChannels) {
+  const int kNonXgmiProbe = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx906");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  int probe = 0;
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  ScopedHook linkType(g_ncclTopoGetLinkType, [&probe](int, int, bool* isXGMI) {
+    *isXGMI = probe++ != kNonXgmiProbe;  // one non-XGMI pair mid-run, so the &= has to accumulate
+    return ncclSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+// --- ncclTopoRankToIndex (:1869) picks the GPU node by rank, not by position ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RankHasNoGpuNode_ReturnsInternalErrorBeforeAllGather3) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();  // nodes[GPU].count stays 0, so no node carries rank 0
+  InstallTopoComputeSuccess(/*nChannels=*/4);
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers())); });
+  EXPECT_TRUE(LogHas(log, "ncclTopoRankToIndex could not find rank 0")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+// A node position that differs from the rank, with another arch at position 0, kills both "nodes[0]" and "nodes[rank]".
+TEST_F(InitMicrotest, InitTransportsRank_GpuNodesOutOfRankOrder_ReadsArchFromThisRanksNode) {
+  const int kSelfRank = 1;
+  const int kSelfNodeIndex = 0;
+  TransportsRankComm c(/*nRanks=*/2, kSelfRank);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx942");
+  topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.rank = kSelfRank;
+  topo->nodes[GPU].nodes[1].gpu.rank = 0;
+  std::snprintf(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn,
+                sizeof(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn), "gfx1250");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);  // the gfx1250 rule at :1937, not gfx942's 16
+}
+
+// --- The per-arch channel-count ladder (:1870-1939), read through ncclTopoPostset's nc ---
+
+TEST_F(InitMicrotest, InitTransportsRank_UnknownArch_LeavesChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx908_ScalesChannelCountByRingChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/1);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);  // max(4/1, 2)
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx908ManyRingChannels_FloorsChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/4);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(4/4, 2), i.e. the floor rather than the quotient
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx90aFullTopology_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+// :1878 needs the topology fully local and :1881 does not, so without this pair the two gfx90a rules look the same.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx90aPartialTopology_KeepsTwoChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
+  topo->nodes[GPU].count = 5;  // init.cc:1651 pins topo->nRanks to nRanks, so vary the node count
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(2, 4/4)
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAboveHalfTheMaximum_CollapsesToOneChannel) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2 + 1);  // :1878 would leave 4
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAtHalfTheMaximum_KeepsTheArchChannelCount) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);  // the boundary the strict > at :1883 exists for
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx1250");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);
+  EXPECT_TRUE(c.get()->topo->ll128Enabled);  // :1944 default-enables LL128 on this arch
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonGfx1250_LeavesLl128Disabled) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->topo->ll128Enabled);  // positive anchor for the gfx1250 case above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Ll128ForceEnabled_TurnsLl128OnForAnyArch) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"RCCL_LL128_FORCE_ENABLE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(c.get()->topo->ll128Enabled);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksOneNode_UsesSixteenChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950FourRanksOneNode_UsesEightChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(8, g_ncclTopoPostsetNc);
+}
+
+// Two ranks, but on different hosts: nNodes is 2, so neither single-node arm applies.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksTwoNodes_FallsBackToFourChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942TwoRanks_UsesSixteenChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  g_hipDeviceGetAttributeResult = hipSuccess;  // :1906 is a CUDACHECK, so it must not error out
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);
+  EXPECT_TRUE(c.get()->rcclUseOneSlice);  // :1901, single node
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942FourRanks_UsesFourChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ThreeRanks_LeavesTheChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(3));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // neither the ==2 nor the ==4 arm at :1912-1917
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942DeviceAttributeFails_PropagatesTheCudaError) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(ncclUnhandledCudaError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+// Managed host access plus more than one node is the MI300A arm; it has to beat the nranks==2 rule.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedMultiNode_UsesSixChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 1;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(6, g_ncclTopoPostsetNc);
+  EXPECT_FALSE(c.get()->rcclUseOneSlice);  // :1901 is single-node only
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedSingleNode_TakesTheRankCountArm) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 1;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);  // managed alone is not enough; :1907 needs nNodes > 1 too
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942UnmanagedMultiNode_TakesTheRankCountArm) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);  // multi-node alone is not enough either
+}
+
+// --- Same-node P2P over network (:1855-1860) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopology_EnablesP2pOverNetwork) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 0}});  // the compiled-in default is 1, i.e. force-disabled
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->p2pNet);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyForcedIntra_LeavesP2pOverNetworkOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL | RCCL_TOPO_FORCE_INTRA;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 0}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->p2pNet);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyP2pNetDisabled_LeavesP2pOverNetworkOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->p2pNet);
+  EXPECT_TRUE(LogHas(log, "RCCL force disabled same node P2P over network")) << "actual log:\n" << log;
+}
+
+// Only one of the two topology bits set: neither the enable nor the force-disable branch runs.
+TEST_F(InitMicrotest, InitTransportsRank_RomeTopologyWithoutGdr_SkipsTheP2pOverNetworkBlock) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->p2pNet);
+  EXPECT_FALSE(LogHas(log, "same node P2P over network")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+// --- Net and CollNet device discovery (init.cc:1948-1957) ---
+
+namespace {
+int g_trNetDeviceCount = 0;
+int g_trCollNetDeviceCount = 0;
+
+ncclResult_t Tr_NetDevices(int* ndev) {
+  *ndev = g_trNetDeviceCount;
+  return ncclSuccess;
+}
+ncclResult_t Tr_CollNetDevices(int* ndev) {
+  *ndev = g_trCollNetDeviceCount;
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsItsDeviceCount) {
+  const int kNetDevices = 7;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->ncclNet->devices = Tr_NetDevices;
+  g_trNetDeviceCount = kNetDevices;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 0: 7 Net devices")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Rank 0: 0 CollNet devices")) << "actual log:\n" << log;
+}
+
+// The bandwidth lookup takes the GPU index from a second ncclTopoRankToIndex, not the rank.
+TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsBandwidthForThisRanksGpuNode) {
+  const int kSelfRank = 1;
+  const int kSelfNodeIndex = 0;
+  const int kNetBw = 42;
+  TransportsRankComm c(/*nRanks=*/2, kSelfRank);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.rank = kSelfRank;
+  topo->nodes[GPU].nodes[1].gpu.rank = 0;
+  c.get()->ncclNet->devices = Tr_NetDevices;
+  g_trNetDeviceCount = 1;
+  int seenGpu = -1;
+  ScopedHook byBw(g_ncclTopoGetLocalNetCountByBw,
+                  [&seenGpu](ncclTopoSystem*, int gpu, int* count, float* bw) {
+                    seenGpu = gpu;
+                    *count = kNetBw;
+                    *bw = 0.0f;
+                    return ncclSuccess;
+                  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, byBw.calls);
+  EXPECT_EQ(kSelfNodeIndex, seenGpu);
+  EXPECT_EQ(kNetBw, c.get()->minNetCount);  // :2040 folds localNetDeviceBw into minNetCount
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NoNetPlugin_SkipsTheDeviceProbe) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook byBw(g_ncclTopoGetLocalNetCountByBw, [](ncclTopoSystem*, int, int* count, float* bw) {
+    *count = 0;
+    *bw = 0.0f;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, byBw.calls);  // comm->ncclNet->devices is null, so :1949-1953 never runs
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetPlugin_ReportsItsDeviceCount) {
+  const int kCollNetDevices = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  g_trCollNetDeviceCount = kCollNetDevices;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 0: 3 CollNet devices")) << "actual log:\n" << log;
+}
+
+// --- The single-rank channel override (:1991-1992) ---
+
+// :2168 folds the override straight back, so ncclTopoPreset is the only place it stays observable.
+TEST_F(InitMicrotest, InitTransportsRank_SingleRank_PresetsEightChannels) {
+  const int kSingleRankChannels = 8;
+  TransportsRankComm c(/*nRanks=*/1, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", /*ringChannels=*/3);
+  int ringAtPreset = -1;
+  int treeAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    ringAtPreset = comm->graphs[NCCL_ALGO_RING].nChannels;
+    treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(1));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kSingleRankChannels, ringAtPreset);
+  EXPECT_EQ(kSingleRankChannels, treeAtPreset);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TwoRanks_PresetsTheComputedChannelCount) {
+  const int kComputedChannels = 3;
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kComputedChannels);
+  int ringAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    ringAtPreset = comm->graphs[NCCL_ALGO_RING].nChannels;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kComputedChannels, ringAtPreset);  // positive anchor for the single-rank override
+}
+
+// --- AllGather3 marshalling and the cross-rank folds (:1961-2040, :2161-2179) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusCheck_SeesThisRanksTopologyModelIndex) {
+  const int kRomeModelIdx = 9;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->romeTopoModelIdx = kRomeModelIdx;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+  EXPECT_EQ(4, g_rcclRomeConsensusNranks);
+  EXPECT_EQ(kRomeModelIdx, g_rcclRomeConsensusIdx0);
+  EXPECT_FALSE(g_rcclRomeConsensusHost0.empty());  // :1975 marshalled a hostname, not a zeroed buffer
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsTheRomeConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  std::vector<PeerSpec> specs(3);
+  specs[2].node = 1;  // two ranks on one host, one on another
+  Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_rcclCheckRomeTopoModelIdxConsensusResult = ncclInvalidArgument;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook preset(g_ncclTopoPreset,
+                    [](ncclComm*, ncclTopoRanks*) { return ncclInvalidArgument; });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, preset.calls);
+  EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+}
+
+// The graphInfo fold is a min(), so a peer reporting fewer channels wins and one reporting more must not.
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsFewerChannels_FoldsDownToThatCount) {
+  const int kLocalChannels = 6;
+  const int kPeerChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) {
+      row.graphInfo[NCCL_ALGO_RING].nChannels = kPeerChannels;
+      row.graphInfo[NCCL_ALGO_TREE].nChannels = kPeerChannels;
+    }
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+  EXPECT_EQ(kPeerChannels, c.get()->nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsMoreChannels_KeepsTheLocalCount) {
+  const int kLocalChannels = 4;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.graphInfo[NCCL_ALGO_RING].nChannels = kLocalChannels + 3;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kLocalChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsHigherTypeIntra_FoldsUpToThatType) {
+  const int kPeerTypeIntra = 5;
+  const int kPeerCrossNic = 1;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 3) {
+      row.graphInfo[NCCL_ALGO_RING].typeIntra = kPeerTypeIntra;
+      row.graphInfo[NCCL_ALGO_RING].crossNic = kPeerCrossNic;
+    }
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerTypeIntra, c.get()->graphs[NCCL_ALGO_RING].typeIntra);  // max, unlike nChannels
+  EXPECT_EQ(kPeerCrossNic, c.get()->graphs[NCCL_ALGO_RING].crossNic);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt) {
+  constexpr float kLocalBw = 50.0f;
+  constexpr float kPeerBw = 12.5f;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook minBw(g_ncclTopoGetMinNetBw, [](ncclTopoSystem*, int, float* bw) {
+    *bw = kLocalBw;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 1) row.minNetBw = kPeerBw;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, minBw.calls);
+  EXPECT_FLOAT_EQ(kPeerBw, c.get()->minNetBw);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook allNvlink(g_ncclTopoPathAllNVLink, [](ncclTopoSystem*, int* v) {
+    *v = 1;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.isAllNvlink = 0;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, allNvlink.calls);
+  EXPECT_EQ(0, c.get()->isAllNvlink);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_EveryPeerAllNvlink_KeepsIsAllNvlinkSet) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook allNvlink(g_ncclTopoPathAllNVLink, [](ncclTopoSystem*, int* v) {
+    *v = 1;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->isAllNvlink);  // positive anchor for the clear above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerOnAnotherCpuArch_MarksTheCommMixed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const int localArch = c.get()->cpuArch;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [localArch](int r, Tr_AllGatherInfo& row) {
+    if (r == 1) row.cpuArch = localArch + 1;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(NCCL_TOPO_CPU_ARCH_MIXED, c.get()->cpuArch);
+  EXPECT_NE(NCCL_TOPO_CPU_VENDOR_MIXED, c.get()->cpuVendor);  // the vendors still agree
+  EXPECT_TRUE(LogHas(log, "CPUs with mixed architecture were detected.")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed vendors were detected.")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerFromAnotherCpuVendor_MarksTheCommMixed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const int localVendor = c.get()->cpuVendor;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [localVendor](int r, Tr_AllGatherInfo& row) {
+    if (r == 3) row.cpuVendor = localVendor + 1;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(NCCL_TOPO_CPU_VENDOR_MIXED, c.get()->cpuVendor);
+  EXPECT_TRUE(LogHas(log, "CPUs with mixed vendors were detected.")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed architecture were detected.")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_UniformCpus_ReportsNoMixture) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+// --- Node discovery from the gathered ring roots (:2012-2022, :2107-2135) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_DistinctRingRoots_MakesEveryRankItsOwnNode) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/2);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks, c.get()->nNodes);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}),
+            std::vector<int>(c.get()->rankToNode, c.get()->rankToNode + kNRanks));
+  EXPECT_EQ(2, c.get()->node);
+  EXPECT_EQ(0, c.get()->localRank);
+  EXPECT_EQ(1, c.get()->localRanks);
+  EXPECT_EQ(1, c.get()->maxLocalRanks);
+}
+
+// Two interleaved nodes of two, so neither "same node as rank 0" nor "localRank == rank" produces this answer.
+TEST_F(InitMicrotest, InitTransportsRank_InterleavedRingRoots_GroupsRanksByTheirRoot) {
+  const int kNRanks = 4;
+  const int kSelfRank = 3;
+  TransportsRankComm c(kNRanks, kSelfRank);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + (r % 2); });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, c.get()->nNodes);
+  EXPECT_EQ(std::vector<int>({0, 1, 0, 1}),
+            std::vector<int>(c.get()->rankToNode, c.get()->rankToNode + kNRanks));
+  EXPECT_EQ(std::vector<int>({0, 0, 1, 1}),
+            std::vector<int>(c.get()->rankToLocalRank, c.get()->rankToLocalRank + kNRanks));
+  EXPECT_EQ(1, c.get()->node);
+  EXPECT_EQ(1, c.get()->localRank);
+  EXPECT_EQ(2, c.get()->localRanks);
+  EXPECT_EQ(std::vector<int>({1, 3}),
+            std::vector<int>(c.get()->localRankToRank, c.get()->localRankToRank + 2));
+  EXPECT_EQ(2, c.get()->maxLocalRanks);
+  EXPECT_EQ(2, c.get()->minLocalRanks);
+  EXPECT_EQ(0, c.get()->isOneRPN);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_UnevenNodes_RecordsBothTheMinAndMaxLocalRankCount) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = r == 3 ? 200 : 100; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, c.get()->nNodes);
+  EXPECT_EQ(3, c.get()->maxLocalRanks);
+  EXPECT_EQ(1, c.get()->minLocalRanks);
+  EXPECT_EQ(3, c.get()->nvlDomainInfo.maxRanksPerNvlDomain);  // initNvlDomainInfo ran after the counts
+  EXPECT_EQ(1, c.get()->nvlDomainInfo.minRanksPerNvlDomain);
+  EXPECT_EQ(2, c.get()->nvlDomainInfo.nNvlDomains);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_OneRankPerNode_SetsIsOneRpn) {
+  const int kNRanks = 3;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->isOneRPN);
+}
+
+// --- Net / CollNet device-count mismatch reporting (:2048-2091) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCounts_WarnsAndFails) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_NET_MISMATCH", 0}});  // the compiled-in default is 1, i.e. ignore
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 1 has 1 local Net devices (max 4).")) << "actual log:\n" << log;
+  // The ignore INFO shares this prefix, so the "Set ..." suffix is what tells the two diagnostics apart.
+  EXPECT_TRUE(LogHas(log, "(min 1, max 4). Set NCCL_IGNORE_NET_MISMATCH=1 to continue."))
+      << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsIgnored_ContinuesToPostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_NET_MISMATCH", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "(min 1, max 4). Ignoring due to NCCL_IGNORE_NET_MISMATCH.")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclTopoPostsetCalls);
+}
+
+// The mismatch report is rank 0's job only; every other rank stays silent and does not fail.
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsOnNonZeroRank_StaysSilent) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "mixed local Net device counts")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCounts_WarnsAndFails) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localCollNetCount = r == 2 ? 0 : 2;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 2 has 0 local CollNet devices (max 2).")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "(min 0, max 2). Set NCCL_IGNORE_COLLNET_MISMATCH=1 to continue."))
+      << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "mixed local Net device counts")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCountsIgnored_ContinuesToPostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_COLLNET_MISMATCH", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localCollNetCount = r == 2 ? 0 : 2;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "(min 0, max 2). Ignoring due to NCCL_IGNORE_COLLNET_MISMATCH.")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclTopoPostsetCalls);
+}
+
+// --- Cross-clique P2P, NVLS tuning and the CollNet node threshold (:2151-2215) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithMoreCliquesThanOne_EnablesCrossCliqueP2p) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->MNNVL = 1;
+  c.get()->nvlDomainSize = 8;
+  c.get()->clique.size = 4;
+  SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(c.get()->p2pCrossClique);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithASingleClique_LeavesCrossCliqueP2pOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->MNNVL = 1;
+  c.get()->nvlDomainSize = 4;
+  c.get()->clique.size = 4;  // not strictly greater, so :2151 stays false
+  SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->p2pCrossClique);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsSupported_TunesNvlsBeforePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->nvlsSupport = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclNvlsTuningCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsGraphHasNoChannels_DisablesNvlsAndSkipsTuning) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->nvlsSupport = 1;
+  c.get()->nvlsChannels = 4;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4),
+                    [](int, Tr_AllGatherInfo& row) { row.graphInfo[NCCL_ALGO_NVLS].nChannels = 0; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->nvlsSupport);
+  EXPECT_EQ(0, c.get()->nvlsChannels);
+  EXPECT_EQ(0, g_ncclNvlsTuningCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetChainGraphHasNoChannels_DisablesCollNet) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->config.collnetEnable = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_COLLNET_CHAIN].nChannels = 0;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->config.collnetEnable);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_FewerNodesThanTheCollNetThreshold_DisablesCollNet) {
+  const int kCollNetNodeThreshold = 5;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  c.get()->config.collnetEnable = 1;
+  SetParams({{"COLLNET_NODE_THRESHOLD", kCollNetNodeThreshold}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->config.collnetEnable);
+  EXPECT_TRUE(LogHas(log, "1 nodes which is less than CollNet node threshold 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AtTheCollNetNodeThreshold_KeepsCollNetEnabled) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  c.get()->config.collnetEnable = 1;
+  SetParams({{"COLLNET_NODE_THRESHOLD", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->config.collnetEnable);  // 1 node is not < 1
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeDefinedByTheTopology_RunsTheTreeBasePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  g_ncclTopoPostsetResult = ncclSuccess;  // :2215 sits past the rung-4 terminator
+  g_ncclTreeBasePostsetResult = ncclRemoteError;
+  ScopedTopoGetSystem restoreTopo;
+  ScopedHook postset(g_ncclTopoPreset, [topo](ncclComm*, ncclTopoRanks*) {
+    topo->treeDefined = true;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTreeBasePostsetCalls);
+  EXPECT_EQ(&c.get()->graphs[NCCL_ALGO_TREE], g_ncclTreeBasePostsetGraph);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeNotDefined_SkipsTheTreeBasePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTreeBasePostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Postset_ReceivesTheSevenAlgorithmGraphsWithNvlsAndTreeAliased) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  ncclTopoGraph* const g = c.get()->graphs;
+  EXPECT_EQ(std::vector<ncclTopoGraph*>({&g[NCCL_ALGO_TREE], &g[NCCL_ALGO_RING], &g[NCCL_ALGO_COLLNET_DIRECT],
+                                         &g[NCCL_ALGO_COLLNET_CHAIN], &g[NCCL_ALGO_NVLS], &g[NCCL_ALGO_NVLS],
+                                         &g[NCCL_ALGO_TREE]}),
+            g_ncclTopoPostsetGraphs);
+}
+
+// A GPU count that disagrees with nRanks plus a NET node takes the min() arm at :2189-2191; otherwise ring wins.
+TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithANetNode_TakesTheSmallerChannelCount) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
+  topo->nodes[GPU].count = 5;
+  topo->nodes[NET].count = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kTreeChannels, c.get()->nChannels);
+  EXPECT_EQ(kTreeChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithoutANetNode_KeepsTheRingChannelCount) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
+  topo->nodes[GPU].count = 5;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kRingChannels, c.get()->nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Cr8gFullTopology_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_CR8G;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Cr8gPartialTopology_KeepsTwoChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_CR8G;
+  topo->nodes[GPU].count = 5;  // != nRanks, so :1876 does not fire
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+// globalNicFused is consumed past the terminator, so the oracle is :1981 putting the flag in this rank's row.
+TEST_F(InitMicrotest, InitTransportsRank_NicFused_ReachesThisRanksAllGatherRow) {
+  const int kSelfRank = 2;
+  TransportsRankComm c(/*nRanks=*/4, kSelfRank);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook nicFused(g_ncclTopoCheckNicFused, [](ncclComm*, bool* fused) {
+    *fused = true;
+    return ncclSuccess;
+  });
+  int rowsSeen = 0;
+  int fusedRows = 0;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [&](int, Tr_AllGatherInfo& row) {
+    rowsSeen++;
+    if (row.nicFused) fusedRows++;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, nicFused.calls);
+  EXPECT_EQ(4, rowsSeen);
+  EXPECT_EQ(4, fusedRows);  // the broadcast copies this rank's row, so all four carry the flag
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NicNotFused_LeavesTheAllGatherRowClear) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  int fusedRows = 0;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [&](int, Tr_AllGatherInfo& row) {
+    if (row.nicFused) fusedRows++;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, fusedRows);  // positive anchor: the default seam answers false
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NicFusedCheckFails_PropagatesBeforeTheMinBwLookup) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook nicFused(g_ncclTopoCheckNicFused,
+                      [](ncclComm*, bool*) { return ncclInvalidArgument; });
+  ScopedHook minBw(g_ncclTopoGetMinNetBw, [](ncclTopoSystem*, int, float* bw) {
+    *bw = 0.0f;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, minBw.calls);
+}
+
+// --- commAlloc: the split-from-parent resource sharing arms (init.cc:745-816) ---
+
+namespace {
+// The post-ncclCommSplit parent state, the only state that opens :745-751 and :800-803.
+class Tr_ParentComm {
+ public:
+  Tr_ParentComm() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}), net_(new ncclNet_t{}) {
+    net_->name = "parentnet";
+    comm_->sharedRes = sr_.get();
+    comm_->ncclNet = net_.get();
+    comm_->shareResources = true;
+    sr_->refCount = 1;
+  }
+  Tr_ParentComm(const Tr_ParentComm&) = delete;
+  Tr_ParentComm& operator=(const Tr_ParentComm&) = delete;
+  ncclComm* get() { return comm_.get(); }
+  ncclSharedResources* sharedRes() { return sr_.get(); }
+  ncclNet_t* net() { return net_.get(); }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sr_;
+  std::unique_ptr<ncclNet_t> net_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CommAlloc_ParentSharesResources_AdoptsThemAndBumpsTheRefCount) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/3));
+  EXPECT_EQ(parent.sharedRes(), comm->sharedRes);
+  EXPECT_EQ(2, parent.sharedRes()->refCount);  // :747 incremented the parent's count, not a fresh one
+  EXPECT_EQ(parent.net(), comm->ncclNet);      // ncclNetInitFromParent, not ncclNetInit
+}
+
+TEST_F(InitMicrotest, CommAlloc_NoParent_AllocatesItsOwnSharedResources) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/3));
+  EXPECT_NE(parent.sharedRes(), comm->sharedRes);
+  EXPECT_EQ(1, parent.sharedRes()->refCount);  // untouched: the anchor for the increment above
+  EXPECT_EQ(1, comm->sharedRes->refCount);
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentDoesNotShareResources_AllocatesItsOwn) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  parent.get()->shareResources = false;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_NE(parent.sharedRes(), comm->sharedRes);  // :745 needs BOTH a parent and shareResources
+  EXPECT_EQ(1, parent.sharedRes()->refCount);
+  EXPECT_NE(parent.net(), comm->ncclNet);          // ncclNetInit, not ncclNetInitFromParent
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentSharesAMemManager_AdoptsItAndBumpsTheRefCount) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  ncclMemManager manager{};
+  manager.refCount = 1;
+  parent.get()->memManager = &manager;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_EQ(&manager, comm->memManager);
+  EXPECT_EQ(2, manager.refCount);
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentHasNoMemManager_CreatesAFreshOne) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_EQ(nullptr, comm->memManager);  // ncclMemManagerInit is faked and writes nothing
+}
+
+TEST_F(InitMicrotest, CommAlloc_LaunchOrderImplicit_TracksTheCudaContext) {
+  InstallCommAllocSuccess();
+  SetParams({{"LAUNCH_ORDER_IMPLICIT", 1}});
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_TRUE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclCudaContextTrackCalls);
+}
+
+TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_SkipsContextTracking) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_FALSE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclCudaContextTrackCalls);
+  EXPECT_TRUE(LogHas(log, "Using network")) << "commAlloc never got that far\n" << log;
+}
+
+// This build has no ENABLE_FAULT_INJECTION, so a non-zero request is refused rather than honoured.
+TEST_F(InitMicrotest, CommAlloc_FaultInjectionRequested_WarnsAndLeavesFaultsUnset) {
+  const int64_t kFaultMask = 0x5;
+  InstallCommAllocSuccess();
+  SetParams({{"RCCL_INJECT_FAULTS", kFaultMask}});
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_TRUE(LogHas(log, "Ignore faults injection of value 0x5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommAlloc_NoFaultInjectionRequested_StaysSilent) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_FALSE(LogHas(log, "faults injection")) << "actual log:\n" << log;
+}
+
+// --- devCommSetup: the workFifo sizing guard and the CollNet rank map (init.cc:933-979) ---
+
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesNotAPowerOfTwo_WarnsAndFallsBackToTheDefault) {
+  const int64_t kNotAPowerOfTwo = 3 << 20;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kNotAPowerOfTwo}});
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  });
+  EXPECT_TRUE(LogHas(log, "NCCL_WORK_FIFO_BYTES=3145728 is being ignored because it is not a power of 2."))
+      << "actual log:\n" << log;
+  EXPECT_EQ(static_cast<uint32_t>(NCCL_WORK_FIFO_BYTES_DEFAULT), comm->workFifoBytes);
+}
+
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAPowerOfTwo_IsKept) {
+  const int64_t kPowerOfTwo = 1 << 20;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kPowerOfTwo}});
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  });
+  EXPECT_FALSE(LogHas(log, "is not a power of 2")) << "actual log:\n" << log;
+  EXPECT_EQ(static_cast<uint32_t>(kPowerOfTwo), comm->workFifoBytes);
+}
+
+// 2^31 and not 2^32: workFifoBytes is a uint32_t, so 2^32 truncates to 0 before the cap ever sees it.
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAboveOneGigabyte_IsCappedThere) {
+  const int64_t kTwoGigabytes = 1LL << 31;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kTwoGigabytes}});
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(1u << 30, comm->workFifoBytes);
+}
+
+TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {
+  const int kNRanks = 8;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
+  std::vector<int> denseToUser(kNRanks);
+  for (int r = 0; r < kNRanks; r++) {
+    denseToUser[r] = kNRanks - 1 - r;
+  }
+  comm->collNetDenseToUserRank = denseToUser.data();
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(3, g_hipMemcpyAsyncCalls);      // one more than the baseline below: the :976 copy
+  EXPECT_EQ(denseToUser[0], kNRanks - 1);   // the source map is read, never rewritten
+  comm->collNetDenseToUserRank = nullptr;   // stack-owned, so it must not outlive this test
+}
+
+TEST_F(InitMicrotest, DevCommSetup_NoCollNetRankMap_SkipsTheDeviceCopy) {
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  EXPECT_EQ(nullptr, comm->collNetDenseToUserRank);
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(2, g_hipMemcpyAsyncCalls);  // the baseline: the :976 rank-map copy is skipped
+  EXPECT_NE(nullptr, comm->devComm);
+}
+
+namespace {
+bool AllBytesAre(const unsigned char* p, std::size_t n, unsigned char v) {
+  for (std::size_t i = 0; i < n; i++) {
+    if (p[i] != v) return false;
+  }
+  return true;
+}
+
+// ncclTopoCompute answers per graph id, so the ring and tree counts can differ. Ids are seeded at
+// :1644 (ring 0), :1668 (tree 1), :1757 (chain 2), :1776 (nvls 3) and :1763 (direct 4).
+void Tr_InstallTopoComputePerGraph(int ringChannels, int treeChannels) {
+  g_ncclTopoCompute = [ringChannels, treeChannels](ncclTopoSystem*, ncclTopoGraph* g) {
+    g->nChannels = g->id == 1 ? treeChannels : ringChannels;
+    return ncclSuccess;
+  };
+}
+}  // namespace
+
+// graphs[0] is the TREE graph, so reading graphs[0] instead of graphs[a] is invisible while every
+// graph carries the same channel count. Giving the tree fewer channels than the ring exposes it.
+TEST_F(InitMicrotest, InitTransportsRank_GraphInfoIsMarshalledPerAlgorithm_NotFromTheTreeGraph) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallTopoComputePerGraph(kRingChannels, kTreeChannels);
+  int treeAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;  // :2188 later overwrites it with ring's
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kTreeChannels, treeAtPreset);
+  EXPECT_EQ(kRingChannels, c.get()->nChannels);  // single node, so :2191 takes the ring count
+  EXPECT_EQ(kRingChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+// nChannelsOrig is captured at :1988 and only read by the :2192 guard, so the relocation loop is the
+// one place a wrong capture shows up. The fold has to shrink nChannels below it for that to happen.
+TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_RelocatesTheSpareChannels) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  const int kFoldedTreeChannels = 1;
+  const unsigned char kPoison = 0xA5;
+  const unsigned char kSource = 0x5C;
+  const unsigned char kGuard = 0x3E;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->nodes[GPU].count = 5;
+  topo->nodes[NET].count = 1;
+  Tr_InstallTopoComputePerGraph(kRingChannels, kTreeChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kFoldedTreeChannels;
+  });
+  ncclComm* comm = c.get();
+  std::memset(&comm->channels[1], kPoison, sizeof(struct ncclChannel));
+  std::memset(&comm->channels[2], kSource, sizeof(struct ncclChannel));
+  std::memset(&comm->channels[3], kGuard, sizeof(struct ncclChannel));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm, nullptr, c.timers()));
+  EXPECT_EQ(kFoldedTreeChannels, comm->nChannels);
+  const auto* dst = reinterpret_cast<const unsigned char*>(&comm->channels[1]);
+  const auto* src = reinterpret_cast<const unsigned char*>(&comm->channels[2]);
+  const auto* guard = reinterpret_cast<const unsigned char*>(&comm->channels[3]);
+  EXPECT_TRUE(AllBytesAre(dst, sizeof(struct ncclChannel), kSource));
+  EXPECT_TRUE(AllBytesAre(src, sizeof(struct ncclChannel), kSource));  // the source is not consumed
+  EXPECT_TRUE(AllBytesAre(guard, sizeof(struct ncclChannel), kGuard));  // one iteration, not two
+}
+
+// nc starts from rank 0's contribution, so a lower value on a LATER rank is what proves the reduction
+// runs at all; patching rank 0 alone would pass even with the min() deleted.
+TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsFewerChannels_FoldsNcDownToIt) {
+  const int kPeerNc = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");  // this rank contributes 8, so a peer's 3 has to win
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.nc = kPeerNc;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerNc, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsMoreChannels_KeepsTheSmallerNc) {
+  const int kLocalNc = 8;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.nc = kLocalNc + 4;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kLocalNc, g_ncclTopoPostsetNc);  // a min(), not a max()
+}
+
+TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesThemToTheDevice) {
+  const int kNRanks = 8;
+  const int kChannelsWithRanks = 2;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
+  std::vector<int> userRanks(kNRanks);
+  for (int c = 0; c < kChannelsWithRanks; c++) {
+    comm->channels[c].ring.userRanks = userRanks.data();
+  }
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(2 + kChannelsWithRanks, g_hipMemcpyAsyncCalls);  // the two baseline copies plus one per channel
+  for (int c = 0; c < kChannelsWithRanks; c++) {
+    comm->channels[c].ring.userRanks = nullptr;  // stack-owned, so it must not outlive this test
+  }
+}
