@@ -13,10 +13,13 @@
 #include <time.h>
 
 #ifdef __cplusplus
-extern "C" {
 #include <cstdint>
 #else  // __cplusplus
 #include <stdint.h>
+#endif  // __cplusplus
+
+#ifdef __cplusplus
+extern "C" {
 #endif  // __cplusplus
 
 /**

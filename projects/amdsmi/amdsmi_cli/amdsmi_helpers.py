@@ -1296,7 +1296,7 @@ class AMDSMIHelpers:
         if gpu_id is None:
             try:
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            except:
+            except Exception:
                 gpu_id = "unknown"
 
         try:
@@ -1347,7 +1347,7 @@ class AMDSMIHelpers:
         try:
             vendor_value = int(asic_info["vendor_id"], 16)
             return vendor_value == AMD_VENDOR_ID
-        except:
+        except Exception:
             return False
 
     def get_perf_levels(self):

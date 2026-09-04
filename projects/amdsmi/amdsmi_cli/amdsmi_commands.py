@@ -239,7 +239,7 @@ class AMDSMICommands(
                 # Shutdown AMD SMI
                 try:
                     amdsmi_interface.amdsmi_shut_down()
-                except:
+                except Exception:
                     pass
 
         except ImportError as e:

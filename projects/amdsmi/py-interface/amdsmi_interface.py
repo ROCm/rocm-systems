@@ -3589,12 +3589,15 @@ def amdsmi_get_gpu_cper_entries(
     return entries, cur.value, cper_data, status_code
 
 
-def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
+def amdsmi_get_afids_from_cper(
+    cper_afid_data: Union[bytes, List[Dict[str, Any]]],
+) -> Tuple[List[int], int]:
     """
     Extract AFIDs from a CPER blob.
 
     Args:
-        cper_afid_data: raw bytes of a single CPER record.
+        cper_afid_data: raw bytes of a single CPER record, or a list of
+            ``{"bytes": list[int], "size": int}`` record dicts.
 
     Returns:
         Tuple[List[int], int]: A tuple containing:
@@ -3605,7 +3608,7 @@ def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
     # Normalize single blob into a list of records
     if isinstance(cper_afid_data, bytes):
         cper_records = [{"bytes": list(cper_afid_data), "size": len(cper_afid_data)}]
-    elif isinstance(cper_afid_data, List[Dict[str, Any]]):
+    elif isinstance(cper_afid_data, list):
         cper_records = cper_afid_data
     else:
         raise AmdSmiParameterException(cper_afid_data, bytes)

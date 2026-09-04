@@ -132,7 +132,7 @@ class ResetCommands:
                             gpus_without_hive.append(gpu)
                     else:
                         gpus_without_hive.append(gpu)
-                except:
+                except Exception:
                     gpus_without_hive.append(gpu)
 
             # For each hive, reset using the first GPU (resets entire hive)

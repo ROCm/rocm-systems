@@ -74,17 +74,16 @@ amdsmi_status_t AMDSmiNoDrmNIC::init() {
     auto nic_dev_dir = opendir(std::string((nic_dev_folder + "/hwmon")).c_str());
 
     if (nic_dev_dir != nullptr) {
-      auto dentry = readdir(nic_dev_dir);
-      while (dentry != nullptr) {
-        if (memcmp(dentry->d_name, "hwmon", strlen("hwmon")) == 0) {
-          if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) continue;
+      struct dirent* dentry = nullptr;
+      while ((dentry = readdir(nic_dev_dir)) != nullptr) {
+        if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) continue;
+        if (strncmp(dentry->d_name, "hwmon", strlen("hwmon")) == 0) {
           const std::string nic_hw_folder =
               nic_dev_folder + "/hwmon/" + std::string(dentry->d_name);
           hwmon_paths_.push_back(nic_hw_folder);
           has_valid_hw_mon = true;
           break;
         }
-        dentry = readdir(nic_dev_dir);
       }
       closedir(nic_dev_dir);
     }
@@ -158,7 +157,7 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_info(uint32_t nic_index,
   std::string net_path = device_path + "/net";
   auto net_node_dir = opendir(net_path.c_str());
   if (net_node_dir != nullptr) {
-    auto dentry = readdir(net_node_dir);
+    struct dirent* dentry = nullptr;
     std::string mac_path;
     while ((dentry = readdir(net_node_dir)) != nullptr) {
       if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) {
@@ -522,7 +521,7 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_uuid(std::string device_path, std:
 
     return AMDSMI_STATUS_FILE_ERROR;
   }
-  auto dentry = readdir(net_node_dir);
+  struct dirent* dentry = nullptr;
   std::string mac_path;
   while ((dentry = readdir(net_node_dir)) != nullptr) {
     // Skip "." and ".." directories
