@@ -2240,6 +2240,40 @@ TEST(L1VectorCacheTest, ScratchDwordCrossesInterleaveBoundary) {
   EXPECT_EQ(mem.read8((kAddr & ~uint64_t{3}) + kScratchStride), 0x87);
 }
 
+TEST(L1VectorCacheTest, SwizzlePostAddressOffsetsDoNotShiftDwordBoundaries) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint32_t kSwizzleStride = 64 * sizeof(uint32_t);
+  constexpr std::array<uint32_t, 2> kInitial = {0x55443322, 0xDDCCBBAA};
+  constexpr std::array<uint32_t, 2> kStored = {0x87654321, 0xFEDCBA98};
+  for (uint32_t post_swizzle_offset : {1u, 2u, 3u}) {
+    const uint64_t addr = 0x7A00 + post_swizzle_offset * 0x400 + post_swizzle_offset;
+    mem.write32(addr, kInitial[0]);
+    mem.write32(addr + kSwizzleStride, kInitial[1]);
+
+    uint64_t addrs[64] = {};
+    addrs[0] = addr;
+    std::array<uint8_t, 64 * sizeof(kInitial)> bytes{};
+    l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/2, bytes.data(),
+            amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+            cdna3::Isa::WF_SIZE, /*vmid=*/0, kSwizzleStride, post_swizzle_offset);
+    std::array<uint32_t, 2> loaded{};
+    std::memcpy(loaded.data(), bytes.data(), sizeof(loaded));
+    EXPECT_EQ(loaded, kInitial) << "post-swizzle offset " << post_swizzle_offset;
+
+    std::memcpy(bytes.data(), kStored.data(), sizeof(kStored));
+    l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/2, bytes.data(),
+             amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
+             kSwizzleStride, post_swizzle_offset);
+    EXPECT_EQ(mem.read32(addr), kStored[0]) << "post-swizzle offset " << post_swizzle_offset;
+    EXPECT_EQ(mem.read32(addr + kSwizzleStride), kStored[1])
+        << "post-swizzle offset " << post_swizzle_offset;
+  }
+}
+
 TEST(L1VectorCacheTest, PartialElementMasksSkipMaskedLoads) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
@@ -2261,7 +2295,8 @@ TEST(L1VectorCacheTest, PartialElementMasksSkipMaskedLoads) {
   std::array<uint8_t, 64 * 4 * sizeof(uint32_t)> bytes{};
   l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
           amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
-          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, kElementMasks);
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, /*addr_base_offset=*/0,
+          kElementMasks);
 
   std::array<uint32_t, 4> lane0{};
   std::array<uint32_t, 4> lane1{};
@@ -2290,7 +2325,7 @@ TEST(L1VectorCacheTest, PartialElementMasksDropSkippedStores) {
   constexpr std::array<uint64_t, 4> kElementMasks = {0x1, 0x1, 0x0, 0x0};
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
            amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
-           /*addr_stride=*/0, kElementMasks);
+           /*addr_stride=*/0, /*addr_base_offset=*/0, kElementMasks);
 
   EXPECT_EQ(mem.read32(kAddr), kStored[0]);
   EXPECT_EQ(mem.read32(kAddr + 4), kStored[1]);
@@ -2320,7 +2355,7 @@ TEST(L1VectorCacheTest, PartialElementMasksCoalesceFullyValidLanes) {
 
   l1.store(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
            amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
-           /*addr_stride=*/0, kElementMasks);
+           /*addr_stride=*/0, /*addr_base_offset=*/0, kElementMasks);
   EXPECT_EQ(l1.store_l2_writes(), 3u);
   EXPECT_EQ(l2.backing_write_transactions(), 3u);
   EXPECT_EQ(mem.read32(kAddr + 0), kLane0[0]);
@@ -2339,7 +2374,8 @@ TEST(L1VectorCacheTest, PartialElementMasksCoalesceFullyValidLanes) {
   std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
   l1.load(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
           amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
-          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, kElementMasks);
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, /*addr_base_offset=*/0,
+          kElementMasks);
   EXPECT_EQ(l2.backing_read_transactions(), 3u);
   EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
@@ -7455,6 +7491,54 @@ TEST(CdnaAddrCalcTest, MubufSwizzledAddTidScratchLayout) {
       EXPECT_EQ(dfmt_stride.per_lane_addr[16], kCdnaBufferBase + 16 * stride18) << arch;
       EXPECT_EQ(dfmt_stride.per_lane_addr[17], kCdnaBufferBase + 16 * stride18 + 4) << arch;
       EXPECT_EQ(dfmt_stride.per_lane_addr[63], kCdnaBufferBase + 48 * stride18 + 60) << arch;
+    }
+  }
+}
+
+TEST(CdnaAddrCalcTest, NonAddTidSwizzleKeepsMultiDwordPayloadContiguous) {
+  constexpr uint32_t kNonScratchWord3 = 0x00110000u; // Representative corpus V#; ADD_TID is clear.
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/512, kNonScratchWord3,
+                                                  /*swizzle_enable=*/true));
+    wave.set_lanes(4, {4});
+
+    auto dwordx4 =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordx4Mubuf), *wave.wf, 4, 4);
+    EXPECT_EQ(dwordx4.per_lane_addr[0], kCdnaBufferBase + 4) << arch;
+    EXPECT_FALSE(dwordx4.scratch_swizzle) << arch;
+    EXPECT_EQ(dwordx4.scratch_addr_stride, 0u) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, BufferSwizzleTracksPostSwizzleBaseOffset) {
+  constexpr uint32_t kScratchWord3 = 0x00EA4FACu;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/0, kScratchWord3,
+                                                  /*swizzle_enable=*/true));
+    wave.set_lanes(4, {0});
+    cdna4::MubufMachineInst inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    inst.soffset = CdnaBufferWave::kSoffset;
+    for (uint32_t soffset : {1u, 2u, 3u}) {
+      wave.set_soffset(soffset);
+      amdgpu::VectorMemState swizzled = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+      EXPECT_EQ(swizzled.per_lane_addr[0], kCdnaBufferBase + soffset) << arch;
+      EXPECT_EQ(swizzled.scratch_addr_base_offset, soffset) << arch;
+
+      amdgpu::VectorMemState typed(amdgpu::GLOBAL_MEM);
+      typed.elem_size = 4;
+      typed.num_elems = 1;
+      cdna4::MtbufMachineInst mtbuf =
+          cdna_mtbuf_inst(cdna4::kTbufferLoadFormatXMtbuf, /*offen=*/true);
+      mtbuf.soffset = CdnaBufferWave::kSoffset;
+      amdgpu::addr_calc::mtbuf_calculate_addresses(mtbuf, *wave.wf, typed);
+      EXPECT_EQ(typed.per_lane_addr[0], kCdnaBufferBase + soffset) << arch;
+      EXPECT_EQ(typed.scratch_addr_base_offset, soffset) << arch;
     }
   }
 }
