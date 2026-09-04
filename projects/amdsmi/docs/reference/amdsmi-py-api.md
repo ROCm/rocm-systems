@@ -6603,7 +6603,7 @@ Output: Dictionary with the corresponding fields
 Field | Description
 ---|---
 `bdf` | BDF of the fabric device
-`version` | Fabric info structure version
+`version` | Fabric info layout version; always `2`, the nested layout the bindings request
 `accelerator_id` | Accelerator identifier (range 0 to 1023)
 `fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
 `bandwidth` | Station bandwidth share in Mb/s
@@ -6613,9 +6613,16 @@ Field | Description
 `vpod_id` | Virtual PoD identifier
 `vpod_size` | Virtual PoD size
 `local_accelerators` | List of local accelerator IDs
-`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`local_accelerator_count` | Count of valid entries in `local_accelerators`
+`vpod_active_accelerators` | List of active accelerator IDs; unused slots read `UINT32_MAX` (UNSET), as with `local_accelerators`
 `addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
 `accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+`station_flags` | DF/station flags
+`num_stations` | Number of stations
+`lane_en_bitmap` | Per-lane enable bitmap as a list of bytes
+`ppod_mask` | `amdsmi_fabric_ppod_field_t` bits actually read into the PPoD fields; a clear bit means that field holds its sentinel
+`vpod_mask` | `amdsmi_fabric_vpod_field_t` bits actually read into the vPoD fields
+`station_mask` | `amdsmi_fabric_df_field_t` bits actually read into the DF/station fields
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
 

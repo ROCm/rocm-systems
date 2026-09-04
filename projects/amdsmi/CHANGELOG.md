@@ -172,6 +172,27 @@ GPU: 0
   - Both are UALoE-backed and report `AMDSMI_STATUS_NOT_SUPPORTED` (or the `UINT32_MAX` sentinel for `physical_acc_id`) on systems without an active UALoE session.
   - CLI: `amd-smi static --asic` now includes `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` flag prints tray type and accelerator count.
 
+- **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
+  - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
+  - New structures: `amdsmi_fabric_ppod_config_t`, `amdsmi_fabric_vpod_config_t`, `amdsmi_fabric_station_config_t`, and the `amdsmi_fabric_ppod_data_t`, `amdsmi_fabric_vpod_data_t`, `amdsmi_fabric_station_data_t` payloads they share with `amdsmi_get_gpu_fabric_info()`.
+  - New enums: `amdsmi_fabric_config_version_t`, `amdsmi_fabric_ppod_field_t`, `amdsmi_fabric_vpod_field_t`, `amdsmi_fabric_df_field_t`. Each config carries a `mask` selecting the fields to write and a `commit` flag.
+  - `commit == false` validates the request and writes nothing. The driver ignores the staging files unless a commit follows, so values left there would only be picked up by the next commit.
+  - `mask` must select at least one field. A request with `mask == 0` returns `AMDSMI_STATUS_INVAL` even when `commit` is set, so a bare commit cannot flush whatever a prior partial write left staged.
+  - A committing request compares the write subtree against the flat surface before it writes anything and logs any field already pending, since the driver applies everything staged rather than only the fields the request named. The check is observational and never changes the result; enable debug logging to see the report.
+
+- **Added `amdsmi_fabric_info_v2_t`, a second layout for `amdsmi_get_gpu_fabric_info()`**.  
+  - Groups the version 1 fields into the `ppod`/`vpod`/`station` payloads shared with the write APIs above, and exposes the DF/station data (`station_flags`, `num_stations`, `lane_en_bitmap`) and `local_accelerator_count`, none of which have a version 1 equivalent.
+  - New enum `amdsmi_fabric_info_version_t` selects the layout. Set `fabric_version` to `AMDSMI_FABRIC_INFO_VERSION_2` before the call to receive the new layout:
+
+    ```c
+    amdsmi_fabric_info_t info = {0};   /* C++: amdsmi_fabric_info_t info = {}; */
+    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+    amdsmi_get_gpu_fabric_info(handle, &info);
+    ```
+
+  - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
+  - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
+
 ### Changed
 
 - **Bumped the library major version to 27.0.0** (breaking).  
@@ -188,7 +209,15 @@ GPU: 0
 - **Flattened the `amdsmi_fabric_info_t` structure and removed `amdsmi_fabric_info_ver_t`**.  
   - The intermediate `amdsmi_fabric_info_ver_t` type was removed from the public header. Its payload union is now the `fabric_info` member of `amdsmi_fabric_info_t`, and its version field is exposed directly as the top-level `fabric_version` field.
   - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
-  - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
+  - The change is ABI-preserving: field offsets are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged. The structure size does change elsewhere in this release; see the `fabric_version` entry below.
+
+- **`amdsmi_fabric_info_t::fabric_version` is now an in/out layout selector**.  
+  - On input it names the union member `amdsmi_get_gpu_fabric_info()` fills; on output it reports the member that was filled. Any value other than `AMDSMI_FABRIC_INFO_VERSION_2` selects `amdsmi_fabric_info_v1_t`, so a zero-initialized structure and one left uninitialized both yield the version 1 layout. An unrecognized value is not an error.
+  - `amdsmi_fabric_info_v1_t` and its field offsets are unchanged and now frozen; on the version 1 path no byte past that union member is written, including the trailing `reserved` words. Existing binaries need no recompile.
+  - `sizeof(amdsmi_fabric_info_t)` grows from 320 to 552 bytes to accommodate `amdsmi_fabric_info_v2_t`. Code that allocates the structure by name is unaffected after a recompile; code that hardcodes the size or serializes the structure whole must be updated.
+
+- **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
+  - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
 - **Prefixed public preprocessor macros with `AMDSMI_` in `amdsmi.h`** (breaking).  
   - `MAX_SVI3_RAIL_INDEX`, `MAX_SVI3_RAIL_SELECTION`, `POWER_EFFICIENCY_MODE_4`, `POWER_EFFICIENCY_MODE_5`, and `MAX_NUMBER_OF_AFIDS_PER_RECORD` are now `AMDSMI_MAX_SVI3_RAIL_INDEX`, `AMDSMI_MAX_SVI3_RAIL_SELECTION`, `AMDSMI_POWER_EFFICIENCY_MODE_4`, `AMDSMI_POWER_EFFICIENCY_MODE_5`, and `AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD`. The unused `CENTRIGRADE_TO_MILLI_CENTIGRADE` macro was removed. Update references to the new names.

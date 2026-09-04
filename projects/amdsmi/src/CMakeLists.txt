@@ -49,6 +49,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
+    "${SRC_DIR}/amd_smi_fabric_ualink.cc"
     "${SRC_DIR}/amd_smi_gpu_device.cc"
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
