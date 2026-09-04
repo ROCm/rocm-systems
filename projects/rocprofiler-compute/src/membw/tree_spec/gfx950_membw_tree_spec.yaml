@@ -1,0 +1,217 @@
+# gfx950 Memory Bandwidth Bottleneck Tree Specification
+#
+# This file defines the bottleneck evaluation tree for gfx950 memory
+# bandwidth guided analysis. Each node's `metric` field is the exact
+# key from 3000_mem_bw.yaml -- the formula is defined there, not here.
+#
+# The GL1, GL2, and EA subtrees are all entries under the top-level
+# `nodes:` key.
+
+thresholds:
+  # Source: 3000_mem_bw.yaml metric descriptions
+  # e.g. "A high stall rate (>= 10%) indicates..."
+  stall_pct_high: 10.0       # >= 10% stall rate indicates bottleneck
+  cache_hit_low: 50.0        # <= 50% hit rate indicates capacity issue
+
+nodes:
+
+  # --- GL1: L1 Cache Bottleneck Detection ---
+  # Source metrics: Table 3001 (L1 Cache) in 3000_mem_bw.yaml
+  #
+  # GL1 detects L1 cache stall bottlenecks. The primary entry point is
+  # "TA stalled by TCP" -- when it exceeds the threshold, child nodes
+  # identify the specific stall source (UTCL1, UTCL2, TD, L2, or other).
+
+  gl1_tcp_stall:
+    level: GL1
+    metric: "L1 Cache - TA stalled by TCP (aggregated)"
+    op: gte
+    threshold: stall_pct_high
+    label: "TCP stall"
+    children:
+
+      gl1_tcp_utcl1_stall:
+        metric: "L1 Cache - TCP stalled by UTCL1"
+        op: gte
+        threshold: stall_pct_high
+        label: "TCP<-UTCL1"
+        guidance_id: gl1_tcp_utcl1_stall
+
+      gl1_tcp_utcl2_stall:
+        metric: "L1 Cache - TCP stalled by UTCL2"
+        op: gte
+        threshold: stall_pct_high
+        label: "TCP<-UTCL2"
+        guidance_id: gl1_tcp_utcl2_stall
+
+      gl1_tcp_td_stall:
+        metric: "L1 Cache - TCP stalled by TD"
+        op: gte
+        threshold: stall_pct_high
+        label: "TCP<-TD"
+        guidance_id: gl1_tcp_td_stall
+
+      gl1_tcp_l2_stall:
+        metric: "L1 Cache - TCP stalled by L2"
+        op: gte
+        threshold: stall_pct_high
+        label: "TCP<-L2"
+        guidance_id: gl1_tcp_l2_stall
+
+      gl1_tcp_other_stall:
+        requires_parent: true
+        requires_siblings_false:
+          - gl1_tcp_utcl1_stall
+          - gl1_tcp_utcl2_stall
+          - gl1_tcp_td_stall
+          - gl1_tcp_l2_stall
+        label: "TCP other"
+        guidance_id: gl1_tcp_other_stall
+
+  gl1_vmem_stall:
+    level: GL1
+    metric: "L1 Cache - VMEM stalled by L1 Cache"
+    op: gte
+    threshold: stall_pct_high
+    label: "VMEM stall"
+    guidance_id: gl1_vmem_stall
+
+  # --- GL2: L2 Cache Bottleneck Detection ---
+  # Source metrics: Table 3012 (L2 Bottleneck Detection Indicators)
+  # in 3000_mem_bw.yaml
+
+  gl2_back_pressure:
+    level: GL2
+    metric: "L2 Back Pressure Indicator"
+    op: gte
+    threshold: stall_pct_high
+    label: "L2 back pressure"
+    guidance_id: gl2_back_pressure
+
+  gl2_mem_bw_bound:
+    level: GL2
+    metric: "L2 Memory BW Bound - Combined Credit Pressure"
+    op: gte
+    threshold: stall_pct_high
+    label: "HBM BW stall"
+    children:
+
+      gl2_mem_bw_read:
+        metric: "L2 Memory BW Bound - Read Credit Pressure"
+        op: gte
+        threshold: stall_pct_high
+        label: "HBM rd stall"
+        guidance_id: gl2_mem_bw_read
+
+      gl2_mem_bw_write:
+        metric: "L2 Memory BW Bound - Write Credit Pressure"
+        op: gte
+        threshold: stall_pct_high
+        label: "HBM wr stall"
+        guidance_id: gl2_mem_bw_write
+
+      gl2_mem_bw_other:
+        requires_parent: true
+        requires_siblings_false:
+          - gl2_mem_bw_read
+          - gl2_mem_bw_write
+        label: "HBM balanced"
+        guidance_id: gl2_mem_bw_other
+
+  gl2_internal_resource:
+    level: GL2
+    metric: "L2 Internal Resource Pressure - Latency FIFO"
+    op: gte
+    threshold: stall_pct_high
+    label: "L2 LFIFO full"
+    guidance_id: gl2_internal_resource
+
+  gl2_src_fifo:
+    level: GL2
+    metric: "L2 Internal Resource Pressure - Source FIFO"
+    op: gte
+    threshold: stall_pct_high
+    label: "L2 SFIFO full"
+    guidance_id: gl2_src_fifo
+
+  gl2_cache_efficiency:
+    level: GL2
+    metric: "L2 Cache Efficiency"
+    op: lte
+    threshold: cache_hit_low
+    label: "L2 low hit rate"
+    guidance_id: gl2_cache_efficiency
+
+  gl2_remote_pressure:
+    level: GL2
+    metric: "L2 Remote Access Pressure (GMI)"
+    op: gte
+    threshold: stall_pct_high
+    label: "GMI stall"
+    guidance_id: gl2_remote_pressure
+
+  # --- EA: Efficiency Arbiter Bottleneck Detection ---
+  # Source metrics: Table 3018 (EA Bottleneck Detection Indicators)
+  # in 3000_mem_bw.yaml
+
+  ea_hbm_bw_bound:
+    level: EA
+    metric: "EA HBM BW Bound - Combined"
+    op: gte
+    threshold: stall_pct_high
+    label: "EA HBM stall"
+    children:
+
+      ea_hbm_read:
+        metric: "EA HBM BW Bound - Read Credit Pressure"
+        op: gte
+        threshold: stall_pct_high
+        label: "EA rd stall"
+        guidance_id: ea_hbm_read
+
+      ea_hbm_write:
+        metric: "EA HBM BW Bound - Write Credit Pressure"
+        op: gte
+        threshold: stall_pct_high
+        label: "EA wr stall"
+        guidance_id: ea_hbm_write
+
+      ea_hbm_other:
+        requires_parent: true
+        requires_siblings_false:
+          - ea_hbm_read
+          - ea_hbm_write
+        label: "EA HBM balanced"
+        guidance_id: ea_hbm_other
+
+  ea_gmi_bw_bound:
+    level: EA
+    metric: "EA GMI BW Bound - Combined"
+    op: gte
+    threshold: stall_pct_high
+    label: "EA GMI stall"
+    guidance_id: ea_gmi_bw_bound
+
+  ea_io_bw_bound:
+    level: EA
+    metric: "EA IO BW Bound - Combined"
+    op: gte
+    threshold: stall_pct_high
+    label: "EA IO stall"
+    guidance_id: ea_io_bw_bound
+
+  ea_write_backpressure:
+    level: EA
+    metric: "EA Write Backpressure"
+    op: gte
+    threshold: stall_pct_high
+    label: "EA write stall"
+    guidance_id: ea_write_backpressure
+
+  ea_atomic_pressure:
+    level: EA
+    metric: "EA HBM Atomic Pressure"
+    op: gte
+    threshold: stall_pct_high
+    label: "EA atomic pressure"
+    guidance_id: ea_atomic_pressure

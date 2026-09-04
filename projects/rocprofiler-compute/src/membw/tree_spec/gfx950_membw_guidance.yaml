@@ -1,0 +1,138 @@
+# gfx950 Memory Bandwidth Guidance Templates
+#
+# Guidance text rendered for active bottleneck leaf nodes.
+# Placeholders {threshold:KEY} and {metric:KEY} are replaced at render time.
+
+guidance_templates:
+
+  # --- GL1 templates (6) ---
+
+  gl1_tcp_utcl1_stall: |
+    [GL1] TCP stalled by UTCL1
+      Condition : TCP stalled by UTCL1 >= {threshold:stall_pct_high}%
+      Measured  : {metric:L1 Cache - TCP stalled by UTCL1}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : Address translation pressure -- TCP blocked waiting on L1 TLB
+
+  gl1_tcp_utcl2_stall: |
+    [GL1] TCP stalled by UTCL2
+      Condition : TCP stalled by UTCL2 >= {threshold:stall_pct_high}%
+      Measured  : {metric:L1 Cache - TCP stalled by UTCL2}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : TLB latency -- UTCL1 LFIFO resources exhausted waiting on UTCL2 lookups
+
+  gl1_tcp_td_stall: |
+    [GL1] TCP stalled by TD
+      Condition : TCP stalled by TD >= {threshold:stall_pct_high}%
+      Measured  : {metric:L1 Cache - TCP stalled by TD}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : TD return path congestion -- TD cannot consume cache return data fast enough
+
+  gl1_tcp_l2_stall: |
+    [GL1] TCP stalled by L2
+      Condition : TCP stalled by L2 >= {threshold:stall_pct_high}%
+      Measured  : {metric:L1 Cache - TCP stalled by L2}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 backpressure -- may cascade from EA/HBM bandwidth saturation
+
+  gl1_tcp_other_stall: |
+    [GL1] TCP stall detected (not attributed to a specific sub-component)
+      Condition : TA stalled by TCP >= {threshold:stall_pct_high}% with no specific child active
+      Measured  : {metric:L1 Cache - TA stalled by TCP (aggregated)}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : TCP stall from an unidentified source -- investigate TCP occupancy and cache line contention
+
+  gl1_vmem_stall: |
+    [GL1] VMEM stalled by L1 Cache
+      Condition : VMEM stalled by L1 Cache >= {threshold:stall_pct_high}%
+      Measured  : {metric:L1 Cache - VMEM stalled by L1 Cache}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : SQ command FIFO full -- L1 cache stall backpressured to shader core
+
+  # --- GL2 templates (8) ---
+
+  gl2_back_pressure: |
+    [GL2] L2 back pressure
+      Condition : L2 input buffer stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Back Pressure Indicator}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 input buffer stalled -- L2 backpressuring L1
+
+  gl2_mem_bw_read: |
+    [GL2] HBM read bandwidth bound
+      Condition : HBM read credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Memory BW Bound - Read Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 stalled waiting for HBM read credits -- memory read bandwidth saturated
+
+  gl2_mem_bw_write: |
+    [GL2] HBM write bandwidth bound
+      Condition : HBM write credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Memory BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 stalled waiting for HBM write credits -- memory write bandwidth saturated
+
+  gl2_mem_bw_other: |
+    [GL2] HBM bandwidth bound (balanced read/write)
+      Condition : Combined HBM credit stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant
+      Measured  : {metric:L2 Memory BW Bound - Combined Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 stalled on HBM bandwidth from balanced read/write pressure -- neither path individually exceeds the threshold
+
+  gl2_internal_resource: |
+    [GL2] L2 internal resource pressure -- Latency FIFO
+      Condition : Latency FIFO full >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Internal Resource Pressure - Latency FIFO}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : Too many pending requests in L2 -- request tracking resources exhausted
+
+  gl2_src_fifo: |
+    [GL2] L2 internal resource pressure -- Source FIFO
+      Condition : Source FIFO full >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Internal Resource Pressure - Source FIFO}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : L2 write data path saturated
+
+  gl2_cache_efficiency: |
+    [GL2] Low L2 cache efficiency
+      Condition : L2 hit rate <= {threshold:cache_hit_low}%
+      Measured  : {metric:L2 Cache Efficiency}% (threshold: {threshold:cache_hit_low}%)
+      Impact    : Workload exceeds L2 cache capacity -- most accesses miss to HBM
+
+  gl2_remote_pressure: |
+    [GL2] Remote access pressure (GMI)
+      Condition : GMI credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:L2 Remote Access Pressure (GMI)}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : Remote memory access bottleneck -- multi-GPU or multi-socket traffic saturated
+
+  # --- EA templates (7) ---
+
+  ea_hbm_read: |
+    [EA] HBM read bandwidth bound
+      Condition : HBM read credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA HBM BW Bound - Read Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : EA read path saturated by HBM bandwidth
+
+  ea_hbm_write: |
+    [EA] HBM write bandwidth bound
+      Condition : HBM write credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA HBM BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : EA write path saturated by HBM bandwidth
+
+  ea_hbm_other: |
+    [EA] HBM bandwidth bound (balanced read/write)
+      Condition : Combined EA HBM stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant
+      Measured  : {metric:EA HBM BW Bound - Combined}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : EA stalled on HBM bandwidth from balanced read/write pressure -- neither path individually exceeds the threshold
+
+  ea_gmi_bw_bound: |
+    [EA] GMI bandwidth bound
+      Condition : GMI credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA GMI BW Bound - Combined}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : Remote memory path bottleneck -- multi-XCD or multi-socket traffic
+
+  ea_io_bw_bound: |
+    [EA] IO bandwidth bound
+      Condition : IO credit stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA IO BW Bound - Combined}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : PCIe path bottleneck -- host-device transfer
+
+  ea_write_backpressure: |
+    [EA] Write backpressure
+      Condition : EA write stall >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA Write Backpressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : EA write path congested -- HBM write saturation, write-heavy workload, or atomic contention
+
+  ea_atomic_pressure: |
+    [EA] HBM atomic pressure
+      Condition : Atomic fraction of HBM writes >= {threshold:stall_pct_high}%
+      Measured  : {metric:EA HBM Atomic Pressure}% (threshold: {threshold:stall_pct_high}%)
+      Impact    : High atomic contention at HBM -- atomics perform read-modify-write, reducing effective bandwidth
