@@ -67,6 +67,21 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
+TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+
+  // Second destroy must not walk off memHead or double-free.
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // AICOMRCCL-835 finalize-drain coverage.
 //
