@@ -883,7 +883,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     // Use the same coherent first read as the other bounded publishers. This
     // gives the common retry loop one uniform entry point at a small fast-path
     // cost and removes exact-shadow's private refresh/re-entry lifecycle.
-    if (!append_atomic_load_u32(words, address_lo_vgpr, ready_version_vgpr, arch) ||
+    if (!append_add_literal_field(words, address_lo_vgpr,
+                                  offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
+                                  arch) ||
+        !append_atomic_load_u32(words, address_lo_vgpr, ready_version_vgpr, arch) ||
+        !append_add_literal_field(
+            words, address_lo_vgpr,
+            0u - static_cast<uint32_t>(offsetof(ConSanMoiInlineExactShadowSlot, version)), tmp_vgpr,
+            arch) ||
         !append_moi_publication_loads(
             words, address_lo_vgpr,
             {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), old_value_vgpr},

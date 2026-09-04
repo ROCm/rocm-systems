@@ -158,7 +158,8 @@ append_moi_version_transition(std::vector<uint32_t> &words, InstructionSequence 
 /// authoritative even version into `base_version_vgpr` and narrow EXEC to the
 /// lanes permitted to replace the slot. A zero retry limit requests exactly
 /// one attempt. On return EXEC and `claimed_exec_sgpr` contain the winners;
-/// exhausted or ineligible lanes are absent.
+/// exhausted or ineligible lanes are absent, and `slot_address_vgpr` once
+/// again names the start of the slot rather than its version field.
 template <typename AppendCandidate>
 [[nodiscard]] bool
 append_moi_bounded_version_claim(std::vector<uint32_t> &words, InstructionSequence &sequence,
@@ -175,21 +176,23 @@ append_moi_bounded_version_claim(std::vector<uint32_t> &words, InstructionSequen
 
   const InstructionSequence::Label retry = sequence.mark_label();
   if (!exec.restore(claim.eligible_exec_sgpr) || !append_candidate() ||
+      !exec.save(claim.retry_exec_sgpr) ||
       !append_moi_version_transition(words, sequence, exec, claim.slot_address_vgpr,
                                      claim.version_offset, claim.base_version_vgpr,
                                      claim.desired_vgpr, claim.expected_vgpr, /*desired_delta=*/1u,
                                      /*expected_delta=*/0u, arch) ||
-      !exec.save(claim.claimed_exec_sgpr)) {
+      !exec.save(claim.claimed_exec_sgpr) || !exec.restore(claim.retry_exec_sgpr) ||
+      !append_add_literal_field(words, claim.slot_address_vgpr, 0u - claim.version_offset,
+                                claim.expected_vgpr, arch) ||
+      !exec.restore(claim.claimed_exec_sgpr)) {
     return false;
   }
 
   if (claim.retry_limit == 0u)
     return true;
 
-  if (!sequence.emit_all(
-          instrumentation::build_s_andn2_b64(claim.retry_exec_sgpr, claim.eligible_exec_sgpr,
-                                             claim.claimed_exec_sgpr, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, claim.claimed_exec_sgpr, arch))) {
+  if (!sequence.emit(instrumentation::build_s_andn2_b64(
+          claim.retry_exec_sgpr, claim.eligible_exec_sgpr, claim.claimed_exec_sgpr, arch))) {
     return false;
   }
   const InstructionSequence::Label claimed = sequence.make_label();

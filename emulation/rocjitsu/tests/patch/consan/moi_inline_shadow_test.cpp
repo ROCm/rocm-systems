@@ -246,6 +246,33 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   ASSERT_TRUE(version_cas);
   ASSERT_TRUE(dispatch_store_low);
   ASSERT_TRUE(dispatch_store_high);
+  const auto select_version_field = ib::build_v_mov_b32_literal(
+      /*vdst=*/12u, offsetof(ConSanMoiInlineExactShadowSlot, version), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_slot_base = ib::build_v_mov_b32_literal(
+      /*vdst=*/23u, 0u - static_cast<uint32_t>(offsetof(ConSanMoiInlineExactShadowSlot, version)),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto adjust_version_address = ib::build_v_add_u32(
+      /*vdst=*/8u, vector_source_vgpr(/*address=*/8u), /*vsrc1=*/12u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_claim_address = ib::build_v_add_u32(
+      /*vdst=*/8u, vector_source_vgpr(/*address=*/8u), /*vsrc1=*/23u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(select_version_field);
+  ASSERT_TRUE(restore_slot_base);
+  ASSERT_TRUE(adjust_version_address);
+  ASSERT_TRUE(restore_claim_address);
+  std::vector<uint32_t> addressed_version_load = *select_version_field;
+  addressed_version_load.insert(addressed_version_load.end(), adjust_version_address->begin(),
+                                adjust_version_address->end());
+  addressed_version_load.push_back(
+      build_v_mov_b32_e32(/*vdst=*/21u, scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_RDNA4));
+  addressed_version_load.insert(addressed_version_load.end(), version_load->begin(),
+                                version_load->end());
+  EXPECT_EQ(count_subsequence(text_words, addressed_version_load), 2u)
+      << "each exact-slot snapshot must read the version field, not packed_access";
+  std::vector<uint32_t> restored_claim_address = *restore_slot_base;
+  restored_claim_address.insert(restored_claim_address.end(), restore_claim_address->begin(),
+                                restore_claim_address->end());
+  EXPECT_EQ(count_subsequence(text_words, restored_claim_address), 2u)
+      << "the common claim must restore the slot base after its version CAS";
   const auto wait_load = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_load);
   EXPECT_EQ(count_subsequence(text_words, *version_load), 2u)
