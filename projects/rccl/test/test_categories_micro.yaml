@@ -11,10 +11,15 @@
 test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
+    # A trailing '.*' anchors the end of the suite name: "RasClientMicrotest.*" cannot reach
+    # RasClientMicrotestGetStatus, so that suite needs its own pattern or it never runs under CTest.
+    # Dropping the dot widens instead ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RasClientMicrotest.*"
+      - "RasClientMicrotestGetStatus.*"
       - "RmaProxyProgressTest.*"
       - "GroupEndInternalTest.*"
       - "Devcomm*"
