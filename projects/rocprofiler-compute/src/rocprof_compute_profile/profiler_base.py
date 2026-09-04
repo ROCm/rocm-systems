@@ -240,15 +240,15 @@ class RocProfCompute_Base:
                     "these options."
                 )
 
-        # Each --dispatch token must be a positive integer or a range
-        # ('start:end' or 'start-end') with start <= end (1-based indexing).
-        if args.dispatch:
-            for token in args.dispatch:
+        # Each --kernel-iteration-range token must be a positive integer or a
+        # range ('start:end' or 'start-end') with start <= end (1-based).
+        if args.kernel_iteration_range:
+            for token in args.kernel_iteration_range:
                 m = re.fullmatch(r"([1-9]\d*)(?:[-:]([1-9]\d*))?", token)
                 if not m or (m.group(2) and int(m.group(2)) < int(m.group(1))):
                     console_error(
-                        f"Invalid --dispatch value '{token}'. Expected a "
-                        "positive integer or 'start:end'/'start-end' "
+                        f"Invalid --kernel-iteration-range value '{token}'. "
+                        "Expected a positive integer or 'start:end'/'start-end' "
                         "range with start <= end (e.g. 1, 3:5, 3-5)."
                     )
 
@@ -421,7 +421,7 @@ class RocProfCompute_Base:
         console_log(f"Target: {self._soc._mspec.gpu_model}")
         console_log(f"Command: {args.remaining}")
         console_log(f"Kernel Selection: {args.kernel}")
-        console_log(f"Dispatch Selection: {args.dispatch}")
+        console_log(f"Kernel Iteration Range: {args.kernel_iteration_range}")
         if self._filter_blocks:
             console_log(f"Filtered sections: {str(self._filter_blocks)}")
         else:

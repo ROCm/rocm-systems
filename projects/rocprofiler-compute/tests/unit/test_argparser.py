@@ -116,6 +116,29 @@ def test_config_dir_requires_value(capsys):
     assert "--config-dir" in capsys.readouterr().err
 
 
+# =============================================================================
+# profile -d / --output-directory
+# =============================================================================
+
+
+@pytest.mark.parametrize("flag", ["-d", "--output-directory"])
+def test_profile_output_directory(flag):
+    args = build_args(["profile", flag, "/tmp/out", "--", "./vcopy"])
+    assert args.output_directory == "/tmp/out"
+
+
+def test_profile_rejects_dispatch():
+    """--dispatch belongs to analyze mode only."""
+    with pytest.raises(SystemExit) as exc:
+        build_args(["profile", "--dispatch", "1", "--", "./vcopy"])
+    assert exc.value.code == 2
+
+
+def test_analyze_dispatch_unaffected():
+    args = build_args(["analyze", "--path", "/tmp/wl", "-d", "3"])
+    assert args.gpu_dispatch_id == [["3"]]
+
+
 def test_pc_sampling_analyze_options():
     """Defaults, overrides, and validation for the analyze PC sampling options."""
     defaults = build_args(["analyze"])
