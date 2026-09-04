@@ -21,10 +21,6 @@ __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
-
-namespace sdma_anvil {
-__device__ unsigned long long g_sdmaStubQuietCount = 0;
-}
 #endif
 
 #include <cstring>
