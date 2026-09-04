@@ -8,6 +8,7 @@ from pathlib import Path
 
 import common
 import pandas as pd
+import pytest
 
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
@@ -19,9 +20,19 @@ from utils.utils_analysis import (
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
 )
-from utils.utils_profile import save_ml_api_trace_inputs
+from utils.utils_profile import (
+    _augment_marker_csv,
+    _parse_function_fields,
+    save_ml_api_trace_inputs,
+)
 
 GUID = "abc-1234-def"
+
+
+def _write_gzip_csv(path, df):
+    with gzip.open(path, "wt", newline="", encoding="utf-8") as f:
+        df.to_csv(f, index=False)
+
 
 MARKER_ROWS = [
     (
@@ -326,8 +337,8 @@ def write_rocpd_layout(workload_dir, fbase="run0"):
         Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv.gz"
     )
 
-    marker_df.to_csv(marker_path, index=False)
-    counter_df.to_csv(counter_path, index=False)
+    _write_gzip_csv(marker_path, marker_df)
+    _write_gzip_csv(counter_path, counter_df)
 
 
 def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
@@ -341,8 +352,8 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     marker_path = subdir / f"ml_api_trace_{pid}_marker_api_trace.csv.gz"
     counter_path = subdir / f"ml_api_trace_{pid}_counter_collection.csv.gz"
 
-    marker_df.to_csv(marker_path, index=False)
-    counter_df.to_csv(counter_path, index=False)
+    _write_gzip_csv(marker_path, marker_df)
+    _write_gzip_csv(counter_path, counter_df)
 
 
 def read_ml_api_trace_csvs(ml_api_trace_dir):
@@ -447,7 +458,168 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
     common.clean_output_dir(True, csv_dir)
 
 
-# ---- Backend column unpacking in save_ml_api_trace_inputs ----
+# ---- Function cell parsing in save_ml_api_trace_inputs ----
+
+
+@pytest.mark.parametrize(
+    "raw, expect_function, expect_backend, expect_args",
+    [
+        ("aten::add", "aten::add", "unknown", ""),
+        ("aten::mm|torch", "aten::mm", "torch", ""),
+        (
+            "aten::mm:#1@aten:0|args=(self=float32[2x3], mat2=float32[3x4])|torch",
+            "aten::mm:#1@aten:0",
+            "torch",
+            "(self=float32[2x3], mat2=float32[3x4])",
+        ),
+        (
+            "aten::relu:#1@aten:0|args=(self=float32[5x20])|torch",
+            "aten::relu:#1@aten:0",
+            "torch",
+            "(self=float32[5x20])",
+        ),
+        (
+            "aten::cat:#1@aten.nested:0"
+            "|args=(tensors=[float32[2x3], float32[2x3]], dim=Int)|torch",
+            "aten::cat:#1@aten.nested:0",
+            "torch",
+            "(tensors=[float32[2x3], float32[2x3]], dim=Int)",
+        ),
+        (
+            "aten::mm:#1@m.py:7|args=(f32[2x2])|torch",
+            "aten::mm:#1@m.py:7",
+            "torch",
+            "(f32[2x2])",
+        ),
+        (
+            "triton.k:#1@m.py:7|args=(x_ptr=f32[8], n=1024)|triton",
+            "triton.k:#1@m.py:7",
+            "triton",
+            "(x_ptr=f32[8], n=1024)",
+        ),
+        (
+            "aten::cat:#1@m.py:7|args=a%7Cb|torch",
+            "aten::cat:#1@m.py:7",
+            "torch",
+            "a|b",
+        ),
+        (
+            "aten::mm:#1@m.py:7|args=(self=f32[2x2])%3Bextra|torch",
+            "aten::mm:#1@m.py:7",
+            "torch",
+            "(self=f32[2x2]);extra",
+        ),
+        (
+            "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2|triton",
+            "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2",
+            "triton",
+            "",
+        ),
+        ("op|bogus", "op|bogus", "unknown", ""),
+        ("", "", "unknown", ""),
+        (None, "", "unknown", ""),
+    ],
+)
+def test_parse_function_fields_splits_args(
+    raw, expect_function, expect_backend, expect_args
+):
+    """The args segment is split out and decoded; unrecognized values fall back
+    to backend 'unknown'."""
+    fn, backend, args = _parse_function_fields(raw)
+    assert fn == expect_function
+    assert backend == expect_backend
+    assert args == expect_args
+
+
+def test_augment_marker_csv_splits_args_into_dedicated_column(tmp_path):
+    """The wire args segment is moved into a dedicated Args column."""
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
+    _write_gzip_csv(
+        src,
+        pd.DataFrame({
+            "Function": [
+                "aten::mm:#1@m.py:7|args=(f32[2x2])|torch",
+                "aten::relu:#2@m.py:8|torch",
+            ],
+            "Start": [1, 2],
+        }),
+    )
+
+    _augment_marker_csv(str(src), str(dst))
+
+    out_df = pd.read_csv(dst, keep_default_na=False)
+    assert "Args" in out_df.columns
+    assert out_df["Function"].tolist() == [
+        "aten::mm:#1@m.py:7",
+        "aten::relu:#2@m.py:8",
+    ]
+    assert out_df["Args"].tolist() == ["(f32[2x2])", ""]
+    assert out_df["Backend"].tolist() == ["torch", "torch"]
+
+
+def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
+    """Untagged rows are tagged 'unknown' and emit a warning."""
+    from utils import utils_profile
+
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
+    _write_gzip_csv(src, pd.DataFrame({"Function": ["aten::sum"]}))
+
+    warnings: list[tuple] = []
+    monkeypatch.setattr(utils_profile, "console_warning", lambda *a: warnings.append(a))
+
+    _augment_marker_csv(str(src), str(dst))
+
+    out_df = pd.read_csv(dst)
+    assert out_df["Function"].tolist() == ["aten::sum"]
+    assert out_df["Backend"].tolist() == ["unknown"]
+    assert warnings, "untagged rows must emit a warning"
+    assert any("unknown" in str(a) for a in warnings[0])
+
+
+def test_augment_marker_csv_adds_backend_column(tmp_path):
+    """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
+
+    src_df = pd.DataFrame({
+        "Domain": ["MARKER_CORE_RANGE_API"] * 3,
+        "Function": [
+            "nn.Module.X.forward:#1@a.py:1|torch",
+            "triton.CompiledKernel.k:#1@b.py:2|triton",
+            "torch.empty:#1@c.py:3",
+        ],
+        "Correlation_Id": [1, 2, 3],
+        "Start_Timestamp": [100, 200, 300],
+        "End_Timestamp": [150, 250, 350],
+    })
+    _write_gzip_csv(src, src_df)
+
+    _augment_marker_csv(str(src), str(dst))
+
+    out_df = pd.read_csv(dst)
+    assert "Backend" in out_df.columns
+    assert out_df["Backend"].tolist() == ["torch", "triton", "unknown"]
+    assert out_df["Function"].tolist() == [
+        "nn.Module.X.forward:#1@a.py:1",
+        "triton.CompiledKernel.k:#1@b.py:2",
+        "torch.empty:#1@c.py:3",
+    ]
+    for col in ("Domain", "Correlation_Id", "Start_Timestamp", "End_Timestamp"):
+        assert col in out_df.columns
+
+
+def test_augment_marker_csv_handles_unknown_schema(tmp_path):
+    """A CSV without a Function column copies verbatim instead of corrupting."""
+    src = tmp_path / "src.csv.gz"
+    dst = tmp_path / "dst.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("Foo,Bar\n1,2\n3,4\n")
+
+    _augment_marker_csv(str(src), str(dst))
+
+    assert dst.read_bytes() == src.read_bytes()
 
 
 def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
@@ -473,7 +645,7 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
     df = pd.read_csv(marker_path)
     df["Backend"] = ["torch", "torch", "triton"]
-    df.to_csv(marker_path, index=False)
+    _write_gzip_csv(marker_path, df)
 
     consolidated_df, _ = process_ml_api_trace_output(workload_dir)
 
@@ -483,3 +655,40 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     )
     assert backend_by_operator.get("torch.mm") == "triton"
     assert backend_by_operator.get("nn.Module.Linear.forward") == "torch"
+
+
+def test_process_ml_api_trace_output_defaults_args_to_empty(tmp_path):
+    """A marker CSV without an Args column yields an empty Args column."""
+    workload_dir = str(tmp_path)
+    write_rocpd_layout(workload_dir)
+
+    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
+
+    assert "Args" in consolidated_df.columns
+    assert (consolidated_df["Args"] == "").all()
+
+
+def test_process_ml_api_trace_output_preserves_per_row_args(tmp_path):
+    """A tagged marker CSV surfaces its per-row Args value into the
+    consolidated dataframe.
+    """
+    workload_dir = str(tmp_path)
+    write_rocpd_layout(workload_dir)
+
+    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
+    df = pd.read_csv(marker_path)
+    df["Args"] = [
+        "(input=float32[2x2])",
+        "(input=float32[2x2])",
+        "(self=float32[2x2])",
+    ]
+    _write_gzip_csv(marker_path, df)
+
+    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
+
+    assert "Args" in consolidated_df.columns
+    args_by_operator = dict(
+        zip(consolidated_df["Operator_Name"], consolidated_df["Args"])
+    )
+    assert args_by_operator.get("torch.mm") == "(self=float32[2x2])"
+    assert args_by_operator.get("nn.Module.Linear.forward") == "(input=float32[2x2])"

@@ -13,9 +13,9 @@ import inspect
 import threading
 from functools import partial, partialmethod
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
-from utils.inject_roctx import core
+from utils.inject_roctx import core, marker_format
 from utils.inject_roctx.core import (
     _pop_scope,
     _push_scope,
@@ -87,6 +87,12 @@ def _register_framework_root() -> None:
         triton_file = getattr(triton, "__file__", None)
         if triton_file:
             core.add_framework_root(str(Path(triton_file).parent))
+        else:
+            console_warning(
+                "ml api trace",
+                "triton.__file__ is not set. Launch marker locations may "
+                "refer to Triton source files.",
+            )
     except Exception as exc:
         console_warning(
             "ml api trace",
@@ -119,10 +125,138 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
     return default
 
 
+# Launch kwargs that carry runtime geometry rather than kernel arguments.
+_LAUNCH_META_KWARGS = frozenset({
+    "grid",
+    "num_warps",
+    "num_stages",
+    "num_ctas",
+    "maxnreg",
+    "cluster_dims",
+    "clusterDim",
+    "warp_specialize",
+    "enable_fp_fusion",
+    "launch_metadata",
+    "stream",
+})
+
+
+def _format_dtype_shape(obj: object) -> Optional[str]:
+    shape = getattr(obj, "shape", None)
+    dtype = getattr(obj, "dtype", None)
+    if shape is None or dtype is None:
+        return None
+    try:
+        dims = "x".join(str(int(d)) for d in shape)
+    except (TypeError, ValueError):
+        return None
+    return f"{str(dtype).replace('torch.', '')}[{dims}]"
+
+
+def _format_triton_arg(obj: object) -> str:
+    """Render one Triton launch arg as a shape/type summary or scalar value."""
+    if isinstance(obj, (list, tuple)):
+        inner = ", ".join(
+            _format_triton_arg(o) for o in obj[: marker_format.MAX_NESTED_ARG_ITEMS]
+        )
+        return f"[{inner}]"
+    dtype_shape = _format_dtype_shape(obj)
+    if dtype_shape is not None:
+        return dtype_shape
+    if core.args_values_enabled():
+        if isinstance(obj, (int, float)):
+            return repr(obj)
+        if isinstance(obj, str):
+            return repr(obj[:32])
+    return type(obj).__name__
+
+
+def _is_kernel_operand(obj: object) -> bool:
+    if obj is None or isinstance(obj, (list, tuple, int, float, str)):
+        return True
+    return _format_dtype_shape(obj) is not None
+
+
+def _collect_arg_names(params: object) -> list[str]:
+    if not params:
+        return []
+    names: list[str] = []
+    try:
+        for param in params:
+            if isinstance(param, str):
+                if param:
+                    names.append(param)
+                continue
+            name = getattr(param, "name", None)
+            if isinstance(name, str) and name:
+                names.append(name)
+    except Exception:
+        return []
+    return names
+
+
+def _kernel_arg_names(self_obj: object) -> list[str]:
+    """Return ordered kernel parameter names when available."""
+    src = getattr(self_obj, "src", None)
+    fn = getattr(self_obj, "fn", None) or getattr(src, "fn", None)
+    for owner in (self_obj, fn):
+        if owner is None:
+            continue
+        for attr in ("params", "arg_names"):
+            names = _collect_arg_names(getattr(owner, attr, None))
+            if names:
+                return names
+    for candidate in (getattr(self_obj, "fn", None), fn):
+        if candidate is None or not (
+            inspect.isfunction(candidate) or inspect.ismethod(candidate)
+        ):
+            continue
+        try:
+            return list(inspect.signature(candidate).parameters.keys())
+        except Exception:
+            continue
+    return []
+
+
+def _build_triton_args(
+    self_obj: object,
+    call_args: tuple[object, ...],
+    call_kwargs: dict[str, object],
+) -> str:
+    """Build the unencoded leaf-args blob for a Triton kernel launch."""
+    if not core.args_capture_enabled():
+        return ""
+    try:
+        names = _kernel_arg_names(self_obj)
+        selected = call_args
+        if names and 0 < len(names) <= len(call_args):
+            selected = call_args[-len(names) :]
+        parts: list[str] = []
+        for i, value in enumerate(selected[: marker_format.MAX_ARG_ITEMS]):
+            label = names[i] if names and i < len(names) and names[i] else None
+            if not label and not _is_kernel_operand(value):
+                continue
+            rendered = _format_triton_arg(value)
+            parts.append(f"{label}={rendered}" if label else rendered)
+        remaining = marker_format.MAX_ARG_ITEMS - len(parts)
+        if remaining > 0:
+            for key, value in list(call_kwargs.items())[:remaining]:
+                if key in _LAUNCH_META_KWARGS:
+                    continue
+                parts.append(f"{key}={_format_triton_arg(value)}")
+        if not parts:
+            return ""
+        return marker_format.cap_args("(" + ", ".join(parts) + ")")
+    except Exception:
+        return ""
+
+
 def _run_with_marker(
     self_obj: object,
     marker_prefix: str,
     thunk: Callable[[], Any],
+    call_args: tuple[object, ...] = (),
+    call_kwargs: Optional[dict[str, object]] = None,
 ) -> object:
     """Run ``thunk`` inside a ROCTX range; nested launches reuse the outer range."""
     if _in_launch():
@@ -133,8 +267,9 @@ def _run_with_marker(
     index = _next_launch_index(marker)
     _thread_local.in_launch = True
     pushed = False
+    op_args = _build_triton_args(self_obj, call_args, call_kwargs or {})
     try:
-        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME)
+        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME, args=op_args)
         pushed = True
         return thunk()
     finally:
@@ -152,7 +287,11 @@ def _roctx_method_call(
 ) -> object:
     """Run a wrapped method ``original`` inside a ROCTX range."""
     return _run_with_marker(
-        instance, marker_prefix, partial(original, instance, *args, **kwargs)
+        instance,
+        marker_prefix,
+        partial(original, instance, *args, **kwargs),
+        args,
+        kwargs,
     )
 
 
@@ -173,7 +312,13 @@ def _roctx_launch(
     **kwargs: Any,
 ) -> object:
     """Run a property-returned ``launcher`` inside a ROCTX range."""
-    return _run_with_marker(instance, marker_prefix, partial(launcher, *args, **kwargs))
+    return _run_with_marker(
+        instance,
+        marker_prefix,
+        partial(launcher, *args, **kwargs),
+        args,
+        kwargs,
+    )
 
 
 def _roctx_property_get(

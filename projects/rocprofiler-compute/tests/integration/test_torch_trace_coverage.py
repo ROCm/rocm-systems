@@ -258,7 +258,7 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     """A grandchild ``Function`` subclass does not get a second ``apply`` wrapper."""
     require_torch()
 
-    from utils.inject_roctx._backends import torch as _torch_backend
+    from utils.inject_roctx.backends import torch as _torch_backend
 
     if not _torch_backend._resolve_torch():
         pytest.skip("torch could not be resolved for inject_roctx backend")
