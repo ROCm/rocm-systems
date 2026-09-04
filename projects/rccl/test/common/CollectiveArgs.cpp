@@ -178,8 +178,8 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // Zero device buffers before releasing them. A pooled worker outlives the config
-    // and recycles this VA, and without the write the next collective reads stale data.
+    // Mitigation for intermittent wrong data in pooled workers (AICOMRCCL-2275).
+    // Measured to remove the failure; the mechanism is not established.
     if (this->inputGpu.ptr && this->numInputBytesAllocated)
     {
       CHECK_HIP(hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated));
