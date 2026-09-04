@@ -178,6 +178,21 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
+    // Zero device buffers before releasing them. A pooled worker outlives the config
+    // and recycles this VA, and without the write the next collective reads stale data.
+    if (this->inputGpu.ptr && this->numInputBytesAllocated)
+    {
+      CHECK_HIP(hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated));
+    }
+    if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+    {
+      CHECK_HIP(hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated));
+    }
+    if (this->expectedGpu.ptr && this->numOutputBytesAllocated)
+    {
+      CHECK_HIP(hipMemset(this->expectedGpu.ptr, 0, this->numOutputBytesAllocated));
+    }
+
     // If in-place, either only inputGpu or outputGpu was allocated
     if (this->inPlace)
     {
