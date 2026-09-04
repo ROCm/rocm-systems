@@ -1056,7 +1056,7 @@ class AMDSMIHelpers:
                             amdsmi_interface.amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH
                         ).name
                     ):
-                        subcommand(args, multiple_devices=True, switch=device_handle)
+                        self.run_device_subcommand(subcommand, args, switch=device_handle)
 
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.switch
@@ -1097,7 +1097,7 @@ class AMDSMIHelpers:
                             amdsmi_interface.amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC
                         ).name
                     ):
-                        subcommand(args, multiple_devices=True, nic=device_handle)
+                        self.run_device_subcommand(subcommand, args, nic=device_handle)
 
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.nic
@@ -1138,7 +1138,7 @@ class AMDSMIHelpers:
                             amdsmi_interface.amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC
                         ).name
                     ):
-                        subcommand(args, multiple_devices=True, nic=device_handle)
+                        self.run_device_subcommand(subcommand, args, nic=device_handle)
 
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.nic
