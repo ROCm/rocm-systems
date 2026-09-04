@@ -77,16 +77,9 @@ if(BUILD_TESTS)
   # Pass the absolute path of hipified source files through as string
   # literals so the #include in the test translation unit stays independent of
   # the build directory layout.
-  # RAS_CLIENT_CC is overridable so a mutation-testing build can point at a
-  # private copy of the unit instead of editing the shared hipified tree.
-  set(RAS_CLIENT_CC "${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc" CACHE FILEPATH
-      "Hipified src/ras/client.cc to compile into rccl-UnitTestsMicro")
-  # Echoed because it is a cache variable: a stale entry silently builds the pristine unit, which reads as a mutation
-  # the suite failed to catch.
-  message(STATUS "rccl-UnitTestsMicro RAS_CLIENT_CC: ${RAS_CLIENT_CC}")
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
-    RAS_CLIENT_CC_PATH="${RAS_CLIENT_CC}"
+    RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
@@ -688,21 +681,12 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${RCCL_INCLUDE_DIRS}
 )
 
-# Overridable so a mutation-testing build can point at a private copy of the
-# unit instead of editing the shared hipified tree:
-#   cmake -B build-mut ... -DRAS_CLIENT_CC=/path/to/mutated/client.cc
-set(RAS_CLIENT_CC "${RCCL_HIPIFY_DIR}/src/ras/client.cc" CACHE FILEPATH
-    "Hipified src/ras/client.cc to compile into rccl-UnitTestsMicro")
-# Echoed because it is a cache variable: a stale entry silently builds the
-# pristine unit, which reads as a mutation the suite failed to catch.
-message(STATUS "rccl-UnitTestsMicro RAS_CLIENT_CC: ${RAS_CLIENT_CC}")
-
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
-  RAS_CLIENT_CC_PATH="${RAS_CLIENT_CC}"
+  RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
