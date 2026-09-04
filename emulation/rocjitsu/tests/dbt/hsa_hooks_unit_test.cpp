@@ -4519,6 +4519,10 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
       << " intents=" << direct.observation_plan().probe_intents.size()
       << " patches=" << rocjitsu::consan_transform_diagnostic_report(direct).patches.size();
   ASSERT_EQ(direct.replacement.size(), bytes.size());
+  const auto direct_report = rocjitsu::consan_transform_diagnostic_report(direct);
+  ASSERT_EQ(direct_report.patches.size(), 1u);
+  EXPECT_EQ(direct_report.patches.front().trampoline_size, 0u);
+  EXPECT_GT(direct_report.patches.front().original_size, 2u * sizeof(uint32_t));
 
   const auto estimate = rocjitsu::consan_hook::consan_transform_major_image_reservation(
       bytes.size(), transform_policy.patched_image_growth_limit);

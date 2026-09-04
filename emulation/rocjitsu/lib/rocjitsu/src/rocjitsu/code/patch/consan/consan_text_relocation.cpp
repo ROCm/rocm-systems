@@ -12,11 +12,66 @@
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <string>
 
 namespace rocjitsu {
+
+namespace {
+
+[[nodiscard]] std::optional<ConSanRelocatedText>
+try_rewrite_consan_text_in_place(std::span<const uint8_t> image, const AmdGpuCodeObject &source,
+                                 rj_code_arch_t arch,
+                                 std::span<const ConSanInlineTextRewrite> rewrites) {
+  if (source.text_sections().size() != 1u)
+    return std::nullopt;
+  const Section &text = *source.text_sections().front();
+  struct RewriteRange {
+    const ConSanInlineTextRewrite *rewrite = nullptr;
+    uint64_t end = 0;
+  };
+  std::vector<RewriteRange> ranges;
+  ranges.reserve(rewrites.size());
+  for (const ConSanInlineTextRewrite &rewrite : rewrites) {
+    const uint64_t replacement_size = rewrite.words.size() * sizeof(uint32_t);
+    if (rewrite.source_size == 0u || rewrite.source_size % sizeof(uint32_t) != 0u ||
+        replacement_size < rewrite.source_size || rewrite.source_offset > text.size() ||
+        replacement_size > text.size() - rewrite.source_offset)
+      return std::nullopt;
+    const uint32_t padding_words =
+        static_cast<uint32_t>((replacement_size - rewrite.source_size) / sizeof(uint32_t));
+    const uint64_t padding_file_offset =
+        text.sectionOffset() + rewrite.source_offset + rewrite.source_size;
+    if (count_nop_padding(image, padding_file_offset, padding_words, arch) != padding_words)
+      return std::nullopt;
+    ranges.push_back({&rewrite, rewrite.source_offset + replacement_size});
+  }
+  std::ranges::sort(ranges, {},
+                    [](const RewriteRange &range) { return range.rewrite->source_offset; });
+  for (size_t i = 1; i < ranges.size(); ++i)
+    if (ranges[i].rewrite->source_offset < ranges[i - 1].end)
+      return std::nullopt;
+
+  ConSanRelocatedText result{
+      .image = std::vector<uint8_t>(image.begin(), image.end()),
+      .placements = {},
+      .source_text_size = text.size(),
+      .relocated_text_size = 0u,
+      .in_place = true,
+  };
+  result.placements.reserve(ranges.size());
+  for (const RewriteRange &range : ranges) {
+    const ConSanInlineTextRewrite &rewrite = *range.rewrite;
+    std::memcpy(result.image.data() + text.sectionOffset() + rewrite.source_offset,
+                rewrite.words.data(), rewrite.words.size() * sizeof(uint32_t));
+    result.placements.push_back({rewrite.source_offset, rewrite.source_offset, true});
+  }
+  return result;
+}
+
+} // namespace
 
 bool stage_consan_text_rewrites(
     const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
@@ -114,6 +169,15 @@ std::optional<ConSanRelocatedText> relocate_consan_text(
                                      ? translated.elf_bytes.size() - input_image_bytes
                                      : 0u;
   if (required_growth > *limit) {
+    if (additional_code_ranges.empty()) {
+      auto in_place =
+          try_rewrite_consan_text_in_place(descriptor_patched_image, source, arch, rewrites);
+      const size_t in_place_growth = in_place && in_place->image.size() > input_image_bytes
+                                         ? in_place->image.size() - input_image_bytes
+                                         : 0u;
+      if (in_place && in_place_growth <= *limit)
+        return in_place;
+    }
     if (failure_cause)
       *failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
     errors.emplace_back("ConSan " + std::string(operation) +
@@ -176,7 +240,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
   std::vector<ConSanInlineTextRewrite> rewrites;
   rewrites.reserve(result.staged_text_rewrites.size());
   for (const ConSanStagedTextRewrite &staged : result.staged_text_rewrites)
-    rewrites.push_back({staged.patch.anchor_offset, staged.words});
+    rewrites.push_back({staged.patch.anchor_offset, staged.patch.original_size, staged.words});
 
   std::vector<SourceTextCodeRange> preexisting_patch_ranges;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -217,13 +281,20 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
         continue;
       ConSanPatchInfo placed = staged.patch;
       placed.trampoline_offset = placement.target_offset;
-      if (placed.trampoline_offset > relocated_text_bytes ||
-          placed.trampoline_size > relocated_text_bytes - placed.trampoline_offset) {
+      if (relocated->in_place) {
+        placed.original_size = static_cast<uint32_t>(staged.words.size() * sizeof(uint32_t));
+        placed.trampoline_size = 0u;
+      }
+      const uint64_t emitted_offset =
+          relocated->in_place ? placed.anchor_offset : placed.trampoline_offset;
+      const uint64_t emitted_size =
+          relocated->in_place ? placed.original_size : placed.trampoline_size;
+      if (emitted_offset > relocated_text_bytes ||
+          emitted_size > relocated_text_bytes - emitted_offset) {
         result.errors.emplace_back(
             "ConSan " + std::string(subject) + " placement exceeds relocated text: source=" +
             std::to_string(staged.patch.anchor_offset) +
-            " target=" + std::to_string(placed.trampoline_offset) +
-            " size=" + std::to_string(placed.trampoline_size) +
+            " target=" + std::to_string(emitted_offset) + " size=" + std::to_string(emitted_size) +
             " text=" + std::to_string(relocated_text_bytes));
         return false;
       }
@@ -249,10 +320,11 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
     commits.push_back(std::move(*commit));
   }
 
-  result.text_relocation = ConSanTextRelocationProof{
-      relocated->source_text_size,
-      relocated->relocated_text_size,
-  };
+  if (!relocated->in_place)
+    result.text_relocation = ConSanTextRelocationProof{
+        relocated->source_text_size,
+        relocated->relocated_text_size,
+    };
   result.staged_text_rewrites.clear();
   return result.publish_access_lowering(std::move(relocated->image), subject, std::move(commits),
                                         std::move(placed_patches));

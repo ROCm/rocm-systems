@@ -18,6 +18,7 @@ namespace rocjitsu {
 
 struct ConSanInlineTextRewrite {
   uint64_t source_offset = 0;
+  uint32_t source_size = 0;
   std::vector<uint32_t> words;
 };
 
@@ -26,6 +27,7 @@ struct ConSanRelocatedText {
   std::vector<TranslatedTextPlacement> placements;
   uint64_t source_text_size = 0;
   uint64_t relocated_text_size = 0;
+  bool in_place = false;
 };
 
 /// Atomically stage descriptor mutations and inline programs against the
