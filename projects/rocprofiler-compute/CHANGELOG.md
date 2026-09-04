@@ -126,6 +126,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
 
+* ML API trace analysis now displays the operator arguments collected via `--ml-trace-with-params {shapes,values}` in the operator call tree. An operator whose calls all passed the same arguments shows them inline as an `args=(...)` segment. An operator whose calls passed differing arguments lists each distinct set under an `args variants:` block, with the number of calls that used it. Long argument blobs are truncated for display.
+
+* The operator summary table in ML API trace analysis now reports one row per operator, aggregated over every source location the operator ran from. Previously an operator called from several locations produced a separate row for each. Totals, call counts and dispatch counts now cover the whole run; the call tree above the table shows the per-location breakdown.
+
 ### Removed
 
 * Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.

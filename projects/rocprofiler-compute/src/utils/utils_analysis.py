@@ -26,6 +26,11 @@ NS_TO_MS = 1.0 / 1_000_000.0
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
 
+# Display bounds for the operator-args segment in the analyze output.
+ARGS_DISPLAY_MAX_ITEMS = 8
+ARGS_DISPLAY_MAX_CHARS = 160
+ARGS_DISPLAY_MAX_VARIANTS = 5
+
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""
@@ -86,6 +91,9 @@ class CallTreeNode:
     Local to this frame:
       - invocation_ids: distinct Context_Id prefixes at this frame's depth.
       - call_count: derived as len(invocation_ids); see the property below.
+      - args_invocations: maps each distinct operator-argument blob recorded at
+        this frame to the invocation ids that used it.
+      - args_variants: derived from args_invocations; see the property below.
 
     Inclusive over this node plus all descendants:
       - kernel_launches: kernel dispatches in the subtree.
@@ -100,6 +108,7 @@ class CallTreeNode:
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
     invocation_ids: set[str] = field(default_factory=set)
+    args_invocations: dict[str, set[str]] = field(default_factory=dict)
     min_dispatch_ns: Optional[float] = None
     max_dispatch_ns: Optional[float] = None
     mean_dispatch_ns: Optional[float] = None
@@ -107,6 +116,20 @@ class CallTreeNode:
     @property
     def call_count(self) -> int:
         return len(self.invocation_ids)
+
+    @property
+    def args_variants(self) -> list[tuple[str, int]]:
+        """Distinct operator-argument blobs with their call counts, most
+        frequent first, ties broken by blob. A count is 0 when the trace
+        carries no Context_Id to attribute calls to.
+        """
+        return sorted(
+            (
+                (blob, len(invocations))
+                for blob, invocations in self.args_invocations.items()
+            ),
+            key=lambda variant: (-variant[1], variant[0]),
+        )
 
 
 @dataclass
@@ -209,6 +232,77 @@ def decode_marker_name(name: str) -> str:
     return name.replace("%2F", "/").replace("%25", "%")
 
 
+def split_operator_args(blob: str) -> list[str]:
+    """Split a parenthesized operator-args blob into top-level argument tokens.
+
+    The outer parentheses are removed. Commas inside brackets, parentheses,
+    braces, or quotes do not split a token. Returns an empty list when the blob
+    has no content.
+    """
+    text = blob.strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    text = text.strip()
+    if not text:
+        return []
+
+    tokens: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quote: Optional[str] = None
+    escaped = False
+    for char in text:
+        if quote is not None:
+            current.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+            current.append(char)
+        elif char in "([{":
+            depth += 1
+            current.append(char)
+        elif char in ")]}":
+            depth = max(depth - 1, 0)
+            current.append(char)
+        elif char == "," and depth == 0:
+            tokens.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    tokens.append("".join(current).strip())
+    return [token for token in tokens if token]
+
+
+def format_operator_args(
+    args: str,
+    max_items: int = ARGS_DISPLAY_MAX_ITEMS,
+    max_chars: int = ARGS_DISPLAY_MAX_CHARS,
+) -> str:
+    """Render an operator-args blob for display.
+
+    Returns an empty string when no arguments are present. Arguments beyond
+    ``max_items`` are replaced by an ellipsis, and the result is capped at
+    ``max_chars`` characters.
+    """
+    tokens = split_operator_args(args)
+    if not tokens:
+        return ""
+
+    shown = tokens[:max_items]
+    if len(tokens) > max_items:
+        shown.append("...")
+    rendered = "(" + ", ".join(shown) + ")"
+    if len(rendered) > max_chars:
+        keep = max(max_chars - 4, 0)
+        rendered = (rendered[:keep].rstrip() + "...)")[:max_chars]
+    return rendered
+
+
 def build_call_trees(
     df: pd.DataFrame,
 ) -> dict[str, CallTreeNode]:
@@ -229,6 +323,7 @@ def build_call_trees(
     )
     has_context_id = "Context_Id" in df.columns
     has_kernel_id = "Kernel_ID" in df.columns
+    has_args = "Args" in df.columns
 
     deduplication_columns = ["Operator_Name", "Kernel_Name"]
     if has_kernel_timestamps:
@@ -247,6 +342,12 @@ def build_call_trees(
 
         context_id = getattr(row, "Context_Id", None) if has_context_id else None
         location = parse_top_level_location(context_id)
+
+        args_value = ""
+        if has_args:
+            raw_args = getattr(row, "Args", None)
+            if raw_args is not None and pd.notna(raw_args):
+                args_value = str(raw_args).strip()
 
         duration_ns = 0.0
         if has_kernel_timestamps:
@@ -268,13 +369,23 @@ def build_call_trees(
         )
 
         current_node = location_root
+        leaf_invocation = None
         for i, encoded_segment in enumerate(op_path.split("/")):
             path_segment = decode_marker_name(encoded_segment)
             if path_segment not in current_node.children:
                 current_node.children[path_segment] = CallTreeNode(name=path_segment)
             current_node = current_node.children[path_segment]
             if i < len(ctx_segments):
-                current_node.invocation_ids.add("/".join(ctx_segments[: i + 1]))
+                leaf_invocation = "/".join(ctx_segments[: i + 1])
+                current_node.invocation_ids.add(leaf_invocation)
+            else:
+                leaf_invocation = None
+
+        # Args belong to the frame the operator path ends at.
+        if split_operator_args(args_value):
+            invocations = current_node.args_invocations.setdefault(args_value, set())
+            if leaf_invocation is not None:
+                invocations.add(leaf_invocation)
 
         if kernel_name not in current_node.kernels:
             kernel_id = None
@@ -324,19 +435,58 @@ def build_call_trees_with_kernel_ids(
     return build_call_trees(consolidated_with_ids)
 
 
+@dataclass
+class _OperatorTotals:
+    """Running totals for one operator over every location it ran from."""
+
+    calls: int = 0
+    dispatches: int = 0
+    total_gpu_ms: float = 0.0
+    weighted_mean_ns: float = 0.0
+    mean_dispatches: int = 0
+    mins: list[float] = field(default_factory=list)
+    maxes: list[float] = field(default_factory=list)
+
+    def add(self, node: CallTreeNode) -> None:
+        self.calls += len(node.invocation_ids)
+        self.dispatches += node.kernel_launches
+        self.total_gpu_ms += node.total_duration_ms
+        if node.mean_dispatch_ns is not None:
+            self.weighted_mean_ns += node.mean_dispatch_ns * node.kernel_launches
+            self.mean_dispatches += node.kernel_launches
+        if node.min_dispatch_ns is not None:
+            self.mins.append(node.min_dispatch_ns)
+        if node.max_dispatch_ns is not None:
+            self.maxes.append(node.max_dispatch_ns)
+
+    @property
+    def mean_dispatch_ms(self) -> float:
+        """Dispatch-weighted mean, NaN when no node carried dispatch stats."""
+        if self.mean_dispatches == 0:
+            return float("nan")
+        return self.weighted_mean_ns / self.mean_dispatches * NS_TO_MS
+
+    @property
+    def min_dispatch_ms(self) -> float:
+        return min(self.mins, default=float("nan")) * NS_TO_MS
+
+    @property
+    def max_dispatch_ms(self) -> float:
+        return max(self.maxes, default=float("nan")) * NS_TO_MS
+
+
 def build_operator_summary(
     call_trees: dict[str, CallTreeNode],
 ) -> pd.DataFrame:
     """Build a one-row-per-operator summary table from the call trees.
 
     Each row describes one operator (e.g. aten::matmul) that ran at least
-    one GPU kernel. All time values are in milliseconds.
+    one GPU kernel, aggregated over every source location it ran from. All
+    time values are in milliseconds.
 
     Columns:
 
     - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
-
-    - Location: Python file:line where the outermost caller lives.
 
     - Calls: how many times this operator was invoked. NaN when the trace
       did not include Context_Id information to count invocations.
@@ -365,11 +515,10 @@ def build_operator_summary(
     are skipped. Empty input returns an empty DataFrame with the full
     column list.
 
-    Sorted by Total_GPU descending, then Operator and Location ascending.
+    Sorted by Total_GPU descending, then Operator ascending.
     """
     columns = [
         "Operator",
-        "Location",
         "Calls",
         "Dispatches",
         "Dispatches_Per_Call",
@@ -380,52 +529,41 @@ def build_operator_summary(
         "Min_Dispatch",
         "Max_Dispatch",
     ]
-    rows: list[dict[str, Any]] = []
+    totals: dict[str, _OperatorTotals] = {}
 
-    def walk(node: CallTreeNode, location: str, path_parts: list[str]) -> None:
+    def walk(node: CallTreeNode, path_parts: list[str]) -> None:
         for child_name, child in node.children.items():
             full_path = path_parts + [child_name]
             if child.kernel_launches > 0:
-                has_calls = len(child.invocation_ids) > 0
-                calls = len(child.invocation_ids) if has_calls else float("nan")
-                dispatches = child.kernel_launches
-                total_gpu_ms = child.total_duration_ms
-                rows.append({
-                    "Operator": "/".join(full_path),
-                    "Location": location,
-                    "Calls": calls,
-                    "Dispatches": dispatches,
-                    "Dispatches_Per_Call": (
-                        dispatches / calls if has_calls else float("nan")
-                    ),
-                    "Total_GPU": total_gpu_ms,
-                    "Pct_Total_GPU": float("nan"),  # filled in if grand total > 0
-                    "Mean_Per_Call": (
-                        total_gpu_ms / calls if has_calls else float("nan")
-                    ),
-                    "Mean_Per_Dispatch": (
-                        child.mean_dispatch_ns * NS_TO_MS
-                        if child.mean_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                    "Min_Dispatch": (
-                        child.min_dispatch_ns * NS_TO_MS
-                        if child.min_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                    "Max_Dispatch": (
-                        child.max_dispatch_ns * NS_TO_MS
-                        if child.max_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                })
-            walk(child, location, full_path)
+                totals.setdefault("/".join(full_path), _OperatorTotals()).add(child)
+            walk(child, full_path)
 
-    for location, root in call_trees.items():
-        walk(root, location, [])
+    for root in call_trees.values():
+        walk(root, [])
 
-    if not rows:
+    if not totals:
         return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, Any]] = []
+    for operator, total in totals.items():
+        has_calls = total.calls > 0
+        calls = total.calls if has_calls else float("nan")
+        rows.append({
+            "Operator": operator,
+            "Calls": calls,
+            "Dispatches": total.dispatches,
+            "Dispatches_Per_Call": (
+                total.dispatches / calls if has_calls else float("nan")
+            ),
+            "Total_GPU": total.total_gpu_ms,
+            "Pct_Total_GPU": float("nan"),  # filled in if grand total > 0
+            "Mean_Per_Call": (
+                total.total_gpu_ms / calls if has_calls else float("nan")
+            ),
+            "Mean_Per_Dispatch": total.mean_dispatch_ms,
+            "Min_Dispatch": total.min_dispatch_ms,
+            "Max_Dispatch": total.max_dispatch_ms,
+        })
 
     grand_total_ms = sum(root.total_duration_ms for root in call_trees.values())
     if grand_total_ms > 0:
@@ -434,8 +572,8 @@ def build_operator_summary(
 
     df = pd.DataFrame(rows, columns=columns)
     return df.sort_values(
-        by=["Total_GPU", "Operator", "Location"],
-        ascending=[False, True, True],
+        by=["Total_GPU", "Operator"],
+        ascending=[False, True],
         ignore_index=True,
     )
 
@@ -524,6 +662,7 @@ def process_ml_api_trace_output(
     )
     required_columns = [
         "Function",
+        "Backend",
         "Kernel_Name",
         "Counter_Name",
         "Counter_Value",
@@ -542,18 +681,12 @@ def process_ml_api_trace_output(
         raise ValueError(
             f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
-    # Backend and Args are added by utils_profile._augment_marker_csv. When
-    # absent, Backend defaults to "torch" and Args to empty.
-    has_backend = "Backend" in consolidated_df.columns
+    # Args is optional and defaults to empty when absent.
     has_args = "Args" in consolidated_df.columns
-    projection = list(required_columns)
-    if has_backend:
-        projection.append("Backend")
+    projection = [*required_columns]
     if has_args:
         projection.append("Args")
     consolidated_df = consolidated_df[projection]
-    if not has_backend:
-        consolidated_df = consolidated_df.assign(Backend="torch")
     if not has_args:
         consolidated_df = consolidated_df.assign(Args="")
     consolidated_df["Args"] = consolidated_df["Args"].fillna("")
