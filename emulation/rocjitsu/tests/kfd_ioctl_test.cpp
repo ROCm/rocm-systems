@@ -40,11 +40,40 @@
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <thread>
 #include <vector>
 
 namespace {
+
+TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  std::promise<void> callback_entered;
+  std::promise<void> release_callback;
+  std::atomic<uint32_t> calls = 0;
+  cp.set_interrupt_callback([&](uint32_t, uint32_t) {
+    ++calls;
+    callback_entered.set_value();
+    release_callback.get_future().wait();
+  });
+
+  std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
+  callback_entered.get_future().wait();
+  std::promise<void> removal_started;
+  auto removal = std::async(std::launch::async, [&] {
+    removal_started.set_value();
+    cp.set_interrupt_callback(nullptr);
+  });
+  removal_started.get_future().wait();
+  EXPECT_EQ(removal.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  release_callback.set_value();
+  EXPECT_EQ(removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  caller.join();
+  cp.invoke_interrupt_callback_for_test(1, 2);
+  EXPECT_EQ(calls.load(), 1u);
+}
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;

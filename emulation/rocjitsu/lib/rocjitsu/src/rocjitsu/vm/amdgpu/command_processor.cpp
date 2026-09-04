@@ -39,13 +39,29 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
-  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
-  interrupt_cb_ = std::move(cb);
+  auto replacement = std::make_shared<InterruptCallbackState>(std::move(cb));
+  std::shared_ptr<InterruptCallbackState> previous;
+  {
+    std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+    previous = std::exchange(interrupt_cb_state_, std::move(replacement));
+  }
+  std::unique_lock<std::mutex> previous_lock(previous->mutex);
+  previous->cv.wait(previous_lock, [&previous] { return previous->active_calls == 0; });
 }
 
-CommandProcessor::InterruptCallback CommandProcessor::interrupt_callback() const {
+CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_callback() {
   std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
-  return interrupt_cb_;
+  auto state = interrupt_cb_state_;
+  if (!state->callback)
+    return {};
+  std::lock_guard<std::mutex> state_lock(state->mutex);
+  ++state->active_calls;
+  return InterruptCallbackLease(std::move(state));
+}
+
+void CommandProcessor::invoke_interrupt_callback(uint32_t process_id, uint32_t event_id) {
+  if (auto interrupt = acquire_interrupt_callback())
+    interrupt(process_id, event_id);
 }
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
@@ -564,8 +580,9 @@ void CommandProcessor::startup() {
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
-  if (auto interrupt = interrupt_callback())
-    completion_->set_interrupt_callback(std::move(interrupt));
+  completion_->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
+    invoke_interrupt_callback(process_id, event_id);
+  });
 }
 
 void CommandProcessor::shutdown() {
@@ -822,8 +839,7 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 
   const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
   memory_->write64(exception_status_va, combined_status, process_id);
-  if (auto interrupt = interrupt_callback())
-    interrupt(process_id, exception_event_id);
+  invoke_interrupt_callback(process_id, exception_event_id);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   while (memory_->read64(exception_status_va, process_id) == combined_status &&
          std::chrono::steady_clock::now() < deadline)
@@ -1174,9 +1190,8 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
             idle_pids.push_back(hw_queues_[i].process_id);
         }
       }
-      if (auto interrupt = interrupt_callback())
-        for (uint32_t pid : idle_pids)
-          interrupt(pid, 0);
+      for (uint32_t pid : idle_pids)
+        invoke_interrupt_callback(pid, 0);
     }
 
     if (poll_count % 5000 == 1) {
@@ -2567,12 +2582,6 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   for (size_t i = 0; i < hw_queues_.size(); ++i)
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
 
-  // Ensure interrupt callback is set on completion tracker.
-  if (completion_) {
-    if (auto interrupt = interrupt_callback())
-      completion_->set_interrupt_callback(std::move(interrupt));
-  }
-
   size_t entries_after = 0;
   for (auto &qs : new_queue_states_)
     entries_after += qs.entries.size();
@@ -3219,8 +3228,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     case sdma::OP_TRAP: {
       uint32_t event_id = dw(1) & 0x0FFFFFFF;
-      if (auto interrupt = interrupt_callback())
-        interrupt(queue.process_id, event_id);
+      invoke_interrupt_callback(queue.process_id, event_id);
       pkt_dwords = sdma::TRAP_SIZE;
       break;
     }
@@ -3316,7 +3324,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // that can refuse has to be settled BEFORE the decrement: once the
         // value drops, the waiter may already have observed it, and faulting
         // afterwards leaves a signal that fired with no notification behind it.
-        auto interrupt = interrupt_callback();
+        auto interrupt = acquire_interrupt_callback();
         const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt;
         uint64_t sig_base = addr_va - 8; // Signal layout: value at offset 8.
         uint64_t mailbox_ptr = 0;

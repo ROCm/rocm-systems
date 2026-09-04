@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -158,6 +159,9 @@ public:
   void set_doorbell_base(uint32_t process_id, void *base);
 
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
+  /// @brief Replace the interrupt sink after all calls to the previous sink finish.
+  /// @details Replacement is a quiescence point: once this returns, no worker
+  /// can retain or invoke the previous callback.
   void set_interrupt_callback(InterruptCallback cb);
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
@@ -383,7 +387,49 @@ public:
     return doorbell_handle_count_.load(std::memory_order_relaxed);
   }
 
+  /// @brief Exercise the synchronized interrupt path without constructing a queue.
+  void invoke_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
+    invoke_interrupt_callback(process_id, event_id);
+  }
+
 private:
+  struct InterruptCallbackState {
+    explicit InterruptCallbackState(InterruptCallback callback = {})
+        : callback(std::move(callback)) {}
+
+    InterruptCallback callback;
+    std::mutex mutex;
+    std::condition_variable cv;
+    size_t active_calls = 0;
+  };
+
+  class InterruptCallbackLease {
+  public:
+    InterruptCallbackLease() = default;
+    explicit InterruptCallbackLease(std::shared_ptr<InterruptCallbackState> state)
+        : state_(std::move(state)) {}
+    InterruptCallbackLease(const InterruptCallbackLease &) = delete;
+    InterruptCallbackLease &operator=(const InterruptCallbackLease &) = delete;
+    InterruptCallbackLease(InterruptCallbackLease &&other) noexcept
+        : state_(std::move(other.state_)) {}
+    ~InterruptCallbackLease() {
+      if (!state_)
+        return;
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      --state_->active_calls;
+      if (state_->active_calls == 0)
+        state_->cv.notify_all();
+    }
+
+    explicit operator bool() const { return static_cast<bool>(state_); }
+    void operator()(uint32_t process_id, uint32_t event_id) const {
+      state_->callback(process_id, event_id);
+    }
+
+  private:
+    std::shared_ptr<InterruptCallbackState> state_;
+  };
+
   struct ClusterWorkgroupPlacement;
   struct ClusterBarrierState;
 
@@ -708,13 +754,16 @@ private:
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
   void ensure_doorbell_monitor();
   bool scan_doorbells();
-  [[nodiscard]] InterruptCallback interrupt_callback() const;
+  [[nodiscard]] InterruptCallbackLease acquire_interrupt_callback();
+  void invoke_interrupt_callback(uint32_t process_id, uint32_t event_id);
 
-  /// @brief Guards replacement and snapshotting of the external interrupt callback.
-  /// @details Callers copy the callback under this leaf mutex and invoke it
-  /// after unlocking, so callback implementation locks never enter CP ordering.
-  mutable std::mutex interrupt_cb_mutex_;
-  InterruptCallback interrupt_cb_;
+  /// @brief Guards the current generation of the external interrupt callback.
+  /// @details Callers lease one immutable generation under this leaf mutex and
+  /// invoke it after unlocking. Replacement publishes its new generation first,
+  /// then waits only for calls admitted to the old generation to drain.
+  std::mutex interrupt_cb_mutex_;
+  std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
+      std::make_shared<InterruptCallbackState>();
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
