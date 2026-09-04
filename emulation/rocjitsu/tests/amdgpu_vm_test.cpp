@@ -5006,6 +5006,248 @@ TEST(MubufLdsTest, LoadDwordLdsAppliesInstOffset) {
   }
 }
 
+// GFX9/CDNA MUBUF range checking: SOFFSET and the instruction offset count toward the checked
+// byte offset (VOFFSET + inst_offset wraps to 32 bits, the SOFFSET add does not), dwordx4 is
+// clamped per dword, STRIDE != 0 is index-checked only with IDXEN, and out-of-range lanes of an
+// LDS-destination load write zeros.
+TEST(MubufRangeCheckTest, CdnaCountsSoffsetClampsPerDwordAndZeroFillsLds) {
+  constexpr uint64_t kSrcAddr = 0x2000ULL;   // 256 dwords holding 0, 1, 2, ...
+  constexpr uint64_t kStoreAddr = 0x3000ULL; // bytes [0, 512 + 16 * 64) preset to kSentinel
+  constexpr uint32_t kSrdA = 4;              // s[4:7]:   src, stride 0,  num_records 128 bytes
+  constexpr uint32_t kSrdB = 8;              // s[8:11]:  src, stride 16, num_records 4
+  constexpr uint32_t kSrdC = 12;             // s[12:15]: src, stride 0,  num_records 120 bytes
+  constexpr uint32_t kSrdD = 16;             // s[16:19]: src, stride 16, num_records 64
+  constexpr uint32_t kSrdE = 20;             // s[20:23]: store, stride 0, num_records 120 bytes
+  constexpr uint32_t kSoff128 = 24, kSoff64 = 25, kSoffNeg128 = 26, kSoff8 = 27;
+  constexpr uint32_t kM0 = 124;
+  constexpr uint32_t kLdsRow = 64 * sizeof(uint32_t);
+  constexpr uint32_t kSentinel = 0xDEADBEEFu;
+  constexpr uint32_t kDwordFormat = 0x00020000u;
+
+  using namespace enc;
+  auto srd = [](uint32_t sgpr, uint64_t base, uint32_t stride, uint32_t num_records) {
+    return std::array<uint32_t, 8>{s_mov_b32(SGPR(sgpr), 255),     static_cast<uint32_t>(base),
+                                   s_mov_b32(SGPR(sgpr + 1), 255), stride << 16,
+                                   s_mov_b32(SGPR(sgpr + 2), 255), num_records,
+                                   s_mov_b32(SGPR(sgpr + 3), 255), kDwordFormat};
+  };
+  std::vector<uint32_t> code;
+  for (const auto &words :
+       {srd(kSrdA, kSrcAddr, 0, 128), srd(kSrdB, kSrcAddr, 16, 4), srd(kSrdC, kSrcAddr, 0, 120),
+        srd(kSrdD, kSrcAddr, 16, 64), srd(kSrdE, kStoreAddr, 0, 120)})
+    code.insert(code.end(), words.begin(), words.end());
+  const uint32_t body[] = {
+      s_mov_b32(SGPR(kSoff128), 255),
+      128u,
+      s_mov_b32(SGPR(kSoff64), INLINE_CONST(64)),
+      s_mov_b32(SGPR(kSoffNeg128), 255),
+      0xFFFFFF80u,
+      s_mov_b32(SGPR(kSoff8), INLINE_CONST(8)),
+      v_lshlrev_b32(1, INLINE_CONST(2), 0), // v1 = 4 * lane
+      v_add_u32(2, 255, 1),                 // v2 = 128 + 4 * lane
+      128u,
+      v_lshlrev_b32(3, INLINE_CONST(4), 0), // v3 = 16 * lane
+      v_mov_b32(6, VGPR_SRC(0)),            // v6 = lane (index), v7 = 4 (offset)
+      v_mov_b32(7, INLINE_CONST(4)),
+      v_mov_b32(8, 255), // v8 = 0xFFFFFFF0
+      0xFFFFFFF0u,
+      // v10..v14: SRD A with soffset 0 / soffset 128 / offset:128 / soffset 64, then
+      // soffset -128 with voffset 128 + 4 * lane.
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(10, 1, kSrdA / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(11, 1, kSrdA / 4, SGPR(kSoff128)),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 128, /*offen=*/1),
+      mubuf_hi(12, 1, kSrdA / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(13, 1, kSrdA / 4, SGPR(kSoff64)),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(14, 2, kSrdA / 4, SGPR(kSoffNeg128)),
+      // v18: SRD A with voffset 0xFFFFFFF0 and offset:32 (wraps to byte 16).
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 32, /*offen=*/1),
+      mubuf_hi(18, 8, kSrdA / 4),
+      // v15: SRD B idxen (index = lane); v16: SRD B offen (voffset = 16 * lane);
+      // v17: SRD D idxen+offen (index = lane, voffset = 4, soffset 8).
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/0, /*idxen=*/1),
+      mubuf_hi(15, 0, kSrdB / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(16, 3, kSrdB / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1, /*idxen=*/1),
+      mubuf_hi(17, 6, kSrdD / 4, SGPR(kSoff8)),
+      // v[20:23]: SRD C dwordx4, voffset = 16 * lane.
+      mubuf_lo(cdna4::kBufferLoadDwordx4Mubuf, 0, /*offen=*/1),
+      mubuf_hi(20, 3, kSrdC / 4),
+      // LDS form: row 1 with soffset 128 (all lanes out of range), row 0 with soffset 0.
+      s_mov_b32(kM0, 255),
+      kLdsRow,
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(0, 1, kSrdA / 4, SGPR(kSoff128)),
+      s_mov_b32(kM0, INLINE_CONST(0)),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(0, 1, kSrdA / 4),
+      S_WAITCNT_0,
+      // Stores through SRD E: v1 (= 4 * lane) with soffset 64, then v[20:23] as dwordx4 at
+      // offset:512 + 16 * lane with num_records raised to 512 + 120.
+      mubuf_lo(cdna4::kBufferStoreDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(1, 1, kSrdE / 4, SGPR(kSoff64)),
+      s_mov_b32(SGPR(kSrdE + 2), 255),
+      512u + 120u,
+      mubuf_lo(cdna4::kBufferStoreDwordx4Mubuf, 512, /*offen=*/1),
+      mubuf_hi(20, 3, kSrdE / 4),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  code.insert(code.end(), std::begin(body), std::end(body));
+
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+    for (uint32_t i = 0; i < 256; ++i)
+      f.mem()->write32(kSrcAddr + i * 4, i);
+    for (uint32_t i = 0; i < 512 + 16 * 64; i += 4)
+      f.mem()->write32(kStoreAddr + i, kSentinel);
+    for (uint32_t i = 0; i < 2 * kLdsRow; i += 4)
+      f.cu()->lds().write32(i, kSentinel);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+    ASSERT_NO_THROW(f.engine->run());
+    f.cu()->flush_all();
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    const auto &wf = snap->snapshots().front();
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      SCOPED_TRACE("lane " + std::to_string(lane));
+      EXPECT_EQ(wf.vgpr(10, lane), lane < 32 ? lane : 0u) << "baseline byte clamp";
+      EXPECT_EQ(wf.vgpr(11, lane), 0u) << "SOFFSET is part of the checked offset";
+      EXPECT_EQ(wf.vgpr(12, lane), 0u) << "inst_offset is part of the checked offset";
+      EXPECT_EQ(wf.vgpr(13, lane), lane < 16 ? 16 + lane : 0u) << "SOFFSET 64: partial";
+      EXPECT_EQ(wf.vgpr(14, lane), 0u) << "VOFFSET + SOFFSET does not wrap to 32 bits";
+      EXPECT_EQ(wf.vgpr(18, lane), 4u) << "VOFFSET + inst_offset wraps to 32 bits";
+      EXPECT_EQ(wf.vgpr(15, lane), lane < 4 ? 4 * lane : 0u) << "IDXEN: index vs num_records";
+      if (lane > 0) { // lane 0 reads offset 0, which holds 0 either way
+        EXPECT_EQ(wf.vgpr(16, lane), 0u) << "STRIDE != 0 without IDXEN is byte-checked";
+      }
+      EXPECT_EQ(wf.vgpr(17, lane), 4 * lane + 3) << "IDXEN+OFFEN: index * stride + offsets";
+      for (uint32_t j = 0; j < 4; ++j) {
+        const bool in_range = lane < 7 || (lane == 7 && j < 2);
+        EXPECT_EQ(wf.vgpr(20 + j, lane), in_range ? 4 * lane + j : 0u)
+            << "dwordx4 per-dword clamp, dword " << j;
+        EXPECT_EQ(f.mem()->read32(kStoreAddr + 512 + lane * 16 + j * 4),
+                  in_range ? 4 * lane + j : kSentinel)
+            << "dwordx4 store per-dword clamp, dword " << j;
+      }
+      EXPECT_EQ(f.cu()->lds().read32(kLdsRow + lane * 4), 0u)
+          << "out-of-range LDS-destination lanes write zeros";
+      EXPECT_EQ(f.cu()->lds().read32(lane * 4), lane < 32 ? lane : 0u)
+          << "LDS-destination load with lanes 32..63 out of range";
+      EXPECT_EQ(f.mem()->read32(kStoreAddr + 64 + lane * 4), lane < 14 ? 4 * lane : kSentinel)
+          << "store with SOFFSET 64 is dropped from byte 120 on";
+    }
+  }
+}
+
+// GFX9/CDNA ADD_TID_ENABLE: lane i addresses base + i * STRIDE with no range check; with
+// SWIZZLE_ENABLE (the scratch descriptor layout) offset / 4 selects a row of INDEX_STRIDE dwords.
+TEST(MubufAddTidTest, CdnaAddsLaneTimesStride) {
+  constexpr uint64_t kSrcAddr = 0x2000ULL;           // 256 dwords holding 0, 1, 2, ...
+  constexpr uint64_t kStoreAddr = 0x3000ULL;         // 64 dwords preset to kSentinel
+  constexpr uint64_t kSwizzledStoreAddr = 0x4000ULL; // Byte-addressed swizzled stores.
+  constexpr uint32_t kSrdT = 4;  // s[4:7]:   src, stride 4, num_records 16, ADD_TID
+  constexpr uint32_t kSrdS = 8;  // s[8:11]:  src, swizzled, INDEX_STRIDE 64, ADD_TID
+  constexpr uint32_t kSrdU = 12; // s[12:15]: store, stride 4, num_records 16, ADD_TID
+  constexpr uint32_t kSrdV = 16; // s[16:19]: store, swizzled, INDEX_STRIDE 64, ADD_TID
+  constexpr uint32_t kSoff1 = 20;
+  constexpr uint32_t kSoff2 = 21;
+  constexpr uint32_t kSoff3 = 22;
+  constexpr uint32_t kSentinel = 0xDEADBEEFu;
+  constexpr uint32_t kAddTid = 0x00800000u;
+  constexpr uint32_t kSwizzledScratch = 0x00EA4FACu;
+  constexpr uint32_t kSwizzleEnable = 1u << 31;
+
+  using namespace enc;
+  auto srd = [](uint32_t sgpr, uint64_t base, uint32_t word1, uint32_t num_records,
+                uint32_t word3) {
+    return std::array<uint32_t, 8>{s_mov_b32(SGPR(sgpr), 255),     static_cast<uint32_t>(base),
+                                   s_mov_b32(SGPR(sgpr + 1), 255), word1,
+                                   s_mov_b32(SGPR(sgpr + 2), 255), num_records,
+                                   s_mov_b32(SGPR(sgpr + 3), 255), word3};
+  };
+  std::vector<uint32_t> code;
+  for (const auto &words :
+       {srd(kSrdT, kSrcAddr, 4u << 16, 16, kAddTid),
+        srd(kSrdS, kSrcAddr, kSwizzleEnable, 1u << 20, kSwizzledScratch),
+        srd(kSrdU, kStoreAddr, 4u << 16, 16, kAddTid),
+        srd(kSrdV, kSwizzledStoreAddr, kSwizzleEnable, 1u << 20, kSwizzledScratch)})
+    code.insert(code.end(), words.begin(), words.end());
+  const uint32_t body[] = {
+      s_mov_b32(SGPR(kSoff1), INLINE_CONST(1)),
+      s_mov_b32(SGPR(kSoff2), INLINE_CONST(2)),
+      s_mov_b32(SGPR(kSoff3), INLINE_CONST(3)),
+      v_mov_b32(1, INLINE_CONST(4)), // v1 = 4
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(10, 0, kSrdT / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/1),
+      mubuf_hi(11, 1, kSrdS / 4),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(12, 0, kSrdS / 4, SGPR(kSoff1)),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(13, 0, kSrdS / 4, SGPR(kSoff2)),
+      mubuf_lo(cdna4::kBufferLoadDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(14, 0, kSrdS / 4, SGPR(kSoff3)),
+      mubuf_lo(cdna4::kBufferLoadDwordx2Mubuf, 0, /*offen=*/0),
+      mubuf_hi(15, 0, kSrdS / 4, SGPR(kSoff2)),
+      mubuf_lo(cdna4::kBufferStoreDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(0, 0, kSrdU / 4), // v0 = lane
+      mubuf_lo(cdna4::kBufferStoreDwordMubuf, 0, /*offen=*/0),
+      mubuf_hi(0, 0, kSrdV / 4, SGPR(kSoff2)),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  code.insert(code.end(), std::begin(body), std::end(body));
+
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+    for (uint32_t i = 0; i < 256; ++i)
+      f.mem()->write32(kSrcAddr + i * 4, i);
+    for (uint32_t i = 0; i < 64; ++i)
+      f.mem()->write32(kStoreAddr + i * 4, kSentinel);
+    for (uint32_t i = 0; i < 4 * 64 + 4; ++i)
+      f.mem()->write8(kSwizzledStoreAddr + i, 0xA5);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+    ASSERT_NO_THROW(f.engine->run());
+    f.cu()->flush_all();
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    const auto &wf = snap->snapshots().front();
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      SCOPED_TRACE("lane " + std::to_string(lane));
+      EXPECT_EQ(wf.vgpr(10, lane), lane) << "ADD_TID: base + lane * stride, unchecked";
+      EXPECT_EQ(wf.vgpr(11, lane), 64 + lane) << "swizzled, offset 4: second row of 64 dwords";
+      EXPECT_EQ(wf.vgpr(12, lane), f.mem()->read32(kSrcAddr + 4 * lane + 1))
+          << "swizzled SOFFSET 1";
+      EXPECT_EQ(wf.vgpr(13, lane), f.mem()->read32(kSrcAddr + 4 * lane + 2))
+          << "swizzled SOFFSET 2";
+      EXPECT_EQ(wf.vgpr(14, lane), f.mem()->read32(kSrcAddr + 4 * lane + 3))
+          << "swizzled SOFFSET 3";
+      EXPECT_EQ(wf.vgpr(15, lane), f.mem()->read32(kSrcAddr + 4 * lane + 2))
+          << "swizzled dwordx2 first dword with SOFFSET 2";
+      EXPECT_EQ(wf.vgpr(16, lane), f.mem()->read32(kSrcAddr + 256 + 4 * lane + 2))
+          << "swizzled dwordx2 second dword with SOFFSET 2";
+      EXPECT_EQ(f.mem()->read32(kStoreAddr + lane * 4), lane) << "ADD_TID store";
+      EXPECT_EQ(f.mem()->read32(kSwizzledStoreAddr + lane * 4 + 2), lane)
+          << "swizzled store with SOFFSET 2";
+    }
+  }
+}
+
 // Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),
 // not to VGPR (vb+vdst).
 TEST(DsTransposeTest, ReadB64TrB16_AccBit) {

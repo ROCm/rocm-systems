@@ -25,8 +25,10 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
@@ -2771,6 +2773,90 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
                    [](const HookEvent &event) { return event.kind == HookEvent::WRITE_SGPR; }));
 }
 
+TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgprBase) {
+  constexpr uint32_t kSgprsPerWave = 128;
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32, kSgprsPerWave);
+  auto *cu = f.cu();
+  auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
+  auto *wf = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(first->sgpr_alloc().base, 0u);
+  ASSERT_EQ(wf->sgpr_alloc().base, kSgprsPerWave);
+
+  constexpr uint32_t kVccLoSlotSentinel = 0x10610610u;
+  constexpr uint32_t kVccHiSlotSentinel = 0x10710710u;
+  constexpr uint32_t kNullSlotSentinel = 0x12412410u;
+  const uint32_t base = wf->sgpr_alloc().base;
+  cu->write_sgpr(base + kVccSelectorFirst, kVccLoSlotSentinel);
+  cu->write_sgpr(base + kVccSelectorLast, kVccHiSlotSentinel);
+  cu->write_sgpr(base + kModernNullSelector, kNullSlotSentinel);
+
+  constexpr uint64_t kDataAddress = 0x8800;
+  constexpr std::array<uint32_t, 7> kData = {
+      0x12345678u, 0xA5B6C7D8u, 0x89ABCDEFu, 0x01234567u, 0xCAFEBABEu, 0x0BADF00Du, 0xDEADBEEFu,
+  };
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(kData.data()), sizeof(kData), kDataAddress);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  TestScalarMemPipeline pipeline(&cu->l1_scalar());
+  auto issue_load = [&](uint16_t op, uint8_t sdata, uint64_t address, uint8_t sbase = 0) {
+    cu->write_sgpr(base, static_cast<uint32_t>(address));
+    cu->write_sgpr(base + 1, static_cast<uint32_t>(address >> 32));
+    const auto words =
+        cdna5::build_smem(op, {.sbase = sbase,
+                               .sdata = sdata,
+                               .scale_offset = 1,
+                               .soffset = static_cast<uint8_t>(kModernNullSelector)});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    EXPECT_NE(load, nullptr);
+    if (!load)
+      return;
+    cu->execute_instruction(load.get(), *wf);
+    EXPECT_NE(load->data(), nullptr);
+    if (!load->data())
+      return;
+    pipeline.issue(load.release(), *wf);
+  };
+
+  wf->set_vcc_raw(0x1122334455667788ull);
+  issue_load(cdna5::kSLoadB32Smem, kVccSelectorFirst, kDataAddress);
+  EXPECT_EQ(wf->vcc(), 0x1122334412345678ull);
+  issue_load(cdna5::kSLoadB32Smem, kVccSelectorLast, kDataAddress + 4);
+  EXPECT_EQ(wf->vcc(), 0xA5B6C7D812345678ull);
+  issue_load(cdna5::kSLoadB64Smem, kVccSelectorFirst, kDataAddress + 8);
+  EXPECT_EQ(wf->vcc(), 0x0123456789ABCDEFull);
+
+  issue_load(cdna5::kSLoadB32Smem, kTtmpSelectorFirst, kDataAddress + 16);
+  EXPECT_EQ(wf->ttmp(0), kData[4]);
+  issue_load(cdna5::kSLoadB32Smem, 4, kDataAddress + 20);
+  EXPECT_EQ(cu->read_sgpr_storage(base + 4), kData[5]);
+  issue_load(cdna5::kSLoadB32Smem, kModernNullSelector, kDataAddress + 24);
+
+  EXPECT_EQ(cu->read_sgpr_storage(base + kVccSelectorFirst), kVccLoSlotSentinel);
+  EXPECT_EQ(cu->read_sgpr_storage(base + kVccSelectorLast), kVccHiSlotSentinel);
+  EXPECT_EQ(cu->read_sgpr_storage(base + kModernNullSelector), kNullSlotSentinel);
+
+  constexpr uint64_t kVccBaseAddress = 0x8900;
+  constexpr uint64_t kTtmpBaseAddress = 0x8A00;
+  constexpr uint32_t kVccBaseValue = 0x13579BDFu;
+  constexpr uint32_t kTtmpBaseValue = 0x2468ACE0u;
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(&kVccBaseValue), sizeof(kVccBaseValue),
+                    kVccBaseAddress);
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(&kTtmpBaseValue), sizeof(kTtmpBaseValue),
+                    kTtmpBaseAddress);
+
+  wf->set_vcc_raw(kVccBaseAddress);
+  issue_load(cdna5::kSLoadB32Smem, 5, /*address=*/0, static_cast<uint8_t>(kVccSelectorFirst / 2));
+  EXPECT_EQ(cu->read_sgpr_storage(base + 5), kVccBaseValue);
+
+  wf->set_ttmp(0, static_cast<uint32_t>(kTtmpBaseAddress));
+  wf->set_ttmp(1, static_cast<uint32_t>(kTtmpBaseAddress >> 32));
+  issue_load(cdna5::kSLoadB32Smem, 6, /*address=*/0, static_cast<uint8_t>(kTtmpSelectorFirst / 2));
+  EXPECT_EQ(cu->read_sgpr_storage(base + 6), kTtmpBaseValue);
+}
+
 TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
   PluginFixture f(/*num_wf_slots=*/2);
   auto *cu = f.cu();
@@ -2949,6 +3035,35 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 
   static_cast<void>(RegisterAccess(*wf).read_scalar(*load->dst_operand(0)));
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->dst_register = {ScalarRegisterStorage::TTMP, 0, 1};
+  state->is_load = true;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+
+  RegisterAccess(*wf).write_ttmp(0, 0x12345678u);
+  EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
+  EXPECT_NE(sink.str().find("access=write"), std::string::npos);
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
