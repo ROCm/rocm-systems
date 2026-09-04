@@ -36,7 +36,65 @@ class Wavefront;
 
 namespace kmd {
 struct CwsrWaveState;
+
+namespace detail {
+
+enum class TrapInterruptSite { Unknown, Profiling, QueueException };
+
+constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  default:
+    return false;
+  }
 }
+
+constexpr TrapInterruptSite
+classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_move, uint32_t delay) {
+  constexpr uint32_t kSNop0 = 0xBF800000u;
+  if (delay != kSNop0)
+    return TrapInterruptSite::Unknown;
+
+  uint32_t profiling_move = 0;
+  uint32_t exception_move = 0;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    profiling_move = 0xBEFC0073u;
+    exception_move = 0xBEFC006Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    profiling_move = 0xBEFC0373u;
+    exception_move = 0xBEFC036Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    profiling_move = 0xBEFD0073u;
+    exception_move = 0xBEFD006Fu;
+    break;
+  default:
+    return TrapInterruptSite::Unknown;
+  }
+
+  if (payload_move == profiling_move)
+    return TrapInterruptSite::Profiling;
+  if (payload_move == exception_move)
+    return TrapInterruptSite::QueueException;
+  return TrapInterruptSite::Unknown;
+}
+} // namespace detail
+} // namespace kmd
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
   uint32_t words[4];

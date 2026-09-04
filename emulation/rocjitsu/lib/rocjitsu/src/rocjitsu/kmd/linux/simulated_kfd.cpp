@@ -3312,30 +3312,7 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
 
   const auto arch = wave.cu().arch();
   bool profiling_interrupt = false;
-  uint32_t profiling_move_encoding = 0;
-  uint32_t exception_move_encoding = 0;
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    profiling_move_encoding = 0xBEFC0073u;
-    exception_move_encoding = 0xBEFC006Fu;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    profiling_move_encoding = 0xBEFC0373u;
-    exception_move_encoding = 0xBEFC036Fu;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    profiling_move_encoding = 0xBEFD0073u;
-    exception_move_encoding = 0xBEFD006Fu;
-    break;
-  default:
-    break;
-  }
-  if (profiling_move_encoding != 0) {
+  if (kmd::detail::uses_pre_gfx12_trap_interrupt_sites(arch)) {
     // ROCr's pre-GFX12 handler has two MSG_INTERRUPT sites. At the profiling
     // site it loads the event id from TTMP7; at the queue-exception site it
     // loads the packed exception from TTMP3. Both insert an s_nop immediately
@@ -3343,15 +3320,16 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     // inspecting the TTMP values: a signal pointer can equal saved M0, and a
     // concurrent trap can legitimately rewrite those registers before the
     // second interrupt.
-    constexpr uint32_t kSNop0 = 0xBF800000u;
     if (wave.pc >= 2 * sizeof(uint32_t)) {
       const uint32_t payload_move =
           wave.cu().fetch_instruction_word(wave.pc - 2 * sizeof(uint32_t), wave.process_id());
       const uint32_t delay =
           wave.cu().fetch_instruction_word(wave.pc - sizeof(uint32_t), wave.process_id());
-      if (delay == kSNop0 && payload_move == profiling_move_encoding)
+      const auto site =
+          kmd::detail::classify_pre_gfx12_trap_interrupt_site(arch, payload_move, delay);
+      if (site == kmd::detail::TrapInterruptSite::Profiling)
         profiling_interrupt = true;
-      else if (delay != kSNop0 || payload_move != exception_move_encoding)
+      else if (site != kmd::detail::TrapInterruptSite::QueueException)
         return false;
     } else {
       return false;
