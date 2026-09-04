@@ -26,9 +26,6 @@ struct MoiObjectFacts {
   size_t admitted_atomic_count = 0;
   bool has_admitted_fence = false;
   bool has_admitted_barrier = false;
-  size_t admitted_barrier_count = 0;
-  bool has_stranded_admitted_barrier = false;
-  bool target_supports_dense_barrier_router = false;
   bool has_explicit_persistent_state = false;
   bool has_report_buffer = false;
 };
@@ -161,7 +158,6 @@ struct MoiDispatchIdentityPlan {
 struct MoiScalarAbiPlan {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
   std::optional<ConSanIndirectJumpSgprs> indirect_jump;
-  bool access_router_uses_dense_abi = false;
 };
 
 /// Mode-neutral inputs from the transform pipeline to evidence planning.
@@ -212,15 +208,15 @@ project_moi_barrier_scratch_facts(const BoundRuntimeResources &resources,
 struct MoiTargetFacts {
   bool available = false;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
-  bool supports_dense_s_call_b64 = false;
   bool requires_aligned_flat_compare_swap_data_pair = false;
 };
 
 [[nodiscard]] MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch);
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
-[[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
-    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts);
+[[nodiscard]] MoiPersistentStateDemand
+make_exact_workgroup_capture_demand(const ConSanMoiOperatingPoint &point,
+                                    const MoiPersistentStateFacts &facts);
 
 [[nodiscard]] MoiObjectModePlan
 make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
@@ -260,25 +256,10 @@ plan_moi_dispatch_identity(const ConSanRequest &request, const MoiDispatchIdenti
 [[nodiscard]] MoiScalarAbiPlan
 make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                          std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
-                         uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi);
+                         uint16_t fixed_indirect_pc_offset);
 
 [[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
                                                    const MoiScalarRoutingState &routing_state);
-
-/// Compose the common Record/Replay + Sampled dense-router representation
-/// from a mode-owned scalar ABI and normalized target facts.
-[[nodiscard]] std::optional<MoiDenseRouterPlan>
-make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
-                                     const MoiScalarRoutingState &routing_state,
-                                     const MoiTargetFacts &target);
-
-/// Resolve the selected mode's dense-router mechanics at the narrow mode
-/// registry boundary. Consumers never branch on the engine themselves.
-[[nodiscard]] std::optional<MoiDenseRouterPlan>
-plan_moi_dense_router(ConSanMoiEngine engine, const MoiScalarRoutingState &routing_state,
-                      rj_code_arch_t arch);
-
-[[nodiscard]] MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine);
 
 [[nodiscard]] ConSanEvidenceRequirements
 plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context);
@@ -316,10 +297,6 @@ struct MoiModeOperations {
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
   MoiScalarAbiPlan (*scalar_abi)(const MoiScalarRoutingState &);
-  MoiDenseAccessRouteTraits dense_access_route;
-  std::optional<MoiDenseRouterPlan> (*dense_router)(const MoiScalarAbiPlan &,
-                                                    const MoiScalarRoutingState &,
-                                                    const MoiTargetFacts &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   ConSanMoiModePolicy policy;
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,

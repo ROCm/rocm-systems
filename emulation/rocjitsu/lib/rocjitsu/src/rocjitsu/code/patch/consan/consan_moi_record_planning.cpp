@@ -32,14 +32,14 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
          });
 }
 
-[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    ConSanMoiOperatingPoint &point, MoiOwnerAssignments assignments,
-    std::span<const uint64_t> owner_descriptor_offsets,
-    const ConSanMoiPrivateStateLayout *private_layout) {
+[[nodiscard]] bool
+apply_record_replay_entry_workgroup_assignment(ConSanMoiOperatingPoint &point,
+                                               MoiOwnerAssignments assignments,
+                                               std::span<const uint64_t> owner_descriptor_offsets,
+                                               const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
       private_layout ? &private_layout->exact_workgroup_offsets : nullptr;
-  if (!consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point,
-                                                                               private_offsets))
+  if (!consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point, private_offsets))
     return false;
   if (consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets)) {
     return true;
@@ -47,7 +47,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
   return apply_moi_persistent_vgpr_assignment(point, assignments, owner_descriptor_offsets) &&
          consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets) &&
          consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point,
-                                                                                 private_offsets);
+                                                                             private_offsets);
 }
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
@@ -85,8 +85,6 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
           *workgroup_sources);
     }
   }
-  const MoiScalarRoutingState routing_state = moi_scalar_routing_state(point);
-  const MoiTargetFacts target = resolve_moi_target_facts(arch);
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,
       .moi_exec_save_sgpr = point.moi_exec_save_sgpr,
@@ -97,9 +95,6 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
       .indirect_jump = scalar_abi.indirect_jump,
-      .dense_router = target.available
-                          ? make_recording_moi_dense_router_plan(scalar_abi, routing_state, target)
-                          : std::nullopt,
       .workgroup_sources = *workgroup_sources,
       .special_state = *scalar_abi.special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources(
@@ -145,8 +140,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     private_layout = build_moi_private_state_layout(
         inventory, resources, arch, warnings,
         {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-         .exact_workgroup =
-             !consan_moi_detail::moi_has_exact_entry_workgroup_capture(event_point),
+         .exact_workgroup = !consan_moi_detail::moi_has_exact_entry_workgroup_capture(event_point),
          .dispatch_id = event_point.moi_dispatch_identity.private_fallback()});
     if (!private_layout)
       return std::nullopt;

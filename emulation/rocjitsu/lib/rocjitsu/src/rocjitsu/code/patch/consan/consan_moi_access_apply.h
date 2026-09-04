@@ -7,7 +7,6 @@
 #pragma once
 
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_moi_common_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"

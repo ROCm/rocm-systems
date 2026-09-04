@@ -12,10 +12,9 @@ namespace rocjitsu::consan_moi_impl {
 
 MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
-  return target
-             ? MoiTargetFacts{true, target->direct_call_form, target->supports_moi_dense_s_call_b64,
-                              target->flat_compare_swap_data_pair_alignment > 1u}
-             : MoiTargetFacts{};
+  return target ? MoiTargetFacts{true, target->direct_call_form,
+                                 target->flat_compare_swap_data_pair_alignment > 1u}
+                : MoiTargetFacts{};
 }
 
 MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanMoiOperatingPoint &point,
@@ -102,10 +101,8 @@ MoiDispatchIdentityPlan plan_moi_dispatch_identity(const ConSanRequest &request,
 MoiScalarAbiPlan
 make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                          std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
-                         uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi) {
-  MoiScalarAbiPlan plan{.special_state = special_state,
-                        .indirect_jump = std::nullopt,
-                        .access_router_uses_dense_abi = access_router_uses_dense_abi};
+                         uint16_t fixed_indirect_pc_offset) {
+  MoiScalarAbiPlan plan{.special_state = special_state, .indirect_jump = std::nullopt};
   if (routing_state.has_scalar_spill()) {
     if (routing_state.scalar_router)
       plan.indirect_jump = routing_state.scalar_router->jump;
@@ -123,63 +120,6 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
 MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
                                      const MoiScalarRoutingState &routing_state) {
   return moi_mode_operations(engine).scalar_abi(routing_state);
-}
-
-std::optional<MoiDenseRouterPlan>
-make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
-                                     const MoiScalarRoutingState &routing_state,
-                                     const MoiTargetFacts &target) {
-  if (!routing_state.exec_save_sgpr || !scalar_abi.special_state || !scalar_abi.indirect_jump ||
-      routing_state.has_branch_only_spill) {
-    return std::nullopt;
-  }
-  const bool spill_backed = routing_state.has_compact_spill();
-  const ConSanMoiRouterCallSgprs *call_state = moi_scalar_router_call(routing_state.scalar_router);
-  if (spill_backed && !call_state)
-    return std::nullopt;
-
-  const uint16_t base = *routing_state.exec_save_sgpr;
-  const uint16_t dispatch_key_sgpr =
-      spill_backed ? call_state->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
-  const uint16_t call_return_sgpr =
-      spill_backed ? call_state->call_return_sgpr : static_cast<uint16_t>(base + 6u);
-  const bool explicit_key = target.direct_call_form != ConSanDirectCallForm::SCallI64;
-  return MoiDenseRouterPlan{
-      .indirect_jump = *scalar_abi.indirect_jump,
-      .dispatch_key_sgpr = dispatch_key_sgpr,
-      .call_return_sgpr = call_return_sgpr,
-      .barrier =
-          {
-              .indirect_jump = *scalar_abi.indirect_jump,
-              .dispatch_key_sgpr = dispatch_key_sgpr,
-              .call_return_sgpr = call_return_sgpr,
-              .derive_key_at_entry = spill_backed,
-          },
-      .entry_island_words = moi_compact_entry_island_words(spill_backed),
-      .relocated_entry_return_words = kMoiCompactIndirectIslandWords,
-      .explicit_key = explicit_key,
-      .collapse_spill_router =
-          spill_backed && call_return_sgpr == scalar_abi.indirect_jump->pc_sgpr && !explicit_key,
-      .restore_scc_before_route = explicit_key,
-  };
-}
-
-std::optional<MoiDenseRouterPlan> plan_moi_dense_router(ConSanMoiEngine engine,
-                                                        const MoiScalarRoutingState &routing_state,
-                                                        rj_code_arch_t arch) {
-  const MoiTargetFacts target = resolve_moi_target_facts(arch);
-  const MoiModeOperations &operations = moi_mode_operations(engine);
-  if (!target.available || operations.dense_router == nullptr ||
-      (operations.dense_access_route.requires_target_dense_call_capability &&
-       target.direct_call_form != ConSanDirectCallForm::SCallI64 &&
-       !target.supports_dense_s_call_b64)) {
-    return std::nullopt;
-  }
-  return operations.dense_router(operations.scalar_abi(routing_state), routing_state, target);
-}
-
-MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine) {
-  return moi_mode_operations(engine).dense_access_route;
 }
 
 ConSanEvidenceRequirements

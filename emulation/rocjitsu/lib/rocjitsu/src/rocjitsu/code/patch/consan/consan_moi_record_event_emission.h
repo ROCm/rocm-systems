@@ -29,7 +29,6 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
   std::optional<ConSanIndirectJumpSgprs> indirect_jump;
-  std::optional<MoiDenseRouterPlan> dense_router;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;

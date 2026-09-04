@@ -129,28 +129,13 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
       result.observation_plan().fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
         return decision.kind == ConSanSiteDecisionKind::Admitted;
       });
-  object_facts.admitted_barrier_count =
-      std::ranges::count_if(result.observation_plan().barrier_site_decisions,
-                            [](const ConSanBarrierSiteDecision &decision) {
-                              return decision.kind == ConSanSiteDecisionKind::Admitted;
-                            });
-  object_facts.has_admitted_barrier = object_facts.admitted_barrier_count != 0u;
-  object_facts.target_supports_dense_barrier_router = consan_is_capability_arch(arch);
+  object_facts.has_admitted_barrier =
+      std::ranges::any_of(result.observation_plan().barrier_site_decisions,
+                          [](const ConSanBarrierSiteDecision &decision) {
+                            return decision.kind == ConSanSiteDecisionKind::Admitted;
+                          });
   object_facts.has_explicit_persistent_state = effective_point.moi_owner_epoch_vgprs.complete();
   object_facts.has_report_buffer = effective_options.moi_report_buffer_address.has_value();
-  AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
-  const uint64_t original_text_size = original_code_object.text_sections().size() == 1
-                                          ? original_code_object.text_sections().front()->size()
-                                          : 0u;
-  object_facts.has_stranded_admitted_barrier =
-      original_text_size != 0u &&
-      std::ranges::any_of(result.observation_plan().barrier_site_decisions,
-                          [&](const ConSanBarrierSiteDecision &decision) {
-                            return decision.kind == ConSanSiteDecisionKind::Admitted &&
-                                   !compute_sopp_branch_simm16(
-                                       decision.semantic_site.physical.original_text_offset,
-                                       original_text_size);
-                          });
   MoiObjectModePlan mode_plan =
       plan_moi_object_mode(effective_options, effective_options, effective_options, effective_point,
                            object_facts, result.observation_plan());

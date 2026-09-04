@@ -15,7 +15,6 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
@@ -23,7 +22,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
@@ -337,19 +335,7 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarRoutingState &routing_st
                                      : publication->publication_exec_save_sgpr,
             }}
           : std::nullopt;
-  return make_moi_scalar_abi_plan(routing_state, special_state, 0u, false);
-}
-
-std::optional<MoiDenseRouterPlan>
-plan_sampled_dense_router(const MoiScalarAbiPlan &scalar_abi,
-                          const MoiScalarRoutingState &routing_state,
-                          const MoiTargetFacts &target) {
-  auto plan = make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
-  if (plan && routing_state.has_compact_spill() &&
-      plan->call_return_sgpr == plan->indirect_jump.pc_sgpr) {
-    plan->collapse_spill_router = true;
-  }
-  return plan;
+  return make_moi_scalar_abi_plan(routing_state, special_state, 0u);
 }
 
 uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
@@ -382,8 +368,6 @@ const MoiModeOperations kSampledModeOperations = {
     .access_spill_fallback = sampled_access_spill_fallback,
     .dispatch_identity = plan_sampled_dispatch_identity,
     .scalar_abi = plan_sampled_scalar_abi,
-    .dense_access_route = {},
-    .dense_router = plan_sampled_dense_router,
     .plan_evidence = plan_sampled_evidence_requirements,
     .policy =
         {

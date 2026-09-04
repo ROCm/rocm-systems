@@ -11,7 +11,6 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
@@ -472,7 +471,6 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
       .scalar_spill = operating_point.has_compact_moi_scalar_spill(),
       .dynamic_stack_spill = operating_point.moi_dynamic_stack_spill,
       .inline_access_present = mode_semantics.inline_access_present,
-      .dense_record_barrier_router = mode_semantics.dense_barrier_router,
   };
 }
 

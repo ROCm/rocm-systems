@@ -13,22 +13,6 @@ namespace rocjitsu::consan_moi_impl {
 [[nodiscard]] bool append_moi_entry_salu_write(std::vector<uint32_t> &words, uint32_t word,
                                                rj_code_arch_t arch);
 
-[[nodiscard]] bool
-emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
-                                     uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const ConSanIndirectJumpSgprs &jump_sgprs,
-                                     std::span<const uint64_t> owner_descriptor_file_offsets,
-                                     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
-                                     std::vector<std::string> &errors, std::string_view context);
-
-[[nodiscard]] bool
-emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
-                                     uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const MoiRecordEventEmissionPlan &plan,
-                                     std::span<const uint64_t> owner_descriptor_file_offsets,
-                                     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
-                                     std::vector<std::string> &errors, std::string_view context);
-
 [[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel,
                                      const ConSanPatchLoweringProduct &patch);
 

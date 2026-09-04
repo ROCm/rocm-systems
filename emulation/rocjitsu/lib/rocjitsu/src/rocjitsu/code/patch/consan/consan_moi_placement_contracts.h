@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
@@ -33,7 +32,6 @@ namespace rocjitsu::consan_moi_impl {
 /// placement's caches or owner analysis directly.
 struct MoiResourcePlanningState;
 struct MoiCfgForwardDistanceIndex;
-class MoiLocalNopIslandAllocator;
 
 struct MoiResourcePlanningStateDeleter {
   void operator()(MoiResourcePlanningState *state) const;
@@ -49,18 +47,7 @@ struct MoiCfgForwardDistanceIndexDeleter {
 using MoiCfgForwardDistanceIndexPtr =
     std::unique_ptr<MoiCfgForwardDistanceIndex, MoiCfgForwardDistanceIndexDeleter>;
 
-inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
-inline constexpr uint32_t kMoiCompactIndirectIslandWords = 7u;
-inline constexpr uint32_t kMoiInlineShadowIndirectIslandWords = 8u;
-inline constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
-
-[[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
-                                                              bool key_encodes_scc = false) {
-  // Relocatable dense routers derive the dispatcher key at entry. The SCC
-  // snapshot can share the key scalar under pressure, adding one carrier word.
-  return derive_key_at_entry ? 6u + (key_encodes_scc ? 1u : 0u) + (7u - 1u) : 7u;
-}
 
 using MoiDescriptorVgprRequirements = ConSanDescriptorRegisterRequirements;
 using MoiDescriptorSgprRequirements = ConSanDescriptorRegisterRequirements;
@@ -88,43 +75,6 @@ struct ResolvedMoiScratchPlan {
   uint32_t original_private_segment_size = 0;
   std::vector<uint64_t> owner_descriptor_file_offsets;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
-};
-
-/// Entry-relay state retained after a caller reserves the appended host body.
-struct MoiDenseEntryHost {
-  uint64_t host_offset = 0;
-  std::vector<uint32_t> displaced_words;
-  uint64_t body_offset = 0;
-};
-
-/// Target-neutral placement and resource result shared by every planned MOI
-/// access patch. Engine evidence semantics are deliberately absent.
-struct MoiPlannedAccessPatch {
-  const ConSanMoiCandidate *candidate = nullptr;
-  DbiPatchPlacement placement;
-  std::optional<uint64_t> entry_island_offset;
-  bool entry_island_at_anchor = false;
-  bool dense_call_anchor = false;
-  std::optional<uint64_t> dense_dispatcher_offset;
-  std::optional<BranchOnlyRelayRoute> branch_only_route;
-  std::vector<uint32_t> displaced_tail_words;
-  ResolvedMoiScratchPlan resources;
-  std::optional<VgprSpillSequence> spill;
-  std::optional<SgprSpillSequence> scalar_spill;
-  std::optional<ConSanMoiPrivateStateLayout> private_state_layout;
-  std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> owner_derivation;
-  uint32_t required_private_bytes = 0;
-  uint32_t guest_instruction_word_count = 0;
-};
-
-/// Common replay-body placement state used by Record/Replay and Sampled.
-struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
-  uint64_t entry_island_word_count = 0;
-  std::optional<uint16_t> incoming_vgpr_bank_mode;
-  uint32_t probe_guest_instruction_offset = 0;
-  bool spill_overlaps_guest_operands = false;
-  bool wrap_embedded_guest_vgpr_bank = false;
-  bool branch_only_scalar_spill = false;
 };
 
 /// Read-only scalar-routing state projected from one accepted operating point.
@@ -160,85 +110,10 @@ moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
   };
 }
 
-/// Exact scalar tuple used by the shared dense-barrier relay. Modes own how
-/// this tuple relates to their access router and fixed or spill-backed ABI.
-struct MoiDenseBarrierRouterPlan {
-  ConSanIndirectJumpSgprs indirect_jump;
-  uint16_t dispatch_key_sgpr = 0;
-  uint16_t call_return_sgpr = 0;
-  bool derive_key_at_entry = false;
-};
-
-/// Resolved scalar ABI and mechanics for one mode's dense routers. Common
-/// placement and emission consume this product without inspecting the engine
-/// that produced it.
-struct MoiDenseRouterPlan {
-  ConSanIndirectJumpSgprs indirect_jump;
-  uint16_t dispatch_key_sgpr = 0;
-  std::optional<uint16_t> call_return_sgpr;
-  MoiDenseBarrierRouterPlan barrier;
-  uint32_t entry_island_words = 0;
-  uint32_t relocated_entry_return_words = 0;
-  bool explicit_key = false;
-  bool collapse_spill_router = false;
-  bool restore_scc_before_route = false;
-  bool requires_indirect_pc_wait = false;
-  bool publish_entry_island_offset = false;
-};
-
-/// Mode-local semantic traits used by common dense-route placement.
-struct MoiDenseAccessRouteTraits {
-  bool requires_target_dense_call_capability = true;
-  bool preserves_replay_ordering = false;
-};
-
-struct MoiDenseAccessRoutePlan {
-  consan_detail::MoiDenseCandidatePartition partition;
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> entry_islands;
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dispatchers;
-  std::map<uint64_t, MoiDenseEntryHost> entry_hosts;
-};
-
-struct MoiAccessEntryIslandPlan {
-  std::optional<uint64_t> offset;
-  uint64_t word_count = 0u;
-  uint32_t original_size = 0u;
-  std::vector<uint32_t> displaced_tail_words;
-  bool at_anchor = false;
-  bool uses_preferred_island = false;
-};
-
 /// A scalar register interval that a relocated host must preserve while it
 /// bootstraps a generated router. This is a placement constraint, not an
 /// engine emission policy.
 using MoiSgprRange = consan_detail::ScalarOwnerSgprRange;
-
-enum class MoiRelocatableHostScalarState : uint8_t {
-  AccessRouter,
-  BarrierRouter,
-};
-
-/// A host discovered in existing text. Appended-body placement is absent:
-/// callers still own the transaction that reserves and populates generated
-/// bytes.
-struct MoiDenseRelayHost {
-  uint64_t host_offset = 0;
-  std::vector<uint32_t> displaced_words;
-};
-
-/// Engine-neutral inputs to owner-complete dense-host discovery. Placement
-/// owns the CFG/liveness proof; engine components supply only their occupied
-/// ranges and the scalar ABI that the relocated host must preserve.
-struct MoiDenseRelayHostRequest {
-  uint64_t owner_begin = 0;
-  uint64_t owner_end = 0;
-  size_t host_word_count = 0;
-  std::span<const uint64_t> anchors;
-  std::span<const ConSanPreappliedReservedRange> preapplied_reserved_ranges;
-  std::span<const uint64_t> owner_descriptor_file_offsets;
-  std::span<const MoiSgprRange> bootstrap_ranges;
-  std::span<const std::pair<uint64_t, uint64_t>> claimed_host_ranges;
-};
 
 /// Persistent VGPRs that cannot be borrowed by an entry relay before the
 /// probe's ordinary spill transaction has run.
@@ -290,27 +165,10 @@ struct MoiCfgDistance {
   auto operator<=>(const MoiCfgDistance &) const = default;
 };
 
-struct MoiDecodedInstructionRange {
-  uint64_t text_offset = 0;
-  uint32_t size = 0;
-  bool is_scalar_clause = false;
-};
-
-[[nodiscard]] constexpr uint32_t
-moi_compact_entry_island_words(bool spill_backed_scalar_assignment) {
-  return kMoiCompactIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
-}
-
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
 order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
                                    const ConSanObservationPlan &observation_plan,
                                    bool track_atomics);
-
-[[nodiscard]] uint64_t
-moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
-                                      const ConSanObservationPlan &observation_plan,
-                                      const ConSanRequest &request, const TransformPolicy &policy,
-                                      const MoiObjectModeSemantics &mode_semantics);
 
 [[nodiscard]] std::span<const ConSanPreappliedReservedRange>
 moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
@@ -322,17 +180,8 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 
 [[nodiscard]] Decoder *moi_resource_decoder(MoiResourcePlanningState &state);
 
-[[nodiscard]] bool moi_resource_entry_window_is_single_entry(const MoiResourcePlanningState &state,
-                                                             uint64_t text_offset,
-                                                             uint64_t byte_count);
-
 [[nodiscard]] bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state,
                                                     uint64_t first_offset, uint64_t second_offset);
-
-/// True only when placement can associate the instruction with at least one
-/// owner context and SCC is dead before it in every such owner.
-[[nodiscard]] bool moi_resource_scc_is_dead_before(const MoiResourcePlanningState &state,
-                                                   uint64_t text_offset);
 
 [[nodiscard]] bool moi_resource_is_valid(const MoiResourcePlanningState &state);
 
@@ -352,17 +201,6 @@ make_moi_cfg_forward_distance_index(const MoiResourcePlanningState &state,
 [[nodiscard]] std::optional<MoiCfgDistance>
 moi_cfg_forward_distance(const MoiCfgForwardDistanceIndex &index, uint64_t from_text_offset);
 
-[[nodiscard]] std::optional<MoiDecodedInstructionRange>
-moi_resource_preceding_instruction(const MoiResourcePlanningState &state, uint64_t text_offset);
-
-[[nodiscard]] bool moi_resource_owner_anchors_admit_sgpr_ranges(
-    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
-    std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
-
-[[nodiscard]] bool moi_resource_owner_anchors_admit_scalar_router_ranges(
-    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
-    std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
-
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
@@ -370,49 +208,6 @@ resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
 [[nodiscard]] bool
 moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
                                              std::span<const uint64_t> owner_descriptor_offsets);
-
-[[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
-collect_moi_synchronization_ranges(const ProgramInventory &program_inventory);
-
-[[nodiscard]] bool
-moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResourcePlan> plans,
-                                            const ConSanMoiOperatingPoint &operating_point,
-                                            const ConSanMoiCandidate &candidate);
-
-[[nodiscard]] bool plan_moi_access_direct_reservoirs(
-    const ProgramInventory &program_inventory, const TransformPolicy &policy, rj_code_arch_t arch,
-    const MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
-    std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
-    std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
-    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, uint64_t route_frontier_source,
-    size_t target_relay_count, DbiPatchPlacementPlanner &placement_planner,
-    BranchOnlyRelayRouter &branch_router, BranchOnlyDirectRelayReservoirSet &reservoirs,
-    std::string *error_out);
-
-[[nodiscard]] MoiDenseAccessRoutePlan plan_moi_dense_access_routes(
-    const ProgramInventory &program_inventory,
-    std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
-    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
-    std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
-    uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
-    MoiLocalNopIslandAllocator *local_entry_islands,
-    BranchOnlyRelayRouter *relay_ownership = nullptr);
-
-[[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
-    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
-    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
-    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
-    MoiResourcePlanningState &resource_state, rj_code_arch_t arch,
-    std::vector<std::string> &errors);
-
-[[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island_with_policy(
-    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
-    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
-    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
-    MoiResourcePlanningState &resource_state, Decoder *decoder, rj_code_arch_t arch,
-    std::vector<std::string> &errors,
-    const std::function<bool(uint64_t, uint64_t)> &relocation_allowed);
 
 [[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
     const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
@@ -498,31 +293,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                     const ConSanMoiCandidate &candidate,
                     const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count);
 
-[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr(
-    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
-    uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state);
-
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
 moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset);
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
 moi_transient_sgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset);
-
-[[nodiscard]] std::vector<MoiSgprRange>
-moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
-                                   const ConSanMoiOperatingPoint &point,
-                                   MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch);
-
-[[nodiscard]] std::optional<MoiDenseRelayHost> find_moi_dense_relay_host_for_owners(
-    MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
-    const MoiDenseRelayHostRequest &request,
-    const std::function<bool(uint64_t, uint64_t)> &overlaps_reserved);
-
-void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
-                                          const MoiPlannedAccessPatch &patch);
-
-void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
-                                const MoiPlannedAccessPatch &patch);
 
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
                                const ResolvedMoiScratchPlan &plan,

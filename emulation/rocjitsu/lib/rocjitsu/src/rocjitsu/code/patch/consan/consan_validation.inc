@@ -40,6 +40,28 @@ struct ValidationByteRange {
   return consan_arch_is_cdna3_or_cdna4(target.arch);
 }
 
+[[nodiscard]] bool is_validation_branch_relay_reservoir_instruction(
+    const Instruction &instruction, uint64_t offset, std::span<const uint8_t> text,
+    rj_code_arch_t arch) {
+  const int size = instruction.size();
+  const std::string_view mnemonic = instruction.mnemonic();
+  if (size <= 0 || size % static_cast<int>(sizeof(uint32_t)) != 0 ||
+      instruction.raw_encoding() == nullptr || offset % sizeof(uint32_t) != 0u ||
+      offset > text.size() || static_cast<uint64_t>(size) > text.size() - offset ||
+      mnemonic.starts_with("ds_") || mnemonic == "s_clause" || mnemonic == "s_delay_alu") {
+    return false;
+  }
+  if (size == static_cast<int>(sizeof(uint32_t)) ||
+      size == 2 * static_cast<int>(sizeof(uint32_t))) {
+    return is_relocatable_anchor(instruction, offset, text, arch);
+  }
+  constexpr uint64_t kControlFlowFlags =
+      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+  return size == 3 * static_cast<int>(sizeof(uint32_t)) &&
+         (mnemonic.starts_with("flat_load") || mnemonic.starts_with("flat_store")) &&
+         !(instruction.flags() & kControlFlowFlags) && !instruction.branch_offset_bytes();
+}
+
 enum class BranchRelayReservoirShape : uint8_t {
   GeneratedBank,
   DirectInstruction,
@@ -901,8 +923,8 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
           break;
         inside = true;
         if (instruction.src_loc() != cursor || clause_remaining != 0 ||
-            !is_consan_branch_relay_reservoir_instruction(instruction, instruction.src_loc(),
-                                                          original_text, arch)) {
+            !is_validation_branch_relay_reservoir_instruction(
+                instruction, instruction.src_loc(), original_text, arch)) {
           valid = false;
           break;
         }

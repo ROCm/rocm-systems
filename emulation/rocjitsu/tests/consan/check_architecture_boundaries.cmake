@@ -320,9 +320,8 @@ foreach(_file IN LISTS _transform_component_sources)
     )
 endforeach()
 
-# Branch-only routing owns capacity, provenance, and route selection. Direct
-# reservoir ownership is already authoritative in reservoir_by_relay; the
-# retired deferred-owner lifecycle duplicated that state and must not return.
+# Whole-text relocation retired branch-only relay routing. Keep its tombstone
+# files free of implementation so the deleted graph cannot regrow unnoticed.
 foreach(_relay_router_file IN ITEMS
     consan_branch_only_relay_router.h
     consan_branch_only_relay_router.cpp
@@ -330,15 +329,9 @@ foreach(_relay_router_file IN ITEMS
     _consan_assert_no_match(
         "${_consan_dir}/${_relay_router_file}"
         "BranchOnlyRelayOwner|owner_affinity|owner_materialization|offer_materialized_owner|has_deferred_owner_affinity|RelayOwnerGrouping|route_optimization|BoundedOptimizationMode"
-        "branch-only routing must not regain parallel owner or optimizer lifecycles"
+        "retired branch-only routing must not regain owner or optimizer lifecycles"
     )
 endforeach()
-file(READ "${_consan_dir}/consan_branch_only_relay_router.cpp" _branch_only_router_owner)
-if(NOT _branch_only_router_owner MATCHES
-   "reservoir_by_relay[.]contains[(]claim[.]offset[)]")
-    message(FATAL_ERROR
-        "direct relay-reservoir dependencies lost their single ownership authority")
-endif()
 
 # Descriptor resource mutation has one mechanical owner. MOI contributes its
 # narrow policy adapter; SuperCollider's two access regions submit batches
@@ -902,7 +895,7 @@ if(NOT _moi_mode_planning_contract MATCHES
         "MOI mode contracts lost the normalized atomic-alignment target fact"
     )
 endif()
-foreach(_planner IN ITEMS plan_moi_scalar_abi plan_moi_dense_router)
+foreach(_planner IN ITEMS plan_moi_scalar_abi)
     if(NOT _moi_mode_planning_contract MATCHES
            "${_planner}[(][^;]*ConSanMoiEngine[^;]*MoiScalarRoutingState" OR
        _moi_mode_planning_contract MATCHES
@@ -1092,12 +1085,10 @@ endif()
 file(READ "${_consan_dir}/consan_moi_record_event_emission.h" _record_event_contract)
 if(NOT _record_event_contract MATCHES
        "std::optional<ConSanIndirectJumpSgprs>[ \t]+indirect_jump" OR
-   NOT _record_event_contract MATCHES
-       "std::optional<MoiDenseRouterPlan>[ \t]+dense_router" OR
    _record_event_contract MATCHES
        "ConSanMoiScalarRouterAllocation|automatic_moi_record_replay_sgpr_spill|router_(dispatch_key|call_return)_sgpr")
     message(FATAL_ERROR
-        "Record/Replay event emission must retain exact indirect and dense routing products"
+        "Record/Replay event emission must retain its exact indirect routing product"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_record_planning.h" _moi_record_planning_contract)
@@ -1338,14 +1329,6 @@ if(NOT _inline_shadow_contract MATCHES
         "the InlineShadow barrier entry point must remain in mode-owned contract and implementation files"
     )
 endif()
-if(NOT _moi_placement_contract MATCHES
-       "kMoiCompactIndirectIslandWords" OR
-   NOT _moi_placement_contract MATCHES
-       "moi_compact_entry_island_words")
-    message(FATAL_ERROR
-        "Sampled compact-entry geometry must retain one shared contract"
-    )
-endif()
 if(_record_replay_contract MATCHES
        "kMoiRecordReplay(BarrierRelay|BorrowedEntry)" OR
    _moi_placement_contract MATCHES
@@ -1366,6 +1349,13 @@ foreach(
         "${_consan_dir}/${_compact_entry_consumer}"
         "kMoiRecordReplayIndirectIslandWords|moi_record_replay_entry_island_words"
         "shared compact-entry geometry must not carry Record/Replay ownership"
+    )
+endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "kMoiCompactIndirectIslandWords|moi_compact_entry_island_words|MoiLocalNopIsland"
+        "retired local entry-island planning must not return"
     )
 endforeach()
 _consan_assert_no_match(
@@ -1415,12 +1405,13 @@ _consan_assert_no_match(
     "InlineShadow barrier emission must consume the target-normalized visible-evidence mechanism"
 )
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
-if(NOT _moi_placement_contract MATCHES
-       "moi_resource_owner_anchors_admit_scalar_router_ranges" OR
+if(NOT _moi_placement MATCHES "class MoiScalarPlacementDomain" OR
+   NOT _moi_placement MATCHES
+       "scalar_owner_contexts_conflict_with_physical_vcc" OR
    _moi_placement_contract MATCHES
-       "moi_resource_owner_(anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
+       "moi_resource_owner_(anchors_admit_scalar_router_ranges|anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
     message(FATAL_ERROR
-        "scalar-router anchor liveness and physical-VCC safety must retain one owner proof"
+        "scalar placement and physical-VCC safety must retain one placement-domain proof"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_record_planning.h" _moi_record_planning_contract)
@@ -1596,10 +1587,8 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 
-# Scalar ABI and dense-router selection share one narrow projection of the
-# accepted operating point. Mode callbacks consume that projection, and dense
-# routing consumes the scalar ABI selected by the same mode rather than
-# reconstructing the broad operating point inside each router planner.
+# Scalar ABI selection consumes one narrow projection of the accepted
+# operating point rather than reconstructing the broad point in each mode.
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_implementation)
 file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_contracts.h" _moi_sampled_contract)
@@ -1609,7 +1598,7 @@ if(NOT _moi_placement_contract MATCHES "struct MoiScalarRoutingState" OR
         "ConSan scalar routing lost its narrow operating-point projection"
     )
 endif()
-foreach(_callback IN ITEMS scalar_abi dense_router)
+foreach(_callback IN ITEMS scalar_abi)
     if(_moi_mode_planning_contract MATCHES
        "\\(\\*${_callback}\\)\\([^;]*ConSanMoiOperatingPoint")
         message(FATAL_ERROR
@@ -1617,20 +1606,6 @@ foreach(_callback IN ITEMS scalar_abi dense_router)
         )
     endif()
 endforeach()
-if(NOT _moi_mode_planning_contract MATCHES
-       "dense_router[^;]*MoiScalarAbiPlan[^;]*MoiScalarRoutingState[^;]*MoiTargetFacts" OR
-   NOT _moi_mode_planning_implementation MATCHES
-       "dense_router\\(operations\\.scalar_abi\\(routing_state\\),[ \t\n]*routing_state")
-    message(FATAL_ERROR
-        "ConSan dense routing must consume the mode-selected scalar ABI exactly once"
-    )
-endif()
-if(_moi_mode_planning_contract MATCHES
-   "\\(\\*dense_router\\)\\([^;]*ConSanTargetProfile")
-    message(FATAL_ERROR
-        "ConSan dense-router mode callbacks must not receive the complete target profile"
-    )
-endif()
 if(_moi_sampled_contract MATCHES
    "moi_sampled_publication_state_sgprs[^;]*(ConSanRequest|ConSanMoiOperatingPoint)")
     message(FATAL_ERROR
@@ -3103,24 +3078,13 @@ foreach(_file IN LISTS _mode_sources)
     )
 endforeach()
 
-# Dense access routing resolves mode policy once at the registry boundary.
-# Shared placement and emission consume the resulting typed plan and may not
-# regain an engine enum or an InlineShadow-only scalar-ABI peephole.
+# Whole-text relocation retired dense access routing and its mode callbacks.
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
-        "MoiDenseAccessRouteAbi|MoiInlineDenseRouterScalarAbi|moi_inline_dense_router_scalar_abi|inline_shadow_route"
-        "dense routing must consume the mode-published router plan"
+        "MoiDenseAccessRouteAbi|MoiInlineDenseRouterScalarAbi|moi_inline_dense_router_scalar_abi|inline_shadow_route|plan_moi_dense_router"
+        "retired dense routing must not return"
     )
-endforeach()
-foreach(_mode IN ITEMS record_replay sampled inline_shadow)
-    set(_mode_owner "${_consan_dir}/modes/${_mode}/consan_moi_${_mode}.cpp")
-    file(READ "${_mode_owner}" _mode_owner_contents)
-    if(NOT _mode_owner_contents MATCHES "[.]dense_router[ 	]*=")
-        message(FATAL_ERROR
-            "ConSan ${_mode} lost its dense-router registry operation"
-        )
-    endif()
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_mode_planning.cpp"

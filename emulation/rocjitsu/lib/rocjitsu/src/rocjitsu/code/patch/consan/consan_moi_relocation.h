@@ -46,18 +46,6 @@ void append_words_bytes(std::vector<uint8_t> &bytes, std::span<const uint32_t> w
 
 namespace rocjitsu::consan_moi_impl {
 
-struct MoiDenseBarrierRouterScalarAbi {
-  uint16_t jump_pc_sgpr = 0;
-  uint16_t saved_scc_sgpr = 0;
-  uint16_t key_sgpr = 0;
-  uint16_t call_return_sgpr = 0;
-};
-
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispatcher_text_offset,
-                                     const MoiDenseBarrierRouterScalarAbi &abi,
-                                     bool derive_key_at_entry, rj_code_arch_t arch);
-
 [[nodiscard]] bool append_moi_direct_or_indirect_return(
     std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
     const std::optional<ConSanIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch);

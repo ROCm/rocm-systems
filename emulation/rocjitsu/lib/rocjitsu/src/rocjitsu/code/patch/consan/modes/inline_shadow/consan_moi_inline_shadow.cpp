@@ -15,7 +15,6 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
@@ -23,7 +22,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
@@ -316,63 +314,7 @@ MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const MoiScalarRoutingState &rout
         .scc_save_sgpr = static_cast<uint16_t>(base + 10u),
     };
   }
-  return make_moi_scalar_abi_plan(routing_state, special_state, 12u, true);
-}
-
-std::optional<MoiDenseRouterPlan>
-plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
-                                const MoiScalarRoutingState &routing_state,
-                                const MoiTargetFacts &target) {
-  if (routing_state.has_branch_only_spill)
-    return std::nullopt;
-  if (!scalar_abi.indirect_jump)
-    return std::nullopt;
-
-  uint16_t dispatch_key_sgpr = 0u;
-  std::optional<uint16_t> call_return_sgpr;
-  MoiDenseBarrierRouterPlan barrier;
-  if (routing_state.has_inline_spill()) {
-    const ConSanMoiRouterCallSgprs *call_state =
-        moi_scalar_router_call(routing_state.scalar_router);
-    if (!call_state)
-      return std::nullopt;
-    dispatch_key_sgpr = call_state->dispatch_key_sgpr;
-    if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
-      call_return_sgpr = call_state->call_return_sgpr;
-    barrier = {
-        .indirect_jump = *scalar_abi.indirect_jump,
-        .dispatch_key_sgpr = dispatch_key_sgpr,
-        .call_return_sgpr = scalar_abi.indirect_jump->pc_sgpr,
-        .derive_key_at_entry = true,
-    };
-  } else {
-    if (!routing_state.exec_save_sgpr || !scalar_abi.special_state)
-      return std::nullopt;
-    const uint16_t base = *routing_state.exec_save_sgpr;
-    dispatch_key_sgpr = target.direct_call_form == ConSanDirectCallForm::SCallI64
-                            ? scalar_abi.indirect_jump->pc_sgpr
-                            : static_cast<uint16_t>(base + 28u);
-    if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
-      call_return_sgpr = static_cast<uint16_t>(base + 28u);
-    barrier = {
-        .indirect_jump = {base, scalar_abi.special_state->scc_save_sgpr},
-        .dispatch_key_sgpr = static_cast<uint16_t>(base + 5u),
-        .call_return_sgpr = static_cast<uint16_t>(base + 6u),
-    };
-  }
-
-  return MoiDenseRouterPlan{
-      .indirect_jump = *scalar_abi.indirect_jump,
-      .dispatch_key_sgpr = dispatch_key_sgpr,
-      .call_return_sgpr = call_return_sgpr,
-      .barrier = barrier,
-      .entry_island_words = kMoiInlineShadowIndirectIslandWords,
-      .relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords,
-      .explicit_key = !call_return_sgpr.has_value(),
-      .restore_scc_before_route = true,
-      .requires_indirect_pc_wait = true,
-      .publish_entry_island_offset = true,
-  };
+  return make_moi_scalar_abi_plan(routing_state, special_state, 12u);
 }
 
 uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
@@ -407,8 +349,6 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .access_spill_fallback = inline_shadow_access_spill_fallback,
     .dispatch_identity = plan_inline_shadow_dispatch_identity,
     .scalar_abi = plan_inline_shadow_scalar_abi,
-    .dense_access_route = {},
-    .dense_router = plan_inline_shadow_dense_router,
     .plan_evidence = plan_inline_shadow_evidence_requirements,
     .policy =
         {

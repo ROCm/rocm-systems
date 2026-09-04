@@ -10,13 +10,11 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
@@ -73,11 +71,6 @@ plan_record_replay_object_mode(const ConSanRequest &request, const BoundRuntimeR
   plan.prologue_requires_consumer =
       !facts.has_report_buffer && !facts.has_explicit_persistent_state;
 
-  constexpr size_t kCompactBarrierMemberLimit = 32u;
-  plan.semantics.dense_barrier_router =
-      facts.target_supports_dense_barrier_router &&
-      (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
-       facts.has_stranded_admitted_barrier);
   plan.semantics.automatic_banked_record_capture =
       record_replay_uses_automatic_banked_capture(request, resources);
   plan.semantics.report_layout =
@@ -221,14 +214,7 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const MoiScalarRoutingState &rout
                              : static_cast<uint16_t>(base + 4u),
     };
   }
-  return make_moi_scalar_abi_plan(routing_state, special_state, 0u, false);
-}
-
-std::optional<MoiDenseRouterPlan>
-plan_record_replay_dense_router(const MoiScalarAbiPlan &scalar_abi,
-                                const MoiScalarRoutingState &routing_state,
-                                const MoiTargetFacts &target) {
-  return make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
+  return make_moi_scalar_abi_plan(routing_state, special_state, 0u);
 }
 
 uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
@@ -239,8 +225,6 @@ uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requir
   constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
   const uint16_t runtime_workgroup_gate_count =
       requirement.runtime_sample_stride > 1u ? kRuntimeWorkgroupGateSgprCount : 0u;
-  if (requirement.dense_record_barrier_router)
-    return std::max<uint16_t>(8u, runtime_workgroup_gate_count);
   if (requirement.scalar_spill)
     return std::max<uint16_t>(4u, runtime_workgroup_gate_count);
   if (requirement.dynamic_stack_spill)
@@ -265,9 +249,6 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .access_spill_fallback = nullptr,
     .dispatch_identity = plan_record_replay_dispatch_identity,
     .scalar_abi = plan_record_replay_scalar_abi,
-    .dense_access_route = {.requires_target_dense_call_capability = false,
-                           .preserves_replay_ordering = true},
-    .dense_router = plan_record_replay_dense_router,
     .plan_evidence = plan_record_replay_evidence_requirements,
     .policy =
         {

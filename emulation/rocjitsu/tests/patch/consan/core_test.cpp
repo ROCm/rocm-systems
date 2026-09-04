@@ -351,7 +351,6 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_dynamic_stack_spill = true;
   const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
-      .dense_barrier_router = true,
       .inline_access_present = true,
       .automatic_banked_record_capture = true,
       .report_layout = {},
@@ -368,7 +367,6 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
                 .scalar_spill = true,
                 .dynamic_stack_spill = true,
                 .inline_access_present = true,
-                .dense_record_barrier_router = true,
             }));
 
   request.moi_dynamic_access_records = true;
@@ -401,7 +399,6 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   ConSanObservationPlan observation_plan;
   const std::array<ConSanMoiCandidate, 1> candidates{};
   const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
-      .dense_barrier_router = false,
       .inline_access_present = true,
       .report_layout = {},
       .reserved_atomic_patch_count = 0u,
@@ -429,8 +426,6 @@ TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 5u);
   requirement.runtime_sample_stride = 2u;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
-  requirement.dense_record_barrier_router = true;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
   requirement.automatic_banked_record_capture = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 14u);
   requirement = {.has_report_buffer = true, .dynamic_stack_spill = true};
