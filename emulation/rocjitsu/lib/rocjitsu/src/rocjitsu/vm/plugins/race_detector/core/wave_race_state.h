@@ -94,6 +94,10 @@ public:
   /// violation (outstanding scalar load targeting the same register).
   void checkScalarRead(RegisterRef reg) const;
 
+  /// Check a scalar instruction write for conflicts with pending scalar loads.
+  /// A wide write reports each conflicting memory event at most once.
+  void checkScalarWrite(RegisterRef reg) const;
+
   /// True if any outstanding global/LDS store reads from the given VGPR lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;
 
@@ -120,6 +124,7 @@ private:
                                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                                   amdgpu::WaitCounterType waitCounterType);
   void retireEventRegisters(EventId);
+  void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);
   void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);

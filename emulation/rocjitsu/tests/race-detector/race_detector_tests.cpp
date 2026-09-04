@@ -9,6 +9,8 @@
 // Test categories:
 //   Vgpr_*          — VGPR races from global loads (vmcnt)
 //   Sgpr_*          — SGPR races from scalar loads (lgkmcnt)
+//   SgprWaw_*       — writes overlapping pending SGPR destinations
+//   TtmpWaw_*       — writes overlapping pending TTMP destinations
 //   LdsCrossWave_*  — cross-wave LDS races (missing barrier)
 //   LdsSameWave_*   — same-wave LDS instruction ordering
 //   SameWave_*      — same-wave VGPR races via LDS loads
@@ -224,6 +226,141 @@ TEST(RaceDetector, RejectsOutOfRangeScalarLoadDestination) {
   b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/15, /*numRegs=*/2);
   b.scalarLoad(/*wave=*/0, /*sgprBase=*/7, /*numRegs=*/2);
   EXPECT_EQ(b.events().totalAllocated(), 0);
+}
+
+// ---- Scalar write-after-write races ----
+
+TEST(RaceDetector, SgprWaw_ScalarLoadThenInstructionWrite) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/4);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &violation = b.violations().front();
+  EXPECT_EQ(violation.space, RaceViolation::Space::SGPR);
+  EXPECT_EQ(violation.index, 4);
+  EXPECT_EQ(violation.lane, -1);
+  EXPECT_TRUE(violation.isWrite);
+  EXPECT_EQ(violation.conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, TtmpWaw_ScalarLoadThenInstructionWrite) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/4, /*numRegs=*/1);
+  b.checkTtmpWrite(/*wave=*/0, /*reg=*/4);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &violation = b.violations().front();
+  EXPECT_EQ(violation.space, RaceViolation::Space::TTMP);
+  EXPECT_EQ(violation.index, 4);
+  EXPECT_EQ(violation.lane, -1);
+  EXPECT_TRUE(violation.isWrite);
+  EXPECT_EQ(violation.conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, SgprWaw_ScalarLoadThenScalarLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_TRUE(b.hasSgprRace(4));
+  EXPECT_TRUE(b.violations().front().isWrite);
+  EXPECT_EQ(b.violations().front().conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, TtmpWaw_ScalarLoadThenScalarLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/4, /*numRegs=*/1);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/4, /*numRegs=*/1);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_TRUE(b.hasTtmpRace(4));
+  EXPECT_TRUE(b.violations().front().isWrite);
+  EXPECT_EQ(b.violations().front().conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, SgprWaw_WaitClearsPendingLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TtmpWaw_WaitClearsPendingLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/4, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.checkTtmpWrite(/*wave=*/0, /*reg=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, SgprWaw_CleanRegisterNoRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/5);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, SgprWaw_WideLoadReportsOnlyOverlappingRegister) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/3, /*numRegs=*/2);
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/4);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_EQ(b.violations().front().index, 4);
+  EXPECT_EQ(b.violations().front().conflictingEvent, EventId{0});
+
+  b.clearViolations();
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/5);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, Sgpr_WideReadReportsPendingEventOnce) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/3, /*numRegs=*/2);
+  b.checkSgprRead(/*wave=*/0, /*reg=*/3, /*width=*/2);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &violation = b.violations().front();
+  EXPECT_EQ(violation.index, 3);
+  EXPECT_FALSE(violation.isWrite);
+  EXPECT_EQ(violation.conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, SgprWaw_WideInstructionWriteReportsPendingEventOnce) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/3, /*numRegs=*/2);
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/3, /*width=*/2);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_EQ(b.violations().front().index, 3);
+  EXPECT_EQ(b.violations().front().conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, TtmpWaw_WideScalarLoadReportsPendingEventOnce) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/3, /*numRegs=*/2);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/3, /*numRegs=*/2);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_EQ(b.violations().front().space, RaceViolation::Space::TTMP);
+  EXPECT_EQ(b.violations().front().index, 3);
+  EXPECT_EQ(b.violations().front().conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, SgprWaw_PreservesEachPendingConflictingEvent) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.clearViolations();
+
+  b.checkSgprWrite(/*wave=*/0, /*reg=*/4);
+
+  ASSERT_EQ(b.raceCount(), 2);
+  EXPECT_EQ(b.violations()[0].conflictingEvent, EventId{0});
+  EXPECT_EQ(b.violations()[1].conflictingEvent, EventId{1});
 }
 
 // ---- LDS cross-wave races ----
