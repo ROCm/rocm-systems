@@ -537,9 +537,7 @@ TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
   std::set<uint32_t> seen_by_a_owner;
 
   // Installed before the first CREATE_QUEUE, which is what starts the doorbell
-  // monitors. interrupt_cb_ is a plain std::function that the poll loop reads
-  // without a lock, so assigning it once a monitor is live is a data race on the
-  // function object itself -- one TSan reports.
+  // monitors. This keeps the test's observers active for every idle transition.
   owner_of_b2->set_interrupt_callback([&](uint32_t pid, uint32_t) {
     std::lock_guard<std::mutex> lock(seen_mutex);
     seen_by_b2_owner.insert(pid);
@@ -5090,10 +5088,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   runtime_notified.store(false, std::memory_order_release);
   exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
-  driver_->set_debug_event_claim_hook_for_testing([&] {
-    exceptions.set_exceptions_enabled.exception_mask = 0;
-    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
-  });
+  driver_->set_debug_event_claim_mask_for_testing(0);
   for (uint32_t i = 0; i < 8 && rejected_wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
        ++i) {
     if (rejected_wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
@@ -5793,10 +5788,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
   kfd_ioctl_dbg_trap_args exceptions{};
   exceptions.pid = static_cast<uint32_t>(getpid());
   exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
-  driver_->set_debug_event_claim_hook_for_testing([&] {
-    exceptions.set_exceptions_enabled.exception_mask = 0;
-    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
-  });
+  driver_->set_debug_event_claim_mask_for_testing(0);
   cu->step();
   EXPECT_EQ(stepping->pc, kSteppingAddress + sizeof(uint32_t));
   EXPECT_FALSE(stepping->debug_halted());
