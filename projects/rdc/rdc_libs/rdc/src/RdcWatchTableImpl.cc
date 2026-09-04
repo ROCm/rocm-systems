@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <ctime>
 #include <map>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 
@@ -395,9 +396,15 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
   return update_field_in_table_when_unwatch(ite->first);
 }
 
-rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int components,
-                                                          rdc_field_grp_t* field_group_id) {
-  // set filed ids
+// Health fields with an alternate source when the primary cannot be read on
+// this platform. The primary is tried first so existing platforms are unchanged.
+static const std::map<rdc_field_t, rdc_field_t> kHealthFieldFallbacks = {
+    // xgmi_error sysfs is unreadable on gfx950+; XGMI faults surface as RAS
+    // errors on the XGMI_WAFL block instead.
+    {RDC_HEALTH_XGMI_ERROR, RDC_FI_ECC_XGMI_WAFL_UE},
+};
+
+std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int components) {
   std::vector<rdc_field_t> field_ids{};
   if (components & RDC_HEALTH_WATCH_PCIE) {
     field_ids.push_back(RDC_HEALTH_PCIE_REPLAY_COUNT);
@@ -405,8 +412,6 @@ rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int component
 
   if (components & RDC_HEALTH_WATCH_XGMI) {
     field_ids.push_back(RDC_HEALTH_XGMI_ERROR);
-    // Fallback source where the legacy xgmi_error sysfs node is unreadable (gfx950+).
-    field_ids.push_back(RDC_FI_ECC_XGMI_WAFL_UE);
   }
 
   if (components & RDC_HEALTH_WATCH_MEM) {
@@ -428,56 +433,118 @@ rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int component
     field_ids.push_back(RDC_HEALTH_POWER_THROTTLE_TIME);
   }
 
-  if (0 == field_ids.size()) {
-    RDC_LOG(RDC_ERROR, "Fail to health set. The components must contain at least one watch.");
-    return RDC_ST_BAD_PARAMETER;
+  // Add the fallback source for any candidate that has one.
+  for (size_t i = 0, n = field_ids.size(); i < n; i++) {
+    auto fallback = kHealthFieldFallbacks.find(field_ids[i]);
+    if (fallback != kHealthFieldFallbacks.end()) field_ids.push_back(fallback->second);
   }
 
-  const std::string field_group_name("health-field-group");
-  return group_settings_->rdc_group_field_create(field_ids.size(), field_ids.data(),
-                                                 field_group_name.c_str(), field_group_id);
+  return field_ids;
+}
+
+bool RdcWatchTableImpl::is_health_field_watched(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                                                rdc_field_t field) {
+  std::lock_guard<std::mutex> guard(watch_mutex_);
+  auto health = health_watch_table_.find(group_id);
+  if (health == health_watch_table_.end()) return false;
+
+  const auto& fields = health->second.fields;
+  return std::find(fields.begin(), fields.end(), RdcFieldKey{gpu_index, field}) != fields.end();
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) {
   // remove old health for same group_id
   rdc_health_clear(group_id);
 
-  // create a field group base on the components
-  rdc_field_grp_t field_group_id;
-  rdc_status_t result = create_health_field_group(components, &field_group_id);
-  if (result != RDC_ST_OK) {
-    return result;
+  std::vector<rdc_field_t> candidates = health_component_fields(components);
+  if (candidates.empty()) {
+    RDC_LOG(RDC_ERROR, "Fail to health set. The components must contain at least one watch.");
+    return RDC_ST_BAD_PARAMETER;
   }
 
-  // get field key
-  std::vector<RdcFieldKey> fields_in_watch;
-  result = get_fields_from_group(group_id, field_group_id, fields_in_watch);
+  rdc_group_info_t ginfo;
+  rdc_status_t result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+  if (result != RDC_ST_OK) return result;
+
+  // Probe every (gpu, field) once per watch set. A field the platform cannot
+  // serve is reported here and left out of the watch instead of failing every
+  // 1 s fetch; other failures are transient and stay watched.
+  std::vector<RdcFieldKey> supported_pairs;
+  std::set<rdc_field_t> supported_fields;
+  for (uint32_t gindex = 0; gindex < ginfo.count; gindex++) {
+    uint32_t gpu_index = ginfo.entity_ids[gindex];
+
+    std::map<rdc_field_t, rdc_status_t> probe;
+    for (auto field : candidates) {
+      rdc_field_value value = {};
+      result = metric_fetcher_->fetch_smi_field(gpu_index, field, &value);
+      // fetch_smi_field collapses SMI failures to RDC_ST_SMI_ERROR and keeps
+      // the specific status in value.status.
+      probe[field] =
+          (result == RDC_ST_SMI_ERROR) ? static_cast<rdc_status_t>(value.status) : result;
+      if (result == RDC_ST_OK) {
+        // set initial values to cache
+        cache_mgr_->rdc_health_set(group_id, gpu_index, value);
+      }
+    }
+
+    for (auto field : candidates) {
+      rdc_status_t status = probe[field];
+      if (is_capability_miss(status)) {
+        auto fallback = kHealthFieldFallbacks.find(field);
+        auto fb_probe =
+            (fallback != kHealthFieldFallbacks.end()) ? probe.find(fallback->second) : probe.end();
+        if (fb_probe != probe.end() && fb_probe->second == RDC_ST_OK) {
+          RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
+                                             << " is not supported on GPU " << gpu_index
+                                             << " (status " << status << "); using "
+                                             << field_id_string(fallback->second)
+                                             << " for this health component instead.");
+        } else {
+          RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
+                                             << " is not supported on GPU " << gpu_index
+                                             << " (status " << status
+                                             << "); skipping this field.");
+        }
+        continue;
+      }
+      supported_pairs.push_back({gpu_index, field});
+      supported_fields.insert(field);
+    }
+  }
+
+  if (supported_fields.empty()) {
+    RDC_LOG(RDC_ERROR, "No supported health fields for group " << group_id
+                                                              << "; health watch not set.");
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
+  // Field groups are per group, not per GPU: a field stays in the 1 s watch if
+  // any GPU in the group supports it. -c still skips it per GPU via
+  // supported_pairs. Keep the candidate order.
+  std::vector<rdc_field_t> watch_ids;
+  for (auto field : candidates) {
+    if (supported_fields.count(field)) watch_ids.push_back(field);
+  }
+
+  rdc_field_grp_t field_group_id;
+  const std::string field_group_name("health-field-group");
+  result = group_settings_->rdc_group_field_create(watch_ids.size(), watch_ids.data(),
+                                                   field_group_name.c_str(), &field_group_id);
   if (result != RDC_ST_OK) {
+    cache_mgr_->rdc_health_clear(group_id);  // drop the values primed above
     return result;
   }
 
   // add to the health watch table
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
-    HealthWatchTableEntry hentry{components, field_group_id, fields_in_watch};
+    HealthWatchTableEntry hentry{components, field_group_id, supported_pairs};
     health_watch_table_.insert({group_id, hentry});
   } while (0);
 
-  for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
-    // get initial values
-    rdc_field_value value;
-    // A field that cannot be read on one GPU must not stop priming the rest.
-    result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK) continue;
-
-    // set initial values to cache
-    result = cache_mgr_->rdc_health_set(group_id, fields->first, value);
-    if (result != RDC_ST_OK) continue;
-  }
-
   // Start to watch the fields and update fields per 1 second.
-  result = rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
-  return result;
+  return rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) {
@@ -522,6 +589,10 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, u
                                                      rdc_field_value* start_value,
                                                      rdc_field_value* end_value) {
   if ((nullptr == start_value) && (nullptr == end_value)) return RDC_ST_BAD_PARAMETER;
+
+  // A field dropped at rdc_health_set (unsupported on this GPU) is skipped
+  // without touching SMI or logging.
+  if (!is_health_field_watched(group_id, gpu_index, field)) return RDC_ST_NOT_FOUND;
 
   rdc_status_t result = RDC_ST_OK;
   if (nullptr != start_value) {
@@ -594,9 +665,11 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gp
       err_code = RDC_FR_XGMI_MULTIPLE_ERROR;
     }
   } else {
-    // xgmi_error is unreadable on gfx950 and later; XGMI faults surface as
-    // uncorrectable RAS errors on the XGMI_WAFL block instead.
-    result = get_start_end_values(group_id, gpu_index, RDC_FI_ECC_XGMI_WAFL_UE, 0, nullptr, &end);
+    // Primary unavailable on this GPU: read the RAS fallback (uncorrectable
+    // XGMI_WAFL count) if one is defined.
+    auto fallback = kHealthFieldFallbacks.find(RDC_HEALTH_XGMI_ERROR);
+    if (fallback == kHealthFieldFallbacks.end()) return RDC_ST_OK;
+    result = get_start_end_values(group_id, gpu_index, fallback->second, 0, nullptr, &end);
     if (result != RDC_ST_OK) return RDC_ST_OK;  // neither source available: skip component
 
     uint64_t ue_count = end.value.l_int;

@@ -20,6 +20,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - New script `tools/dme_rdc_metric_sync_check.py` parses DME's protobuf metric definitions and compares against RDC field enums via a curated mapping file (`tools/dme_rdc_metric_mapping.json`).
   - New GitHub Action (`.github/workflows/rdc-dme-sync-check.yml`) runs weekly and on PRs touching metric definitions. Automatically creates GitHub issues when DME adds metrics not yet tracked in RDC.
 
+### Resolved Issues
+
+- **Fixed health watches on gfx950 (MI355) and stopped the 1 Hz fetch error flood**.
+  - `RDC_HEALTH_PENDING_PAGE_NUM` reported an error whenever a GPU had zero bad pages; it now returns 0.
+  - `rdci health -s` / `-c` no longer abort priming, refreshing, or `memory_check` on the first field that fails; each sub-check is evaluated independently.
+  - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable.
+  - Health fields the platform cannot serve are probed at `rdci health -s`, reported per GPU at default verbosity (naming the fallback source where one exists), and left out of the 1 s watch.
+
 ## RDC for ROCm 7.13.0
 
 ### Added

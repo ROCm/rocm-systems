@@ -32,6 +32,9 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+//!< Whether a fetch status means the platform cannot serve the field, as
+//!< opposed to a transient failure.
+bool is_capability_miss(rdc_status_t status);
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,

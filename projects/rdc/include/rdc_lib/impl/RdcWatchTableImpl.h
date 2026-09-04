@@ -124,7 +124,10 @@ class RdcWatchTableImpl : public RdcWatchTable {
   static rdc_status_t handle_fields(rdc_gpu_field_value_t* values, uint32_t num_values,
                                     void* user_data);
 
-  rdc_status_t create_health_field_group(unsigned int components, rdc_field_grp_t* field_group_id);
+  //!< The candidate health fields for a set of RDC_HEALTH_WATCH_* components.
+  std::vector<rdc_field_t> health_component_fields(unsigned int components);
+  //!< Whether (gpu, field) survived the probe at rdc_health_set for this group.
+  bool is_health_field_watched(rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field);
   //!< output: Whether health incidents are full
   bool add_health_incident(uint32_t gpu_index, rdc_health_system_t component,
                            rdc_health_result_t health, uint32_t err_code, std::string err_msg,
