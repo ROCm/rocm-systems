@@ -5009,6 +5009,75 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   EXPECT_FALSE(stopped->saved_status_halt);
   EXPECT_EQ(stopped->status & (1u << 13), 0u);
   EXPECT_EQ(running->status & (1u << 13), 0u);
+
+  // Exercise the opposite subscription transition on a separate queue. The
+  // sendmsg routes this exception to ROCr while it is unsubscribed; enabling
+  // the debugger before s_rfe must not let trap completion claim it again.
+  constexpr uint64_t kRuntimeCwsrAddress = 0x600500000ULL;
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kExceptionEventId = 73;
+  std::vector<uint8_t> runtime_cwsr(static_cast<size_t>(kCwsrSize) * soc_->num_xcds());
+  std::array<uint8_t, 4096> exception_page{};
+  process->map_pages(kRuntimeCwsrAddress, runtime_cwsr.data(), runtime_cwsr.size());
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t), kExceptionStatusAddress,
+                  driver_->local_process_id());
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t) + sizeof(uint64_t), kExceptionEventId,
+                  driver_->local_process_id());
+
+  std::atomic<bool> runtime_notified = false;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+      if (event_id != kExceptionEventId)
+        return;
+      runtime_notified.store(true, std::memory_order_release);
+      memory->write64(kExceptionStatusAddress, 0, process_id);
+    });
+  });
+
+  kfd_ioctl_create_queue_args runtime_queue = create;
+  runtime_queue.ctx_save_restore_address = kRuntimeCwsrAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &runtime_queue), 0);
+  auto *runtime_wave = cu->dispatch_wf(/*wg_id=*/2, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(runtime_wave, nullptr);
+  runtime_wave->set_process_id(driver_->local_process_id());
+  runtime_wave->set_queue_id(runtime_queue.queue_id);
+
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  for (uint32_t i = 0; i < 8 && runtime_wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
+       ++i) {
+    if (runtime_wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
+      runtime_wave->set_m0((kReportedExceptions << 10) | runtime_queue.queue_id);
+    cu->step();
+  }
+  ASSERT_EQ(runtime_wave->pc, kTrapHandlerAddress + 5 * sizeof(uint32_t));
+  ASSERT_TRUE(runtime_notified.load(std::memory_order_acquire));
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  cu->step();
+
+  notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_FALSE(runtime_wave->debug_halted());
+  EXPECT_NE(runtime_wave->trap_runtime_exception_status(), 0u);
+  std::array<kfd_queue_snapshot_entry, 2> runtime_entries{};
+  kfd_ioctl_dbg_trap_args runtime_snapshot{};
+  runtime_snapshot.pid = static_cast<uint32_t>(getpid());
+  runtime_snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  runtime_snapshot.queue_snapshot.snapshot_buf_ptr =
+      reinterpret_cast<uint64_t>(runtime_entries.data());
+  runtime_snapshot.queue_snapshot.num_queues = runtime_entries.size();
+  runtime_snapshot.queue_snapshot.entry_size = sizeof(runtime_entries[0]);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &runtime_snapshot), 0);
+  auto runtime_entry =
+      std::find_if(runtime_entries.begin(), runtime_entries.end(),
+                   [&](const auto &entry) { return entry.queue_id == runtime_queue.queue_id; });
+  ASSERT_NE(runtime_entry, runtime_entries.end());
+  EXPECT_EQ(runtime_entry->exception_status & kReportedExceptions, 0u);
+  soc_->for_each_cp(
+      [&](rocjitsu::amdgpu::CommandProcessor *cp) { cp->set_interrupt_callback(nullptr); });
 }
 
 // An unfetchable PC is the only wave stop that reaches the debug callbacks

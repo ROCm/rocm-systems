@@ -3397,15 +3397,6 @@ bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, 
 bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                       uint32_t gpu_id, uint64_t exception_mask) {
   const pid_t target_pid = proc->client_pid();
-  uint64_t report_mask = exception_mask;
-  {
-    std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
-    auto queue = proc->queue_snapshot_map_.find(queue_id);
-    if (queue != proc->queue_snapshot_map_.end()) {
-      queue->second.exception_status |= exception_mask;
-      report_mask |= queue->second.exception_status & KFD_EC_MASK(EC_QUEUE_NEW);
-    }
-  }
 
   // Claim and latch the event under one session snapshot. A concurrent mask
   // update may affect future events, but it cannot revoke an event that has
@@ -3420,6 +3411,15 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
     if (notifier.get() < 0)
       return false;
+    uint64_t report_mask = exception_mask;
+    {
+      std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
+      auto queue = proc->queue_snapshot_map_.find(queue_id);
+      if (queue != proc->queue_snapshot_map_.end()) {
+        queue->second.exception_status |= exception_mask;
+        report_mask |= queue->second.exception_status & KFD_EC_MASK(EC_QUEUE_NEW);
+      }
+    }
     std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
     auto &event = debug_events_[target_pid][queue_id];
     event.gpu_id = gpu_id;
