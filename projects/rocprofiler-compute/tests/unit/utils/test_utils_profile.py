@@ -287,7 +287,17 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     assert "TCC_HIT" in merged_counters
 
 
-def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_subprocess(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options
+):
     """
     Test run_prof when subprocess execution fails.
 
@@ -302,7 +312,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (False, "error output"),
@@ -310,14 +320,76 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
+    errors = []
+
     def mock_console_error(msg, exit=True):
+        errors.append((msg, exit))
         if exit:
             raise RuntimeError("console_error called")
 
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+
+    assert all(msg != utils_profile._DUPLICATE_ROCM_MESSAGE for msg, _ in errors)
+
+
+@pytest.mark.parametrize(
+    "abort_line",
+    [
+        "Option 'spirv-expand-step' registered more than once!",
+        "ROCPROFILER_REGISTER_LIBRARY is already set to '/opt/rocm/lib/lib.so'",
+    ],
+    ids=["llvm-duplicate-option", "rocprofiler-register-conflict"],
+)
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_prints_duplicate_rocm_install_message(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options, abort_line
+):
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+    captured_output = "\n".join([
+        f"[{rocprof_cmd}] tool initialization ::     0.146483 sec",
+        "running vcopy",
+        abort_line,
+        "workload stderr",
+    ])
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (False, captured_output),
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+
+    errors = []
+
+    def mock_console_error(msg, exit=True):
+        errors.append((msg, exit))
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+
+    with pytest.raises(RuntimeError, match="console_error called"):
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+
+    # The raw failure output stays visible; the hint follows it, then the abort.
+    assert (abort_line, False) in errors
+    assert errors[-2:] == [
+        (utils_profile._DUPLICATE_ROCM_MESSAGE, False),
+        ("Profiling execution failed.", True),
+    ]
 
 
 def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
