@@ -719,6 +719,90 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
+    def test_nic_and_switch_loops_record_device_failures_like_gpus(self):
+        """NIC and switch counterpart of the handle_gpus test above. These three
+        loops called the subcommand directly, so the first device-scoped failure
+        escaped: later devices were never visited, and the output already
+        buffered for the healthy ones died with the unreached final print.
+        """
+        import argparse
+        from unittest import mock
+
+        import amdsmi_helpers
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def __init__(self):
+                self.printed_multiple = False
+
+            def print_output(self, multiple_device_enabled=False):
+                self.printed_multiple = multiple_device_enabled
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+        interface = amdsmi_helpers.amdsmi_interface
+        # Two devices with different codes: one is too few to enter the loop at
+        # all, and differing codes are what resolve to MIXED_DEVICE_ERRORS.
+        device_failures = {
+            "dev-0": amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            "dev-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        }
+        devices = list(device_failures)
+
+        for handler, device_arg, processor_type in (
+            (
+                AMDSMIHelpers.handle_switchs,
+                "switch",
+                amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
+            ),
+            (AMDSMIHelpers.handle_brcm_nics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC),
+            (AMDSMIHelpers.handle_ainics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC),
+        ):
+            with self.subTest(handler=handler.__name__):
+                calls = []
+
+                def fake_subcommand(args, multiple_devices=False, **device_kwarg):
+                    (device,) = device_kwarg.values()
+                    calls.append((multiple_devices, dict(device_kwarg)))
+                    raise _FakeLibErr(device_failures[device])
+
+                helpers = AMDSMIHelpers()
+                logger = _FakeLogger()
+                args = argparse.Namespace(**{device_arg: devices})
+                type_name = interface.AmdSmiProcessorType(processor_type).name
+
+                with mock.patch.object(
+                    interface,
+                    "amdsmi_get_processor_type",
+                    return_value={"processor_type": type_name},
+                ):
+                    handled, _ = handler(helpers, args, logger, fake_subcommand)
+
+                self.assertTrue(handled)
+                self.assertEqual(
+                    [kwargs for _, kwargs in calls],
+                    [{device_arg: device} for device in devices],
+                    f"loop did not visit every device as {device_arg}=<handle>",
+                )
+                self.assertEqual(
+                    [flag for flag, _ in calls],
+                    [True] * len(devices),
+                    "subcommand lost multiple_devices=True",
+                )
+                self.assertTrue(
+                    logger.printed_multiple,
+                    "final print_output was skipped, so buffered device output is dropped",
+                )
+                self.assertEqual(
+                    helpers.error_collector.resolve_exit_code(),
+                    int(self.ExitCode.MIXED_DEVICE_ERRORS),
+                )
+
     def test_power_cap_out_of_range_records_invalid_parameter_value(self):
         """validate_and_set_power_cap owns its recording; the set_gpu handler
         does none. Out of range must record and return a message rather than
