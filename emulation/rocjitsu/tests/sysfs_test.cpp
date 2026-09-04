@@ -69,6 +69,18 @@ Sysfs::GpuInfo make_gpu_info(uint32_t gfx_target_version) {
   return gpu;
 }
 
+TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(make_gpu_info(90500u /* gfx950 */));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("num_sdma_engines"));
+  ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
+  EXPECT_EQ(props["num_sdma_engines"], 0u);
+  EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
+}
+
 // Golden per-GFXIP expectations. Each row mirrors what
 // kfd_topology_set_capabilities() in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
 // programs for the corresponding GC hardware IP version. The watch-mask lo/hi
@@ -341,6 +353,7 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     // so a pair that disagrees reports one part two ways.
     EXPECT_EQ(props["simd_count"], 1216u);
     EXPECT_EQ(props["simd_per_cu"], 4u);
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
 
     // What libhsakmt derives from those: NumShaderBanks = array_count /
     // simd_arrays_per_engine, i.e. the node's total shader engines.

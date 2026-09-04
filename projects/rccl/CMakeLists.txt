@@ -100,15 +100,20 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
+option(SQTT_ENABLED                            "Enable SQTT instrumentation"                   OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
+if(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
@@ -350,6 +355,18 @@ if (rocm_version_matches)
     # Convert the version components to int for comparison
     math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
     add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+
+    # SQTT instrumentation requires ROCm >= 7.13
+    if(SQTT_ENABLED)
+      set(ROCM_VERSION_STRING "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+      if(ROCM_VERSION_STRING VERSION_LESS "7.13")
+        message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_VERSION_STRING}. Disabling SQTT_ENABLED.")
+        set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+      else()
+        message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING})")
+        add_definitions("-DSQTT_ENABLED=1")
+      endif()
+    endif()
 else()
     message(WARNING "Failed to extract ROCm version.")
 endif()
@@ -807,6 +824,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/profiler/accl)
   endif()
   add_subdirectory(test)
 

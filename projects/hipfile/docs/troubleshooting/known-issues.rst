@@ -8,6 +8,14 @@ Known issues
 
 This page documents known issues with hipFile.
 
+Asynchronous operations that use the fastpath backend will not retry on the fallback backend
+============================================================================================
+
+If asynchronous operations satisfy fastpath prerequisites, they now run on the
+fastpath backend. If the fastpath device lookup fails or the p2pdma transfer
+is not supported between the devices, the asynchronous operation will now
+fail.
+
 Poor performance with GPU Virtual Functions
 ===========================================
 

@@ -28,12 +28,16 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "asan"
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
       repository: ROCm/TheRock
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   log_therock_ref:
@@ -60,7 +64,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -70,7 +74,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -87,7 +91,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

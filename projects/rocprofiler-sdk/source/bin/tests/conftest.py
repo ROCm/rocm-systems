@@ -37,18 +37,39 @@ def pytest_addoption(parser):
         default="",
         help="Path to the rocprofv3 launcher script to import and unit-test.",
     )
+    parser.addoption(
+        "--rocprof-attach-path",
+        action="store",
+        default="",
+        help="Path to the rocprof-attach launcher script to import and unit-test.",
+    )
+
+
+def _load_launcher(module_name, path, option):
+    assert path, f"{option} must point at a launcher"
+    assert os.path.isfile(path), f"launcher script not found: {path}"
+
+    # Installed launchers have no .py suffix, so load them via an explicit loader.
+    loader = SourceFileLoader(module_name, path)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(scope="session")
 def rocprofv3(request):
     """Import the rocprofv3 launcher as a module (no GPU required)."""
-    path = request.config.getoption("--rocprofv3-path")
-    assert path, "--rocprofv3-path must point at rocprofv3"
-    assert os.path.isfile(path), f"rocprofv3 script not found: {path}"
+    option = "--rocprofv3-path"
+    return _load_launcher(
+        "rocprofv3_under_test", request.config.getoption(option), option
+    )
 
-    # installed launcher is named "rocprofv3" (no .py), so load via explicit loader
-    loader = SourceFileLoader("rocprofv3_under_test", path)
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+
+@pytest.fixture(scope="session")
+def rocprof_attach(request):
+    """Import the rocprof-attach launcher as a module (no GPU required)."""
+    option = "--rocprof-attach-path"
+    return _load_launcher(
+        "rocprof_attach_under_test", request.config.getoption(option), option
+    )
