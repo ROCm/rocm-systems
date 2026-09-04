@@ -145,6 +145,8 @@ class SimulatedKfd : public LinuxKfd {
 public:
   /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
   using DebugIdentityValidationHook = std::function<void()>;
+  /// @brief One-shot test seam between debugger ownership selection and event publication.
+  using DebugEventClaimHook = std::function<void()>;
 
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
@@ -167,6 +169,10 @@ public:
   /// @retval false No local process to retain (e.g. it was already torn down, or
   ///         daemon/remote mode); the caller must NOT treat the fd as retained.
   [[nodiscard]] bool retain_local_open() override;
+
+  void set_debug_event_claim_hook_for_testing(DebugEventClaimHook hook) {
+    debug_event_claim_hook_ = std::move(hook);
+  }
 
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
@@ -609,6 +615,7 @@ private:
   mutable std::mutex debug_sessions_mutex_;
   std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
   DebugIdentityValidationHook debug_identity_validation_hook_;
+  DebugEventClaimHook debug_event_claim_hook_;
   std::condition_variable_any debug_sessions_cv_;
   std::jthread debug_session_reaper_;
 
