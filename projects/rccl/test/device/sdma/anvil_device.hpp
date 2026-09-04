@@ -5,6 +5,8 @@
 
 namespace sdma_anvil {
 
+__device__ unsigned long long g_sdmaStubQuietCount = 0;
+
 struct SdmaQueueDeviceHandle {
   int tag;
 };
@@ -32,6 +34,9 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
   memcpyDevice(dst, src, size);
 }
 
-__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) { (void)handle; }
+__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
+  (void)handle;
+  atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+}
 
 }  // namespace sdma_anvil
