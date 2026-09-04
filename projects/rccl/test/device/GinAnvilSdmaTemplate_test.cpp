@@ -84,6 +84,28 @@ static unsigned long long readThreadfenceCount() {
   return c;
 }
 
+static void resetQuietCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubQuietCount), &z, sizeof(z)));
+}
+
+static unsigned long long readQuietCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubQuietCount), sizeof(c)));
+  return c;
+}
+
+static void resetQuietCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubQuietCount), &z, sizeof(z)));
+}
+
+static unsigned long long readQuietCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(sdma_anvil::g_sdmaStubQuietCount), sizeof(c)));
+  return c;
+}
+
 // H1: non-leader thread returns immediately.
 __global__ void kernelPutLeaderOnly(TemplateHarness* h, int* executed) {
   ncclGinCtx ginCtx{};
@@ -580,14 +602,18 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_ZeroBytesNoOp) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   mapIpcTo(&host, &d_entry, &d_src, static_cast<size_t>(kN));
+  host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
   kernelGetIpc<<<1, 1>>>(d_h.ptr, 0);
   syncAndCheck();
   auto got = d_dst.copyTo();
   for (uint8_t b : got) EXPECT_EQ(b, 0);
+  EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
 // H16: missing queue handle falls back to ipcPut even above the threshold.
@@ -603,9 +629,12 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_MissingHandleFallsBackToIpc) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
   mapIpcTo(&host, &d_entry, &d_src, static_cast<size_t>(kN));
+  host.ctx.sdmaDirty = d_dirty.ptr;
   host.ctx.queueHandles = nullptr;
   d_h.upload(host);
   kernelGetIpc<<<1, 1>>>(d_h.ptr, static_cast<size_t>(kN));
@@ -614,6 +643,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_MissingHandleFallsBackToIpc) {
   for (int i = 0; i < kN; ++i) {
     EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
   }
+  EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
 // H17: FlushAsync quiets dirty channels for the requested peer and marks complete.
@@ -644,10 +674,12 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CompletesWithoutClearingDirty) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
+  resetQuietCount();
   kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
   syncAndCheck();
   EXPECT_EQ(d_complete.download(), 1u);
   EXPECT_EQ(d_dirty.download(), peer1Bit);
+  EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
 // H18: invalid ctx still completes the request so Wait will not hang.
@@ -666,9 +698,11 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxCompletes) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.layoutMagic = 0;
   d_h.upload(host);
+  resetQuietCount();
   kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
   syncAndCheck();
   EXPECT_EQ(d_complete.download(), 1u);
+  EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
 // H19/H20: Wait fences only after FlushAsync has marked the request complete.
@@ -736,9 +770,11 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalResolvesQueue) {
   host.ctx.ipcTable = d_entry.ptr;
   host.ctx.ipcTableCount = 1;
   d_h.upload(host);
+  resetQuietCount();
   kernelPutStandaloneSignal<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE

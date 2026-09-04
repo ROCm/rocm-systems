@@ -50,8 +50,7 @@ int requestedGinType() {
 // if the type numbering ever changes.
 std::string ginTypeUsage() {
   return "required NCCL_GIN_TYPE=" +
-         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy], " +
-         std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + " [rocshmem-gda] or " +
+         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy] or " +
          std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + " [anvil-sdma]";
 }
 
@@ -60,8 +59,7 @@ std::string ginTypeReason() {
   if (!ginType)
     return "GIN type not set (" + ginTypeUsage() + ")";
   int t = requestedGinType();
-  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA &&
-      t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return std::string("Invalid GIN type: ") + ginType + " (" + ginTypeUsage() + ")";
   return "";
 }
@@ -1542,7 +1540,7 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
 
 template <typename GinOrAllContexts>
 __device__ void syncFenceVisibilityBarrier(GinOrAllContexts ginOrAllContexts, BarrierFenceOperation operation,
-                                           bool defaultFence, struct ncclDevComm devComm) {
+                                           bool defaultFence) {
   ncclGinBarrierSession<ncclCoopCta> bar{
     ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
   if (defaultFence) {
@@ -1574,9 +1572,9 @@ __global__ void barrierFenceVisibilityKernel(
   }
 
   if (allContexts) {
-    syncFenceVisibilityBarrier(ncclGinAllContexts(devComm), operation, defaultFence, devComm);
+    syncFenceVisibilityBarrier(ncclGinAllContexts(devComm), operation, defaultFence);
   } else {
-    syncFenceVisibilityBarrier(gin, operation, defaultFence, devComm);
+    syncFenceVisibilityBarrier(gin, operation, defaultFence);
   }
 
   int sourceRank = operation == BarrierFenceOperation::SelfPut ? rank : (rank + devComm.nRanks - 1) % devComm.nRanks;
@@ -1610,23 +1608,29 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   void* dDst = nullptr;
   int* dError = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
-  auto memCleanup = makeScopeGuard([&]() {
-    if (dError) (void)hipFree(dError);
-    if (dDst) (void)ncclMemFree(dDst);
+  auto srcCleanup = makeScopeGuard([&]() {
     if (dSrc) (void)ncclMemFree(dSrc);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
+  auto dstCleanup = makeScopeGuard([&]() {
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
+  auto errorCleanup = makeScopeGuard([&]() {
+    if (dError) (void)hipFree(dError);
   });
 
   ncclWindow_t srcWin = nullptr;
   ncclWindow_t dstWin = nullptr;
   ASSERT_MPI_EQ(ncclSuccess,
                 ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto srcWinCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+  });
   ASSERT_MPI_EQ(ncclSuccess,
                 ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto winCleanup = makeScopeGuard([&]() {
+  auto dstWinCleanup = makeScopeGuard([&]() {
     if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
   });
 
   std::vector<uint8_t> hostSrc(kBytes);
@@ -1635,6 +1639,7 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
@@ -1673,6 +1678,7 @@ TEST_F(GinMPIDeviceTests, BarrierFence_GetMakesLocalGetVisible_SingleNode) {
 
 TEST_F(GinMPIDeviceTests, BarrierFence_DefaultIsPutAndGet_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Get, /*allContexts=*/false, /*defaultFence=*/true);
+  runBarrierFenceVisibility(BarrierFenceOperation::Put, /*allContexts=*/false, /*defaultFence=*/true);
 }
 
 TEST_F(GinMPIDeviceTests, BarrierFence_AllContextsPut_SingleNode) {
