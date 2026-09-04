@@ -212,6 +212,12 @@ virtualMemoryManagement:
     # Multiprocess export/import over a unix socket.
     # ROCr refuses a CPU mapping of VMM memory under WSL DXG.
     disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_MulProc_ImportedDeviceMem_HostAccess_ExporterNotDeviceZero:
+    <<: *level_2
+    # Multiprocess export/import over a unix socket.
+    # ROCr refuses a CPU mapping of VMM memory under WSL DXG.
+    disabled: [amd_windows, amd_wsl]
+    tags: [multigpu]
   Unit_hipMemSetAccess_MulProc_ImportedDeviceMem_HostThenDeviceAccess:
     <<: *level_2
     # Multiprocess export/import over a unix socket.

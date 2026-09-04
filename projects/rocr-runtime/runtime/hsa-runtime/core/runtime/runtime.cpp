@@ -4317,6 +4317,60 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   return HSA_STATUS_SUCCESS;
 }
 
+/* Any GPU can import a dmabuf for peer access, but only its exporter can CPU map it: elsewhere it
+ * is a ttm_bo_type_sg BO whose mmap succeeds and then takes SIGBUS on the first fault. */
+Agent* Runtime::ImportedHandleCpuMmapAgent(MemoryHandle* memHandle) {
+  assert(memHandle->imported && "Exporter lookup only applies to imported handles");
+
+  if (memHandle->cpu_mmap_agent_resolved) return memHandle->cpu_mmap_agent;
+  memHandle->cpu_mmap_agent_resolved = true;
+
+  /* hsaKmtHandleImport mints a fabric handle's dmabuf on whichever device it is handed, so that
+   * device is the exporter by construction and any GPU agent serves. */
+  if (memHandle->is_fabric_handle) {
+    memHandle->cpu_mmap_agent = KfdGttAnchorGpu();
+    return memHandle->cpu_mmap_agent;
+  }
+
+  const int dmabuf_fd = memHandle->driver_handle.dmabuf_fd;
+
+  if (dmabuf_fd >= 0) {
+    HsaGraphicsResourceInfo info = {};
+    HSA_REGISTER_MEM_FLAGS regFlags{0};
+    /* No VA and no node list: the "import without VA assigned" form, cheapest way to get NodeId. */
+    regFlags.ui32.requiresVAddr = 0;
+
+    if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd),
+                                                           &info, 0, nullptr, regFlags)) ==
+        HSAKMT_STATUS_SUCCESS) {
+      const uint32_t exporter_node = info.NodeId;
+      HSAKMT_CALL(hsaKmtDeregisterMemory(info.MemoryAddress));
+
+      /* A definitive answer: take the exporting agent if it is visible, give up if it is not.
+       * Substituting another GPU is what produces the SIGBUS above. */
+      auto it = agents_by_node_.find(exporter_node);
+      if (it != agents_by_node_.end()) {
+        for (Agent* agent : it->second) {
+          if (agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
+            memHandle->cpu_mmap_agent = agent;
+            return memHandle->cpu_mmap_agent;
+          }
+        }
+      }
+      debug_print("CPU mapping of imported handle: exporting node %u is not a visible GPU agent\n",
+                  exporter_node);
+      return memHandle->cpu_mmap_agent;
+    }
+    debug_print("CPU mapping of imported handle: could not query the exporting node\n");
+  }
+
+  /* No answer at all. With one visible GPU there is no other device the BO could have come from,
+   * so it is the exporter; with more than one, refuse rather than guess. */
+  if (gpu_agents_.size() == 1) memHandle->cpu_mmap_agent = gpu_agents_[0];
+
+  return memHandle->cpu_mmap_agent;
+}
+
 Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappedHandle,
                                                             Agent* targetAgent, void* va,
                                                             size_t size,
@@ -4329,18 +4383,14 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
   MemoryHandle* memHandle = mappedHandle->mem_handle;
 
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    /* A locally-created handle already has a CPU mapping: CreateShareableHandle recorded that
-     * BO's mmap offset. An imported handle owns only the fd, so import the dmabuf here to get an
-     * offset EnableAccess can mmap. The GPU must be the KFD GTT anchor VMemoryHandleCreate uses;
-     * on CPX+NPS2 it is not the lowest DRM minor and the wrong context faults on first CPU
-     * store. */
+    /* A locally-created handle already has a CPU mapping from CreateShareableHandle. An imported
+     * one owns only the fd, so import the dmabuf here for an offset EnableAccess can mmap. It has
+     * to land in the exporting GPU's DRM context; see ImportedHandleCpuMmapAgent. */
     if (!memHandle->imported) return;
 
-    core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-    if (drm_agent == nullptr) {
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                               "No GPU agent available to map imported memory on the CPU");
-    }
+    core::Agent* drm_agent =
+        core::Runtime::runtime_singleton_->ImportedHandleCpuMmapAgent(memHandle);
+    if (drm_agent == nullptr) return;
 
     hsa_status_t status = drm_agent->driver().ImportMemoryHandle(
         *drm_agent, &driver_handle,
@@ -4378,10 +4428,13 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
 
-    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
-    bool result = rocr::os::UncommitMemory(va, size);
-    assert(result && "Failed to remap VA to anonymous");
-    (void)result;
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation.
+     * Only if one was made: on the EnableAccess failure path this would drop a live reservation. */
+    if (cpu_mapped) {
+      bool result = rocr::os::UncommitMemory(va, size);
+      assert(result && "Failed to remap VA to anonymous");
+      (void)result;
+    }
 
     /* Release the BO imported by the constructor for the imported-handle CPU mapping. */
     if (cpu_mmap_drm_agent != nullptr) {
@@ -4411,7 +4464,11 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
      * for a locally-created one. */
     if (mappedHandle->mem_handle->imported) {
       agent = cpu_mmap_drm_agent;
-      if (agent == nullptr) return HSA_STATUS_ERROR;
+      if (agent == nullptr) {
+        debug_print(
+            "EnableAccess: cannot CPU map an imported handle whose exporting GPU is unknown\n");
+        return HSA_STATUS_ERROR;
+      }
       agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       cpu_mmap_handle = &driver_handle;
     } else if (mappedHandle->mem_handle->region) {
@@ -4437,6 +4494,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
                              cpu_mmap_handle->mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
+    cpu_mapped = true;
   } else {
     hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size,
                                                     perms, targetAgent->node_id());
