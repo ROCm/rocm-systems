@@ -3064,6 +3064,16 @@ file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_support.cpp" 
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_common.inc" _sc_common_body)
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc" _sc_flat_body)
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_lds.inc" _sc_lds_body)
+file(READ "${_consan_dir}/consan_text_relocation.cpp" _text_relocation_body)
+file(READ "${_consan_dir}/targets/cdna5/consan_gfx1250_target_profile.h.inc" _cdna5_profile)
+if(_text_relocation_body MATCHES "CDNA5|Gfx1250|gfx1250" OR
+   NOT _text_relocation_body MATCHES "identity_translation_revision" OR
+   NOT _cdna5_profile MATCHES
+       "identity_translation_revision[ ]*=[ ]*ProcessorRevision::Gfx1250A0")
+    message(FATAL_ERROR
+        "ConSan structural-translation revision selection escaped its target profile"
+    )
+endif()
 foreach(_operation IN ITEMS
     access_dword_count
     access_scratch_tuple_base_is_valid

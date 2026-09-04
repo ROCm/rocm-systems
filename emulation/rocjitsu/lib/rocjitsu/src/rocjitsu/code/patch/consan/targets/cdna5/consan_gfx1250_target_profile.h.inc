@@ -19,6 +19,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   };
   profile.direct_call_form = ConSanDirectCallForm::SCallI64;
   profile.code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation;
+  profile.identity_translation_revision = ProcessorRevision::Gfx1250A0;
   profile.resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10};
   profile.workgroup_shadow_clear = {
       .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,

@@ -12,6 +12,7 @@
 #include <optional>
 #include <string_view>
 
+#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/patch/consan/consan_enum_vocabulary.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -302,6 +303,8 @@ struct ConSanTargetProfile {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
   ConSanDeviceCacheRefreshForm device_cache_refresh = ConSanDeviceCacheRefreshForm::None;
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
+  /// Same-revision selection required for a structural, non-semantic DBT pass.
+  ProcessorRevision identity_translation_revision = ProcessorRevision::Unspecified;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;

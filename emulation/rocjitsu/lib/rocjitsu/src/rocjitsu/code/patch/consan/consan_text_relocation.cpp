@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
@@ -68,12 +69,11 @@ std::optional<ConSanRelocatedText> relocate_consan_text(
   options.source_text_code_ranges.insert(options.source_text_code_ranges.end(),
                                          additional_code_ranges.begin(),
                                          additional_code_ranges.end());
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    // A same-revision choice selects structural identity translation. ConSan's
-    // target-specific emitters already produced words for the loaded revision;
-    // no B0-to-A0 stepping rewrite is requested here.
-    options.input_revision = ProcessorRevision::Gfx1250A0;
-    options.output_revision = ProcessorRevision::Gfx1250A0;
+  if (const ConSanTargetProfile *target = consan_target_profile(arch);
+      target != nullptr &&
+      target->identity_translation_revision != ProcessorRevision::Unspecified) {
+    options.input_revision = target->identity_translation_revision;
+    options.output_revision = target->identity_translation_revision;
   }
   if (descriptor_patched_image.size() < sizeof(Elf64_Ehdr)) {
     errors.emplace_back("ConSan " + std::string(operation) + " has no complete ELF header");
