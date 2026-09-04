@@ -47,6 +47,10 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
                                    uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
                                    uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts);
 
+//!< Whether a fetch status means the platform cannot serve the field, as
+//!< opposed to a transient failure.
+bool is_capability_miss(rdc_status_t status);
+
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
