@@ -253,6 +253,19 @@ TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
       rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
+TEST(KfdIoctlHelpersTest, PreservesRuntimeOwnershipThroughTrapCompletion) {
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kMathError = KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
+  constexpr uint64_t kExceptions = kWaveAbort | kMathError;
+
+  EXPECT_EQ(rocjitsu::kmd::detail::preserve_runtime_queue_exception_owner(kExceptions, kWaveAbort,
+                                                                          kExceptions),
+            0u);
+  EXPECT_EQ(
+      rocjitsu::kmd::detail::preserve_runtime_queue_exception_owner(kExceptions, 0, kExceptions),
+      kExceptions);
+}
+
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
 // still reads the ring alone. An SDMA queue is per-engine and is not replicated.

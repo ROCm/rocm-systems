@@ -93,6 +93,14 @@ classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_mov
     return TrapInterruptSite::QueueException;
   return TrapInterruptSite::Unknown;
 }
+
+constexpr uint64_t preserve_runtime_queue_exception_owner(uint64_t queue_exception_status,
+                                                          uint64_t runtime_exception_status,
+                                                          uint64_t debugger_status) {
+  // A combined event has one owner. Once any bit was published to ROCr, a
+  // later subscription change cannot split the same event with the debugger.
+  return (queue_exception_status & runtime_exception_status) != 0 ? 0 : debugger_status;
+}
 } // namespace detail
 } // namespace kmd
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
