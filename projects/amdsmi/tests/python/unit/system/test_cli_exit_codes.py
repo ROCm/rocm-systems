@@ -558,17 +558,11 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         errors under test.
         """
         import argparse
-        import os
         from unittest import mock
 
         from amdsmi_helpers import AMDSMIHelpers
 
-        # Import the set_value subcommand as a standalone module (it uses only
-        # absolute imports), so no driver-backed package init is triggered.
-        sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
-        if sub_dir not in sys.path:
-            sys.path.append(sub_dir)
-        import set_value
+        set_value = _load_set_value()
 
         class _FakeLogger:
             format = "human"
@@ -899,14 +893,10 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         set_value guard, which runs before any device dispatch.
         """
         import argparse
-        import os
 
         from amdsmi_helpers import AMDSMIHelpers
 
-        sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
-        if sub_dir not in sys.path:
-            sys.path.append(sub_dir)
-        import set_value
+        set_value = _load_set_value()
 
         cmd: Any = set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
@@ -947,15 +937,11 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         above.
         """
         import argparse
-        import os
         from unittest import mock
 
         from amdsmi_helpers import AMDSMIHelpers
 
-        sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
-        if sub_dir not in sys.path:
-            sys.path.append(sub_dir)
-        import set_value
+        set_value = _load_set_value()
 
         class _FakeLogger:
             format = "human"
@@ -1310,6 +1296,11 @@ class _FakeGpuLogger:
 
 
 def _load_set_value():
+    """Import the set_value subcommand standalone. It uses only absolute imports,
+    so this triggers no driver-backed package init.
+    """
+    if _CLI_DRIVE_SKIP:
+        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
     sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
     if sub_dir not in sys.path:
         sys.path.append(sub_dir)
@@ -1763,6 +1754,8 @@ class TestSetGpuGAllFailureGuards(unittest.TestCase):
 
 
 def _load_reset():
+    if _CLI_DRIVE_SKIP:
+        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
     sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
     if sub_dir not in sys.path:
         sys.path.append(sub_dir)
