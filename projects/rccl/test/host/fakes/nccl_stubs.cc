@@ -32,8 +32,10 @@
 #include <vector>
 
 #include "nccl.h"
-#include "nccl_fakes.h"  // g_loadParam
+#include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+
+#include "fakes/nccl_stubs.h"
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -141,17 +143,21 @@ ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
-ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
+static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
+ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
-// Controllable (was fail-loud). Records the comm it was handed: commCleanup forwards its own argument,
-// and without the recorder passing anything else (or nullptr) would be invisible.
+// Controllable (was fail-loud). The default records the comm it was handed: commCleanup forwards its own
+// argument, and without the recorder passing anything else (or nullptr) would be invisible.
 extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
-ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
+static ncclResult_t DefaultNcclTunerPluginUnload(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("tunerUnload");
   g_ncclTunerPluginUnloadLastComm = comm;
   return g_ncclTunerPluginUnloadResult;
 }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
+ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { return g_ncclTunerPluginUnload(comm); }
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
 // rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
@@ -160,17 +166,41 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+static ncclResult_t DefaultNcclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                           void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
+                                           struct ncclComm*) {
+  ncclResult_t ret = func(job);
+  if (ret != ncclSuccess && undo) undo(job);
+  if (destructor) destructor(job);
+  return ret;
+}
+std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                           void (*)(struct ncclAsyncJob*), void (*)(void*), struct ncclComm*)>
+    g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
+                             void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), struct ncclComm* comm) {
+  return g_ncclAsyncLaunch(job, func, undo, destructor, comm);
+}
 // Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
 // unit under test emits this via NCCL_PARAM (enqueue.cc:1986). Reads the env
 // rather than a hardcoded 0, which forced config.graphStreamOrdering on every
 // envConfigOverride call and hid the field.
 #ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-int64_t ncclParamGraphStreamOrdering() { return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT); }
+int64_t ncclParamGraphStreamOrdering() {
+  return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
+}
 #endif
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }  // src/channel.cc:14
-namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
-ncclResult_t ncclCommDestroy(ncclComm_t) { ::abort(); }
+static ncclResult_t DefaultCollTraceDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy = DefaultCollTraceDestroy;
+namespace latency_profiler {
+ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); }
+ncclResult_t collTraceDestroy(struct ncclComm* comm) { return g_collTraceDestroy(comm); }
+}  // namespace latency_profiler
+
+static ncclResult_t DefaultNcclCommDestroy(ncclComm_t) { return ncclSuccess; }
+std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy = DefaultNcclCommDestroy;
+ncclResult_t ncclCommDestroy(ncclComm_t comm) { return g_ncclCommDestroy(comm); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
 ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
 char ncclLastError[1024] = {};
@@ -192,6 +222,9 @@ extern unsigned int g_rocmVersionMajor;
 extern unsigned int g_rocmVersionMinor;
 extern unsigned int g_rocmVersionPatch;
 
+static ncclResult_t DefaultNcclMemFree(void*) { return ncclSuccess; }
+std::function<ncclResult_t(void*)> g_ncclMemFree = DefaultNcclMemFree;
+
 extern "C" {
 ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { return ncclSuccess; }
 // librocm-core; signature matches rocm-core's, though rocm_version.h is not included in this TU.
@@ -202,7 +235,16 @@ int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch
   return g_getROCmVersionResult;
 }
 ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
-ncclResult_t ncclMemFree(void* ptr) { ::abort(); }
+ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
+
+void ResetNcclStubs() {
+  g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+  g_ncclMemFree = DefaultNcclMemFree;
+  g_ncclSymkFinalize = DefaultNcclSymkFinalize;
+  g_ncclCommDestroy = DefaultNcclCommDestroy;
+  g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
+}

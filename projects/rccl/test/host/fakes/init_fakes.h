@@ -17,6 +17,7 @@
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
 #include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
+#include "nccl_stubs.h"  // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
 #include "rccl_wrap_fakes.h"  // src/rccl_wrap.cc seams (shared)
 #include "recorder_fakes.h"  // rccl::Recorder no-ops (shared)
 #include "transport_stubs.h"  // g_rcclUseAinic (shared)
@@ -26,6 +27,16 @@ struct ncclTopoSystem;
 // Forward-declared, not #include "bootstrap.h": including it here would pull src/include/recorder.h in alongside the
 // hipified copy init.cc includes, and the two enum definitions collide.
 struct ncclBootstrapHandle;
+
+struct amdsmiFabricDeviceInfo;
+
+// fillInfo's UALoE/MNNVL probe. The default answers -1, i.e. what a host with no fabric device reports.
+ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex);
+extern std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId;
+
+// The default leaves the caller's struct untouched, so fillInfo's own fabricSupported=false stands.
+ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info);
+extern std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo;
 
 void SetGethostnameFail(bool fail);
 void SetDladdrFail(bool fail);
@@ -38,6 +49,9 @@ extern unsigned int g_rocmVersionMinor;
 extern unsigned int g_rocmVersionPatch;
 
 extern bool g_ginHasError;
+
+extern std::function<ncclResult_t()> g_ncclEnvPluginInit;
+extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort;
 
 extern bool g_validHsaScratch;
 extern const char* g_lastHsaScratchEnv;  // hsaScratchEnv as passed to validHsaScratchEnvSetting

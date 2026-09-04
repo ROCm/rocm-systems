@@ -76,7 +76,9 @@ ncclResult_t ncclGetUniqueId(ncclUniqueId* id) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
+ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* job) { return g_ncclGroupJobAbort(job); }
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
 
 bool g_ginHasError = false;
@@ -104,13 +106,23 @@ bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersio
 }
 int getFirmwareVersion() { return g_firmwareVersion; }
 
-struct amdsmiFabricDeviceInfo;
-ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
+ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
   return ncclSuccess;
 }
-ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo*) {
+std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId =
+    DefaultAmdSmiGetDeviceIndexByPciBusId;
+ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex) {
+  return g_amdSmiGetDeviceIndexByPciBusId(busId, deviceIndex);
+}
+
+ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo*) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo =
+    DefaultAmdSmiGetFabricDeviceInfo;
+ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
+  return g_amdSmiGetFabricDeviceInfo(deviceIndex, info);
 }
 ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {
   if (supported) *supported = false;
@@ -175,7 +187,10 @@ void initEnv() {}
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 void initNvtxRegisteredEnums() {}
 ncclResult_t g_ncclEnvPluginInitResult = ncclSuccess;
-ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInitResult; }
+// Default reads the plain result seam so both styles work: set g_ncclEnvPluginInitResult, or ScopedHook the functor.
+static ncclResult_t DefaultNcclEnvPluginInit() { return g_ncclEnvPluginInitResult; }
+std::function<ncclResult_t()> g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInit(); }
 bool ncclIommuPassthroughOk(const char*) { return true; }
 // ncclInit() strtok_r()s the /proc version read, so it must have >= 3 whitespace tokens.
 ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
@@ -310,16 +325,21 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ResetRecorderFakes();
   ResetRcclWrapFakes();
+  ResetNcclStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();
   g_ginHasError = false;
+  g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+  g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
   g_lastHsaScratchEnv = nullptr;
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
+  g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_pciDeviceClass = kDefaultPciDeviceClass;
   g_pciDeviceClassCalls = 0;
   g_lastPciDeviceClassBusId.clear();
