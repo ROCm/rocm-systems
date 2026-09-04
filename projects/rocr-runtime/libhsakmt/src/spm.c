@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode)
