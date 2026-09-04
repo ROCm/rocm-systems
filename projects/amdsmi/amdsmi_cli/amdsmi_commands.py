@@ -9,7 +9,7 @@ import sys
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
-from amdsmi_cli_exceptions import AmdSmiExitCode, AmdSmiLibraryErrorException
+from amdsmi_cli_exceptions import AmdSmiDeviceKind, AmdSmiExitCode, AmdSmiLibraryErrorException
 
 from subcommands import (
     BadPagesCommands,
@@ -33,7 +33,7 @@ from subcommands import (
 )
 
 
-def _exit_on_init_error(output_format, error, device_class):
+def _exit_on_init_error(output_format, error, device_kind: AmdSmiDeviceKind):
     """Report a device-init library failure and exit with its status code.
 
     Device init runs before argv is parsed, so this cannot reach the top-level
@@ -41,7 +41,7 @@ def _exit_on_init_error(output_format, error, device_class):
     The traceback stays at debug level -- the user gets the formatted error.
     """
     exc = AmdSmiLibraryErrorException(output_format, error.err_code)
-    logging.debug(f"Unexpected library error during {device_class} device init", exc_info=True)
+    logging.debug(f"Unexpected library error during {device_kind.value} device init", exc_info=True)
     print(exc)
     sys.exit(exc.value)
 
@@ -111,7 +111,7 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (amdgpu not found in modules)"
                     )
                 else:
-                    _exit_on_init_error(self.logger.format, e, "GPU")
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.GPU)
 
             if len(self.device_handles) == 0:
                 # No GPU's found post amdgpu driver initialization
@@ -140,7 +140,7 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
                     )
                 else:
-                    _exit_on_init_error(self.logger.format, e, "NIC")
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.NIC)
 
         # Resolve the node handle (independent of AINIC init; needed for amd-smi node).
         for dev in self.device_handles:
@@ -167,7 +167,7 @@ class AMDSMICommands(
                         "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
                     )
                 else:
-                    _exit_on_init_error(self.logger.format, e, "CPU")
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU)
 
             # core handles
             try:
@@ -181,7 +181,7 @@ class AMDSMICommands(
                         "Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)"
                     )
                 else:
-                    _exit_on_init_error(self.logger.format, e, "CORE")
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU_CORE)
 
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization

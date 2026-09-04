@@ -103,6 +103,19 @@ class AmdSmiErrorSeverity(enum.Enum):
     DEVICE = "device"
 
 
+class AmdSmiDeviceKind(enum.Enum):
+    """Device kinds the CLI can report as missing. The value is the label used
+    in the message; NIC covers both AI-NIC and Broadcom, which ``-N`` selects
+    together.
+    """
+
+    GPU = "GPU"
+    CPU = "CPU"
+    CPU_CORE = "CPU CORE"
+    NIC = "NIC"
+    SWITCH = "SWITCH"
+
+
 # The two 32-bit library sentinels (see amdsmi_wrapper.amdsmi_status_t), named here
 # so this module stays importable without the amdsmi package and avoids bare hex.
 AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE
@@ -260,20 +273,12 @@ class AmdSmiInvalidParameterException(AmdSmiException):
 
 
 class AmdSmiDeviceNotFoundException(AmdSmiException):
-    def __init__(self, command, outputformat: str, gpu: bool, cpu: bool, core: bool):
+    def __init__(self, command, outputformat: str, device_kind: AmdSmiDeviceKind):
         super().__init__()
         self.value = int(AmdSmiExitCode.DEVICE_NOT_FOUND)
         self.command = command
         self.output_format = outputformat
-
-        # Handle different devices
-        self.device_type = ""
-        if gpu:
-            self.device_type = "GPU"
-        elif cpu:
-            self.device_type = "CPU"
-        elif core:
-            self.device_type = "CPU CORE"
+        self.device_type = device_kind.value
 
         common_message = f"Can not find a device: {self.device_type} '{self.command}'"
 
