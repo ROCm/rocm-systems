@@ -5831,7 +5831,6 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-  char buff[AMDSMI_MAX_STRING_LENGTH];
   FILE* fp;
   double pcie_speed = 0;
   unsigned pcie_width = 0;
@@ -5861,7 +5860,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
-    if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+    if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
       fclose(fp);
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__ << " | Failed to parse: " << path_max_link_speed;
