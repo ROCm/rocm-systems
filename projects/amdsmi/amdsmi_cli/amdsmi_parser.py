@@ -827,9 +827,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _GPUSelectAction.outputformat,
-                            True,
-                            False,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.GPU,
                         )
 
         return _GPUSelectAction
@@ -863,7 +861,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _NICSelectAction.output_format
+                            selected_device_handles,
+                            _NICSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.NIC,
                         )
 
         return _NICSelectAction
@@ -897,7 +897,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _SwitchSelectAction.output_format
+                            selected_device_handles,
+                            _SwitchSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.SWITCH,
                         )
 
         return _SwitchSelectAction
@@ -936,9 +938,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CPUSelectAction.outputformat,
-                            False,
-                            True,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU,
                         )
 
         return _CPUSelectAction
@@ -977,9 +977,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CoreSelectAction.outputformat,
-                            False,
-                            False,
-                            True,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU_CORE,
                         )
 
         return _CoreSelectAction
