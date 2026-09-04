@@ -30,6 +30,7 @@
 const std::vector<const char*> ShaderList = {
     NoopIsa,
     CopyDwordIsa,
+    BlitCopyIsa,
     InfiniteLoopIsa,
     AtomicIncIsa,
     ScratchCopyDwordIsa,
@@ -54,6 +55,10 @@ const std::vector<const char*> ShaderList = {
 
 /* Macros for portable v_add_co_u32, v_add_co_ci_u32,
  * and v_cmp_lt_u32.
+ *
+ * Note V_ADD_U32_NC is only carry-free from gfx9 on. gfx8 has no no-carry add,
+ * so it falls back to the carry form and clobbers VCC; callers must not expect
+ * VCC to survive it.
  */
 #define SHADER_MACROS_U32 \
     "   .text\n"\
@@ -88,6 +93,43 @@ const std::vector<const char*> ShaderList = {
     "       .else\n"\
     "           v_cmp_eq_u32        vcc, \\src0, \\vsrc1\n"\
     "       .endif\n"\
+    "   .endm\n"\
+    "   .macro V_ADD_U32_NC vdst, src0, vsrc1\n"\
+    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
+    "           v_add_nc_u32        \\vdst, \\src0, \\vsrc1\n"\
+    "       .elseif (.amdgcn.gfx_generation_number >= 9)\n"\
+    "           v_add_u32           \\vdst, \\src0, \\vsrc1\n"\
+    "       .else\n"\
+    "           v_add_u32           \\vdst, vcc, \\src0, \\vsrc1\n"\
+    "       .endif\n"\
+    "   .endm\n"
+
+/* Wait for all outstanding memory operations to retire.
+ * gfx12 replaces the unified vmcnt/lgkmcnt counters with split ones.
+ */
+#define SHADER_MACROS_WAIT \
+    "   .macro S_WAIT_MEM\n"\
+    "       .if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "           s_wait_idle\n"\
+    "       .else\n"\
+    "           s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
+    "       .endif\n"\
+    "   .endm\n"
+
+/* Narrow EXEC to the lanes VCC selected, so a divergent block only runs on the
+ * lanes that should. s_cbranch_* alone is not enough: it branches on the whole
+ * wave, so inactive lanes would still execute the block.
+ *
+ * gfx10+ runs KFDTest shaders in wave32 (Dispatch sets CS_W32_EN), hence the
+ * 32-bit forms, matching the vcc_lo use in SHADER_MACROS_U32 above.
+ */
+#define SHADER_MACROS_EXEC \
+    "   .macro S_AND_EXEC_VCC\n"\
+    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
+    "           s_and_b32 exec_lo, exec_lo, vcc_lo\n"\
+    "       .else\n"\
+    "           s_and_b64 exec, exec, vcc\n"\
+    "       .endif\n"\
     "   .endm\n"
 
 /* Macros for portable flat load/store/atomic instructions.
@@ -119,12 +161,54 @@ const std::vector<const char*> ShaderList = {
     "           flat_store_dword \\vaddr, \\vsrc \\arg0 \\arg1\n"\
     "       .endif\n"\
     "   .endm\n"\
+    "   .macro FLAT_LOAD_DWORDX4_NSS vdst, vaddr arg0 arg1\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
+    "           flat_load_dwordx4 \\vdst, \\vaddr nt sc1 sc0\n"\
+    "       .else\n"\
+    "           flat_load_dwordx4 \\vdst, \\vaddr \\arg0 \\arg1\n"\
+    "       .endif\n"\
+    "   .endm\n"\
     "   .macro FLAT_ATOMIC_ADD_NSS vdst, vaddr, vsrc arg0 arg1\n"\
     "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
     "           flat_atomic_add \\vdst, \\vaddr, \\vsrc nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_atomic_add \\vdst, \\vaddr, \\vsrc \\arg0 \\arg1\n"\
     "       .endif\n"\
+    "   .endm\n"
+
+/* Bulk copy load/store, for BlitCopyIsa.
+ *
+ * Same three-way modifier split as the FLAT_*_NSS macros above, but folded
+ * inside the macro, so the unrolled copy body does not have to spell out a .if
+ * for each of its eight accesses.
+ *
+ * The modifiers keep the copy out of the caches on purpose. MI300 has 256MB of
+ * last-level cache, comfortably more than the buffers the bandwidth test
+ * copies, so a cached copy would report cache bandwidth on every repeat after
+ * the first instead of what the link can carry.
+ */
+#define SHADER_MACROS_BLIT \
+    "   .macro BLIT_LOAD_X4 vdst, vaddr\n"\
+    "       .if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "           flat_load_dwordx4 \\vdst, \\vaddr th:TH_LOAD_NT\n"\
+    "       .elseif (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
+    "           flat_load_dwordx4 \\vdst, \\vaddr nt\n"\
+    "       .else\n"\
+    "           flat_load_dwordx4 \\vdst, \\vaddr slc\n"\
+    "       .endif\n"\
+    "   .endm\n"\
+    "   .macro BLIT_STORE_X4 vaddr, vsrc\n"\
+    "       .if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "           flat_store_dwordx4 \\vaddr, \\vsrc th:TH_STORE_NT\n"\
+    "       .elseif (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
+    "           flat_store_dwordx4 \\vaddr, \\vsrc nt\n"\
+    "       .else\n"\
+    "           flat_store_dwordx4 \\vaddr, \\vsrc slc\n"\
+    "       .endif\n"\
+    "   .endm\n"\
+    "   .macro BLIT_ADD64 vlo, vhi, vinc\n"\
+    "       V_ADD_CO_U32 \\vlo, \\vinc, \\vlo\n"\
+    "       V_ADD_CO_CI_U32 \\vhi, \\vhi, 0\n"\
     "   .endm\n"
 
 /**
@@ -222,6 +306,209 @@ const char *CopyWordsIsa =
         v_cmp_lt_u32 v9, v8
         s_cbranch_vccnz LOOP
 
+        s_endpgm
+)";
+
+/* Wide grid-strided copy, for measuring CU ("blit") copy bandwidth.
+ *
+ * CopyWordsIsa above is a single thread moving one dword per iteration. That is
+ * fine for checking that bytes arrive, but timing it measures loop overhead
+ * rather than bandwidth. This one runs the full grid, 16 bytes per thread per
+ * iteration, so the number it produces is comparable to what SDMA reports.
+ *
+ * Args follow CopyWordsIsa's convention:
+ *   s[0:1] -> {src (64b), dst (64b)}
+ *   s[2:3] -> {itersPerThread, strideBytes, remChunks, remBaseByte, log2WgSize}
+ *
+ * The host precomputes the loop geometry (see GetBlitGeometry() in
+ * KFDTestUtilQueue.cpp) so the shader needs no division and no 64-bit math.
+ * Every thread runs itersPerThread iterations, which keeps the main loop
+ * uniform across the wave; the leftover chunks that do not divide evenly are
+ * mopped up afterwards by the first remChunks threads under a narrowed EXEC.
+ *
+ * Bandwidth here comes from keeping several loads in flight per wave, not from
+ * running many waves: the main loop is unrolled four deep and issues its four
+ * loads before waiting on any of them. That reaches v39, so the caller raises
+ * COMPUTE_PGM_RSRC1.VGPRS via Dispatch::SetVgprGranules() - the default of 4
+ * granules is only 20 VGPRs on gfx9, not the 32 its old comment claimed. See
+ * BLIT_VGPR_GRANULES and BLIT_WORKGROUPS_PER_CU in KFDTestUtilQueue.cpp for why
+ * the grid is deliberately narrow.
+ *
+ * 40 VGPRs costs no occupancy on CDNA, which has 512 per SIMD and caps at 8
+ * waves: 512/8 = 64 available per wave either way. So there is nothing to win
+ * by packing the payloads tighter, and v21-v23 are left unused to keep the
+ * unrolled payloads on a 4-register boundary.
+ *
+ *   v0       thread id within the workgroup (TIDIG_COMP_CNT)
+ *   v1       scratch: byte offset, then loop counter
+ *   v[2:3]   running src pointer (arg address during setup)
+ *   v[4:5]   src base      v[6:7]    dst base
+ *   v8       itersPerThread    v9    strideBytes
+ *   v10      remChunks         v11   remBaseByte
+ *   v12      log2WgSize        v13   global thread id
+ *   v[14:15] running dst pointer
+ *   v[16:19] params address during setup, then the 16-byte payload for the
+ *            tail and remainder passes
+ *   v20      itersPerThread rounded down to a multiple of 4
+ *   v[24:39] the four 16-byte payloads of the unrolled loop
+ *
+ * Requires src, dst and size to be 16-byte aligned.
+ */
+const char *BlitCopyIsa =
+    SHADER_START
+    SHADER_MACROS_U32
+    SHADER_MACROS_FLAT
+    SHADER_MACROS_WAIT
+    SHADER_MACROS_EXEC
+    SHADER_MACROS_BLIT
+    R"(
+        // Fetch every argument before waiting on any of them. These three
+        // loads are independent, and a wave that waits on each in turn pays
+        // three round trips to memory before it copies a single byte - which
+        // the whole grid then pays again, once per wave.
+        //
+        // v[4:5] = src, v[6:7] = dst. They are adjacent in the arg buffer, so
+        // one dwordx4 fetches both.
+        v_mov_b32 v2, s0
+        v_mov_b32 v3, s1
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORDX4_NSS v[4:7], v[2:3] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORDX4_NSS v[4:7], v[2:3] slc
+        .endif
+
+        // v8 = itersPerThread, v9 = strideBytes,
+        // v10 = remChunks, v11 = remBaseByte
+        v_mov_b32 v16, s2
+        v_mov_b32 v17, s3
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORDX4_NSS v[8:11], v[16:17] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORDX4_NSS v[8:11], v[16:17] slc
+        .endif
+
+        // v12 = log2 of the workgroup size
+        V_ADD_CO_U32 v16, 16, v16
+        V_ADD_CO_CI_U32 v17, v17, 0
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORD_NSS v12, v[16:17] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORD_NSS v12, v[16:17] slc
+        .endif
+        S_WAIT_MEM
+
+        // v13 = global thread id = (workgroup id << log2WgSize) + tid
+        .if (.amdgcn.gfx_generation_number >= 12)
+            v_mov_b32 v13, ttmp9        // workgroup id
+        .else
+            v_mov_b32 v13, s4           // workgroup id
+        .endif
+        v_lshlrev_b32 v13, v12, v13
+        V_ADD_U32_NC v13, v0, v13
+
+        // Walk from src/dst + gid * 16, stepping strideBytes each iteration.
+        // Both offsets stay well inside 32 bits: gid * 16 spans one grid worth
+        // of chunks, and the buffers copied here are far smaller than 4GB.
+        v_lshlrev_b32 v1, 4, v13
+        V_ADD_CO_U32 v2, v4, v1
+        v_mov_b32 v3, v5
+        V_ADD_CO_CI_U32 v3, v3, 0
+        V_ADD_CO_U32 v14, v6, v1
+        v_mov_b32 v15, v7
+        V_ADD_CO_CI_U32 v15, v15, 0
+
+        // itersPerThread is uniform across the grid, so every lane makes the
+        // same number of trips and the loop never diverges
+        v_mov_b32 v1, 0
+
+        // v20 = itersPerThread rounded down to a multiple of 4. The unrolled
+        // loop runs that far and TAIL_LOOP picks up the last 0-3 trips.
+        v_and_b32 v20, 0xfffffffc, v8
+
+        UNROLLED_LOOP:
+        V_CMP_LT_U32 v1, v20
+        s_cbranch_vccz TAIL_LOOP
+
+        // Wait out the previous pass's stores before overwriting the payload
+        // registers they still have to read
+        S_WAIT_MEM
+
+        // Issue four loads before waiting on any of them. This is the whole
+        // point of the unroll: a peer read costs the better part of a
+        // microsecond, and a wave with a single load in flight is bound by
+        // that latency rather than by the link, which is what makes a
+        // one-chunk-per-wait loop measure the wait instead of the hardware.
+        // Four outstanding loads move four times the bytes per round trip.
+        //
+        // Advancing the cursor immediately after each load is safe: a VMEM
+        // instruction has read its address operand by the time the next
+        // instruction issues.
+        BLIT_LOAD_X4 v[24:27], v[2:3]
+        BLIT_ADD64 v2, v3, v9
+        BLIT_LOAD_X4 v[28:31], v[2:3]
+        BLIT_ADD64 v2, v3, v9
+        BLIT_LOAD_X4 v[32:35], v[2:3]
+        BLIT_ADD64 v2, v3, v9
+        BLIT_LOAD_X4 v[36:39], v[2:3]
+        BLIT_ADD64 v2, v3, v9
+
+        S_WAIT_MEM
+
+        BLIT_STORE_X4 v[14:15], v[24:27]
+        BLIT_ADD64 v14, v15, v9
+        BLIT_STORE_X4 v[14:15], v[28:31]
+        BLIT_ADD64 v14, v15, v9
+        BLIT_STORE_X4 v[14:15], v[32:35]
+        BLIT_ADD64 v14, v15, v9
+        BLIT_STORE_X4 v[14:15], v[36:39]
+        BLIT_ADD64 v14, v15, v9
+
+        V_ADD_U32_NC v1, 4, v1
+        s_branch UNROLLED_LOOP
+
+        // Trips left when itersPerThread is not a multiple of 4. At most three
+        // of them, so they are not worth unrolling.
+        TAIL_LOOP:
+        V_CMP_LT_U32 v1, v8
+        s_cbranch_vccz REMAINDER
+
+        // Wait out the previous iteration's store before overwriting the
+        // payload registers it still has to read
+        S_WAIT_MEM
+        BLIT_LOAD_X4 v[16:19], v[2:3]
+        S_WAIT_MEM
+        BLIT_STORE_X4 v[14:15], v[16:19]
+
+        V_ADD_CO_U32 v2, v9, v2
+        V_ADD_CO_CI_U32 v3, v3, 0
+        V_ADD_CO_U32 v14, v9, v14
+        V_ADD_CO_CI_U32 v15, v15, 0
+        V_ADD_U32_NC v1, 1, v1
+        s_branch TAIL_LOOP
+
+        REMAINDER:
+        // Chunks left over when the grid does not divide the buffer evenly.
+        // Fewer than one per thread, so this is a single guarded copy.
+        V_CMP_LT_U32 v13, v10
+        S_AND_EXEC_VCC
+        s_cbranch_execz DONE
+
+        v_lshlrev_b32 v1, 4, v13
+        V_ADD_U32_NC v1, v11, v1
+        V_ADD_CO_U32 v2, v4, v1
+        v_mov_b32 v3, v5
+        V_ADD_CO_CI_U32 v3, v3, 0
+        V_ADD_CO_U32 v14, v6, v1
+        v_mov_b32 v15, v7
+        V_ADD_CO_CI_U32 v15, v15, 0
+
+        S_WAIT_MEM
+        BLIT_LOAD_X4 v[16:19], v[2:3]
+        S_WAIT_MEM
+        BLIT_STORE_X4 v[14:15], v[16:19]
+
+        DONE:
+        S_WAIT_MEM
         s_endpgm
 )";
 
