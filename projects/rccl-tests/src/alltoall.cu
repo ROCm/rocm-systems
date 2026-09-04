@@ -266,7 +266,7 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 using dda::common::kDdaLLMaxBytes;
 using dda::common::kDdaLLA2ASlotStridePkts;
 using dda::common::LLPacket16;
-using dda::common::bf16;
+using ::bf16;
 using gin::fabric::kDdaMaxNranks;
 using gin::fabric::kDdaLLA2APktsPerBlock;
 using gin::fabric::kDdaLLAgMaxBlocksPerPeer;
