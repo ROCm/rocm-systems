@@ -3130,8 +3130,9 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   const pid_t target_pid = proc->client_pid();
 
   const uint64_t queue_exception_status = wave.trap_queue_exception_status();
-  const uint64_t debugger_status =
-      debugger_queue_exception_mask(proc, queue_id, queue_exception_status);
+  const uint64_t debugger_status = kmd::detail::preserve_runtime_queue_exception_owner(
+      queue_exception_status, wave.trap_runtime_exception_status(),
+      debugger_queue_exception_mask(proc, queue_id, queue_exception_status));
   if (queue_exception_status != 0) {
     const uint64_t unreported =
         queue_exception_status & ~debugger_status & ~wave.trap_runtime_exception_status();
