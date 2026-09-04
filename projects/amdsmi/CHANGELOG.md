@@ -75,7 +75,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   | Import failure | `1` | `193` |
   | Invalid command | `1` | `194` |
   | Invalid parameter | `2` | `195` |
-  | Device not found | `3` | `196` |
+  | Device not found (bad device index, or no devices present) | `3` / `255` | `196` |
   | Invalid file path | `4` | `197` |
   | Invalid parameter value | `5` | `198` |
   | Missing parameter value | `6` | `199` |
@@ -86,10 +86,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   | Permission denied | `11` | `10` (real `AMDSMI_STATUS_NO_PERM`) |
   | Mixed device/field failures (differing codes) | — | `204` |
   | `amdsmi_init()` watchdog timeout | `2` | `205` |
-  | Drivers not loaded | `1` | `206` |
+  | Drivers not loaded | `255` | `206` |
   | Interactive confirmation declined (answering no, or closing stdin) | `1` | `207` |
   | Library (device) failure | `(1000 + status)` wrapped to a byte | underlying `AMDSMI_STATUS_*` (`0`-`56`) |
-  | Unknown/unmapped library error | `100` | `255` (library `UNKNOWN_ERROR` folded to a byte) |
+  | Unknown/unmapped library error | `231` | `255` (library `UNKNOWN_ERROR` reported as its low byte) |
   | Library status too large to report as an exit code | — | `253` (not reachable with current library versions) |
 
   The `Was`/`Now` values are process exit codes (`$?`). Previously the printed `code` field showed the *negative* of these (e.g. `-7`) while the process exited with the absolute value (`7`); the rework makes the printed `code` and `$?` agree (both `200`).
