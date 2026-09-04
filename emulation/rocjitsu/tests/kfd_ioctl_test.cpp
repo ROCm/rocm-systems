@@ -5770,7 +5770,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
 
   auto *memory = soc_->memory();
   ASSERT_NE(memory, nullptr);
-  for (uint32_t step = 0; step < kStepCount; ++step) {
+  for (uint32_t step = 0; step <= kStepCount; ++step) {
     memory->write32(kSteppingAddress + step * sizeof(uint32_t), kSNop, driver_->local_process_id());
     memory->write32(kPeerAddress + step * sizeof(uint32_t), kSNop, driver_->local_process_id());
   }
@@ -5786,13 +5786,42 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
   }
   stepping->set_debug_single_step(true);
 
+  // Lose the debugger subscription at the exact claim-to-publication
+  // boundary. The completed step is still consumed, but its unpublished stop
+  // must be rolled back so the wave remains runnable and invisible to the
+  // debugger.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  driver_->set_debug_event_claim_hook_for_testing([&] {
+    exceptions.set_exceptions_enabled.exception_mask = 0;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  });
+  cu->step();
+  EXPECT_EQ(stepping->pc, kSteppingAddress + sizeof(uint32_t));
+  EXPECT_FALSE(stepping->debug_halted());
+  EXPECT_FALSE(stepping->debug_single_step());
+  EXPECT_EQ(stepping->trapsts() & kTrapAfterInst, 0u);
+  EXPECT_EQ(peer->pc, kPeerAddress + sizeof(uint32_t));
+  uint64_t rejected_notifications = 0;
+  EXPECT_EQ(::read(notifier, &rejected_notifications, sizeof(rejected_notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  kfd_ioctl_dbg_trap_args rejected_query{};
+  rejected_query.pid = static_cast<uint32_t>(getpid());
+  rejected_query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &rejected_query), -EAGAIN);
+
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  stepping->set_debug_single_step(true);
+
   for (uint32_t step = 0; step < kStepCount; ++step) {
     cu->step();
 
     EXPECT_TRUE(stepping->debug_halted());
-    EXPECT_EQ(stepping->pc, kSteppingAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(stepping->pc, kSteppingAddress + (step + 2) * sizeof(uint32_t));
     EXPECT_FALSE(peer->debug_halted());
-    EXPECT_EQ(peer->pc, kPeerAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(peer->pc, kPeerAddress + (step + 2) * sizeof(uint32_t));
 
     uint64_t notifications = 0;
     ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
@@ -5838,7 +5867,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
                        : state.wave_id == kSteppingWaveId;
     });
     ASSERT_NE(selected, states.end());
-    EXPECT_EQ(selected->pc, kSteppingAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(selected->pc, kSteppingAddress + (step + 2) * sizeof(uint32_t));
     selected->wave_id = kSteppingWaveId;
     if (step != 0) {
       selected->queue_packet_id = 100 + step;
