@@ -686,6 +686,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         .before_words = {},
         .replacement_words = std::move(planned.words),
         .after_words = {},
+        .branch_fixups = {},
         .patch = std::move(planned.info),
     });
   }

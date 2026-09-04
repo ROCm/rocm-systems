@@ -8727,7 +8727,7 @@ TEST(ConSanMoi, InlineWorkgroupKeyIsExactInsideBoundedShapes) {
           .valid);
 }
 
-TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
+TEST(ConSanMoi, FirstLightProbeRelocatesWhenInlinePaddingIsUnavailable) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
@@ -8748,7 +8748,8 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 0u);
-  EXPECT_EQ(patch.trampoline_offset, text_words.size() * sizeof(uint32_t));
+  ASSERT_TRUE(result.text_relocation);
+  EXPECT_GE(patch.trampoline_offset, result.text_relocation->source_text_size);
   EXPECT_EQ(patch.original_size, 2u * sizeof(uint32_t));
   EXPECT_GT(patch.trampoline_size, 2u * sizeof(uint32_t));
 
@@ -8756,28 +8757,22 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   EXPECT_GE(patched.text_sections().front()->size(),
-            text_words.size() * sizeof(uint32_t) + patch.trampoline_size);
+            patch.trampoline_offset + patch.trampoline_size);
 
   std::vector<uint32_t> actual_words(patched.text_sections().front()->size() / sizeof(uint32_t));
   std::memcpy(actual_words.data(), patched.text_sections().front()->data(),
               patched.text_sections().front()->size());
-  const auto fwd =
-      compute_sopp_branch_simm16(/*branch_pc=*/0, text_words.size() * sizeof(uint32_t));
-  ASSERT_TRUE(fwd);
-  EXPECT_EQ(actual_words[0], build_s_branch(*fwd, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[1], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(actual_words[0], text_words[0]);
+  EXPECT_EQ(actual_words[1], text_words[1]);
   EXPECT_EQ(actual_words[2], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint32_t> trampoline_words =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
   ASSERT_GE(trampoline_words.size(), 3u);
-  EXPECT_EQ(trampoline_words[trampoline_words.size() - 3u], 0xD8340000u);
-  EXPECT_EQ(trampoline_words[trampoline_words.size() - 2u], 0x00000000u);
+  ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+  EXPECT_EQ(text_words_at_offset(patched, *patch.relocated_guest_instruction_offset,
+                                 2u * sizeof(uint32_t)),
+            (std::vector<uint32_t>{0xD8340000u, 0x00000000u}));
   EXPECT_EQ(std::count(actual_words.begin(), actual_words.end(), 0xBFC60000u), 0u);
-  const uint64_t return_branch_pc =
-      patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
-  const auto ret = compute_sopp_branch_simm16(return_branch_pc, 2u * sizeof(uint32_t));
-  ASSERT_TRUE(ret);
-  EXPECT_EQ(trampoline_words.back(), build_s_branch(*ret, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {

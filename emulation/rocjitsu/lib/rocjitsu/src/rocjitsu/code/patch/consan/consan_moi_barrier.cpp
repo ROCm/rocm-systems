@@ -33,6 +33,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"

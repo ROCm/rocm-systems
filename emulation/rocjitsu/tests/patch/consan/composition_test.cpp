@@ -267,8 +267,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   ASSERT_NE(mutation, valid.patches.end());
   ASSERT_NE(record, valid.patches.end());
   ASSERT_TRUE(record->relocated_guest_instruction_offset);
-  EXPECT_EQ(*record->relocated_guest_instruction_offset + mutation->original_size +
-                sizeof(uint32_t),
+  EXPECT_EQ(*record->relocated_guest_instruction_offset + mutation->original_size,
             record->trampoline_offset + record->trampoline_size);
 
   AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
@@ -878,6 +877,14 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
              patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite;
     });
     ASSERT_NE(mutation, result.patches.end());
+    if (engine == ConSanMoiEngine::RecordReplay) {
+      ASSERT_TRUE(result.text_relocation);
+      EXPECT_EQ(std::ranges::count(result.patches,
+                                   ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                                   &ConSanPatchInfo::kind),
+                0u);
+      continue;
+    }
     const uint64_t continuation = mutation->anchor_offset + mutation->original_size;
     size_t dense_host_count = 0u;
     for (const ConSanPatchInfo &patch : result.patches) {

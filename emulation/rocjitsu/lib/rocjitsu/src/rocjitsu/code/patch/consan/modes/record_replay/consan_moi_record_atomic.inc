@@ -1,7 +1,7 @@
-void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                   const ConSanMoiOperatingPoint &operating_point,
-                                   const MoiObjectModeSemantics &mode_semantics,
-                                   rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                       const ConSanMoiOperatingPoint &operating_point,
+                                       const MoiObjectModeSemantics &mode_semantics,
+                                       rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
   if (consan_target_profile(arch) == nullptr) {
@@ -45,8 +45,12 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
 
   const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
-  CodeObjectPatcher patcher(code_object);
-  const std::span<const uint8_t> old_text = patcher.text_bytes();
+  const std::span<const uint8_t> old_text =
+      code_object.text_sections().size() == 1u
+          ? std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t *>(code_object.text_sections().front()->data()),
+                code_object.text_sections().front()->size())
+          : std::span<const uint8_t>{};
   if (old_text.empty()) {
     result.errors.emplace_back("ConSan MOI atomic record patch found no .text section");
     return;
@@ -73,25 +77,15 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       result.errors.emplace_back("ConSan MOI atomic record patch site is outside .text");
       return;
     }
-    const ConSanPatchLoweringProduct *composed_access_patch = nullptr;
-    for (const ConSanPatchLoweringProduct &patch : result.patches) {
-      const bool access_patch = patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-                                patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
-      if (access_patch && patch.anchor_offset == site.text_offset &&
-          patch.relocated_guest_instruction_offset) {
-        composed_access_patch = &patch;
-        break;
-      }
-    }
-    const auto overlaps_existing_patch = std::any_of(
-        result.patches.begin(), result.patches.end(), [&](const ConSanPatchLoweringProduct &patch) {
-          if (&patch == composed_access_patch)
-            return false;
-          const uint64_t patch_end =
-              patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
-          return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
+    const bool incompatible_overlap =
+        std::ranges::any_of(result.staged_text_fragments, [&](const ConSanTextFragment &fragment) {
+          const uint64_t fragment_end = fragment.patch.anchor_offset + fragment.patch.original_size;
+          const uint64_t site_end = site.text_offset + site.size;
+          return site.text_offset < fragment_end && fragment.patch.anchor_offset < site_end &&
+                 (fragment.patch.anchor_offset != site.text_offset ||
+                  fragment.patch.original_size != site.size);
         });
-    if (overlaps_existing_patch) {
+    if (incompatible_overlap) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch skipped an overlapping patch in " +
           candidate.container_name);
@@ -159,121 +153,83 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, planned.emission, arch);
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
-                                         descriptor_requirements, scalar_requirements,
-                                         private_requirements, nullptr, nullptr, arch,
-                                         "ConSan MOI atomic record patch", result.errors)) {
-    return;
-  }
-
-  std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
-  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
-                                                arch, kMoiLocalIndirectIslandWords);
-  std::vector<ConSanPatchInfo> patches;
-  std::vector<ConSanCommittedLowering> lowering_commits;
+  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
+  std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
+    if (!neutralize_atomic_scalar_clause(neutralized_text, planned.candidate, arch,
+                                         scalar_clause_patches, result.errors))
       return;
+  }
+  std::vector<ConSanTextFragment> fragments;
+  fragments.reserve(selected_candidates.size() + scalar_clause_patches.size());
+  for (ConSanPatchInfo &patch : scalar_clause_patches) {
+    fragments.push_back({
+        .id = 0u,
+        .kind = ConSanTextFragmentKind::Replacement,
+        .intent_ids = {},
+        .runtime_mapping = {},
+        .before_words = {},
+        .replacement_words = {build_s_nop(0u, arch)},
+        .after_words = {},
+        .branch_fixups = {},
+        .patch = std::move(patch),
+    });
   }
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
-    const auto composed_access_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
-      return (patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
-             patch.anchor_offset == site.text_offset && patch.relocated_guest_instruction_offset;
-    });
-    const uint64_t physical_anchor_offset =
-        composed_access_patch == result.patches.end()
-            ? site.text_offset
-            : *composed_access_patch->relocated_guest_instruction_offset;
-    const uint64_t cave_text_offset = placement_planner.appended_end();
-    const uint64_t return_text_offset = physical_anchor_offset + site.size;
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, candidate, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
-        layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
-        return_text_offset, composed_access_patch != result.patches.end(),
-        guest_instruction_offset, result.errors);
+        layout.atomic_record_capacity, layout.atomic_records_offset,
+        /*cave_text_offset=*/0u, /*return_text_offset=*/0u,
+        /*already_runtime_workgroup_gated=*/true, guest_instruction_offset, result.errors,
+        /*fallthrough=*/true);
     if (!cave_words)
       return;
-
-    const bool direct_entry =
-        compute_sopp_branch_simm16(physical_anchor_offset, cave_text_offset).has_value();
-    uint64_t indirect_entry_island = 0;
-    bool has_indirect_entry_island = false;
-    if (!direct_entry) {
-      const auto claimed_island = indirect_allocator.claim_reachable(physical_anchor_offset);
-      if (!claimed_island) {
-        result.warnings.emplace_back(
-            "ConSan MOI atomic record patch found no reachable indirect entry island in " +
-            candidate.container_name);
-        continue;
-      }
-      indirect_entry_island = *claimed_island;
-      has_indirect_entry_island = true;
-    }
-    std::string placement_error;
-    const auto placement = placement_planner.plan_indirect_appended(
-        physical_anchor_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
-    if (!placement) {
-      result.errors.emplace_back("ConSan MOI atomic record placement failed: " + placement_error);
-      return;
-    }
-    if (placement->body_offset != cave_text_offset || new_text.size() != placement->body_offset) {
-      result.errors.emplace_back("ConSan MOI atomic record patch has a stale cave mapping");
-      return;
-    }
-
-    const uint64_t entry_target =
-        has_indirect_entry_island ? indirect_entry_island : placement->body_offset;
-    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
-    if (!fwd) {
-      result.errors.emplace_back("ConSan MOI atomic record forward branch is out of range");
-      return;
-    }
-    std::vector<uint32_t> anchor_words(site.size / sizeof(uint32_t), build_s_nop(0, arch));
-    if (anchor_words.empty()) {
-      result.errors.emplace_back("ConSan MOI atomic record patch empty anchor");
-      return;
-    }
-    anchor_words.front() = build_s_branch(*fwd, arch);
-    if (physical_anchor_offset > new_text.size() ||
-        anchor_words.size() * sizeof(uint32_t) > new_text.size() - physical_anchor_offset) {
-      result.errors.emplace_back("ConSan MOI atomic record anchor exceeds .text");
-      return;
-    }
-    std::memcpy(new_text.data() + physical_anchor_offset, anchor_words.data(),
-                anchor_words.size() * sizeof(uint32_t));
-    if (has_indirect_entry_island &&
-        !emit_moi_local_indirect_entry_island(
-            new_text, indirect_entry_island, placement->body_offset, physical_anchor_offset,
-            planned.emission, planned.resources.owner_descriptor_file_offsets, arch, patches,
-            result.errors, "ConSan MOI atomic record patch")) {
-      return;
-    }
-    append_words_bytes(new_text, *cave_words);
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::TrampolineMoiAtomicRecord;
     info.anchor_offset = site.text_offset;
-    info.trampoline_offset = cave_text_offset;
     info.original_size = site.size;
-    info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-    info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     note_moi_probe_patch_info(info, planned);
-    if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors, candidate, info,
-                                         "atomic record patch", lowering_commits))
+    auto fragment = make_consan_around_text_fragment(
+        std::move(*cave_words), guest_instruction_offset, site.size, candidate.intent_ids(), {},
+        std::move(info), result.errors, "MOI atomic record patch");
+    if (!fragment)
       return;
-    patches.push_back(info);
+    const bool access_gate_already_staged =
+        std::ranges::any_of(result.staged_text_fragments, [&](const ConSanTextFragment &existing) {
+          return existing.patch.anchor_offset == site.text_offset &&
+                 (existing.patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+                  existing.patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+                 std::ranges::any_of(existing.branch_fixups, [](const auto &fixup) {
+                   return fixup.target == ConSanTextFragmentBranchTarget::Bypass;
+                 });
+        });
+    if (!access_gate_already_staged && planned.emission.runtime_workgroup_gate) {
+      auto gate = build_moi_runtime_workgroup_gate_prefix(*planned.emission.runtime_workgroup_gate,
+                                                          planned.emission.workgroup_sources, arch);
+      if (!gate) {
+        result.errors.emplace_back(
+            "ConSan MOI atomic record patch could not encode its runtime workgroup gate");
+        return;
+      }
+      fragment->branch_fixups.push_back({.word_index = gate->bypass_branch_word,
+                                         .target = ConSanTextFragmentBranchTarget::Bypass});
+      fragment->before_words.insert(fragment->before_words.begin(), gate->words.begin(),
+                                    gate->words.end());
+    }
+    fragments.push_back(std::move(*fragment));
     ++record_index;
   }
-
-  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
-                               "MOI atomic record patch", "atomic record patch",
-                               std::move(lowering_commits), std::move(patches));
+  const MoiDescriptorLdsRequirements no_lds;
+  (void)stage_consan_text_rewrites(
+      code_object, arch,
+      {descriptor_requirements, scalar_requirements, private_requirements, no_lds},
+      moi_descriptor_mutation_policy(nullptr, arch), "MOI atomic record patch",
+      std::move(fragments), result);
 }

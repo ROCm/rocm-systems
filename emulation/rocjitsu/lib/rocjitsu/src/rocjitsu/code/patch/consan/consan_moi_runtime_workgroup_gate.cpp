@@ -187,6 +187,35 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
       words, residue, quotient, plan.sample_offset & (plan.sample_stride - 1u), arch);
 }
 
+std::optional<MoiRuntimeWorkgroupGatePrefix>
+build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
+                                        const ConSanMoiWorkgroupSources &workgroup_sources,
+                                        rj_code_arch_t arch) {
+  if (plan.sample_stride <= 1u)
+    return std::nullopt;
+  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
+  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
+  const uint16_t residue = static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
+  MoiRuntimeWorkgroupGatePrefix result;
+  if (!append_moi_runtime_workgroup_predicate(result.words, plan, workgroup_sources, saved_scc,
+                                              quotient, residue, arch))
+    return std::nullopt;
+  InstructionSequence sequence(result.words);
+  const InstructionSequence::Label selected = sequence.make_label();
+  if (!sequence.emit_branch(selected, InstructionSequence::BranchKind::SccNonzero) ||
+      !sequence.emit(
+          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)))
+    return std::nullopt;
+  result.bypass_branch_word = static_cast<uint32_t>(result.words.size());
+  result.words.push_back(0u);
+  if (!sequence.bind(selected) ||
+      !sequence.emit(
+          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)) ||
+      !sequence.resolve_branches(arch))
+    return std::nullopt;
+  return result;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const MoiRuntimeWorkgroupGatePlan &plan, const ConSanMoiWorkgroupSources &workgroup_sources,

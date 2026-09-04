@@ -12,6 +12,9 @@
 
 namespace rocjitsu::consan_moi_impl {
 
+[[nodiscard]] ConSanDescriptorMutationPolicy
+moi_descriptor_mutation_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t arch);
+
 [[nodiscard]] std::optional<uint16_t>
 common_moi_workitem_owner_shift(std::span<const uint8_t> image,
                                 const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,

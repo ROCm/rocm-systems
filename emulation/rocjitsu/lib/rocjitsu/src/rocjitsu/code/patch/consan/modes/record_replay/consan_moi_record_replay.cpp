@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
@@ -103,11 +104,10 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
                                       const MoiObjectFacts &facts,
                                       const MoiObjectModeSemantics &semantics,
                                       ConSanTransformArtifacts &result) {
-  MoiRecordReplayAccessOutput access_output;
+  (void)resource_state;
   if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
-    try_apply_first_light_access_record_patch(bytes, options, operating_point, *target,
-                                              resource_state, access_output, candidates, semantics,
-                                              result);
+    try_stage_first_light_access_fragments(bytes, options, operating_point, *target, candidates,
+                                           semantics, result);
   } else if (options.moi_report_buffer_address) {
     result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
   }
@@ -115,9 +115,9 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
     return;
 
   const bool emitted_access =
-      std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
-        return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+      std::ranges::any_of(result.staged_text_fragments, [](const ConSanTextFragment &fragment) {
+        return fragment.patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+               fragment.patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
       });
   const bool atomic_or_fence_relevant =
       options.moi_track_atomics && (facts.has_admitted_atomic || facts.has_admitted_fence);
@@ -136,12 +136,12 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
   }
-  try_apply_atomic_record_patch(bytes, options, operating_point, semantics, arch, result);
+  try_stage_atomic_record_fragments(bytes, options, operating_point, semantics, arch, result);
   if (result.errors.empty())
-    try_apply_record_replay_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                          access_output, semantics, result);
+    try_stage_record_replay_barrier_fragments(bytes, options, operating_point, arch, semantics,
+                                              result);
   if (result.errors.empty())
-    try_apply_fence_record_patch(bytes, options, operating_point, semantics, arch, result);
+    try_stage_fence_record_fragments(bytes, options, operating_point, semantics, arch, result);
 }
 
 uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,

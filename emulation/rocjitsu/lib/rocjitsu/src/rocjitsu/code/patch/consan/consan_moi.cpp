@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
+#include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 
 #include <algorithm>
@@ -163,7 +164,6 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
                        std::make_move_iterator(mode_plan.errors.end()));
   if (!result.errors.empty())
     return result;
-  const bool inline_atomic_without_access = mode_plan.inline_atomic_without_access;
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
@@ -319,32 +319,16 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     result.errors.emplace_back(
         "ConSan MOI report buffer exceeds the 32-bit dynamic record-offset window");
   }
-  bool owner_epoch_prologue_applied_early = false;
-  const bool has_usable_atomic_plan =
-      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return plan.site_kind == ConSanResourceSiteKind::Atomic &&
-               plan.source != ConSanRegisterAllocationSource::Unsupported;
-      });
-  if (result.errors.empty() && inline_atomic_without_access && has_usable_atomic_plan &&
-      effective_point.moi_initialize_owner_epoch) {
-    // Atomic-only objects do not need access-layout information in their
-    // owner/epoch prologue. Emit it before the large atomic helpers so the
-    // original kernel entry can reach it without consuming a scarce local
-    // branch island.
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, mode_plan.semantics,
-                                         mode_plan.prologue, arch, result);
-    owner_epoch_prologue_applied_early =
-        std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
-          return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
-        });
-  }
   if (result.errors.empty())
     apply_moi_mode_patches(code_object_bytes, effective_options, effective_point, arch,
                            resource_planning_state, moi_candidates, object_facts,
                            mode_plan.semantics, result);
-  if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
-      (!mode_plan.prologue_requires_consumer || result.modified()))
+  if (result.errors.empty() && !result.staged_text_fragments.empty() &&
+      !finalize_consan_text_rewrites(result.replacement, arch, effective_options,
+                                     "MOI probe programs", result)) {
+    result.discard_candidate_modification();
+  }
+  if (result.errors.empty() && (!mode_plan.prologue_requires_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
                                          prologue_scratch_assignments, mode_plan.semantics,
                                          mode_plan.prologue, arch, result);

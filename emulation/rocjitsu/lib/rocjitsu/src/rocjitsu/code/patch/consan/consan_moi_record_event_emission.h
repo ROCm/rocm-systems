@@ -59,7 +59,8 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
     size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors);
+    uint64_t return_text_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr, bool fallthrough = false);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
@@ -67,7 +68,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors);
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors, bool fallthrough = false);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiFenceEvidenceSitePlan &candidate,
@@ -76,6 +77,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    std::vector<std::string> &errors);
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    bool fallthrough = false);
 
 } // namespace rocjitsu::consan_moi_impl

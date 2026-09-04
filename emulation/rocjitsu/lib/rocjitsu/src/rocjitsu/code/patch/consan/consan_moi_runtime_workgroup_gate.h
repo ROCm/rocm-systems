@@ -37,6 +37,15 @@ struct MoiRuntimeWorkgroupGateInputs {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
 };
 
+/// Position-independent predicate prefix for a whole-text probe fragment.
+/// `bypass_branch_word` is an unresolved unconditional branch owned by the
+/// text transaction; its target is the base operation after the complete
+/// instrumentation nest.
+struct MoiRuntimeWorkgroupGatePrefix {
+  std::vector<uint32_t> words;
+  uint32_t bypass_branch_word = 0;
+};
+
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSource> moi_runtime_workgroup_selection_source();
 
 [[nodiscard]] bool
@@ -45,6 +54,11 @@ moi_has_probe_entry_runtime_workgroup_gate(const ConSanMoiWorkgroupSources &work
 [[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan>
 plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
                                 const ConSanMoiWorkgroupSources &workgroup_sources);
+
+[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePrefix>
+build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
+                                        const ConSanMoiWorkgroupSources &workgroup_sources,
+                                        rj_code_arch_t arch);
 
 [[nodiscard]] uint64_t
 moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,

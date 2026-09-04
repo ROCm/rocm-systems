@@ -64,6 +64,38 @@ using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
+[[nodiscard]] std::optional<uint64_t>
+active_descriptor_entry_text_offset(const AmdGpuCodeObject &code_object,
+                                    const AmdGpuKernelInfo &kernel, const KD &descriptor) {
+  const Section *text = nullptr;
+  for (const Section *section : code_object.text_sections()) {
+    if (section->sectionOffset() == kernel.text_file_offset) {
+      text = section;
+      break;
+    }
+  }
+  if (text == nullptr)
+    return std::nullopt;
+
+  const uint64_t descriptor_vaddr = code_object.kernel_descriptor_offset(kernel.name);
+  const int64_t encoded_offset = descriptor.kernel_code_entry_byte_offset;
+  uint64_t entry_vaddr = descriptor_vaddr;
+  if (encoded_offset >= 0) {
+    const uint64_t positive = static_cast<uint64_t>(encoded_offset);
+    if (positive > std::numeric_limits<uint64_t>::max() - entry_vaddr)
+      return std::nullopt;
+    entry_vaddr += positive;
+  } else {
+    const uint64_t magnitude = uint64_t{0} - static_cast<uint64_t>(encoded_offset);
+    if (magnitude > entry_vaddr)
+      return std::nullopt;
+    entry_vaddr -= magnitude;
+  }
+  if (entry_vaddr < text->vaddr() || entry_vaddr - text->vaddr() >= text->size())
+    return std::nullopt;
+  return entry_vaddr - text->vaddr();
+}
+
 [[nodiscard]] bool append_moi_entry_salu_write(std::vector<uint32_t> &words, uint32_t word,
                                                rj_code_arch_t arch) {
   return InstructionSequence(words).emit_all(word,
@@ -1663,7 +1695,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
   struct PlannedPrivateEpochPrologue {
     const ConSanKernelInfo *kernel = nullptr;
     uint64_t active_descriptor_file_offset = 0;
-    uint64_t active_entry_text_offset = 0;
+    uint64_t active_launch_entry_text_offset = 0;
     MoiPrivateEpochPrologueEmissionPlan emission;
     ConSanMoiPrivateStateLayout private_state_layout;
     uint32_t required_private_bytes = 0;
@@ -1697,6 +1729,13 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       return;
     }
     const KD &descriptor = *descriptor_value;
+    const auto active_launch_entry =
+        active_descriptor_entry_text_offset(code_object, *active_kernel, descriptor);
+    if (!active_launch_entry) {
+      result.errors.emplace_back(
+          "ConSan MOI private-epoch prologue could not resolve the active descriptor entry");
+      return;
+    }
 
     const ConSanMoiPrivateStateLayout &layout = *access_patch->private_state_layout;
     if (!layout.is_well_formed()) {
@@ -1882,7 +1921,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     planned.push_back({
         .kernel = &kernel,
         .active_descriptor_file_offset = active_kernel->descriptor_file_offset,
-        .active_entry_text_offset = active_kernel->entry_text_offset,
+        .active_launch_entry_text_offset = *active_launch_entry,
         .emission = std::move(emission),
         .private_state_layout = layout,
         .required_private_bytes = required_private_bytes,
@@ -1925,12 +1964,14 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
   for (const PlannedPrivateEpochPrologue &item : planned) {
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
-    auto words = build_private_epoch_prologue_words(
-        prologue_text_offset, item.active_entry_text_offset, item.emission, arch, result.errors);
+    auto words = build_private_epoch_prologue_words(prologue_text_offset,
+                                                    item.active_launch_entry_text_offset,
+                                                    item.emission, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
-                                       item.active_entry_text_offset, prologue_text_offset)) {
+                                       item.active_launch_entry_text_offset,
+                                       prologue_text_offset)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue could not redirect kernel entry");
       return;
@@ -1941,8 +1982,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       const uint64_t secondary_prologue_offset = util::align_up(
           prologue_text_offset + words->size() * sizeof(uint32_t), kAmdhsaKernelEntryAlignment);
       auto secondary_words = build_private_epoch_prologue_words(
-          secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
-          item.emission, arch, result.errors);
+          secondary_prologue_offset,
+          item.active_launch_entry_text_offset + kAmdhsaKernelEntryAlignment, item.emission, arch,
+          result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1953,15 +1995,16 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       } else {
         constexpr uint64_t kPairedEntryWindow = 2u * kAmdhsaKernelEntryAlignment;
         primary_body_offset = prologue_text_offset + kPairedEntryWindow;
-        words =
-            build_private_epoch_prologue_words(*primary_body_offset, item.active_entry_text_offset,
-                                               item.emission, arch, result.errors);
+        words = build_private_epoch_prologue_words(*primary_body_offset,
+                                                   item.active_launch_entry_text_offset,
+                                                   item.emission, arch, result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
-        secondary_words = build_private_epoch_prologue_words(
-            *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
-            item.emission, arch, result.errors);
+        secondary_words = build_private_epoch_prologue_words(*secondary_body_offset,
+                                                             item.active_launch_entry_text_offset +
+                                                                 kAmdhsaKernelEntryAlignment,
+                                                             item.emission, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -2136,6 +2179,7 @@ void try_apply_owner_epoch_prologue_patch(
   /// kernel ABI or change the initialization contract.
   struct PlannedOwnerEpochPrologue {
     ConSanKernelInfo kernel;
+    uint64_t active_launch_entry_text_offset = 0;
     MoiOwnerEpochPrologueEmissionPlan emission;
     bool has_kernarg_preload = false;
     bool instrument_entry_in_place = false;
@@ -2236,6 +2280,13 @@ void try_apply_owner_epoch_prologue_patch(
       return;
     }
     const KD &descriptor = *descriptor_value;
+    const auto active_launch_entry =
+        active_descriptor_entry_text_offset(code_object, *active_kernel, descriptor);
+    if (!active_launch_entry) {
+      result.errors.emplace_back(
+          "ConSan MOI owner/epoch prologue could not resolve the active descriptor entry");
+      return;
+    }
     const uint16_t owner_shift_bits = kernel_wavefront_size(arch, descriptor) == 32u ? 5u : 6u;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     if (dispatch_capture.present()) {
@@ -2495,6 +2546,7 @@ void try_apply_owner_epoch_prologue_patch(
     });
     target_kernels.push_back(PlannedOwnerEpochPrologue{
         .kernel = std::move(active),
+        .active_launch_entry_text_offset = *active_launch_entry,
         .emission = std::move(emission),
         .has_kernarg_preload = has_kernarg_preload,
         .instrument_entry_in_place = kernel.uses_dynamic_stack.value_or(false) ||
@@ -2545,6 +2597,7 @@ void try_apply_owner_epoch_prologue_patch(
     }
     const std::array<uint64_t, 1> canonical_owner = {canonical_kernel->descriptor_file_offset};
     const MoiOwnerEpochPrologueEmissionPlan &prologue_plan = item.emission;
+    const uint64_t launch_entry_text_offset = item.active_launch_entry_text_offset;
 
     // Keep the hardware entry stable and displace its first instruction
     // through the same local-island mechanism used by ordinary long-range
@@ -2553,7 +2606,12 @@ void try_apply_owner_epoch_prologue_patch(
     // redirects a descriptor entry across particular late .text placement
     // boundaries.
     const bool requires_in_place_entry = kernel.uses_dynamic_stack.value_or(false);
-    bool instrument_entry_in_place = item.instrument_entry_in_place;
+    // A whole-text transaction has already moved the executable entry and
+    // retained the source prefix as inert provenance.  Redirect the active
+    // descriptor to a new prologue instead of mutating that relocated body in
+    // place; the latter would make this legacy pass publish destination
+    // coordinates as if they were source patch anchors.
+    bool instrument_entry_in_place = item.instrument_entry_in_place && !result.text_relocation;
     if (instrument_entry_in_place && item.has_kernarg_preload) {
       // A kernarg-preload descriptor exposes the ordinary firmware entry and
       // a preloaded entry exactly 256 bytes later. Redirect the descriptor to
@@ -2567,7 +2625,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::vector<uint32_t> displaced_entry_words;
     std::optional<uint64_t> entry_island_offset;
     bool indirect_at_entry = false;
-    uint64_t prologue_return_target = kernel.entry_text_offset;
+    uint64_t prologue_return_target = launch_entry_text_offset;
     const ConSanKernelInfo *original_kernel =
         result.program_inventory.find_kernel_by_name(kernel.name);
     const auto is_chainable_entry_patch = [](const ConSanPatchLoweringProduct &patch) {
@@ -2650,7 +2708,7 @@ void try_apply_owner_epoch_prologue_patch(
           // direct relay exists.
           instrument_entry_in_place = false;
           displaced_entry_words.clear();
-          prologue_return_target = kernel.entry_text_offset;
+          prologue_return_target = launch_entry_text_offset;
         } else {
           if (chains_existing_entry_trampoline) {
             result.errors.emplace_back(
@@ -2703,7 +2761,7 @@ void try_apply_owner_epoch_prologue_patch(
               // hardware entry intact and use descriptor redirection instead.
               instrument_entry_in_place = false;
               displaced_entry_words.clear();
-              prologue_return_target = kernel.entry_text_offset;
+              prologue_return_target = launch_entry_text_offset;
               break;
             }
             displaced_entry_words.insert(displaced_entry_words.end(), decoded->begin(),
@@ -2796,7 +2854,7 @@ void try_apply_owner_epoch_prologue_patch(
         return;
       }
     } else if (!patcher.redirect_kernel_entry(kernel.descriptor_file_offset,
-                                              kernel.entry_text_offset, prologue_text_offset)) {
+                                              launch_entry_text_offset, prologue_text_offset)) {
       result.errors.emplace_back("ConSan MOI owner/epoch prologue could not redirect kernel entry");
       return;
     }
@@ -2806,7 +2864,7 @@ void try_apply_owner_epoch_prologue_patch(
       const uint64_t secondary_prologue_offset = util::align_up(
           prologue_text_offset + words->size() * sizeof(uint32_t), kAmdhsaKernelEntryAlignment);
       auto secondary_words = build_owner_epoch_prologue_words(
-          secondary_prologue_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
+          secondary_prologue_offset, launch_entry_text_offset + kAmdhsaKernelEntryAlignment,
           prologue_plan, std::span<const uint32_t>{}, arch, result.errors);
       if (!secondary_words)
         return;
@@ -2833,7 +2891,7 @@ void try_apply_owner_epoch_prologue_patch(
         const uint64_t secondary_body_offset =
             primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_owner_epoch_prologue_words(
-            secondary_body_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
+            secondary_body_offset, launch_entry_text_offset + kAmdhsaKernelEntryAlignment,
             prologue_plan, std::span<const uint32_t>{}, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, primary_body_offset);
@@ -2860,7 +2918,7 @@ void try_apply_owner_epoch_prologue_patch(
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
-    info.anchor_offset = kernel.entry_text_offset;
+    info.anchor_offset = canonical_kernel->entry_text_offset;
     info.trampoline_offset = prologue_text_offset;
     info.original_size =
         instrument_entry_in_place

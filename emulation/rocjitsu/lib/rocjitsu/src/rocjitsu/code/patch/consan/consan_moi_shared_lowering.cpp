@@ -425,12 +425,10 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
   return spill;
 }
 
-namespace {
-
 const MoiDescriptorLdsRequirements kNoMoiLdsRequirements;
 
 [[nodiscard]] ConSanDescriptorMutationPolicy
-moi_descriptor_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t arch) {
+moi_descriptor_mutation_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t arch) {
   ConSanDescriptorMutationPolicy policy{
       .maximum_ordinary_vgpr_count = kMaxVgprs,
       .inventory_proves_empty_accumulator_bank = true,
@@ -441,8 +439,6 @@ moi_descriptor_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t ar
   }
   return policy;
 }
-
-} // namespace
 
 bool apply_moi_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,
@@ -456,7 +452,7 @@ bool apply_moi_descriptor_requirements(
       patcher, program_inventory, active_code_object,
       {vgprs, sgprs, private_segment_bytes,
        group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
-      moi_descriptor_policy(capabilities, arch), arch, subject, errors);
+      moi_descriptor_mutation_policy(capabilities, arch), arch, subject, errors);
 }
 
 bool apply_moi_descriptor_requirements(
@@ -470,7 +466,7 @@ bool apply_moi_descriptor_requirements(
       image, program_inventory,
       {vgprs, sgprs, private_segment_bytes,
        group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
-      moi_descriptor_policy(capabilities, arch), arch, subject, errors);
+      moi_descriptor_mutation_policy(capabilities, arch), arch, subject, errors);
 }
 
 [[nodiscard]] bool append_inline_shadow_owner_field(

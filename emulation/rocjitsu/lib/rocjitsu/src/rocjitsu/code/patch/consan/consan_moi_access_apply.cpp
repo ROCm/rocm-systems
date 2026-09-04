@@ -292,7 +292,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
         0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
   }
   body.insert(body.end(), plan.displaced_tail_words.begin(), plan.displaced_tail_words.end());
-  if ((body.size() + options.deferred_guest_word_count) * sizeof(uint32_t) != plan.body_size) {
+  if (plan.body_size != 0u &&
+      (body.size() + options.deferred_guest_word_count) * sizeof(uint32_t) != plan.body_size) {
     errors.emplace_back(
         "ConSan MOI " + std::string(probe_name) + " body size changed after placement: emitted=" +
         std::to_string((body.size() + options.deferred_guest_word_count) * sizeof(uint32_t)) +

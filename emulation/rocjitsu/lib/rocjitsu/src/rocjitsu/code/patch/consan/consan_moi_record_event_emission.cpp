@@ -46,7 +46,8 @@ using consan_moi_detail::kFenceRecordLayout;
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
     size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors) {
+    uint64_t return_text_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, bool fallthrough) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -104,7 +105,7 @@ using consan_moi_detail::kFenceRecordLayout;
   words.reserve(
       186 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
-  const bool runtime_workgroup_gate = options.runtime_workgroup_gate.has_value();
+  const bool runtime_workgroup_gate = !fallthrough && options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
     auto gate = build_moi_runtime_workgroup_gate_call_words(
         bytes.subspan(candidate.site.file_offset, candidate.site.size),
@@ -243,10 +244,12 @@ using consan_moi_detail::kFenceRecordLayout;
   if (select_low_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.push_back(original_barrier_word);
 
-  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                            arch)) {
+  if (!fallthrough && !append_moi_direct_or_indirect_return(words, cave_text_offset,
+                                                            return_text_offset, options, arch)) {
     errors.emplace_back("ConSan MOI barrier record could not encode its return");
     return std::nullopt;
   }
@@ -258,7 +261,7 @@ using consan_moi_detail::kFenceRecordLayout;
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors, bool fallthrough) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -319,8 +322,8 @@ using consan_moi_detail::kFenceRecordLayout;
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
-  const bool runtime_workgroup_gate =
-      !already_runtime_workgroup_gated && options.runtime_workgroup_gate.has_value();
+  const bool runtime_workgroup_gate = !fallthrough && !already_runtime_workgroup_gated &&
+                                      options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
     auto gate = build_moi_runtime_workgroup_gate_call_words(
         bytes.subspan(candidate.site.file_offset, candidate.site.size),
@@ -671,8 +674,8 @@ using consan_moi_detail::kFenceRecordLayout;
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     words.insert(words.end(), guest_atomic_words.begin(), guest_atomic_words.end());
   }
-  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                            arch)) {
+  if (!fallthrough && !append_moi_direct_or_indirect_return(words, cave_text_offset,
+                                                            return_text_offset, options, arch)) {
     errors.emplace_back("ConSan MOI atomic record could not encode its return");
     return std::nullopt;
   }
@@ -685,7 +688,7 @@ using consan_moi_detail::kFenceRecordLayout;
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset, bool fallthrough) {
   (void)record_index;
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
@@ -752,8 +755,8 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI fence record runtime guest exceeds ELF bytes");
     return std::nullopt;
   }
-  const bool runtime_workgroup_gate =
-      !candidate.capture_address_before_guest && options.runtime_workgroup_gate.has_value();
+  const bool runtime_workgroup_gate = !fallthrough && !candidate.capture_address_before_guest &&
+                                      options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
     if (candidate.capture_address_before_guest) {
       errors.emplace_back(
@@ -814,6 +817,8 @@ using consan_moi_detail::kFenceRecordLayout;
   };
   if (candidate.capture_address_before_guest && !append_address_capture())
     return std::nullopt;
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.patch_size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.patch_file_offset + offset, sizeof(word));
@@ -964,7 +969,9 @@ using consan_moi_detail::kFenceRecordLayout;
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
   words.insert(words.end(), displaced_tail_words.begin(), displaced_tail_words.end());
-  if (call_return_sgpr) {
+  if (fallthrough) {
+    // Whole-text relocation provides the continuation.
+  } else if (call_return_sgpr) {
     words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
   } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
                                                    options, arch)) {

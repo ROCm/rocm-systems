@@ -336,7 +336,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
       const bool nested_composed_access_atomic =
           existing->phase == ConSanPatchPhase::Instrumentation &&
           next.phase == ConSanPatchPhase::Instrumentation &&
-          existing->bytes.begin == next.bytes.begin &&
+          ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
+           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end)) &&
           (((existing->kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
              existing->kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
             next.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) ||

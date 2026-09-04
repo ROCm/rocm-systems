@@ -231,6 +231,21 @@ enum class ConSanTextFragmentKind : uint8_t {
   Replacement,
 };
 
+enum class ConSanTextFragmentBranchTarget : uint8_t {
+  /// The ordinary guest boundary within this fragment's nested program.
+  Guest,
+  /// A transaction-owned copy of the base operation after all instrumentation.
+  /// Runtime predicates use this to bypass both pre- and post-guest work.
+  Bypass,
+  End,
+};
+
+/// One unconditional branch in `before_words` resolved after fragment nesting.
+struct ConSanTextFragmentBranchFixup {
+  uint32_t word_index = 0;
+  ConSanTextFragmentBranchTarget target = ConSanTextFragmentBranchTarget::Guest;
+};
+
 /// One lowering fragment awaiting the object-wide text relocation transaction.
 ///
 /// Fragments retain semantic source coordinates and owner scope but no destination geometry.
@@ -246,6 +261,7 @@ struct ConSanTextFragment {
   std::vector<uint32_t> before_words;
   std::vector<uint32_t> replacement_words;
   std::vector<uint32_t> after_words;
+  std::vector<ConSanTextFragmentBranchFixup> branch_fixups;
   ConSanPatchInfo patch;
 };
 

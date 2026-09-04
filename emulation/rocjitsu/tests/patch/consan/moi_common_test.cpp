@@ -2420,7 +2420,7 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
-  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 2u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 20u);
@@ -2505,7 +2505,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().original_private_segment_size, 20u);
-  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 2u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.spilled_vgpr_count, 6u);
   EXPECT_EQ(patch.required_private_segment_size, 56u);
@@ -2552,7 +2552,7 @@ TEST(ConSanMoi, IndirectSharedHelperSpillUsesEveryRecoveredOwner) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 2u);
   EXPECT_EQ(result.patches.front().owner_descriptor_file_offsets,
             plan.owner_descriptor_file_offsets);
 }
@@ -2577,7 +2577,7 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 2u);
   EXPECT_EQ(result.patches.front().required_private_segment_size, 56u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().text_offset, result.patches.front().anchor_offset);

@@ -331,6 +331,7 @@ moi_embedded_guest_vgpr_bank_plan_is_valid(bool wraps_embedded_guest, bool selec
 struct MoiAppendedBodyPatchPlan {
   const VgprSpillSequence *spill = nullptr;
   std::span<const uint32_t> displaced_tail_words;
+  /// Zero for position-independent assembly before whole-object placement.
   uint64_t body_size = 0;
   uint32_t guest_instruction_size = 0;
 };

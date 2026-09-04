@@ -15,6 +15,14 @@
 
 namespace rocjitsu {
 
+/// Split an already-assembled semantic program around its single guest operation.
+/// The returned fragment contains no entry or return routing.
+[[nodiscard]] std::optional<ConSanTextFragment> make_consan_around_text_fragment(
+    std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
+    std::span<const ConSanProbeIntentId> intent_ids, ConSanRuntimeStaticMapping runtime_mapping,
+    ConSanPatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
+    std::optional<uint32_t> emitted_guest_size = std::nullopt);
+
 /// Atomically stage descriptor mutations and inline programs against the
 /// current composition image. Mode-local builders never publish partial bytes.
 [[nodiscard]] bool
