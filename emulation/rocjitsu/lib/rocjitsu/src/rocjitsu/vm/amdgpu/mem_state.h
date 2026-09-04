@@ -11,6 +11,7 @@
 /// pipeline subclasses own the initiate/complete logic that operates
 /// on this state.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -72,16 +73,8 @@ enum class AtomicOp : uint8_t {
 struct ScalarMemState : DynamicInstState {
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
-  uint32_t dst_reg_base = 0;
-  /// @brief The SDATA operand selector, before it was resolved to a physical
-  /// register.
-  /// @details Selectors 108..123 name the trap-temporary file rather than a
-  /// slot in the wave's SGPR allocation, so the load write-back has to dispatch
-  /// on the selector; dst_reg_base is meaningless for those. The ROCr trap
-  /// handler loads straight into TTMPs (`s_load_dwordx2 ttmp[2:3], ...`), so
-  /// this is a live path, and writing dst_reg_base for one would land outside
-  /// the wave's own allocation.
-  uint32_t dst_selector = 0;
+  /// Architectural destination resolved and range-checked at issue time.
+  ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;
@@ -190,6 +183,10 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
+  // Low bits of the uniform address contribution applied after swizzling. The
+  // cache walker subtracts this contribution when locating logical dword
+  // boundaries, while per_lane_addr remains the actual first-byte address.
+  uint32_t scratch_addr_base_offset = 0;
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
@@ -226,6 +223,15 @@ struct VectorMemState : DynamicInstState {
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
 };
+
+/// @brief Reject a vector-memory instruction before it reaches a memory pipeline.
+/// @details Preserve exec_mask so normal load completion semantics treat every
+/// denied lane as inactive/OOB, while clearing lane addresses and lane_mask so
+/// no transaction or store reaches memory.
+inline void reject_vector_memory_access(VectorMemState &state) {
+  state.lane_mask = 0;
+  state.per_lane_addr.fill(0);
+}
 
 } // namespace amdgpu
 } // namespace rocjitsu

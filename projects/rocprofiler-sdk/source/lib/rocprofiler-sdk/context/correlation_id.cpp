@@ -26,6 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -75,7 +76,9 @@ correlation_id::sub_ref_count()
 {
     if(m_ref_count == 0)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format(
+        // Below-zero is a real bug pre-finalization, but once finalize starts the retirement sweep
+        // races in-flight decrements (benign teardown), so only treat it as CI-fatal before then.
+        ROCP_CI_LOG_IF(WARNING, registration::get_fini_status() == 0) << fmt::format(
             "attempt to decrement correlation id {} reference count but reference count is zero",
             internal);
         return 0;
@@ -85,7 +88,10 @@ correlation_id::sub_ref_count()
 
     if(registration::get_fini_status() > 0) return 0;
 
-    ROCP_CI_LOG_IF(WARNING, _ret == 0) << fmt::format("correlation id underflow on {}", internal);
+    // Same finalization race as the zero-check above: a concurrent decrement can slip between that
+    // check and this fetch_sub during the retirement sweep, so only flag underflow before finalize.
+    ROCP_CI_LOG_IF(WARNING, _ret == 0 && registration::get_fini_status() == 0)
+        << fmt::format("correlation id underflow on {}", internal);
 
     if(_ret == 1)
     {
@@ -237,6 +243,13 @@ correlation_id_finalize()
         {
             if(itr && itr->get_ref_count() > 0)
             {
+                // "Leaked" = a signal-less dispatch whose firmware completion record was
+                // lost (ring overrun, slot quarantine, or teardown), so no record is
+                // emitted and the id is intentionally not retired here: its kernel may
+                // still be running, and force-retiring would release state the GPU can
+                // still reach.
+                if(kfd::signal_less_id_is_leaked(itr->internal)) continue;
+
                 ++ndangling;
                 ROCP_WARNING << "retiring dangling correlation ID " << itr->internal
                              << " from thread " << itr->thread_idx
@@ -245,7 +258,27 @@ correlation_id_finalize()
                 {}
             }
         }
-        ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
+
+        if(ndangling > 0)
+        {
+            auto retirement_ctxs = get_active_contexts([](const context* ctx) {
+                return (ctx->buffered_tracer &&
+                        (ctx->buffered_tracer->domains(
+                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+            });
+
+            if(!retirement_ctxs.empty())
+            {
+                ROCP_CI_LOG_IF(INFO, ndangling > 0)
+                    << fmt::format("retired dangling correlation IDs: {}", ndangling);
+            }
+            else
+            {
+                ROCP_INFO << fmt::format(
+                    "retired dangling correlation IDs: {} (no retirement consumer active)",
+                    ndangling);
+            }
+        }
     });
 }
 }  // namespace context

@@ -20,8 +20,10 @@ TEST(SystemUnit, StatusCodeToStringValidOutPtr) {
   EXPECT_NE(msg, nullptr);
 }
 
+#if ENABLE_ESMI_LIB
 TEST(SystemUnit, EsmiErrMsgRejectsNullOutPtr) {
   EXPECT_EQ(amdsmi_get_esmi_err_msg(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }
+#endif
 
 }  // namespace

@@ -25,51 +25,9 @@
 
 #include "recorder.h"
 
-namespace {
-// A nullopt entry means "absent". Unmapped names read as unset via micro_getenv, real via the getenv interposer.
-std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
-  static std::unordered_map<std::string, std::optional<std::string>> m;
-  return m;
-}
-// Resolved past our interposing definition below so the map-miss fallback doesn't recurse into ourselves.
-char* real_getenv(const char* name) {
-  using Fn = char* (*)(const char*);
-  static Fn next = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "getenv"));
-  return next ? next(name) : nullptr;
-}
-}  // namespace
-
-// Strict: a name the fixture has not scripted reads as unset, so no test can
-// depend on the ambient environment. ncclGetEnv routes here.
-const char* micro_getenv(const char* name) {
-  if (name == nullptr) return nullptr;
-  auto& m = microEnvMap();
-  auto it = m.find(name);
-  return (it != m.end() && it->second) ? it->second->c_str() : nullptr;
-}
-
-// Link-level override rather than a scoped macro: init.cc:2721 uses std::getenv, which a macro cannot
-// catch. It is process-wide, so gtest/libstdc++ reads must still see the real environment -- unlike
-// micro_getenv it falls back. init.cc's three bare getenv() sites are masked by the fixture instead.
-extern "C" char* getenv(const char* name) {
-  if (name != nullptr) {
-    auto& m = microEnvMap();
-    auto it = m.find(name);
-    if (it != m.end()) return it->second ? const_cast<char*>(it->second->c_str()) : nullptr;
-  }
-  return real_getenv(name);
-}
-
-// A null value means "absent", NOT "leave unmapped" -- leaving it unmapped would fall through to the real getenv.
-void SetMicroEnv(const char* name, const char* value) {
-  if (name == nullptr) return;
-  if (value == nullptr) microEnvMap()[name] = std::nullopt;
-  else microEnvMap()[name] = value;
-}
-
-void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
-
-void ClearMicroEnv() { microEnvMap().clear(); }
+// micro_getenv / SetMicroEnv / ClearMicroEnv / the getenv interposer / ncclGetEnv
+// moved to env_fakes.cc so every microtest binary shares ONE env implementation:
+// a second, map-only copy cannot intercept production's raw getenv() call sites.
 
 // Arming gethostname failure + reaching fillInfo latches getHostName's hostHash call_once, poisoning later tests.
 namespace {
@@ -100,8 +58,6 @@ extern "C" int dladdr(const void* addr, Dl_info* info) {
   return real ? real(addr, info) : 0;
 }
 
-const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
-
 // ncclParam* referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover them.
 // Each default mirrors production; the trailing comment names the definition it copies, so drift is checkable here.
 int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
@@ -110,20 +66,9 @@ int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }       
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }                       // graph/tuning.cc:1105
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:605
 
-// Recorder is pure instrumentation -> no-op fake.
-namespace rccl {
-Recorder::Recorder() {}
-Recorder::~Recorder() {}
-Recorder& Recorder::instance() {
-  static Recorder inst;
-  return inst;
-}
-void Recorder::record(const char*) {}
-void Recorder::record(ncclComm_t*, int, const int*) {}
-ncclResult_t Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclComm_t, int) { return ncclSuccess; }
-ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return ncclSuccess; }
-void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclComm_t) {}
-}  // namespace rccl
+// rccl::Recorder moved to recorder_fakes.cc: the ctor/dtor/instance() triple was
+// copied verbatim into three fakes files, differing only in which record()
+// overloads each target referenced.
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
@@ -179,10 +124,39 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
-// fillInfo MLOPart PCI-function fallback (init.cc ~1093): empty class keeps
-// isGpu=0 so existing tests' default busId=0 path stays a no-op.
-ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* /*busId*/, char* deviceClass, size_t maxLen) {
-  if (deviceClass && maxLen > 0) deviceClass[0] = '\0';
+// fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
+// reports for a GPU's own BDF -- an accelerator class -- rather than an empty string. An empty
+// default is what let the mloPart=0 stamp on non-partitioned GPUs ship green: with it, isGpu is 0
+// for every test that does not set comm->busId, so the fn==0 arm of the fallback was unreachable and
+// InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset could not see the stamp on its own rank.
+// A test that wants the HIP-alias shape (BDF absent from sysfs) must now ask for "" explicitly.
+// Duplicates PCI_ACCELERATOR_CLASS (src/graph/xml.h), which this TU does not include.
+static const char* const kDefaultPciDeviceClass = "0x120000";
+std::string g_pciDeviceClass = kDefaultPciDeviceClass;
+int g_pciDeviceClassCalls = 0;
+std::string g_lastPciDeviceClassBusId;
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen) {
+  ++g_pciDeviceClassCalls;
+  g_lastPciDeviceClassBusId = busId ? busId : "";
+  if (deviceClass && maxLen > 0) {
+    std::strncpy(deviceClass, g_pciDeviceClass.c_str(), maxLen - 1);
+    deviceClass[maxLen - 1] = '\0';
+  }
+  return ncclSuccess;
+}
+// fillInfo's compute-partition probe. "SPX" is the unpartitioned default, so the class-probe
+// fallback stays on the path it had before partition detection existed.
+static const char* const kDefaultComputePartition = "SPX";
+std::string g_pciComputePartition = kDefaultComputePartition;
+int g_pciComputePartitionCalls = 0;
+std::string g_lastPciComputePartitionBusId;
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  ++g_pciComputePartitionCalls;
+  g_lastPciComputePartitionBusId = busId ? busId : "";
+  if (partition && maxLen > 0) {
+    std::strncpy(partition, g_pciComputePartition.c_str(), maxLen - 1);
+    partition[maxLen - 1] = '\0';
+  }
   return ncclSuccess;
 }
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
@@ -260,8 +234,8 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char
 
 // Topology-detection and CPU-affinity seams (:1576-1618). All succeed by default so a test can walk the
 // block and inject exactly one failure; ncclTopoCompute is the exception -- it is the rung-2 terminator.
-int g_tuningIndexValue                      = 0;
-std::string g_tuningIndexLastArch;
+// g_tuningIndexValue / g_tuningIndexLastArch: tuning_fakes.cc, next to
+// rcclGetTuningIndexForArch itself.
 int g_ncclTopoComputePathsCalls             = 0;
 int g_ncclTopoComputePathsFailAt            = -1;
 ncclResult_t g_ncclTopoTrimSystemResult     = ncclSuccess;
@@ -325,7 +299,11 @@ void InstallDevCommSetupSuccess() {
 void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
-  ClearMicroEnv();
+  ResetRecorderFakes();
+  ResetRcclWrapFakes();
+  ResetTransportStubs();
+  ResetTuningFakes();
+  ResetEnvFakes();
   g_ginHasError = false;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
@@ -333,6 +311,12 @@ void ResetInitFakes() {
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  g_pciDeviceClass = kDefaultPciDeviceClass;
+  g_pciDeviceClassCalls = 0;
+  g_lastPciDeviceClassBusId.clear();
+  g_pciComputePartition = kDefaultComputePartition;
+  g_pciComputePartitionCalls = 0;
+  g_lastPciComputePartitionBusId.clear();
   pfn_hsa_amd_portable_export_dmabuf = nullptr;
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;
@@ -363,8 +347,6 @@ void ResetInitFakes() {
   g_ncclMnnvlCheckCalls = 0;
   g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
   g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
-  g_tuningIndexValue = 0;
-  g_tuningIndexLastArch.clear();
   g_ncclTopoComputePathsCalls = 0;
   g_ncclTopoComputePathsFailAt = -1;
   g_ncclTopoTrimSystemResult = ncclSuccess;

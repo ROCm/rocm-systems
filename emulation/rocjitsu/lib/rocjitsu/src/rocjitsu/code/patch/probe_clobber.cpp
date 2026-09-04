@@ -3,11 +3,12 @@
 
 #include "rocjitsu/code/patch/probe_clobber.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <cctype>
@@ -117,7 +118,17 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
 
 std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallable &callable,
                                                                std::string *error_out) {
-  auto decoder = Decoder::create(callable.arch);
+  const auto &registry = default_isa_target_registry();
+  if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(callable.target);
+    if (descriptor == nullptr || descriptor->architecture_id != callable.arch) {
+      report(error_out, "probe target does not match the probe architecture");
+      return std::nullopt;
+    }
+  }
+  auto decoder = callable.target == ROCJITSU_CODE_TARGET_INVALID
+                     ? Decoder::create(callable.arch)
+                     : Decoder::create(registry, callable.target);
   if (!decoder) {
     report(error_out, "no decoder available for the probe architecture");
     return std::nullopt;

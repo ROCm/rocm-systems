@@ -28,6 +28,8 @@
 #include <dlfcn.h>
 #include <cassert>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -44,16 +46,55 @@ decoder_supports_event_records(void* handle)
     return dlsym(handle, "rocprof_trace_decoder_get_version") != nullptr ||
            dlsym(handle, "rocprof_trace_decoder_create_handle") != nullptr;
 }
+
+constexpr auto kDecoderBaseName = "librocprof-trace-decoder.so";
 }  // namespace
 
 DL::DL(const char* libpath)
 {
     if(libpath == nullptr) return;
 
-    auto path = common::filesystem::path(libpath) / "librocprof-trace-decoder.so";
+    namespace fs = common::filesystem;
 
-    handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
-    if(!handle) return;
+    const auto dir = fs::path(libpath);
+
+    std::vector<std::string> lib_names;
+    // Major defines ABI compatibility, so probe most-compatible first and narrow. The
+    // unversioned name is last: it is a devel-only symlink to an unknown version.
+#if defined(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR) &&                                            \
+    defined(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR) &&                                            \
+    defined(ROCPROFILER_ATT_DECODER_SOVERSION_PATCH)
+    const auto base  = std::string{kDecoderBaseName};
+    const auto major = base + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR);
+    const auto minor = major + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR);
+    const auto patch = minor + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_PATCH);
+    lib_names.emplace_back(major);
+    lib_names.emplace_back(minor);
+    lib_names.emplace_back(patch);
+#endif
+    lib_names.emplace_back(kDecoderBaseName);
+
+    std::string attempted;
+    std::string loaded_path;
+    for(const auto& lib_name : lib_names)
+    {
+        const auto candidate = (dir / lib_name).string();
+        handle               = dlopen(candidate.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        if(handle)
+        {
+            loaded_path = candidate;
+            break;
+        }
+        const char* err = dlerror();
+        attempted += "\n  tried '" + candidate + "': " + (err ? err : "not loadable");
+    }
+
+    if(!handle)
+    {
+        ROCP_ERROR << "Error loading trace decoder from directory '" << libpath
+                   << "':" << attempted;
+        return;
+    }
 
     att_parse_data_fn =
         reinterpret_cast<ParseFn*>(dlsym(handle, "rocprof_trace_decoder_parse_data"));
@@ -63,7 +104,7 @@ DL::DL(const char* libpath)
 
     // Occupancy data is unaffected by an old decoder, so warn rather than fail.
     if(!decoder_supports_event_records(handle))
-        ROCP_WARNING << path.string()
+        ROCP_WARNING << loaded_path
                      << ": decoder is older than 0.2 and cannot emit ATT event or dispatch "
                         "records. Event and dispatch timelines will be empty. Check for a "
                         "standalone rocprof-trace-decoder package shadowing the one shipped "

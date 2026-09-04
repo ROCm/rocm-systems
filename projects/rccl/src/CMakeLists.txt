@@ -139,6 +139,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/gin/gin_alltoall.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -520,6 +521,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
+    src/algorithms/gin/sdma/gin_alltoall_sdma.cu
   )
 endif()
 
@@ -812,6 +814,9 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
+  # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
+  # needs full HIP compilation rather than --offload-host-only.
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
@@ -1079,6 +1084,20 @@ if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-missing-braces)
 endif()
 
+## Add SQTT instrumentation support if enabled
+if(SQTT_ENABLED)
+  # Check if SQTT markers are already in source code
+  execute_process(
+    COMMAND grep -q "PRIM_SIMPLE_WAIT_PEER" "${CMAKE_CURRENT_SOURCE_DIR}/device/prims_simple.h"
+    RESULT_VARIABLE MARKERS_PRESENT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+
+  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
+endif()
+
 ## Set RCCL compile and linker options for unit tests and code coverage
 if(ENABLE_CODE_COVERAGE)
   if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -1266,12 +1285,22 @@ endif()
 # a FetchContent-built fmt-header-only target leaks into rccl's link
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+  # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
+  # -lhsakmt would have no search path to resolve against.
+  find_library(HSAKMT_LIBRARY NAMES hsakmt
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES lib lib64)
+  if(NOT HSAKMT_LIBRARY)
+    message(FATAL_ERROR "Could not find libhsakmt")
+  endif()
+endif()
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE hsakmt)
+  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
@@ -1284,7 +1313,55 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
   # With the device linker (default), per-arch .bc files are injected directly
   # into the per-arch device link step via DeviceLinker.cmake.
-  # Host symbols from GIN plugins are left unresolved via --allow-shlib-undefined.
+  #
+  # Pull the SDMA host objects out of librocshmem.a so apps running only SDMA do
+  # not have to link it. Seeding by symbol rather than by file survives renames.
+  # GDA stays unresolved, as it needs constmem registration this mode cannot do.
+  set(_gin_rocshmem_syms
+    gin_anvil_sdma_probe
+    gin_anvil_sdma_create
+    gin_anvil_sdma_destroy
+    gin_anvil_sdma_get_num_channels
+    gin_anvil_sdma_get_channel_stride
+    _ZN8rocshmem3ibvE)
+  set(_gin_rocshmem_undefine "")
+  foreach(_sym ${_gin_rocshmem_syms})
+    list(APPEND _gin_rocshmem_undefine -u ${_sym})
+  endforeach()
+
+  set(_gin_rocshmem_object "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_host.o")
+  set(_gin_rocshmem_archive_name "librocshmem_gin_host.a")
+  set(_gin_rocshmem_archive "${CMAKE_CURRENT_BINARY_DIR}/${_gin_rocshmem_archive_name}")
+  if(TARGET rocshmem_static)
+    set(_gin_rocshmem_depends rocshmem_static)
+  else()
+    set(_gin_rocshmem_depends ${ROCSHMEM_LIBRARY})
+  endif()
+
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_object}
+    COMMAND ${CMAKE_LINKER} -r ${_gin_rocshmem_undefine} ${ROCSHMEM_LIBRARY} -o ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_depends}
+    COMMENT "Extracting GIN host objects from librocshmem.a"
+    VERBATIM)
+
+  # An app linking rocshmem under -rdynamic would interpose our globals, so both
+  # modules would run destructors over one object and double free at exit.
+  # --exclude-libs keeps our copies local. It needs an archive, hence the wrapper.
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_AR} rcs ${_gin_rocshmem_archive} ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_object}
+    COMMENT "Packaging GIN host objects into ${_gin_rocshmem_archive_name}"
+    VERBATIM)
+  add_custom_target(gin_rocshmem_host_objects DEPENDS ${_gin_rocshmem_archive})
+
+  add_dependencies(rccl gin_rocshmem_host_objects)
+  target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
+  target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
+  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
+  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
