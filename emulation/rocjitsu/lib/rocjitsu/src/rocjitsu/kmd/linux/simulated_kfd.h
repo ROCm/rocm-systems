@@ -176,6 +176,12 @@ public:
   /// order that production event publication never takes.
   void set_debug_event_claim_mask_for_testing(uint64_t exception_mask);
 
+  /// @brief Exercise the CWSR-layout publication gate without constructing a wave.
+  /// @details Used to drive concurrent unsupported-target checks under TSAN.
+  [[nodiscard]] bool debug_stop_publishable_for_testing(uint32_t gpu_id) {
+    return debug_stop_publishable(gpu_id);
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
@@ -571,6 +577,8 @@ private:
   void init_command_processors_locked();
 
   std::vector<GpuDevice> gpus_;
+  /// @brief Serializes each per-GPU unsupported-CWSR warning latch and log.
+  std::mutex cwsr_layout_warning_mutex_;
   bool daemon_mode_ = false;
   std::atomic<int> fd_{-1};
   std::atomic<bool> fail_next_doorbell_monitor_mmap_{false};

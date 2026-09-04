@@ -777,8 +777,10 @@ private:
 
   /// @brief Guards the current generation of the external interrupt callback.
   /// @details Callers lease one immutable generation under this leaf mutex and
-  /// invoke it after unlocking. Replacement publishes its new generation first,
-  /// then waits only for calls admitted to the old generation to drain.
+  /// invoke it after unlocking. Replacement publishes its new generation first.
+  /// External replacement then drains every retained older generation; reentrant
+  /// replacement cannot wait for its own lease, so it leaves retirement to a
+  /// later external replacement or to the final lease release.
   std::mutex interrupt_cb_mutex_;
   std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
       std::make_shared<InterruptCallbackState>();
