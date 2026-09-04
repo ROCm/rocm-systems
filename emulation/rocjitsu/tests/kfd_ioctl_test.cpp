@@ -201,13 +201,17 @@ protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
 };
 
-struct Gfx9TrapParam {
+struct PreGfx12TrapParam {
   const char *config_path;
   uint32_t gpu_id;
+  uint32_t profiling_move;
+  uint32_t exception_move;
+  uint32_t sendmsg_interrupt;
+  uint32_t trap;
 };
 
-class KfdIoctlGfx9TrapTest : public KfdIoctlTest,
-                             public ::testing::WithParamInterface<Gfx9TrapParam> {
+class KfdIoctlPreGfx12TrapTest : public KfdIoctlTest,
+                                 public ::testing::WithParamInterface<PreGfx12TrapParam> {
 protected:
   void SetUp() override { SetUpWithConfig(GetParam().config_path); }
 };
@@ -771,7 +775,7 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   EXPECT_EQ(read_pointer, 0u) << "the fatal queue gate must prevent pending packet fetch";
 }
 
-TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSendSites) {
+TEST_P(KfdIoctlPreGfx12TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSendSites) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
   constexpr uint32_t kExceptionEventId = 41;
@@ -840,16 +844,15 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
   observer_guard.queue_id = create.queue_id;
 
-  constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
   const uint32_t handler[] = {
-      0xBEFC0073u, // s_mov_b32 m0, ttmp7 (profiling event id)
-      0xBF800000u, // s_nop 0
-      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT)
-      0xBEFC006Fu, // s_mov_b32 m0, ttmp3 (packed queue exception)
-      0xBF800000u, // s_nop 0
-      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT)
+      GetParam().profiling_move,    // s_mov_b32 m0, ttmp7 (profiling event id)
+      0xBF800000u,                  // s_nop 0
+      GetParam().sendmsg_interrupt, // s_sendmsg sendmsg(MSG_INTERRUPT)
+      GetParam().exception_move,    // s_mov_b32 m0, ttmp3 (packed queue exception)
+      0xBF800000u,                  // s_nop 0
+      GetParam().sendmsg_interrupt, // s_sendmsg sendmsg(MSG_INTERRUPT)
   };
-  memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
+  memory->write32(kKernelAddress, GetParam().trap, driver_->local_process_id());
   for (uint32_t i = 0; i < std::size(handler); ++i)
     memory->write32(kTrapHandlerAddress + i * sizeof(uint32_t), handler[i],
                     driver_->local_process_id());
@@ -858,7 +861,7 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(driver_->local_process_id());
   wave->set_queue_id(create.queue_id);
-  cu->step(); // Enter the GFX9 trap handler.
+  cu->step(); // Enter the pre-GFX12 trap handler.
   // Make every register-value heuristic ambiguous: the profiling path's live
   // value equals both saved-M0 candidates, while both architecture-specific
   // provenance markers are present.
@@ -891,9 +894,14 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
   EXPECT_TRUE(cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
 }
 
-INSTANTIATE_TEST_SUITE_P(Gfx9Layouts, KfdIoctlGfx9TrapTest,
-                         ::testing::Values(Gfx9TrapParam{CDNA2_CONFIG_PATH.c_str(), kCdna2GpuId},
-                                           Gfx9TrapParam{CONFIG_PATH.c_str(), kGpuId}));
+INSTANTIATE_TEST_SUITE_P(
+    PreGfx12Architectures, KfdIoctlPreGfx12TrapTest,
+    ::testing::Values(PreGfx12TrapParam{CDNA2_CONFIG_PATH.c_str(), kCdna2GpuId, 0xBEFC0073u,
+                                        0xBEFC006Fu, 0xBF900001u, 0xBF920001u},
+                      PreGfx12TrapParam{CONFIG_PATH.c_str(), kGpuId, 0xBEFC0073u, 0xBEFC006Fu,
+                                        0xBF900001u, 0xBF920001u},
+                      PreGfx12TrapParam{RDNA3_CONFIG_PATH.c_str(), kRdna3GpuId, 0xBEFD0073u,
+                                        0xBEFD006Fu, 0xBFB60001u, 0xBF900001u}));
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
