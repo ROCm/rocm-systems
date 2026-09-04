@@ -80,6 +80,18 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
   }
 }
 
+bool is_capability_miss(rdc_status_t status) {
+  switch (status) {
+    case RDC_ST_NOT_SUPPORTED:
+    case RDC_ST_BAD_PARAMETER:  // AMDSMI_STATUS_INVAL, e.g. xgmi_error read on gfx950
+    case RDC_ST_NOT_FOUND:
+    case RDC_ST_PERM_ERROR:  // privileges do not change for the life of the daemon
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Dual index semantics for gpu_id:
 //   Physical/instance-0: device_index is a flat index into s_flat_gpu_table.
 //   Partition-instance:  device_index is a socket index, instance_index the per-socket proc.
