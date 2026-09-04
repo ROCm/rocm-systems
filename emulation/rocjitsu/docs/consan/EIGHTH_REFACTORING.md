@@ -694,9 +694,11 @@ The deliberately smaller protocol is now:
    retains typed rewrite intent without publishing partial executable bytes;
 3. perturbation and the other SuperCollider access leaf may compose while all
    facts still use pristine source coordinates;
-4. `relocate_consan_text` performs one structure-preserving identity
-   translation, replacing each selected instruction inline in the relocated
-   program; and
+4. the private `relocate_consan_text` transaction performs one
+   structure-preserving identity translation, replacing each selected
+   instruction inline in the relocated program, or performs the same batch
+   in place when a restrictive growth policy admits only existing contiguous
+   NOP padding; and
 5. `finalize_consan_text_rewrites` validates every translated placement and
    atomically publishes the image, committed lowerings, patch geometry, and
    relocation proof.
@@ -711,15 +713,17 @@ or publication anymore. `ScOwnerAnalysis` also gives them one lazy owner,
 CFG, liveness, register-extent, descriptor, dynamic-stack, and scratch
 analysis instead of reconstructing that graph twice.
 
-The intentional representational slack is explicit. Every transformed object
-retains its pristine source text as an unreachable coordinate-stable prefix,
-and a one-site rewrite pays for the same object-wide relocation protocol as a
-many-site rewrite. The protocol can transport additional already-patched code
-ranges even though a pure access-only object has none. This is larger at
-runtime than a fortunate local NOP cave, but it removes all reachability- and
-workload-dependent cave orchestration while preserving exact executable
-behavior. The target profile, rather than common relocation code, now owns
-any same-revision selection required by the structural translation.
+The intentional representational slack is explicit. By default, every
+transformed object retains its pristine source text as an unreachable
+coordinate-stable prefix, and a one-site rewrite pays for the same object-wide
+relocation protocol as a many-site rewrite. The protocol can transport
+additional already-patched code ranges even though a pure access-only object
+has none. A zero- or tightly bounded-growth policy may instead commit the
+whole batch in place, but only after the common transaction proves contiguous
+NOP capacity, bounds, and non-overlap for every rewrite. This preserves the
+single authority without restoring either mode's old cave topology. The
+target profile, rather than common relocation code, owns any same-revision
+selection required by the structural translation.
 
 Retired representations and authorities include the SuperCollider dense-route
 identity and target operations, dense and indirect route fragments, local and
@@ -799,6 +803,18 @@ the whole-MOI relocation backend explicitly so a later campaign does not
 mistake this conclusion for evidence that the current mutation strategy is
 optimal.
 
+A post-fix reread also checked the new transaction itself for residue from the
+retired design. `ConSanInlineTextRewrite`, the public relocation result and
+entry point, the staged rewrite's unused duplicate physical identity, and the
+MOI-private NOP-padding scanner were all adapters or duplicate facts with one
+consumer. Commit `bde0817d93f` removed them. The surviving public surface is
+only staging plus finalization; relocation state is private to that owner, and
+the single shared padding scanner serves both old incremental placement and
+the new whole-text transaction. Searches find no old dense/indirect
+SuperCollider route types and no per-target architecture dispatch outside
+`targets/`. This cleanup changes none of the Section 12.8 verdicts and reveals
+no new bounded macro candidate.
+
 ### 12.9 Campaign accounting and completion audit
 
 After moving structural-translation revision selection into the CDNA5 target
@@ -807,9 +823,9 @@ profile, the final production inventory is:
 | Signal | Eighth baseline | Final | Campaign change |
 | --- | ---: | ---: | ---: |
 | Production files | 313 | **316** | +3 |
-| Physical production lines | 96,100 | **91,892** | **-4,208** |
-| Nonblank production lines | 89,764 | **85,656** | **-4,108** |
-| Governing implementation lines | 82,302 | **78,293** | **-4,009** |
+| Physical production lines | 96,100 | **91,889** | **-4,211** |
+| Nonblank production lines | 89,764 | **85,655** | **-4,109** |
+| Governing implementation lines | 82,302 | **78,294** | **-4,008** |
 
 The file increase is the shared access-program implementation and the two
 shared text-relocation owners; each displaced private implementation was
@@ -819,14 +835,14 @@ governing count. No implementation moved into an excluded category.
 
 The completion requirements now have direct evidence:
 
-1. the governing reduction is 4,009 lines, leaving 78,293, nine lines below
+1. the governing reduction is 4,008 lines, leaving 78,294, eight lines below
    the required maximum;
 2. the whole-text SuperCollider protocol replaces the materially different
    LDS and FLAT placement/publication lifecycles and removes 3,803 governing
    lines by itself;
-3. `stage_consan_text_rewrites`, `relocate_consan_text`, and
-   `finalize_consan_text_rewrites` are the sole outer authority, with LDS and
-   FLAT as real consumers and no route compatibility implementation;
+3. `stage_consan_text_rewrites` and `finalize_consan_text_rewrites` expose the
+   sole outer authority, with private relocation machinery, LDS and FLAT as
+   real consumers, and no route compatibility implementation;
 4. the algebra is site, owners, descriptor effects, typed program, relocation,
    placement proof, and atomic commit--none of which enumerates a mode or
    architecture;
@@ -834,14 +850,40 @@ The completion requirements now have direct evidence:
    is target-owned, and the boundary test rejects either fact escaping;
 6. final validation remains independent, relocation and descriptor mutation
    remain fail-closed and transactional, and runtime evidence stays typed;
-7. the malformed-ELF memory defect and HIP-fixture public-include defect found
+7. the malformed-ELF memory defect, HIP-fixture public-include defect,
+   exact-shadow version-address defect, and zero-growth admission defect found
    during the campaign have bounded regression coverage;
 8. final nonphysical gate results are recorded below; and
 9. Section 12.8 is the required fresh operation-matrix audit.
 
-Validation checkpoint: a clean `ninja -j16` rebuild and
-`ConSan.ArchitectureBoundaries` pass. The first full nonphysical ConSan gate
-attempted 16 memory-heavy InlineShadow transforms concurrently and produced a
-cluster of timeouts and resource-admission failures; that overloaded run is not
-completion evidence. A resource-aware full ConSan gate and the full
-nonphysical RocJitsu gate remain pending.
+Validation checkpoint: a clean `ninja -j16` rebuild and the focused 105-test
+relocation, growth-policy, SuperCollider-composition, and architecture-boundary
+set pass. The complete nonphysical ConSan gate passes **4,759/4,759** in
+211.27 seconds. The complete nonphysical RocJitsu gate registers 9,547 tests;
+one is disabled, and all **9,546** remaining tests complete without failure in
+268.64 seconds (nine report environment- or feature-dependent skips). No
+physical-GPU test was used for this completion checkpoint.
+
+### 12.10 Corrective regressions after the macro cutover
+
+The full gate exposed two behavioral obligations that the first whole-text
+checkpoint had not represented precisely enough:
+
+- `def027fc999` fixes the shared bounded-publication caller contract. The
+  exact-shadow slot's version lives at byte offset 16, so its initial coherent
+  load must use that field while the later payload writes must recover the
+  slot base for every pre-CAS candidate lane. The regression pins both the
+  emitted address adjustment and physical contention behavior across the five
+  simulated targets.
+- `ba2b92fa248` preserves explicit zero-growth admission. Structural
+  relocation normally grows an ELF even when a complete probe already fits
+  contiguous source NOPs. The common transaction now attempts an all-or-none
+  in-place batch only after normal relocation exceeds policy, and the host
+  regression requires a real multiword rewrite with zero trampoline and no
+  image growth.
+
+These are corrections to the lifted protocols, not compatibility paths. The
+first strengthens the common versioned-claim boundary; the second keeps one
+text-rewrite authority under both ordinary and restrictive growth policies.
+The adapter cleanup in `bde0817d93f` followed the fixes and repaid their code
+cost while retaining the campaign floor.
