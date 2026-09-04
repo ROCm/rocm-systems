@@ -1151,6 +1151,11 @@ file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay_barrier.i
      _record_replay_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
 file(READ "${_consan_dir}/consan_moi_barrier.h" _moi_barrier_contract)
+if(_moi_barrier_contract MATCHES "MoiBarrierIslandReservation")
+    message(FATAL_ERROR
+        "the shared barrier contract must not restore obsolete island reservations"
+    )
+endif()
 file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay.h"
      _record_replay_contract)
 file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.inc"
