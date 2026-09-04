@@ -490,7 +490,18 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
       }
     }
 
+    // A fallback is only watched where its primary is unavailable.
+    std::set<rdc_field_t> unneeded_fallbacks;
+    for (const auto& fb : kHealthFieldFallbacks) {
+      auto primary = probe.find(fb.first);
+      if (primary != probe.end() && primary->second == RDC_ST_OK) {
+        unneeded_fallbacks.insert(fb.second);
+      }
+    }
+
     for (auto field : candidates) {
+      if (unneeded_fallbacks.count(field)) continue;
+
       rdc_status_t status = probe[field];
       if (is_capability_miss(status)) {
         auto fallback = kHealthFieldFallbacks.find(field);
@@ -515,18 +526,22 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
     }
   }
 
-  if (supported_fields.empty()) {
-    RDC_LOG(RDC_ERROR, "No supported health fields for group " << group_id
-                                                              << "; health watch not set.");
-    return RDC_ST_NOT_SUPPORTED;
-  }
-
   // Field groups are per group, not per GPU: a field stays in the 1 s watch if
   // any GPU in the group supports it. -c still skips it per GPU via
-  // supported_pairs. Keep the candidate order.
+  // supported_pairs. Keep the candidate order. An empty group has nothing to
+  // probe; watch every candidate, as before.
   std::vector<rdc_field_t> watch_ids;
-  for (auto field : candidates) {
-    if (supported_fields.count(field)) watch_ids.push_back(field);
+  if (0 == ginfo.count) {
+    watch_ids = candidates;
+  } else {
+    for (auto field : candidates) {
+      if (supported_fields.count(field)) watch_ids.push_back(field);
+    }
+    if (watch_ids.empty()) {
+      RDC_LOG(RDC_ERROR, "No supported health fields for group " << group_id
+                                                                << "; health watch not set.");
+      return RDC_ST_NOT_SUPPORTED;
+    }
   }
 
   rdc_field_grp_t field_group_id;
