@@ -49,6 +49,9 @@ extern unsigned int g_rocmVersionPatch;
 
 extern bool g_ginHasError;
 
+extern std::function<ncclResult_t()> g_ncclEnvPluginInit;
+extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort;
+
 extern bool g_validHsaScratch;
 extern const char* g_lastHsaScratchEnv;  // hsaScratchEnv as passed to validHsaScratchEnvSetting
 extern int g_firmwareVersion;
