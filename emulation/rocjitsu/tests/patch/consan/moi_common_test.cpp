@@ -1283,32 +1283,6 @@ TEST(ConSanMoi, SpilledVgprReloadResultNamesAreDistinctAndComplete) {
   }
 }
 
-TEST(ConSanMoi, ResourcePlanAlternativeNamesAreExhaustiveAndDistinct) {
-  EXPECT_EQ(ConSanResourcePlanAlternative{}.kind,
-            ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
-  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
-                   ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill),
-               "guest_operand_overlap_spill");
-  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
-                   ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery),
-               "spill_backed_operand_recovery");
-  EXPECT_STREQ(
-      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Selected),
-      "selected");
-  EXPECT_STREQ(
-      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Rejected),
-      "rejected");
-  EXPECT_STREQ(consan_resource_plan_alternative_outcome_name(
-                   ConSanResourcePlanAlternativeOutcome::Superseded),
-               "superseded");
-  EXPECT_STREQ(consan_resource_plan_alternative_outcome_name(
-                   ConSanResourcePlanAlternativeOutcome::Contributed),
-               "contributed");
-  EXPECT_STREQ(
-      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Vetoed),
-      "vetoed");
-}
-
 TEST(ConSanMoi, ResourcePlanAlternativeOutcomeTracksFinalPlanVeto) {
   ConSanCandidateResourcePlan plan;
   plan.source = ConSanRegisterAllocationSource::SpillRequired;

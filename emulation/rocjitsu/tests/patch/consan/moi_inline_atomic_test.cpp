@@ -3599,9 +3599,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-    ASSERT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible())
-        << consan_fence_association_name(
-               result.program_inventory.sync().moi_fence_candidates.front().association);
+    ASSERT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
     const ConSanMoiFenceCandidate &semantic_fence =
         result.program_inventory.sync().moi_fence_candidates.front();
     ASSERT_TRUE(semantic_fence.communication_event);

@@ -6236,7 +6236,7 @@ rocjitsu::ConSanTransformArtifacts auto_sc_transform_result() {
   result.replacement = {0x7f, 'E', 'L', 'F', 's', 'c'};
   rocjitsu::ConSanPatchInfo patch;
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  patch.kind = rocjitsu::ConSanPatchKind::LocalCaveLdsStoreCheckTrap;
+  patch.kind = rocjitsu::ConSanPatchKind::LdsStoreCheckTrap;
   result.patches.push_back(patch);
   install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
                                rocjitsu::ConSanAccessPolicyReason::None,
@@ -9303,7 +9303,7 @@ TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInte
     g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
     rocjitsu::ConSanPatchInfo patch;
     patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-    patch.kind = rocjitsu::ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
+    patch.kind = rocjitsu::ConSanPatchKind::FlatLoadCheckTrap;
     patch.required_private_segment_size = 32u;
     patch.dynamic_private_segment_addend = 32u;
     patch.owner_descriptor_file_offsets = {64u};

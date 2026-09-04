@@ -8,8 +8,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 
-#include <string_view>
-
 namespace rocjitsu {
 
 /// Classify whether one exact synchronization sequence is eligible for the
@@ -19,8 +17,5 @@ namespace rocjitsu {
 perturbation_rejection_reason(const SyncEventSemanticIndex &events,
                               const ConSanSyncSequence &sequence, ConSanPerturbationKind kind,
                               ConSanPerturbationEdge edge);
-
-[[nodiscard]] std::string_view
-consan_perturbation_rejection_reason_name(ConSanPerturbationRejectionReason reason);
 
 } // namespace rocjitsu

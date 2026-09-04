@@ -90,20 +90,8 @@ enum class ConSanPatchKind : uint8_t {
   InlineLdsEndpgmRewrite,
   LdsLoadCheckTrap,
   LdsStoreCheckTrap,
-  // Compatibility spellings for callers that have not yet stopped describing
-  // semantic LDS instrumentation by its former physical placement.
-  InlineLdsLoadCheckTrap = LdsLoadCheckTrap,
-  LocalCaveLdsLoadCheckTrap = LdsLoadCheckTrap,
-  InlineLdsStoreCheckTrap = LdsStoreCheckTrap,
-  LocalCaveLdsStoreCheckTrap = LdsStoreCheckTrap,
   FlatLoadCheckTrap,
   FlatStoreCheckTrap,
-  // Compatibility spellings for callers that have not yet stopped describing
-  // semantic FLAT instrumentation by its former physical placement.
-  InlineFlatLoadCheckTrap = FlatLoadCheckTrap,
-  LocalCaveFlatLoadCheckTrap = FlatLoadCheckTrap,
-  InlineFlatStoreCheckTrap = FlatStoreCheckTrap,
-  LocalCaveFlatStoreCheckTrap = FlatStoreCheckTrap,
   InlineFlatTrapRewrite,
   InlineBarrierNopRewrite,
   InlineBarrierIdScopeRewrite,

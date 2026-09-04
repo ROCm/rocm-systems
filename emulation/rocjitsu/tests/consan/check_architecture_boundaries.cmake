@@ -3061,22 +3061,33 @@ endif()
 file(READ "${_consan_dir}/consan_placement.inc" _access_scratch_owner)
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_support.h" _sc_support_contract)
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_support.cpp" _sc_support_body)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_common.inc" _sc_common_body)
 file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc" _sc_flat_body)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_lds.inc" _sc_lds_body)
 foreach(_operation IN ITEMS
     access_dword_count
     access_scratch_tuple_base_is_valid
     access_scratch_search_start
-    choose_scratch_vgpr
     choose_spill_scratch_vgpr
 )
     if(NOT _common_placement_contract MATCHES "${_operation}" OR
        NOT _access_scratch_owner MATCHES "${_operation}" OR
-       NOT _sc_flat_body MATCHES "${_operation}")
+       (NOT _sc_common_body MATCHES "${_operation}" AND
+        NOT _sc_flat_body MATCHES "${_operation}"))
         message(FATAL_ERROR
             "ConSan normalized access scratch operation lost its shared placement owner: ${_operation}"
         )
     endif()
 endforeach()
+if(NOT _sc_common_body MATCHES "choose_scratch_vgpr" OR
+   NOT _sc_common_body MATCHES "plan_consan_registers" OR
+   NOT _sc_common_body MATCHES "choose_sc_access_scratch_vgpr" OR
+   NOT _sc_flat_body MATCHES "choose_sc_access_scratch_vgpr" OR
+   NOT _sc_lds_body MATCHES "choose_sc_access_scratch_vgpr")
+    message(FATAL_ERROR
+        "ConSan SuperCollider LDS and FLAT must share one all-owner scratch planner"
+    )
+endif()
 if(_sc_support_contract MATCHES "flat_(dword_count|scratch)" OR
    _sc_support_body MATCHES "flat_(dword_count|scratch)|choose_flat_(scratch|spill)")
     message(FATAL_ERROR

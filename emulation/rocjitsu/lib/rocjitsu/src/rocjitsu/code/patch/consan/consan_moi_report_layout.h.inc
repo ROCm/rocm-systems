@@ -82,9 +82,6 @@ inline constexpr uint32_t kConSanMoiRecordReplayIdentityHashMultiplier = 0x9e377
 /// full table. Large admitted inventories can legitimately drive the bounded
 /// table above half occupancy, so retain a finite 1,024-step collision budget.
 inline constexpr uint32_t kConSanMoiRecordReplayProbeLimit = 1024u;
-[[nodiscard]] constexpr uint32_t consan_moi_record_replay_fold_dispatch_token(uint64_t token) {
-  return static_cast<uint32_t>(token) ^ static_cast<uint32_t>(token >> 32u);
-}
 [[nodiscard]] constexpr uint32_t consan_moi_record_replay_mix_identity(uint32_t hash,
                                                                        uint32_t coordinate) {
   return (hash * kConSanMoiRecordReplayIdentityHashMultiplier) ^ coordinate;
@@ -299,27 +296,6 @@ enum class ConSanEvidenceRequirementReason : uint8_t {
   Count,
 };
 
-/// Complete iterable set of evidence-requirement construction reasons.
-inline constexpr auto kConSanEvidenceRequirementReasons = [] {
-  using E = ConSanEvidenceRequirementReason;
-  return make_consan_enum_vocabulary(
-      "invalid-evidence-requirement-reason", consan_enum(E::None, "none"),
-      consan_enum(E::InvalidObservationPlan, "invalid-observation-plan"),
-      consan_enum(E::WrongEngine, "wrong-engine"),
-      consan_enum(E::UnexpectedIntentKind, "unexpected-intent-kind"),
-      consan_enum(E::InvalidIntentPayload, "invalid-intent-payload"),
-      consan_enum(E::MissingInventoryFact, "missing-inventory-fact"));
-}();
-
-/// Return the stable diagnostic spelling of a requirement-construction reason.
-[[nodiscard]] constexpr std::string_view
-consan_evidence_requirement_reason_name(ConSanEvidenceRequirementReason reason) {
-  return kConSanEvidenceRequirementReasons.name(reason);
-}
-
-static_assert(kConSanEvidenceRequirementReasons.size() ==
-              static_cast<size_t>(ConSanEvidenceRequirementReason::Count));
-
 /// Buffer-independent role played by one admitted observation in the
 /// evidence protocol.
 ///
@@ -345,25 +321,6 @@ enum class ConSanEvidenceIntentKind : uint8_t {
   /// One-past-the-end iteration bound; never an evidence intent.
   Count,
 };
-
-/// Complete iterable set of buffer-independent evidence-intent kinds.
-inline constexpr auto kConSanEvidenceIntentKinds = [] {
-  using E = ConSanEvidenceIntentKind;
-  return make_consan_enum_vocabulary(
-      "invalid-evidence-intent-kind", consan_enum(E::Access, "access"),
-      consan_enum(E::Barrier, "barrier"), consan_enum(E::Atomic, "atomic"),
-      consan_enum(E::Fence, "fence"), consan_enum(E::AddressCapture, "address-capture"),
-      consan_enum(E::StickyMarker, "sticky-marker"));
-}();
-
-/// Return the stable diagnostic spelling of an evidence-intent kind.
-[[nodiscard]] constexpr std::string_view
-consan_evidence_intent_kind_name(ConSanEvidenceIntentKind kind) {
-  return kConSanEvidenceIntentKinds.name(kind);
-}
-
-static_assert(kConSanEvidenceIntentKinds.size() ==
-              static_cast<size_t>(ConSanEvidenceIntentKind::Count));
 
 /// One admitted policy observation translated into report-facing meaning.
 ///

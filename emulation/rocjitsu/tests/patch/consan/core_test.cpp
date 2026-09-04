@@ -225,15 +225,14 @@ TEST(ConSan, MoiExactEntryWorkgroupCaptureHasOneExplicitStorageDomain) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets private_offsets{32u, 36u, 40u};
 
   EXPECT_FALSE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
+  EXPECT_TRUE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, &private_offsets));
   EXPECT_TRUE(
-      consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, &private_offsets));
-  EXPECT_TRUE(consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(
-      point, &private_offsets));
+      consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
 
   point.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
   EXPECT_TRUE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
-  EXPECT_FALSE(consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(
-      point, &private_offsets));
+  EXPECT_FALSE(
+      consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
 }
 
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
@@ -267,8 +266,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   state.moi_dispatch_identity.set_private_fallback(true);
   state.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
   state.moi_persistent_sgprs.workgroup_key = 22u;
-  state.moi_persistent_sgprs.exact_workgroup =
-      ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u};
+  state.moi_persistent_sgprs.exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u};
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
   EXPECT_EQ(state, ConSanMoiOperatingPoint(state));
@@ -848,14 +846,6 @@ TEST(ConSan, ParsesFlavorNames) {
   EXPECT_EQ(consan_flavor_name(ConSanFlavor::None), std::string_view("none"));
   EXPECT_EQ(consan_flavor_name(ConSanFlavor::SuperCollider), std::string_view("supercollider"));
   EXPECT_EQ(consan_flavor_name(ConSanFlavor::Moi), std::string_view("moi"));
-  EXPECT_EQ(consan_transform_outcome_name(ConSanTransformOutcome::Unchanged),
-            std::string_view("unchanged"));
-  EXPECT_EQ(consan_transform_outcome_name(ConSanTransformOutcome::ModifiedValid),
-            std::string_view("modified-valid"));
-  EXPECT_EQ(consan_transform_outcome_name(ConSanTransformOutcome::Unsupported),
-            std::string_view("unsupported"));
-  EXPECT_EQ(consan_transform_outcome_name(ConSanTransformOutcome::Invalid),
-            std::string_view("invalid"));
   EXPECT_FALSE(parse_consan_flavor(""));
   EXPECT_FALSE(parse_consan_flavor("context"));
 }
@@ -933,9 +923,6 @@ TEST(ConSan, PatchedImageGrowthBudgetIsSharedAcrossStages) {
 }
 
 TEST(ConSan, SharedDiagnosticVocabularyUsesStableNames) {
-  EXPECT_STREQ(
-      consan_register_allocation_source_name(ConSanRegisterAllocationSource::DescriptorGrowth),
-      "descriptor-growth");
   EXPECT_STREQ(consan_delay_mode_name(ConSanDelayMode::SleepVar), "sleep_var");
   EXPECT_STREQ(
       consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource::StaticM0Literal32),

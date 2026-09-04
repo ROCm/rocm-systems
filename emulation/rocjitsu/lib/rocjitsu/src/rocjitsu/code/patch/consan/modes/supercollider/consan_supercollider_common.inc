@@ -46,6 +46,219 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
   }
 }
 
+struct ScOwnerContext {
+  const ConSanKernelInfo *kernel = nullptr;
+  KernelCfgScope scope;
+  std::unique_ptr<LivenessAnalysis> liveness;
+};
+
+struct ScSiteOwnerFacts {
+  const Instruction *instruction = nullptr;
+  std::vector<uint64_t> descriptor_file_offsets;
+  std::vector<const ScOwnerContext *> contexts;
+  std::vector<const LivenessAnalysis *> liveness;
+  std::optional<uint16_t> common_ordinary_vgpr_count;
+  std::optional<uint16_t> common_unified_vgpr_count;
+  std::optional<uint16_t> common_sgpr_count;
+  std::optional<uint16_t> max_vgpr_ref;
+  std::optional<uint16_t> max_sgpr_ref;
+  uint32_t max_private_segment_size = 0;
+  bool any_dynamic_stack = false;
+  bool every_dynamic_stack = true;
+  bool every_owner_can_grow_ordinary_vgprs = true;
+};
+
+class ScOwnerAnalysis {
+public:
+  ScOwnerAnalysis(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
+                  rj_code_arch_t arch, bool restrict_to_preflight_candidates)
+      : arch_(arch), original_bytes_(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                                     code_object.image_size()),
+        decoder_(Decoder::create(arch)) {
+    for (const ConSanKernelInfo &kernel : inventory.kernels())
+      kernels_.emplace(kernel.descriptor_file_offset, &kernel);
+    if (!decoder_)
+      return;
+
+    consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+        code_object, inventory.kernels(), inventory.functions());
+    if (restrict_to_preflight_candidates) {
+      cfg.leaders.clear();
+      cfg.kernel_entries.clear();
+      cfg.code_ranges.clear();
+      for (const ConSanKernelInfo &kernel : inventory.kernels()) {
+        if (!kernel.has_text_range || kernel.preflight_action != ConSanPreflightAction::Candidate)
+          continue;
+        cfg.leaders.push_back(kernel.entry_text_offset);
+        cfg.kernel_entries.push_back(kernel.entry_text_offset);
+        if (kernel.code_size != 0u)
+          cfg.code_ranges.push_back(
+              {.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+      }
+      std::ranges::sort(cfg.leaders);
+      cfg.leaders.erase(std::ranges::unique(cfg.leaders).begin(), cfg.leaders.end());
+      std::ranges::sort(cfg.kernel_entries);
+      cfg.kernel_entries.erase(std::ranges::unique(cfg.kernel_entries).begin(),
+                               cfg.kernel_entries.end());
+    }
+    blocks_ = BasicBlock::build(code_object, *decoder_, arch, cfg.leaders, cfg.code_ranges);
+    block_ptrs_ = block_ptrs_for(blocks_);
+    block_index_ = build_block_offset_index(blocks_);
+    kernel_entries_ = std::move(cfg.kernel_entries);
+    if (code_object.text_sections().size() == 1u) {
+      const Section *text = code_object.text_sections().front();
+      pristine_text_ =
+          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+    }
+    contexts_.reserve(inventory.kernels().size());
+    failed_contexts_.reserve(inventory.kernels().size());
+    max_refs_.reserve(inventory.kernels().size());
+  }
+
+  [[nodiscard]] const ConSanKernelInfo *kernel(uint64_t descriptor_file_offset) const {
+    const auto found = kernels_.find(descriptor_file_offset);
+    return found == kernels_.end() ? nullptr : found->second;
+  }
+
+  [[nodiscard]] const ScOwnerContext *context(uint64_t descriptor_file_offset) {
+    if (const auto found = contexts_.find(descriptor_file_offset); found != contexts_.end())
+      return &found->second;
+    const ConSanKernelInfo *owner = kernel(descriptor_file_offset);
+    if (!decoder_ || owner == nullptr || !owner->has_text_range ||
+        failed_contexts_.contains(descriptor_file_offset))
+      return nullptr;
+    auto scope = build_kernel_cfg_scope(blocks_, block_index_,
+                                        KernelScopeRequest{.entry_offset = owner->entry_text_offset,
+                                                           .additional_entry_offsets = {}},
+                                        kernel_entries_, pristine_text_);
+    if (!scope) {
+      failed_contexts_.insert(descriptor_file_offset);
+      return nullptr;
+    }
+    ScOwnerContext built{.kernel = owner, .scope = std::move(*scope), .liveness = nullptr};
+    built.liveness =
+        std::make_unique<LivenessAnalysis>(KernelBlockScope(built.scope.blocks),
+                                           LivenessAnalysisOptions{}, built.scope.liveness_edges);
+    return &contexts_.emplace(descriptor_file_offset, std::move(built)).first->second;
+  }
+
+  [[nodiscard]] std::optional<ScSiteOwnerFacts> site_facts(const ConSanAccessInventorySite &site,
+                                                           std::vector<uint64_t> owners) {
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    ScSiteOwnerFacts facts;
+    facts.descriptor_file_offsets = std::move(owners);
+    facts.instruction = find_instruction_at_text_offset(KernelBlockScope(block_ptrs_),
+                                                        site.physical_id.original_text_offset);
+    if (!facts.instruction || facts.descriptor_file_offsets.empty())
+      return std::nullopt;
+
+    for (uint64_t owner_id : facts.descriptor_file_offsets) {
+      const ScOwnerContext *owner = context(owner_id);
+      const auto descriptor = read_kernel_descriptor(original_bytes_, owner_id);
+      const Instruction *owner_instruction =
+          owner == nullptr ? nullptr
+                           : find_instruction_at_text_offset(KernelBlockScope(owner->scope.blocks),
+                                                             site.physical_id.original_text_offset);
+      if (owner == nullptr || owner->kernel->preflight_action == ConSanPreflightAction::Blocked ||
+          owner->liveness == nullptr || owner_instruction != facts.instruction || !descriptor)
+        return std::nullopt;
+
+      auto refs = max_refs_.find(owner_id);
+      if (refs == max_refs_.end())
+        refs = max_refs_
+                   .emplace(owner_id, max_register_refs_in_kernel(
+                                          *owner->kernel, KernelBlockScope(owner->scope.blocks)))
+                   .first;
+      facts.contexts.push_back(owner);
+      facts.liveness.push_back(owner->liveness.get());
+      const uint16_t ordinary = descriptor_ordinary_vgpr_allocation_count(*descriptor, arch_);
+      const uint16_t unified = descriptor_vgpr_allocation_count(*descriptor, arch_);
+      const uint16_t sgprs = descriptor_sgpr_allocation_count(*descriptor, arch_);
+      const auto minimum = [](std::optional<uint16_t> current, uint16_t value) {
+        return current ? std::min(*current, value) : value;
+      };
+      facts.common_ordinary_vgpr_count = minimum(facts.common_ordinary_vgpr_count, ordinary);
+      facts.common_unified_vgpr_count = minimum(facts.common_unified_vgpr_count, unified);
+      facts.common_sgpr_count = minimum(facts.common_sgpr_count, sgprs);
+      facts.max_private_segment_size =
+          std::max(facts.max_private_segment_size, descriptor->private_segment_fixed_size);
+      if (refs->second.vgpr)
+        facts.max_vgpr_ref = facts.max_vgpr_ref ? std::max(*facts.max_vgpr_ref, *refs->second.vgpr)
+                                                : refs->second.vgpr;
+      if (refs->second.sgpr)
+        facts.max_sgpr_ref = facts.max_sgpr_ref ? std::max(*facts.max_sgpr_ref, *refs->second.sgpr)
+                                                : refs->second.sgpr;
+      const bool dynamic = owner->kernel->uses_dynamic_stack.value_or(false);
+      facts.any_dynamic_stack |= dynamic;
+      facts.every_dynamic_stack &= dynamic;
+      facts.every_owner_can_grow_ordinary_vgprs &= ordinary == unified;
+    }
+    return facts;
+  }
+
+private:
+  rj_code_arch_t arch_;
+  std::span<const uint8_t> original_bytes_;
+  std::unique_ptr<Decoder> decoder_;
+  std::vector<std::unique_ptr<BasicBlock>> blocks_;
+  std::vector<BasicBlock *> block_ptrs_;
+  BlockOffsetIndex block_index_;
+  std::vector<uint64_t> kernel_entries_;
+  std::span<const uint8_t> pristine_text_;
+  std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_;
+  std::unordered_map<uint64_t, ScOwnerContext> contexts_;
+  std::unordered_set<uint64_t> failed_contexts_;
+  std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_;
+};
+
+[[nodiscard]] std::optional<uint16_t> choose_sc_access_scratch_vgpr(
+    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
+    std::span<const LivenessAnalysis *const> owner_liveness, uint16_t search_start,
+    std::optional<uint16_t> allocation_limit, uint16_t required_vgprs, uint16_t alignment,
+    uint16_t max_referenced_count = 0u) {
+  if (options.scratch_vgpr)
+    return choose_scratch_vgpr(access, options, inst, nullptr, search_start, allocation_limit,
+                               required_vgprs);
+  if (!inst || owner_liveness.empty() || required_vgprs > UINT8_MAX ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return !liveness; }) ||
+      !access.lowering.form)
+    return std::nullopt;
+
+  RegisterSet live;
+  for (const LivenessAnalysis *liveness : owner_liveness)
+    live |= liveness->live_before(*inst);
+  ConSanRegisterRequest request{
+      .reg_class = RegClass::VGPR,
+      .count = required_vgprs,
+      .alignment = alignment,
+      .search_start = search_start,
+      .current_allocation_count =
+          std::min(allocation_limit.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit),
+      .max_referenced_count = max_referenced_count,
+      .architecture_limit =
+          std::min(allocation_limit.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit),
+      .explicit_base = std::nullopt,
+      .forbidden = {},
+      .allow_spill = false,
+      .force_spill = false,
+      .allow_spill_descriptor_growth = false,
+  };
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  const auto forbid = [&](std::optional<uint16_t> base, uint16_t count) {
+    if (base)
+      request.forbidden.expand({RegClass::VGPR, *base, static_cast<uint8_t>(count)});
+  };
+  forbid(form.address_vgpr, form.address_vgpr_count);
+  forbid(form.destination_vgpr, form.destination_register_count);
+  const uint16_t data_count =
+      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
+  forbid(form.data_vgpr, data_count);
+  forbid(form.second_data_vgpr, data_count);
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  return plan.source == ConSanRegisterAllocationSource::LivenessDead ? plan.base : std::nullopt;
+}
+
 [[nodiscard]] bool sc_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                           uint16_t rhs_width) {
   return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
@@ -69,34 +282,36 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
   return consan_arch_is_cdna3_or_cdna4(target.arch) ? 2u : 1u;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_sc_borrowed_scalar_sgpr(uint16_t allocated_sgpr_count,
-                                                                     const ConSanOptions &options) {
-  // This scalar is live and explicitly preserved, so the only constraints are
-  // that every owner already allocates it and that it is not the active
-  // runtime delay source.
+[[nodiscard]] std::optional<uint16_t>
+choose_sc_borrowed_scalar_range(uint16_t allocated_sgpr_count, uint16_t width,
+                                const ConSanOptions &options,
+                                bool preserve_dynamic_stack_abi = false) {
   const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
-  for (uint16_t sgpr = 0; sgpr < limit; ++sgpr) {
-    if (!sc_sgpr_range_overlaps_delay_source(sgpr, 1u, options))
-      return sgpr;
-  }
+  for (uint16_t base = 0; static_cast<uint32_t>(base) + width <= limit; base += width)
+    if (!sc_sgpr_range_overlaps_delay_source(base, width, options) &&
+        !(preserve_dynamic_stack_abi &&
+          sc_sgpr_ranges_overlap(base, width, kDynamicStackTopSgpr, 2u)))
+      return base;
   return std::nullopt;
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_dead_vcc_save_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     uint16_t allocated_sgpr_count, std::optional<uint16_t> min_preferred_sgpr,
-    uint16_t selection_limit, const ConSanTargetProfile &target, const ConSanOptions &options) {
+    uint16_t selection_limit, uint16_t width, bool prefer_allocated_hole,
+    const ConSanOptions &options, bool preserve_dynamic_stack_abi = false) {
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
-  const uint16_t width = sc_vcc_save_sgpr_width(target);
   const uint16_t limit = std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
   const auto find_free = [&](uint16_t start, uint16_t end) -> std::optional<uint16_t> {
     if (width == 2u && (start & 1u) != 0u)
       ++start;
     for (uint16_t base = start; static_cast<uint32_t>(base) + width <= end;
          base = static_cast<uint16_t>(base + width)) {
-      if (sc_sgpr_range_overlaps_delay_source(base, width, options))
+      if (sc_sgpr_range_overlaps_delay_source(base, width, options) ||
+          (preserve_dynamic_stack_abi &&
+           sc_sgpr_ranges_overlap(base, width, kDynamicStackTopSgpr, 2u)))
         continue;
       const RegisterRef ref{RegClass::SGPR, base, static_cast<uint8_t>(width)};
       if (std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
@@ -107,7 +322,7 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
     return std::nullopt;
   };
   const uint16_t allocated_limit = std::min(allocated_sgpr_count, limit);
-  if (consan_arch_is_cdna3_or_cdna4(target.arch)) {
+  if (prefer_allocated_hole) {
     // CDNA SGPR allocation participates in occupancy. Reuse an all-owner dead
     // hole inside the current allocation before growing every descriptor.
     if (auto existing = find_free(0, allocated_limit))
@@ -126,13 +341,6 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
       return preferred;
   }
   return find_free(0, limit);
-}
-
-[[nodiscard]] ConSanPatchKind lds_check_trap_patch_kind(const ConSanAccessInventorySite &access,
-                                                        bool) {
-  if (access.kind == ConSanLdsAccessKind::Write)
-    return ConSanPatchKind::LdsStoreCheckTrap;
-  return ConSanPatchKind::LdsLoadCheckTrap;
 }
 
 [[nodiscard]] bool is_d16_lds_load(const ConSanAccessInventorySite &access) {
@@ -157,9 +365,6 @@ struct SplitTwoAddressLdsExpansionPlan {
     return static_cast<uint16_t>(offsets.first > UINT16_MAX) +
            static_cast<uint16_t>(offsets.second > UINT16_MAX);
   }
-
-  [[nodiscard]] uint32_t access_word_count() const { return 4u + 2u * large_offset_count(); }
-
 };
 
 [[nodiscard]] std::optional<SplitTwoAddressLdsExpansionPlan>

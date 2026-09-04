@@ -205,12 +205,6 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
 }
 
 TEST(ConSanEvidenceRequirements, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
-  expect_evidence_enum_contract(
-      kConSanEvidenceRequirementReasons, ConSanEvidenceRequirementReason::Count,
-      consan_evidence_requirement_reason_name, "invalid-evidence-requirement-reason");
-  expect_evidence_enum_contract(kConSanEvidenceIntentKinds, ConSanEvidenceIntentKind::Count,
-                                consan_evidence_intent_kind_name, "invalid-evidence-intent-kind");
-
   constexpr std::array outcomes = {
       ConSanMoiAutoReportPlanOutcome::Complete,
       ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity,

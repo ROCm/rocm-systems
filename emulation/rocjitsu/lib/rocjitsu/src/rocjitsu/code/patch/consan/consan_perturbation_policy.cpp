@@ -34,32 +34,6 @@ namespace {
          consan_memory_scope_is_agent_or_system(*atomic->scope);
 }
 
-constexpr auto kConSanPerturbationRejectionReasons = make_consan_enum_vocabulary(
-    "invalid-perturbation-rejection-reason",
-    consan_enum(ConSanPerturbationRejectionReason::None, ""),
-    consan_enum(ConSanPerturbationRejectionReason::MissingExactBasicBlock,
-                "missing-exact-basic-block"),
-    consan_enum(ConSanPerturbationRejectionReason::CyclicCfgComponent, "cyclic-cfg-component"),
-    consan_enum(ConSanPerturbationRejectionReason::InsideScalarClause, "inside-s-clause"),
-    consan_enum(ConSanPerturbationRejectionReason::RuntimeHelper, "runtime-helper"),
-    consan_enum(ConSanPerturbationRejectionReason::NonExactSequenceMembers,
-                "non-exact-sequence-members"),
-    consan_enum(ConSanPerturbationRejectionReason::AmbiguousOrUnsupportedSequence,
-                "ambiguous-or-unsupported-sequence"),
-    consan_enum(ConSanPerturbationRejectionReason::NotQualifiedFullBarrier,
-                "not-qualified-full-barrier"),
-    consan_enum(ConSanPerturbationRejectionReason::DynamicOrUnknownBarrierParticipants,
-                "dynamic-or-unknown-barrier-participants"),
-    consan_enum(ConSanPerturbationRejectionReason::NotAtomicSequence, "not-atomic-sequence"),
-    consan_enum(ConSanPerturbationRejectionReason::UnknownOrInapplicableMemoryRole,
-                "unknown-or-inapplicable-memory-role"),
-    consan_enum(ConSanPerturbationRejectionReason::UnsupportedAtomicScope,
-                "unsupported-atomic-scope"),
-    consan_enum(ConSanPerturbationRejectionReason::AmbiguousAddressProvenance,
-                "ambiguous-address-provenance"),
-    consan_enum(ConSanPerturbationRejectionReason::NoPerturbationKind, "no-perturbation-kind"),
-    consan_enum(ConSanPerturbationRejectionReason::MissingAnchorEvent, "missing-anchor-event"));
-
 } // namespace
 
 ConSanPerturbationRejectionReason
@@ -105,11 +79,6 @@ perturbation_rejection_reason(const SyncEventSemanticIndex &events,
     return Reason::None;
   }
   return Reason::NoPerturbationKind;
-}
-
-std::string_view
-consan_perturbation_rejection_reason_name(ConSanPerturbationRejectionReason reason) {
-  return kConSanPerturbationRejectionReasons.name(reason);
 }
 
 } // namespace rocjitsu

@@ -456,26 +456,6 @@ TEST(RuntimeCapabilitiesContractTest, PhysicalAndSimulatorFixturesShareOneFactMo
   EXPECT_NE(requirements_copy, all);
 }
 
-TEST(ConSanRuntimeBackendTest, EnumeratesAndNamesEveryDeclaredValue) {
-  constexpr std::array expected_names{
-      std::string_view{"unknown"},
-      std::string_view{"physical-hsa"},
-      std::string_view{"rocjitsu-simulator"},
-  };
-  static_assert(kConSanRuntimeBackends.size() == expected_names.size());
-
-  std::unordered_set<std::string_view> unique_names;
-  for (size_t i = 0; i < kConSanRuntimeBackends.size(); ++i) {
-    EXPECT_EQ(static_cast<size_t>(kConSanRuntimeBackends[i]), i);
-    const std::string_view name = consan_runtime_backend_name(kConSanRuntimeBackends[i]);
-    EXPECT_EQ(name, expected_names[i]);
-    EXPECT_TRUE(unique_names.insert(name).second) << name;
-  }
-  EXPECT_EQ(consan_runtime_backend_name(ConSanRuntimeBackend::Count), "invalid-runtime-backend");
-  EXPECT_EQ(consan_runtime_backend_name(static_cast<ConSanRuntimeBackend>(255)),
-            "invalid-runtime-backend");
-}
-
 TEST(RuntimeCapabilitiesContractTest, RejectsEachMissingRequiredFact) {
   RuntimeCapabilities capabilities{
       .backend = ConSanRuntimeBackend::PhysicalHsa,

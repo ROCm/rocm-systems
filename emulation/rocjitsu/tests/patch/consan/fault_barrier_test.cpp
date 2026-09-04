@@ -2026,7 +2026,7 @@ TEST(ConSan, FaultDropBarrierModeComposesWithLdsCheckTrapPatch) {
   EXPECT_EQ(result.patches[0].phase, ConSanPatchPhase::Mutation);
   EXPECT_EQ(result.patches[1].phase, ConSanPatchPhase::Instrumentation);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierNopRewrite);
-  EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
+  EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::LdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 40u);
   EXPECT_GT(result.replacement.size(), bytes.size());
 

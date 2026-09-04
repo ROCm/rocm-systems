@@ -371,33 +371,6 @@ enum class ConSanFenceAssociation : uint8_t {
   Count,
 };
 
-/// Complete iterable set of fence-association outcomes.
-inline constexpr auto kConSanFenceAssociations = [] {
-  using E = ConSanFenceAssociation;
-  return make_consan_enum_vocabulary(
-      "invalid-fence-association", consan_enum(E::Qualified, "qualified"),
-      consan_enum(E::MissingOrAmbiguousSequence, "missing-or-ambiguous-sequence-membership"),
-      consan_enum(E::NotAddressedCommunication,
-                  "fence-not-associated-with-addressed-communication-sequence"),
-      consan_enum(E::InsufficientConfidence, "communication-sequence-confidence-insufficient"),
-      consan_enum(E::AcquirePairPrefixCoveredByTail, "paired-acquire-prefix-covered-by-tail"),
-      consan_enum(E::UnsupportedCacheOperation, "unsupported-cache-operation"),
-      consan_enum(E::MemoryRoleMismatch, "cache-role-not-carried-by-communication-sequence"),
-      consan_enum(E::MissingOrAmbiguousCommunicationEvent,
-                  "missing-or-ambiguous-communication-event"),
-      consan_enum(E::UnsupportedAddressSource, "communication-address-source-unsupported"),
-      consan_enum(E::UnsupportedScope, "communication-scope-unsupported"));
-}();
-
-/// Return the stable diagnostic spelling of a fence-association outcome.
-[[nodiscard]] constexpr std::string_view
-consan_fence_association_name(ConSanFenceAssociation association) {
-  return kConSanFenceAssociations.name(association);
-}
-
-static_assert(kConSanFenceAssociations.size() ==
-              static_cast<size_t>(ConSanFenceAssociation::Count));
-
 /// Immutable association between one cache/fence event and an addressed
 /// synchronization sequence.
 ///

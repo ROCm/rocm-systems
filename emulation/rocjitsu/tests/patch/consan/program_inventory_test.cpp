@@ -84,15 +84,11 @@ exclusion_reasons(const ConSanAccessInventorySite &site) {
   return reasons;
 }
 
-TEST(ConSanProgramInventory, FenceAssociationContractIsExhaustiveNamedAndRejectsInvalidValues) {
-  expect_complete_enum_contract(kConSanFenceAssociations, ConSanFenceAssociation::Count,
-                                consan_fence_association_name, "invalid-fence-association");
-}
-
 TEST(ConSanProgramInventory, FenceCandidateEligibilityExactlyMatchesQualifiedAssociation) {
   ConSanMoiFenceCandidate candidate;
-  for (ConSanFenceAssociation association : kConSanFenceAssociations) {
-    SCOPED_TRACE(consan_fence_association_name(association));
+  for (uint8_t value = 0; value < static_cast<uint8_t>(ConSanFenceAssociation::Count); ++value) {
+    const auto association = static_cast<ConSanFenceAssociation>(value);
+    SCOPED_TRACE(value);
     candidate.association = association;
     EXPECT_EQ(candidate.eligible(), association == ConSanFenceAssociation::Qualified);
   }

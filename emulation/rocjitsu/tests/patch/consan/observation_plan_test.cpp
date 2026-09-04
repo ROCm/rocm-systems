@@ -147,29 +147,9 @@ ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site)
 }
 
 TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
-  expect_observation_enum_contract(kConSanSiteDecisionKinds, ConSanSiteDecisionKind::Count,
-                                   consan_site_decision_kind_name, "invalid-site-decision-kind");
-  expect_observation_enum_contract(kConSanAccessPolicyReasons, ConSanAccessPolicyReason::Count,
-                                   consan_access_policy_reason_name,
-                                   "invalid-access-policy-reason");
-  expect_observation_enum_contract(kConSanBarrierPolicyReasons, ConSanBarrierPolicyReason::Count,
-                                   consan_barrier_policy_reason_name,
-                                   "invalid-barrier-policy-reason");
   expect_observation_enum_contract(kConSanAtomicPolicyReasons, ConSanAtomicPolicyReason::Count,
                                    consan_atomic_policy_reason_name,
                                    "invalid-atomic-policy-reason");
-  expect_observation_enum_contract(kConSanFencePolicyReasons, ConSanFencePolicyReason::Count,
-                                   consan_fence_policy_reason_name, "invalid-fence-policy-reason");
-  expect_observation_enum_contract(kConSanProbeIntentKinds, ConSanProbeIntentKind::Count,
-                                   consan_probe_intent_kind_name, "invalid-probe-intent-kind");
-  expect_observation_enum_contract(kConSanProbePositions, ConSanProbePosition::Count,
-                                   consan_probe_position_name, "invalid-probe-position");
-  expect_observation_enum_contract(
-      kConSanDynamicResultRequirements, ConSanDynamicResultRequirement::Count,
-      consan_dynamic_result_requirement_name, "invalid-dynamic-result-requirement");
-  expect_observation_enum_contract(kConSanLoweringOutcomeKinds, ConSanLoweringOutcomeKind::Count,
-                                   consan_lowering_outcome_kind_name,
-                                   "invalid-lowering-outcome-kind");
 }
 
 TEST(ConSanObservationPlan, SynchronizationAssociationIdentityHasAnExplicitInvalidDefault) {

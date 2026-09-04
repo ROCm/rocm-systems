@@ -59,8 +59,6 @@ struct KernelMaxRegisterRefs {
 };
 
 [[nodiscard]] bool ranges_overlap(ByteRange lhs, ByteRange rhs);
-[[nodiscard]] bool overlaps_preapplied_reserved_range(const ProgramInventory &inventory,
-                                                      ByteRange range);
 [[nodiscard]] bool overlaps_reserved_range(std::span<const ByteRange> ranges, ByteRange range);
 [[nodiscard]] std::optional<std::vector<ByteRange>>
 reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,

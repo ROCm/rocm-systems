@@ -9,105 +9,6 @@ flat_check_trap_comparison_scratch_vgprs(const ConSanAccessInventorySite &access
              : 0u;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_vcc_save_sgpr(
-    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options,
-    bool preserve_dynamic_stack_abi) {
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
-    return std::nullopt;
-  const auto find_pair = [&](uint16_t start) -> std::optional<uint16_t> {
-    while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, start)) {
-      const bool overlaps_dynamic_stack =
-          preserve_dynamic_stack_abi && sc_sgpr_ranges_overlap(*pair, 2u, kDynamicStackTopSgpr, 2u);
-      const RegisterRef ref{RegClass::SGPR, *pair, 2u};
-      const bool dead_for_every_owner =
-          std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-            return !liveness->any_live_before(*inst, ref);
-          });
-      if (!sc_sgpr_range_overlaps_delay_source(*pair, 2u, options) && !overlaps_dynamic_stack &&
-          dead_for_every_owner)
-        return pair;
-      if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-        return std::nullopt;
-      start = static_cast<uint16_t>(*pair + 2u);
-    }
-    return std::nullopt;
-  };
-  if (min_preferred_sgpr) {
-    if (auto high_pair = find_pair(*min_preferred_sgpr))
-      return high_pair;
-  }
-  return find_pair(0);
-}
-
-[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_scalar_spill_pair(
-    uint16_t allocated_sgpr_count, const ConSanOptions &options, bool preserve_dynamic_stack_abi) {
-  // The caller spills and restores the returned live pair, so any ordinary
-  // allocated pair is legal except the active delay source. Staying within
-  // the descriptor allocation (and every owner's common minimum for shared
-  // code) avoids growing an owner around a site-local choice.
-  const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
-  for (uint16_t pair = 0; static_cast<uint32_t>(pair) + 2u <= limit; pair += 2u) {
-    const bool overlaps_dynamic_stack =
-        preserve_dynamic_stack_abi && sc_sgpr_ranges_overlap(pair, 2u, kDynamicStackTopSgpr, 2u);
-    if (!sc_sgpr_range_overlaps_delay_source(pair, 2u, options) && !overlaps_dynamic_stack)
-      return pair;
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_scratch_vgpr(
-    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
-    std::span<const LivenessAnalysis *const> owner_liveness,
-    std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
-    uint16_t required_vgprs) {
-  if (options.scratch_vgpr) {
-    return choose_scratch_vgpr(access, options, inst, nullptr, min_auto_scratch_vgpr,
-                               max_auto_scratch_vgpr, required_vgprs);
-  }
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness,
-                          [](const auto *liveness) { return liveness == nullptr; }) ||
-      required_vgprs > std::numeric_limits<uint8_t>::max())
-    return std::nullopt;
-
-  RegisterSet live_before_all_owners;
-  for (const LivenessAnalysis *liveness : owner_liveness)
-    live_before_all_owners |= liveness->live_before(*inst);
-
-  ConSanRegisterRequest request;
-  request.reg_class = RegClass::VGPR;
-  request.count = required_vgprs;
-  request.alignment = access.lowering.form ? access.lowering.form->data_register_alignment : 1u;
-  request.search_start =
-      std::max(access_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
-  // RegisterSet can represent target-specific VGPR banks above 255, but the
-  // SuperCollider probe ABI directly encodes only ordinary low-bank VGPRs.
-  // LivenessAnalysis::find_free_run enforced this bound through its configured
-  // max_free_vgpr; preserve it explicitly at the shared planner boundary.
-  request.current_allocation_count =
-      std::min(max_auto_scratch_vgpr.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit);
-  request.max_referenced_count = min_auto_scratch_vgpr.value_or(0u);
-  request.architecture_limit = request.current_allocation_count;
-  request.allow_spill = false;
-  if (!access.lowering.form)
-    return std::nullopt;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
-  if (form.address_vgpr)
-    request.forbidden.expand(
-        {RegClass::VGPR, *form.address_vgpr, static_cast<uint8_t>(form.address_vgpr_count)});
-  if (form.destination_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *form.destination_vgpr,
-                              static_cast<uint8_t>(form.destination_register_count)});
-  if (form.data_vgpr)
-    request.forbidden.expand(
-        {RegClass::VGPR, *form.data_vgpr, static_cast<uint8_t>(form.data_register_count)});
-
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live_before_all_owners);
-  return plan.source == ConSanRegisterAllocationSource::LivenessDead ? plan.base : std::nullopt;
-}
-
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      const ConSanTargetProfile &target,
                                      const ConSanOptions &options, ConSanTransformArtifacts &result,
@@ -135,36 +36,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
-
-  struct FlatOwnerPlanningContext {
-    uint64_t descriptor_file_offset = 0;
-    KernelCfgScope scope;
-    std::unique_ptr<LivenessAnalysis> liveness;
-  };
-  std::vector<std::unique_ptr<BasicBlock>> blocks;
-  std::vector<BasicBlock *> block_ptrs;
-  BlockOffsetIndex block_index;
-  std::vector<uint64_t> kernel_entries;
-  std::span<const uint8_t> pristine_text;
-  std::unordered_map<uint64_t, FlatOwnerPlanningContext> owner_contexts;
-  std::unordered_set<uint64_t> failed_owner_contexts;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (decoder) {
-    const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-        code_object, result.program_inventory.kernels(), result.program_inventory.functions());
-    blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
-    block_ptrs = block_ptrs_for(blocks);
-
-    block_index = build_block_offset_index(blocks);
-    kernel_entries = cfg.kernel_entries;
-    if (code_object.text_sections().size() == 1) {
-      const Section *text = code_object.text_sections().front();
-      pristine_text =
-          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-    }
-  }
-  owner_contexts.reserve(result.program_inventory.kernels().size());
-  failed_owner_contexts.reserve(result.program_inventory.kernels().size());
+  ScOwnerAnalysis owner_analysis(code_object, result.program_inventory, arch,
+                                 /*restrict_to_preflight_candidates=*/false);
 
   struct FlatCheckTrapCandidate {
     const ConSanAccessInventorySite *site = nullptr;
@@ -176,21 +49,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
   };
 
-  enum class FlatOwnerStackKind : uint8_t {
-    Fixed,
-    Dynamic,
-    Mixed,
-  };
-
-  const auto make_candidate = [](const ConSanAccessInventorySite *site, uint16_t scratch_vgpr,
-                                 const std::vector<uint64_t> &owner_descriptor_file_offsets) {
-    FlatCheckTrapCandidate candidate;
-    candidate.site = site;
-    candidate.scratch_vgpr = scratch_vgpr;
-    candidate.owner_descriptor_file_offsets = owner_descriptor_file_offsets;
-    return candidate;
-  };
-
   std::vector<FlatCheckTrapCandidate> candidates;
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
@@ -198,12 +56,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   size_t mixed_stack_owner_spill_rejection_count = 0;
   size_t dynamic_stack_spill_encoding_failure_count = 0;
   size_t private_spill_encoding_failure_count = 0;
-  auto visit_site = [&](const ConSanAccessInventorySite &site,
+  auto visit_site = [&](const ConSanAccessInventorySite &site, const Instruction *site_inst,
                         std::optional<uint16_t> min_auto_scratch_vgpr,
                         std::optional<uint16_t> max_auto_scratch_vgpr,
                         std::optional<uint16_t> min_fresh_sgpr,
                         std::optional<uint16_t> allocated_sgpr_count,
-                        uint32_t original_private_segment_size, FlatOwnerStackKind owner_stack_kind,
+                        uint32_t original_private_segment_size, bool any_dynamic_stack,
+                        bool every_dynamic_stack,
                         std::span<const LivenessAnalysis *const> owner_liveness,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
     ++supported_candidate_count;
@@ -216,16 +75,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
     const uint32_t instrumentation_scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
-    const Instruction *site_inst = find_instruction_at_text_offset(
-        KernelBlockScope(block_ptrs), site.physical_id.original_text_offset);
-    const bool uses_dynamic_stack = owner_stack_kind == FlatOwnerStackKind::Dynamic;
-    const bool preserve_dynamic_stack_abi = owner_stack_kind != FlatOwnerStackKind::Fixed;
-    auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(site_inst, owner_liveness, min_fresh_sgpr,
-                                                         options, preserve_dynamic_stack_abi);
+    const bool uses_dynamic_stack = any_dynamic_stack && every_dynamic_stack;
+    const bool preserve_dynamic_stack_abi = any_dynamic_stack;
+    auto vcc_save = choose_sc_dead_vcc_save_sgpr(
+        site_inst, owner_liveness, allocated_sgpr_count.value_or(0u), min_fresh_sgpr,
+        REGISTER_SET_ALLOCATABLE_SGPRS, 2u, false, options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
     if (!vcc_save && consan_arch_is_rdna4_or_cdna5(target.arch) && allocated_sgpr_count) {
-      vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options,
-                                                          preserve_dynamic_stack_abi);
+      vcc_save = choose_sc_borrowed_scalar_range(*allocated_sgpr_count, 2u, options,
+                                                 preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
     }
     if (!vcc_save) {
@@ -237,13 +95,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     uint32_t scratch_vgprs =
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
-    auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
-                                                       min_auto_scratch_vgpr, max_auto_scratch_vgpr,
-                                                       scratch_vgprs);
+    auto scratch = choose_sc_access_scratch_vgpr(
+        site, options, site_inst, owner_liveness,
+        std::max(access_scratch_search_start(site), min_auto_scratch_vgpr.value_or(0u)),
+        max_auto_scratch_vgpr, scratch_vgprs, site.lowering.form->data_register_alignment,
+        min_auto_scratch_vgpr.value_or(0u));
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
-      if (owner_stack_kind == FlatOwnerStackKind::Mixed) {
+      if (any_dynamic_stack && !every_dynamic_stack) {
         ++mixed_stack_owner_spill_rejection_count;
       } else {
         // Once the VGPR window itself is live, preserve it before using it as
@@ -301,57 +161,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
               }}
             : std::nullopt;
     ++scratchable_candidate_count;
-    candidates.push_back(make_candidate(&site, *scratch, owner_descriptor_file_offsets));
-    candidates.back().vcc_save_sgpr = *vcc_save;
-    candidates.back().scalar_vcc_spill = scalar_vcc_spill;
-    candidates.back().vgpr_spill = vgpr_spill;
-    candidates.back().dynamic_stack_spill = dynamic_stack_spill;
-  };
-
-  // Shared functions can contribute hundreds of candidate sites to the same
-  // owner.  Computing the owner's maximum register references for every site
-  // turns otherwise modest multi-kernel objects into a quadratic scan.  The
-  // answer depends only on the immutable decoded blocks and kernel range, so
-  // compute it once per descriptor and reuse it for both kernel-local and
-  // shared-function candidates.
-  std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
-  std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
-  kernels_by_descriptor.reserve(result.program_inventory.kernels().size());
-  max_refs_by_descriptor.reserve(result.program_inventory.kernels().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    kernels_by_descriptor.emplace(kernel.descriptor_file_offset, &kernel);
-  const auto get_owner_context = [&](const ConSanKernelInfo &kernel) -> FlatOwnerPlanningContext * {
-    const uint64_t descriptor_file_offset = kernel.descriptor_file_offset;
-    if (const auto existing = owner_contexts.find(descriptor_file_offset);
-        existing != owner_contexts.end())
-      return &existing->second;
-    if (decoder == nullptr || !kernel.has_text_range ||
-        failed_owner_contexts.contains(descriptor_file_offset))
-      return nullptr;
-    auto scope = build_kernel_cfg_scope(blocks, block_index,
-                                        KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
-                                                           .additional_entry_offsets = {}},
-                                        kernel_entries, pristine_text);
-    if (!scope) {
-      failed_owner_contexts.insert(descriptor_file_offset);
-      return nullptr;
-    }
-    FlatOwnerPlanningContext context{
-        .descriptor_file_offset = descriptor_file_offset,
-        .scope = std::move(*scope),
-        .liveness = nullptr,
-    };
-    context.liveness =
-        std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
-                                           LivenessAnalysisOptions{}, context.scope.liveness_edges);
-    return &owner_contexts.emplace(descriptor_file_offset, std::move(context)).first->second;
+    candidates.push_back({.site = &site,
+                          .scratch_vgpr = *scratch,
+                          .owner_descriptor_file_offsets = std::move(owner_descriptor_file_offsets),
+                          .vcc_save_sgpr = *vcc_save,
+                          .scalar_vcc_spill = scalar_vcc_spill,
+                          .vgpr_spill = vgpr_spill,
+                          .dynamic_stack_spill = dynamic_stack_spill});
   };
 
   for (const auto &[file_offset, access] : admitted_sites) {
     (void)file_offset;
     const ConSanAccessInventorySite &site = *access;
-    const Instruction *site_inst = find_instruction_at_text_offset(
-        KernelBlockScope(block_ptrs), site.physical_id.original_text_offset);
     std::vector<uint64_t> owners = site.execution_and_container_owner_descriptor_file_offsets();
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (plan.site_kind == ConSanResourceSiteKind::Access &&
@@ -366,70 +187,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       for (const ConSanExecutionOwner &owner : fault.execution_owners)
         owners.push_back(owner.descriptor_file_offset);
     }
-    std::ranges::sort(owners);
-    owners.erase(std::ranges::unique(owners).begin(), owners.end());
-
-    bool complete_context = decoder != nullptr && site_inst != nullptr && !owners.empty();
-    std::vector<const LivenessAnalysis *> owner_liveness;
-    owner_liveness.reserve(owners.size());
-    std::optional<uint16_t> common_allocated_vgpr_count;
-    std::optional<uint16_t> common_allocated_sgpr_count;
-    std::optional<uint16_t> max_owner_vgpr_ref;
-    std::optional<uint16_t> max_owner_sgpr_ref;
-    uint32_t max_owner_private_segment_size = 0;
-    bool any_owner_uses_dynamic_stack = false;
-    bool any_owner_uses_fixed_stack = false;
-    for (uint64_t owner : owners) {
-      const auto owner_kernel = kernels_by_descriptor.find(owner);
-      FlatOwnerPlanningContext *owner_context = owner_kernel == kernels_by_descriptor.end()
-                                                    ? nullptr
-                                                    : get_owner_context(*owner_kernel->second);
-      auto refs = max_refs_by_descriptor.find(owner);
-      if (refs == max_refs_by_descriptor.end() && owner_context != nullptr) {
-        refs =
-            max_refs_by_descriptor
-                .emplace(owner,
-                         max_register_refs_in_kernel(*owner_kernel->second,
-                                                     KernelBlockScope(owner_context->scope.blocks)))
-                .first;
-      }
-      const auto descriptor = read_kernel_descriptor(original_bytes, owner);
-      const Instruction *owner_site_inst =
-          owner_context == nullptr
-              ? nullptr
-              : find_instruction_at_text_offset(KernelBlockScope(owner_context->scope.blocks),
-                                                site.physical_id.original_text_offset);
-      if (owner_kernel == kernels_by_descriptor.end() ||
-          owner_kernel->second->preflight_action == ConSanPreflightAction::Blocked ||
-          owner_context == nullptr || owner_context->liveness == nullptr ||
-          owner_site_inst != site_inst || refs == max_refs_by_descriptor.end() || !descriptor) {
-        complete_context = false;
-        break;
-      }
-      owner_liveness.push_back(owner_context->liveness.get());
-
-      const uint16_t allocated_vgprs = descriptor_vgpr_allocation_count(*descriptor, arch);
-      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(*descriptor, arch);
-      common_allocated_vgpr_count = common_allocated_vgpr_count
-                                        ? std::min(*common_allocated_vgpr_count, allocated_vgprs)
-                                        : allocated_vgprs;
-      common_allocated_sgpr_count = common_allocated_sgpr_count
-                                        ? std::min(*common_allocated_sgpr_count, allocated_sgprs)
-                                        : allocated_sgprs;
-      max_owner_private_segment_size =
-          std::max(max_owner_private_segment_size, descriptor->private_segment_fixed_size);
-      if (refs->second.vgpr)
-        max_owner_vgpr_ref = max_owner_vgpr_ref ? std::max(*max_owner_vgpr_ref, *refs->second.vgpr)
-                                                : *refs->second.vgpr;
-      if (refs->second.sgpr)
-        max_owner_sgpr_ref = max_owner_sgpr_ref ? std::max(*max_owner_sgpr_ref, *refs->second.sgpr)
-                                                : *refs->second.sgpr;
-      if (owner_kernel->second->uses_dynamic_stack.value_or(false))
-        any_owner_uses_dynamic_stack = true;
-      else
-        any_owner_uses_fixed_stack = true;
-    }
-    if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count) {
+    auto facts = owner_analysis.site_facts(site, std::move(owners));
+    if (!facts || !facts->common_unified_vgpr_count || !facts->common_sgpr_count) {
       (void)publish_sc_access_rejection(
           result.coverage_ledger, result.errors, site.physical_id,
           ConSanLoweringOutcomeKind::ResourceRejected,
@@ -440,27 +199,23 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool selected_by_filter =
         options.test_kernel_name_filter.empty() ||
         site.container.name.find(options.test_kernel_name_filter) != std::string::npos ||
-        std::ranges::any_of(owners, [&](uint64_t owner) {
-          const auto kernel = kernels_by_descriptor.find(owner);
-          return kernel != kernels_by_descriptor.end() &&
-                 kernel->second->name.find(options.test_kernel_name_filter) != std::string::npos;
+        std::ranges::any_of(facts->descriptor_file_offsets, [&](uint64_t owner) {
+          const ConSanKernelInfo *kernel = owner_analysis.kernel(owner);
+          return kernel && kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
         });
     if (!selected_by_filter)
       continue;
 
     std::optional<uint16_t> min_auto_scratch_vgpr;
-    if (max_owner_vgpr_ref && *max_owner_vgpr_ref < 255u)
-      min_auto_scratch_vgpr = static_cast<uint16_t>(*max_owner_vgpr_ref + 1u);
+    if (facts->max_vgpr_ref && *facts->max_vgpr_ref < 255u)
+      min_auto_scratch_vgpr = static_cast<uint16_t>(*facts->max_vgpr_ref + 1u);
     std::optional<uint16_t> min_fresh_sgpr;
-    if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
-      min_fresh_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
-    const FlatOwnerStackKind owner_stack_kind =
-        any_owner_uses_dynamic_stack && any_owner_uses_fixed_stack ? FlatOwnerStackKind::Mixed
-        : any_owner_uses_dynamic_stack                             ? FlatOwnerStackKind::Dynamic
-                                                                   : FlatOwnerStackKind::Fixed;
-    visit_site(site, min_auto_scratch_vgpr, common_allocated_vgpr_count, min_fresh_sgpr,
-               common_allocated_sgpr_count, max_owner_private_segment_size, owner_stack_kind,
-               owner_liveness, std::move(owners));
+    if (facts->max_sgpr_ref && *facts->max_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
+      min_fresh_sgpr = static_cast<uint16_t>(*facts->max_sgpr_ref + 1u);
+    visit_site(site, facts->instruction, min_auto_scratch_vgpr, facts->common_unified_vgpr_count,
+               min_fresh_sgpr, facts->common_sgpr_count, facts->max_private_segment_size,
+               facts->any_dynamic_stack, facts->every_dynamic_stack, facts->liveness,
+               std::move(facts->descriptor_file_offsets));
   }
   if (!result.errors.empty())
     return;
@@ -502,8 +257,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         std::to_string(mixed_stack_owner_spill_rejection_count) +
         " dynamic_stack_spill_encoding_failures=" +
         std::to_string(dynamic_stack_spill_encoding_failure_count) +
-        " private_spill_encoding_failures=" +
-        std::to_string(private_spill_encoding_failure_count));
+        " private_spill_encoding_failures=" + std::to_string(private_spill_encoding_failure_count));
     return;
   }
 
@@ -831,8 +585,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
 
     planned.info.original_size = site.instruction_size;
-    planned.info.trampoline_size =
-        static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
+    planned.info.trampoline_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
 
     planned_patches.push_back(std::move(planned));
   }
@@ -860,14 +613,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         .patch = std::move(planned.info),
     });
   }
-  (void)stage_consan_text_rewrites(
-      code_object, arch,
-      {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
-       no_group_segment_requirements},
-      {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-       .inventory_proves_empty_accumulator_bank = false,
-       .maximum_group_segment_bytes = std::nullopt},
-      "ConSan flat check/trap proof", std::move(rewrites), result);
+  (void)stage_consan_text_rewrites(code_object, arch,
+                                   {no_vgpr_requirements, descriptor_sgpr_growths,
+                                    descriptor_private_requirements, no_group_segment_requirements},
+                                   {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+                                    .inventory_proves_empty_accumulator_bank = false,
+                                    .maximum_group_segment_bytes = std::nullopt},
+                                   "ConSan flat check/trap proof", std::move(rewrites), result);
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,

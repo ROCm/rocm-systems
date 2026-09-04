@@ -725,8 +725,9 @@ TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachEngineEvidenceC
 }
 
 TEST(ConSanAtomicFencePolicy, EveryFenceAssociationRejectionRemainsTypedInventoryEvidence) {
-  for (ConSanFenceAssociation association : kConSanFenceAssociations) {
-    SCOPED_TRACE(consan_fence_association_name(association));
+  for (uint8_t value = 0; value < static_cast<uint8_t>(ConSanFenceAssociation::Count); ++value) {
+    const auto association = static_cast<ConSanFenceAssociation>(value);
+    SCOPED_TRACE(value);
     const ConSanAtomicFencePolicyResult policy =
         plan_consan_atomic_fence_observation(ordinary_fence_inventory(association),
                                              atomic_request(ConSanCapabilityEngine::RecordReplay));

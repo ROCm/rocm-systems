@@ -8,41 +8,6 @@
 namespace rocjitsu {
 namespace {
 
-TEST(ConSan, PerturbationRejectionReasonsAreTypedAndRenderStableTokens) {
-  using Reason = ConSanPerturbationRejectionReason;
-  const std::array expected = {
-      std::pair{Reason::None, std::string_view{""}},
-      std::pair{Reason::MissingExactBasicBlock, std::string_view{"missing-exact-basic-block"}},
-      std::pair{Reason::CyclicCfgComponent, std::string_view{"cyclic-cfg-component"}},
-      std::pair{Reason::InsideScalarClause, std::string_view{"inside-s-clause"}},
-      std::pair{Reason::RuntimeHelper, std::string_view{"runtime-helper"}},
-      std::pair{Reason::NonExactSequenceMembers, std::string_view{"non-exact-sequence-members"}},
-      std::pair{Reason::AmbiguousOrUnsupportedSequence,
-                std::string_view{"ambiguous-or-unsupported-sequence"}},
-      std::pair{Reason::NotQualifiedFullBarrier, std::string_view{"not-qualified-full-barrier"}},
-      std::pair{Reason::DynamicOrUnknownBarrierParticipants,
-                std::string_view{"dynamic-or-unknown-barrier-participants"}},
-      std::pair{Reason::NotAtomicSequence, std::string_view{"not-atomic-sequence"}},
-      std::pair{Reason::UnknownOrInapplicableMemoryRole,
-                std::string_view{"unknown-or-inapplicable-memory-role"}},
-      std::pair{Reason::UnsupportedAtomicScope, std::string_view{"unsupported-atomic-scope"}},
-      std::pair{Reason::AmbiguousAddressProvenance,
-                std::string_view{"ambiguous-address-provenance"}},
-      std::pair{Reason::NoPerturbationKind, std::string_view{"no-perturbation-kind"}},
-      std::pair{Reason::MissingAnchorEvent, std::string_view{"missing-anchor-event"}},
-  };
-  static_assert(expected.size() == static_cast<size_t>(Reason::Count));
-  for (size_t index = 0; index < expected.size(); ++index) {
-    EXPECT_EQ(static_cast<size_t>(expected[index].first), index);
-    EXPECT_EQ(consan_perturbation_rejection_reason_name(expected[index].first),
-              expected[index].second);
-  }
-  EXPECT_EQ(consan_perturbation_rejection_reason_name(Reason::Count),
-            "invalid-perturbation-rejection-reason");
-  EXPECT_EQ(consan_perturbation_rejection_reason_name(static_cast<Reason>(255)),
-            "invalid-perturbation-rejection-reason");
-}
-
 TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   const std::array<uint32_t, 3> text_words = {
       0xBE804EC1u, // s_barrier_signal -1
@@ -311,8 +276,8 @@ TEST(ConSan, AtomicOrderFaultComposesWithPerturbationAndAccessInstrumentation) {
     return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
   }));
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
-           patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+    return patch.kind == ConSanPatchKind::LdsLoadCheckTrap ||
+           patch.kind == ConSanPatchKind::LdsLoadCheckTrap;
   }));
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
@@ -349,8 +314,8 @@ TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
     return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
   }));
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
-           patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+    return patch.kind == ConSanPatchKind::LdsLoadCheckTrap ||
+           patch.kind == ConSanPatchKind::LdsLoadCheckTrap;
   }));
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
@@ -705,9 +670,8 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(composed.mutation.perturbation.applied, 1u);
   ASSERT_EQ(composed.patches.size(), 2u);
-  const auto perturb = std::ranges::find(composed.patches,
-                                         ConSanPatchKind::TrampolineScPerturbation,
-                                         &ConSanPatchInfo::kind);
+  const auto perturb = std::ranges::find(
+      composed.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
   const auto lds = std::ranges::find(composed.patches, ConSanPatchKind::LdsLoadCheckTrap,
                                      &ConSanPatchInfo::kind);
   ASSERT_NE(perturb, composed.patches.end());
@@ -737,8 +701,7 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_NE(std::ranges::find(all_supported.patches, ConSanPatchKind::LdsLoadCheckTrap,
                               &ConSanPatchInfo::kind),
             all_supported.patches.end());
-  EXPECT_NE(std::ranges::find(all_supported.patches,
-                              ConSanPatchKind::TrampolineScPerturbation,
+  EXPECT_NE(std::ranges::find(all_supported.patches, ConSanPatchKind::TrampolineScPerturbation,
                               &ConSanPatchInfo::kind),
             all_supported.patches.end());
 }
@@ -765,11 +728,10 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   ASSERT_TRUE(local.errors.empty()) << testing::PrintToString(local.errors);
   EXPECT_EQ(local.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(local.patches.size(), 2u);
-  const auto local_lds = std::ranges::find(local.patches, ConSanPatchKind::LdsLoadCheckTrap,
-                                           &ConSanPatchInfo::kind);
-  const auto local_perturb = std::ranges::find(local.patches,
-                                               ConSanPatchKind::TrampolineScPerturbation,
-                                               &ConSanPatchInfo::kind);
+  const auto local_lds =
+      std::ranges::find(local.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind);
+  const auto local_perturb = std::ranges::find(
+      local.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
   ASSERT_NE(local_lds, local.patches.end());
   ASSERT_NE(local_perturb, local.patches.end());
   EXPECT_TRUE(local_lds->trampoline_offset + local_lds->trampoline_size <=
@@ -824,11 +786,10 @@ TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 2u);
-  const auto flat = std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap,
-                                      &ConSanPatchInfo::kind);
-  const auto perturbation = std::ranges::find(result.patches,
-                                              ConSanPatchKind::TrampolineScPerturbation,
-                                              &ConSanPatchInfo::kind);
+  const auto flat =
+      std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
+  const auto perturbation = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
   ASSERT_NE(flat, result.patches.end());
   ASSERT_NE(perturbation, result.patches.end());
   EXPECT_EQ(flat->anchor_offset, 32u);
@@ -1238,11 +1199,10 @@ TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.modified());
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap,
-                               &ConSanPatchInfo::kind),
-            1u);
-  EXPECT_EQ(std::ranges::count(result.patches,
-                               ConSanPatchKind::TrampolineBranchRelayReservoir,
+  EXPECT_EQ(
+      std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
+      1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             0u);
 }

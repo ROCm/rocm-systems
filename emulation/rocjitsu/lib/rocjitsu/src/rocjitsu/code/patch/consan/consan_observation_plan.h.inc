@@ -41,24 +41,6 @@ enum class ConSanSiteDecisionKind : uint8_t {
   Count,
 };
 
-/// Complete iterable set of policy decision kinds.
-inline constexpr auto kConSanSiteDecisionKinds = [] {
-  using E = ConSanSiteDecisionKind;
-  return make_consan_enum_vocabulary("invalid-site-decision-kind",
-                                     consan_enum(E::NotApplicable, "not-applicable"),
-                                     consan_enum(E::Unsupported, "unsupported"),
-                                     consan_enum(E::Admitted, "admitted"));
-}();
-
-/// Return the stable diagnostic spelling of a policy decision kind.
-[[nodiscard]] constexpr std::string_view
-consan_site_decision_kind_name(ConSanSiteDecisionKind kind) {
-  return kConSanSiteDecisionKinds.name(kind);
-}
-
-static_assert(kConSanSiteDecisionKinds.size() ==
-              static_cast<size_t>(ConSanSiteDecisionKind::Count));
-
 /// Machine-readable reason for an access-policy decision.
 ///
 /// These values describe only semantic applicability and support. Register
@@ -109,7 +91,6 @@ enum class ConSanAccessPolicyReason : uint8_t {
   Count,
 };
 
-/// Complete iterable set of access-policy reasons, including `None`.
 inline constexpr auto kConSanAccessPolicyReasons = [] {
   using E = ConSanAccessPolicyReason;
   return make_consan_enum_vocabulary(
@@ -134,14 +115,10 @@ inline constexpr auto kConSanAccessPolicyReasons = [] {
       consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-/// Return the stable diagnostic spelling of an access-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_access_policy_reason_name(ConSanAccessPolicyReason reason) {
   return kConSanAccessPolicyReasons.name(reason);
 }
-
-static_assert(kConSanAccessPolicyReasons.size() ==
-              static_cast<size_t>(ConSanAccessPolicyReason::Count));
 
 /// Machine-readable reason for a barrier-policy decision.
 ///
@@ -179,7 +156,6 @@ enum class ConSanBarrierPolicyReason : uint8_t {
   Count,
 };
 
-/// Complete iterable set of barrier-policy reasons, including `None`.
 inline constexpr auto kConSanBarrierPolicyReasons = [] {
   using E = ConSanBarrierPolicyReason;
   return make_consan_enum_vocabulary(
@@ -197,14 +173,10 @@ inline constexpr auto kConSanBarrierPolicyReasons = [] {
       consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-/// Return the stable diagnostic spelling of a barrier-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_barrier_policy_reason_name(ConSanBarrierPolicyReason reason) {
   return kConSanBarrierPolicyReasons.name(reason);
 }
-
-static_assert(kConSanBarrierPolicyReasons.size() ==
-              static_cast<size_t>(ConSanBarrierPolicyReason::Count));
 
 /// Machine-readable reason for an atomic-policy decision.
 ///
@@ -320,7 +292,6 @@ enum class ConSanFencePolicyReason : uint8_t {
   Count,
 };
 
-/// Complete iterable set of fence-policy reasons, including `None`.
 inline constexpr auto kConSanFencePolicyReasons = [] {
   using E = ConSanFencePolicyReason;
   return make_consan_enum_vocabulary(
@@ -335,14 +306,10 @@ inline constexpr auto kConSanFencePolicyReasons = [] {
       consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-/// Return the stable diagnostic spelling of a fence-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_fence_policy_reason_name(ConSanFencePolicyReason reason) {
   return kConSanFencePolicyReasons.name(reason);
 }
-
-static_assert(kConSanFencePolicyReasons.size() ==
-              static_cast<size_t>(ConSanFencePolicyReason::Count));
 
 /// Stable identity of one synchronization association inside a code object.
 ///
@@ -379,24 +346,6 @@ enum class ConSanDynamicResultRequirement : uint8_t {
   Count,
 };
 
-/// Complete iterable set of dynamic-result requirements.
-inline constexpr auto kConSanDynamicResultRequirements = [] {
-  using E = ConSanDynamicResultRequirement;
-  return make_consan_enum_vocabulary(
-      "invalid-dynamic-result-requirement", consan_enum(E::None, "none"),
-      consan_enum(E::ReturnedOldValue, "returned-old-value"),
-      consan_enum(E::CompareExchangeSuccess, "compare-exchange-success"));
-}();
-
-/// Return the stable diagnostic spelling of a dynamic-result requirement.
-[[nodiscard]] constexpr std::string_view
-consan_dynamic_result_requirement_name(ConSanDynamicResultRequirement requirement) {
-  return kConSanDynamicResultRequirements.name(requirement);
-}
-
-static_assert(kConSanDynamicResultRequirements.size() ==
-              static_cast<size_t>(ConSanDynamicResultRequirement::Count));
-
 /// Target-neutral kind of evidence requested from one physical probe.
 ///
 /// The kinds deliberately name the semantic observation rather than an ISA
@@ -431,25 +380,6 @@ enum class ConSanProbeIntentKind : uint8_t {
   /// One-past-the-end iteration bound; never an observation intent.
   Count,
 };
-
-/// Complete iterable set of probe intent kinds.
-inline constexpr auto kConSanProbeIntentKinds = [] {
-  using E = ConSanProbeIntentKind;
-  return make_consan_enum_vocabulary(
-      "invalid-probe-intent-kind",
-      consan_enum(E::RedundantAccessObservation, "redundant-access-observation"),
-      consan_enum(E::AccessRecord, "access-record"),
-      consan_enum(E::SampledAccess, "sampled-access"),
-      consan_enum(E::ExactShadowAccess, "exact-shadow-access"),
-      consan_enum(E::BarrierRecord, "barrier-record"),
-      consan_enum(E::SampledBarrierEpoch, "sampled-barrier-epoch"),
-      consan_enum(E::ExactBarrierEpoch, "exact-barrier-epoch"),
-      consan_enum(E::AtomicAddressCapture, "atomic-address-capture"),
-      consan_enum(E::AtomicRecord, "atomic-record"),
-      consan_enum(E::SampledAtomicOrdering, "sampled-atomic-ordering"),
-      consan_enum(E::ExactAtomicOrdering, "exact-atomic-ordering"),
-      consan_enum(E::FenceRecord, "fence-record"));
-}();
 
 /// One engine's target-neutral probe and report-facing evidence vocabulary.
 ///
@@ -493,13 +423,6 @@ consan_engine_probe_vocabulary(ConSanCapabilityEngine engine) {
   return vocabulary.engine == engine ? &vocabulary : nullptr;
 }
 
-/// Return the stable diagnostic spelling of an access probe intent kind.
-[[nodiscard]] constexpr std::string_view consan_probe_intent_kind_name(ConSanProbeIntentKind kind) {
-  return kConSanProbeIntentKinds.name(kind);
-}
-
-static_assert(kConSanProbeIntentKinds.size() == static_cast<size_t>(ConSanProbeIntentKind::Count));
-
 /// Required ordering of a probe relative to the pristine guest instruction.
 ///
 /// This is a semantic placement constraint. It does not choose inline versus
@@ -512,18 +435,6 @@ enum class ConSanProbePosition : uint8_t {
   /// One-past-the-end iteration bound; never a placement constraint.
   Count,
 };
-
-/// Complete iterable set of relative probe positions.
-inline constexpr auto kConSanProbePositions = make_consan_enum_vocabulary(
-    "invalid-probe-position", consan_enum(ConSanProbePosition::Before, "before"),
-    consan_enum(ConSanProbePosition::After, "after"));
-
-/// Return the stable diagnostic spelling of a relative probe position.
-[[nodiscard]] constexpr std::string_view consan_probe_position_name(ConSanProbePosition position) {
-  return kConSanProbePositions.name(position);
-}
-
-static_assert(kConSanProbePositions.size() == static_cast<size_t>(ConSanProbePosition::Count));
 
 /// One engine-policy decision for one normalized semantic access range.
 ///
@@ -852,25 +763,6 @@ enum class ConSanLoweringOutcomeKind : uint8_t {
   /// One-past-the-end iteration bound; never a lowering result.
   Count,
 };
-
-/// Complete iterable set of lowering outcomes.
-inline constexpr auto kConSanLoweringOutcomeKinds = [] {
-  using E = ConSanLoweringOutcomeKind;
-  return make_consan_enum_vocabulary(
-      "invalid-lowering-outcome-kind", consan_enum(E::Pending, "pending"),
-      consan_enum(E::Instrumented, "instrumented"),
-      consan_enum(E::ResourceRejected, "resource-rejected"),
-      consan_enum(E::PlacementRejected, "placement-rejected"));
-}();
-
-/// Return the stable diagnostic spelling of a lowering outcome.
-[[nodiscard]] constexpr std::string_view
-consan_lowering_outcome_kind_name(ConSanLoweringOutcomeKind kind) {
-  return kConSanLoweringOutcomeKinds.name(kind);
-}
-
-static_assert(kConSanLoweringOutcomeKinds.size() ==
-              static_cast<size_t>(ConSanLoweringOutcomeKind::Count));
 
 /// Original-program attribution shared by every runtime-facing access map.
 ///

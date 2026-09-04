@@ -754,24 +754,6 @@ enum class ConSanRuntimeBackend : uint8_t {
   Count,
 };
 
-/// Every declared runtime-backend value, including the construction sentinel
-/// but excluding the one-past-the-end iteration bound. Keeping this inventory
-/// beside the enum makes exhaustive tests and diagnostic rendering fail
-/// visibly when the backend vocabulary grows.
-inline constexpr auto kConSanRuntimeBackends = make_consan_enum_vocabulary(
-    "invalid-runtime-backend", consan_enum(ConSanRuntimeBackend::Unknown, "unknown"),
-    consan_enum(ConSanRuntimeBackend::PhysicalHsa, "physical-hsa"),
-    consan_enum(ConSanRuntimeBackend::RocJitsuSimulator, "rocjitsu-simulator"));
-
-/// Return the stable diagnostic spelling of a runtime-backend provenance.
-/// Invalid values, including `Count`, deliberately share an invalid spelling
-/// so they cannot masquerade as a queried backend in logs or test fixtures.
-[[nodiscard]] constexpr std::string_view consan_runtime_backend_name(ConSanRuntimeBackend backend) {
-  return kConSanRuntimeBackends.name(backend);
-}
-
-static_assert(kConSanRuntimeBackends.size() == static_cast<size_t>(ConSanRuntimeBackend::Count));
-
 /// Facts discovered from the selected execution backend and agent.
 ///
 /// These are runtime facts, not implications of a `gfx*` name. Optional

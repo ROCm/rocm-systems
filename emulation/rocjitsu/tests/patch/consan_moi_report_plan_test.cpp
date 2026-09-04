@@ -25,7 +25,8 @@ inline constexpr uint64_t kRecordReplayCeilingBytes = 512u * 1024u * 1024u;
     return std::nullopt;
   // Host oracle for the instruction sequence in
   // build_first_light_access_record_words().
-  size_t bank = consan_moi_record_replay_fold_dispatch_token(token) & (slots.size() - 1u);
+  size_t bank =
+      (static_cast<uint32_t>(token) ^ static_cast<uint32_t>(token >> 32u)) & (slots.size() - 1u);
   const size_t probe_limit = std::min<size_t>(slots.size(), kConSanMoiRecordReplayProbeLimit);
   for (size_t probe = 0; probe < probe_limit; ++probe) {
     if (slots[bank] == 0u) {

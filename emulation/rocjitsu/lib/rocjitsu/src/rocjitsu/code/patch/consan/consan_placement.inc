@@ -44,18 +44,6 @@ text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_of
   return lhs.begin < rhs.end && rhs.begin < lhs.end;
 }
 
-[[nodiscard]] bool overlaps_preapplied_reserved_range(const ProgramInventory &inventory,
-                                                      ByteRange range) {
-  return std::ranges::any_of(
-      inventory.preapplied_mutation().reserved_ranges,
-      [&](const ConSanPreappliedReservedRange &reserved) {
-        if (reserved.size == 0 ||
-            reserved.text_offset > std::numeric_limits<uint64_t>::max() - reserved.size)
-          return false;
-        return ranges_overlap(range, {reserved.text_offset, reserved.text_offset + reserved.size});
-      });
-}
-
 [[nodiscard]] bool overlaps_reserved_range(std::span<const ByteRange> ranges, ByteRange range) {
   for (ByteRange reserved : ranges) {
     if (ranges_overlap(reserved, range))
