@@ -649,5 +649,4 @@ struct ConSanPatchInfo : ConSanPatchMutationProduct, ConSanPatchFaultProof {};
 /// ordinary patch inventory continues to describe only instrumented sites.
 struct ConSanTextRelocationProof {
   uint64_t source_text_size = 0;
-  uint64_t relocated_text_size = 0;
 };

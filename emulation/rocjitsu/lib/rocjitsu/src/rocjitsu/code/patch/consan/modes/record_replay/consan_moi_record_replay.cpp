@@ -45,7 +45,6 @@ using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_moi_detail::append_words_bytes;
-using consan_moi_detail::count_nop_padding;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 using consan_moi_detail::record_replay_uses_automatic_banked_capture;

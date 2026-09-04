@@ -7523,9 +7523,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeRelocatesLargeDelay) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LdsLoadCheckTrap);
   EXPECT_GT(result.patches.front().trampoline_size, options.delay_nops * sizeof(uint32_t));
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_GT(result.text_relocation->relocated_text_size, options.delay_nops * sizeof(uint32_t));
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  ASSERT_GE(patched.text_sections().front()->size(), result.text_relocation->source_text_size);
+  EXPECT_GT(patched.text_sections().front()->size() - result.text_relocation->source_text_size,
+            options.delay_nops * sizeof(uint32_t));
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingVccSaveSite) {

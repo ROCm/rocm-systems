@@ -679,7 +679,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   rewrites.reserve(planned_patches.size());
   for (PlannedLdsCheckTrapPatch &planned : planned_patches) {
     rewrites.push_back({
-        .original_site = planned.site->physical_id,
         .intent_ids = std::move(planned.intent_ids),
         .words = std::move(planned.words),
         .patch = std::move(planned.info),

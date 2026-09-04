@@ -226,7 +226,6 @@ struct ConSanMutationOutcome {
 /// deliberately deferred so heterogeneous SuperCollider probes share one
 /// relocated executable image.
 struct ConSanStagedTextRewrite {
-  PhysicalSiteId original_site;
   std::vector<ConSanProbeIntentId> intent_ids;
   std::vector<uint32_t> words;
   ConSanPatchInfo patch;

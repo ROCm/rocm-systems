@@ -23,9 +23,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
                                      rj_code_arch_t arch, std::vector<std::string> &errors,
                                      Decoder *reusable_decoder = nullptr);
 
-[[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
-                                         rj_code_arch_t arch);
-
 void append_word_bytes(std::vector<uint8_t> &bytes, uint32_t word);
 void append_words_bytes(std::vector<uint8_t> &bytes, std::span<const uint32_t> words);
 

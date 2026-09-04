@@ -655,7 +655,7 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
 }
 
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
-                                         uint32_t max_word_count, rj_code_arch_t arch) {
+                                         rj_code_arch_t arch, uint32_t max_word_count) {
   const uint32_t nop = build_s_nop(0, arch);
   uint32_t count = 0;
   for (; count < max_word_count; ++count) {

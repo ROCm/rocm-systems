@@ -257,9 +257,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
   if (result.text_relocation) {
     const ConSanTextRelocationProof &relocation = *result.text_relocation;
     if (relocation.source_text_size < original_bytes.size() ||
-        relocation.source_text_size > replacement_bytes.size() ||
-        relocation.relocated_text_size !=
-            replacement_bytes.size() - relocation.source_text_size) {
+        relocation.source_text_size > replacement_bytes.size()) {
       errors.emplace_back("ConSan final validation found invalid whole-text relocation geometry");
       return;
     }
@@ -687,8 +685,8 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
         patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
         branch_relay_reservoir_shape(patch) == BranchRelayReservoirShape::DirectInstruction &&
         patch.original_size >= 2u * sizeof(uint32_t);
-    if ((!is_moi_body && !is_routed_reservoir) ||
-        patch.trampoline_size < sizeof(uint32_t) || patch.trampoline_offset > text.size() ||
+    if ((!is_moi_body && !is_routed_reservoir) || patch.trampoline_size < sizeof(uint32_t) ||
+        patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset) {
       errors.emplace_back("ConSan branch-only continuation proof found invalid geometry");
       return;

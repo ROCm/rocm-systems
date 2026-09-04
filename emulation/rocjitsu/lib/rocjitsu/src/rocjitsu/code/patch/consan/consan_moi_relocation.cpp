@@ -92,23 +92,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
   return words;
 }
 
-uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset, rj_code_arch_t arch) {
-  if (offset > bytes.size())
-    return 0;
-
-  const uint32_t nop = build_s_nop(0, arch);
-  uint32_t count = 0;
-  while (bytes.size() - offset >= sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    if (word != nop)
-      break;
-    ++count;
-    offset += sizeof(uint32_t);
-  }
-  return count;
-}
-
 void append_word_bytes(std::vector<uint8_t> &bytes, uint32_t word) {
   const auto *begin = reinterpret_cast<const uint8_t *>(&word);
   bytes.insert(bytes.end(), begin, begin + sizeof(word));
