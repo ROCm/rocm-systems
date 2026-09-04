@@ -278,11 +278,6 @@ if ( BUILD_THUNK_VIRTIO )
   target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
 endif()
 
-if ( DEFINED ROCDXG_LIB_VERSION_MAJOR )
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE
-    ROCDXG_LIB_VERSION_MAJOR=${ROCDXG_LIB_VERSION_MAJOR})
-endif()
-
 target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
 
 ## Depend on trap handler target.
