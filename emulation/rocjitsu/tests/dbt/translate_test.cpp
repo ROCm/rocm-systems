@@ -3705,6 +3705,52 @@ TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMar
   EXPECT_EQ(descriptor_entry, 0u) << "branches to the source entry must execute its prefix";
 }
 
+TEST(BinaryTranslator, ClientKernelEntryPrefixUsesTranslatorOwnedLaunchStub) {
+  const uint32_t prefix_nop = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> words = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_kernel_entry_rewrite_callback(
+      [&](const KernelEntryRewriteContext &context) -> std::optional<KernelEntryRewrite> {
+        EXPECT_EQ(context.source_entry_offset, 0u);
+        EXPECT_FALSE(context.has_kernarg_preload_firmware_skip);
+        return KernelEntryRewrite{
+            .prefix_words = {prefix_nop},
+            .markers = {{.id = 51, .byte_offset = 0}, {.id = 52, .byte_offset = sizeof(uint32_t)}}};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  ASSERT_GE(translated_words.size(), 2u);
+  EXPECT_EQ(translated_words[0], prefix_nop);
+  EXPECT_EQ(translated_words[1] & 0xffff0000u,
+            build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4) & 0xffff0000u);
+  ASSERT_EQ(result.client_marker_placements.size(), 2u);
+  EXPECT_EQ(result.client_marker_placements[0].id, 51u);
+  EXPECT_EQ(result.client_marker_placements[0].source_offset, 0u);
+  EXPECT_EQ(result.client_marker_placements[0].target_offset, 0u);
+  EXPECT_EQ(result.client_marker_placements[1].id, 52u);
+  EXPECT_EQ(result.client_marker_placements[1].target_offset, sizeof(uint32_t));
+
+  const Section *rodata = find_section(translated, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+  const uint64_t descriptor_entry = static_cast<uint64_t>(static_cast<int64_t>(rodata->vaddr()) +
+                                                          descriptor.kernel_code_entry_byte_offset -
+                                                          static_cast<int64_t>(text.vaddr()));
+  EXPECT_EQ(descriptor_entry, 0u);
+}
+
 TEST(BinaryTranslator, ClientRewriteOwnsBoundedMultiInstructionSourceSpan) {
   const uint32_t replacement_nop = build_s_nop(9, ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint32_t> words = {
@@ -3927,6 +3973,59 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   EXPECT_EQ(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
       << "the descriptor is redirected to the synthesized compatibility entry; compatible "
          "firmware still reaches the synthesized +256 entry by adding the ABI skip";
+}
+
+TEST(BinaryTranslator, ClientKernelEntryPrefixCoversBothKernargPreloadEntries) {
+  auto image = make_large_amdgpu_elf_with_waitcnt_entry();
+  AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
+  const auto *source_text = source_layout.text_sections()[0];
+  auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
+  source_words[0] = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  source_words[64] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const uint32_t prefix_nop = build_s_nop(9, ROCJITSU_CODE_ARCH_CDNA3);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  translator.set_kernel_entry_rewrite_callback(
+      [&](const KernelEntryRewriteContext &context) -> std::optional<KernelEntryRewrite> {
+        EXPECT_TRUE(context.has_kernarg_preload_firmware_skip);
+        return KernelEntryRewrite{
+            .prefix_words = {prefix_nop},
+            .markers = {{.id = 61, .byte_offset = 0}, {.id = 62, .byte_offset = sizeof(uint32_t)}}};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section &text = *translated.text_sections().front();
+  const auto target_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  ASSERT_GT(target_words.size(), kKernargPreloadSkipBytes / sizeof(uint32_t) + 1u);
+  EXPECT_EQ(target_words[0], prefix_nop);
+  EXPECT_EQ(target_words[kKernargPreloadSkipBytes / sizeof(uint32_t)], prefix_nop);
+
+  ASSERT_EQ(result.client_marker_placements.size(), 4u);
+  const auto marker_at = [&](uint64_t id, uint64_t source_offset, uint64_t target_offset) {
+    return std::ranges::any_of(result.client_marker_placements, [&](const auto &marker) {
+      return marker.id == id && marker.source_offset == source_offset &&
+             marker.target_offset == target_offset;
+    });
+  };
+  EXPECT_TRUE(marker_at(61u, 0u, 0u));
+  EXPECT_TRUE(marker_at(62u, 0u, sizeof(uint32_t)));
+  EXPECT_TRUE(marker_at(61u, kKernargPreloadSkipBytes, kKernargPreloadSkipBytes));
+  EXPECT_TRUE(
+      marker_at(62u, kKernargPreloadSkipBytes, kKernargPreloadSkipBytes + sizeof(uint32_t)));
 }
 
 TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPrologue) {

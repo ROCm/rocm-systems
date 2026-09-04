@@ -139,6 +139,32 @@ struct InstructionRewrite {
 using InstructionRewriteCallback =
     std::function<std::optional<InstructionRewrite>(const InstructionRewriteContext &)>;
 
+/// @brief Source descriptor identity presented to a kernel-entry rewrite client.
+///
+/// @details The callback runs once for each source descriptor before kernel scopes are emitted.
+/// Descriptors that share one executable entry must request identical words because they share one
+/// translated launch stub. The translator duplicates the resulting prefix at the firmware's
+/// secondary entry when kernarg preload exposes the architectural entry+256 path.
+struct KernelEntryRewriteContext {
+  uint64_t owner_descriptor_file_offset = 0;
+  uint64_t source_entry_offset = 0;
+  std::string_view owner_kernel_name;
+  bool has_kernarg_preload_firmware_skip = false;
+};
+
+/// @brief Position-independent client words executed at every hardware kernel entry.
+///
+/// @details The translator appends these words to its own descriptor-ABI prologue and emits the
+/// final branch into the relocated body. Markers are relative to the beginning of the client words
+/// and are published once for each hardware-visible entry.
+struct KernelEntryRewrite {
+  std::vector<uint32_t> prefix_words;
+  std::vector<InstructionRewriteMarker> markers;
+};
+
+using KernelEntryRewriteCallback =
+    std::function<std::optional<KernelEntryRewrite>(const KernelEntryRewriteContext &)>;
+
 /// @brief One final placement of a source .text instruction or boundary.
 ///
 /// @details A source offset may occur more than once when a shared function
@@ -296,6 +322,9 @@ public:
   /// @brief Install an optional inline source-instruction rewrite callback.
   void set_instruction_rewrite_callback(InstructionRewriteCallback callback);
 
+  /// @brief Install an optional position-independent kernel-entry rewrite callback.
+  void set_kernel_entry_rewrite_callback(KernelEntryRewriteCallback callback);
+
   /// @brief Translate a decoded code object.
   /// @param obj  The guest code object to translate.
   /// @returns TranslatedCodeObject with the host ELF bytes and diagnostics.
@@ -338,10 +367,11 @@ private:
   uint32_t target_mach_;                                    ///< ELF MACH flag for target processor.
   TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
   InstructionRewriteCallback instruction_rewrite_callback_; ///< Optional client inline rewrite.
-  BinaryTranslatorOptions options_;                         ///< Optional translation controls.
-  EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
-  LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
-  std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
+  KernelEntryRewriteCallback kernel_entry_rewrite_callback_; ///< Optional client entry prefix.
+  BinaryTranslatorOptions options_;                          ///< Optional translation controls.
+  EncodingTranslateFn encoding_translate_;                   ///< Per-pair encoding translator.
+  LegalizationLookupFn legalization_lookup_;                 ///< Per-pair legalization table.
+  std::unique_ptr<SemanticTranslator> semantic_translator_;  ///< Per-pair semantic rule engine.
 
   /// @brief Deferred-family mnemonics already reported in this translation.
   ///

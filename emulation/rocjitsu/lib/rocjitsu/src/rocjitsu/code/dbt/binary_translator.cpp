@@ -2260,6 +2260,10 @@ void BinaryTranslator::set_instruction_rewrite_callback(InstructionRewriteCallba
   instruction_rewrite_callback_ = std::move(callback);
 }
 
+void BinaryTranslator::set_kernel_entry_rewrite_callback(KernelEntryRewriteCallback callback) {
+  kernel_entry_rewrite_callback_ = std::move(callback);
+}
+
 void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) const {
   result.rewrite_discharge_checked = true;
   if (!semantic_translator_->supports_rewrite_discharge()) {
@@ -2942,6 +2946,74 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }
   }
 
+  // Entry clients describe source-coordinate prologue words once. Keep that
+  // plan separate from descriptor translation because register feedback may
+  // rebuild KdTranslation later; the same words are appended to the rebuilt
+  // descriptor prologue before its layout is compared with the emitted one.
+  std::unordered_map<uint64_t, KernelEntryRewrite> client_kernel_entry_rewrites;
+  if (kernel_entry_rewrite_callback_) {
+    for (const KdTranslation &translation : descriptor_translations) {
+      if (client_kernel_entry_rewrites.contains(translation.descriptor_file_offset))
+        continue;
+      auto rewrite = kernel_entry_rewrite_callback_(
+          {.owner_descriptor_file_offset = translation.descriptor_file_offset,
+           .source_entry_offset = translation.entry_text_offset,
+           .owner_kernel_name = translation.kernel_name,
+           .has_kernarg_preload_firmware_skip = translation.has_kernarg_preload_firmware_skip});
+      if (!rewrite)
+        continue;
+      const uint64_t prefix_bytes = rewrite->prefix_words.size() * sizeof(uint32_t);
+      const bool invalid_marker =
+          std::ranges::any_of(rewrite->markers, [&](const InstructionRewriteMarker &marker) {
+            return marker.byte_offset % sizeof(uint32_t) != 0u || marker.byte_offset > prefix_bytes;
+          });
+      if (invalid_marker) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "client kernel-entry rewrite marker is outside its supplied prefix",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
+      client_kernel_entry_rewrites.emplace(translation.descriptor_file_offset, std::move(*rewrite));
+    }
+
+    // One scope has one launch stub even when several descriptors alias its
+    // body. Refuse contradictory client programs instead of silently choosing
+    // whichever descriptor happened to be enumerated first.
+    for (size_t i = 0; i < descriptor_translations.size(); ++i) {
+      for (size_t j = i + 1u; j < descriptor_translations.size(); ++j) {
+        if (!same_kernel_scope_variant(descriptor_translations[i], descriptor_translations[j]))
+          continue;
+        const auto lhs =
+            client_kernel_entry_rewrites.find(descriptor_translations[i].descriptor_file_offset);
+        const auto rhs =
+            client_kernel_entry_rewrites.find(descriptor_translations[j].descriptor_file_offset);
+        const std::span<const uint32_t> lhs_words =
+            lhs == client_kernel_entry_rewrites.end()
+                ? std::span<const uint32_t>{}
+                : std::span<const uint32_t>(lhs->second.prefix_words);
+        const std::span<const uint32_t> rhs_words =
+            rhs == client_kernel_entry_rewrites.end()
+                ? std::span<const uint32_t>{}
+                : std::span<const uint32_t>(rhs->second.prefix_words);
+        if (!std::ranges::equal(lhs_words, rhs_words)) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "descriptors sharing one kernel entry requested different client "
+                       "prologues",
+                       descriptor_translations[i].entry_text_offset);
+          return leave_unchanged();
+        }
+      }
+    }
+  }
+  const auto append_client_kernel_entry_rewrite = [&](KdTranslation &translation) {
+    const auto rewrite = client_kernel_entry_rewrites.find(translation.descriptor_file_offset);
+    if (rewrite == client_kernel_entry_rewrites.end())
+      return;
+    translation.prologue_words.insert(translation.prologue_words.end(),
+                                      rewrite->second.prefix_words.begin(),
+                                      rewrite->second.prefix_words.end());
+  };
+
   // A device function whose address is produced only by a data relocation -- a C++ vtable slot is
   // the common case -- is named by no decoded edge, so no kernel scope reaches it. Translated text
   // replaces .text wholesale, so leaving it unreached drops the body and strands the addend that
@@ -3480,6 +3552,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         return leave_unchanged();
       }
     }
+    append_client_kernel_entry_rewrite(*scope.translation);
 
     layout.entry_plan = {
         .has_kernarg_preload_firmware_skip = scope.translation->has_kernarg_preload_firmware_skip,
@@ -4944,6 +5017,39 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
            .target_offset = marker.target_offset + target_delta,
            .owner_descriptor_file_offset = marker.owner_descriptor_file_offset});
     }
+    for (const KdTranslation &translation : descriptor_translations) {
+      if (!same_kernel_scope_variant(translation, *scope.translation))
+        continue;
+      const auto rewrite = client_kernel_entry_rewrites.find(translation.descriptor_file_offset);
+      if (rewrite == client_kernel_entry_rewrites.end())
+        continue;
+      if (rewrite->second.prefix_words.size() > scope.translation->prologue_words.size()) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "client kernel-entry prefix exceeds the emitted descriptor prologue",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
+      const uint64_t client_begin =
+          layout.target_entry +
+          (scope.translation->prologue_words.size() - rewrite->second.prefix_words.size()) *
+              sizeof(uint32_t);
+      const auto publish_entry_markers = [&](uint64_t source_entry, uint64_t target_entry) {
+        for (const InstructionRewriteMarker &marker : rewrite->second.markers) {
+          client_marker_placements.push_back(
+              {.id = marker.id,
+               .source_offset = source_entry,
+               .target_offset = target_entry + marker.byte_offset,
+               .owner_descriptor_file_offset = translation.descriptor_file_offset});
+        }
+      };
+      publish_entry_markers(translation.entry_text_offset, client_begin);
+      if (translation.has_kernarg_preload_firmware_skip) {
+        publish_entry_markers(translation.kernarg_preload_firmware_entry_text_offset,
+                              client_begin +
+                                  (translation.kernarg_preload_firmware_entry_text_offset -
+                                   translation.entry_text_offset));
+      }
+    }
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
     // literal it owns must not also be written here -- the later write would land in a range the
     // other model has already rebuilt.
@@ -5153,6 +5259,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           return leave_unchanged();
         }
+        append_client_kernel_entry_rewrite(*updated);
 
         if (!updated->supported) {
           if (skip_failed_kernels) {
