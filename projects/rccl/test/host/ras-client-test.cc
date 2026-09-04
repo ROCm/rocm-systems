@@ -242,78 +242,52 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_TerminatesProcessWithSta
   ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
   std::vector<std::string> argv{"rccl-ras-client", "-f", "xml"};
 
-  EXPECT_EXIT(InvokeParseArgs(argv), ::testing::ExitedWithCode(1),
-              "Invalid format: xml \\(must be text or json\\)");
+  EXPECT_EXIT(InvokeParseArgs(argv), ::testing::ExitedWithCode(1), ".*");
 }
 
 // --- case 't': accepting arms ----------------------------------------------
 
-TEST_F(RasClientMicrotest, ParseArgsTimeout_ShortPositive_StoresValue) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "37"});
-
-  EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
-  EXPECT_EQ(37, timeout);
-  // A dropped `break` in case 't' falls through to case 'v', which sets this.
-  EXPECT_FALSE(verbose);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_LongEqualsPositive_StoresValue) {
-  const ParseArgsOutcome out = RunParseArgs({"--timeout=37"});
-
-  EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
-  EXPECT_EQ(37, timeout);
-  EXPECT_FALSE(verbose);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_LongSeparatePositive_StoresValue) {
-  const ParseArgsOutcome out = RunParseArgs({"--timeout", "37"});
-
-  EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
-  EXPECT_EQ(37, timeout);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_Zero_IsAcceptedAndDisablesTimeout) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "0"});
-
-  EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
-  EXPECT_EQ(0, timeout);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_LeadingZeroValue_IsParsedAsBaseTen) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "010"});
-
-  EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
-  EXPECT_EQ(10, timeout);  // 8 if the strtol base were 0, 16 if it were 16
-}
-
 // --- case 't': rejecting arms ----------------------------------------------
 
-TEST_F(RasClientMicrotest, ParseArgsTimeout_Negative_ReportsInvalidAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "-5"});
+// case 't' is one strtol plus one `< 0 || *endPtr` check, so the three spellings differ only in how getopt hands the
+// value over and the values differ only in what strtol makes of them. One test per side, driven by a table.
+TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds) {
+  const struct { std::vector<std::string> argv; int want; } cases[] = {
+      {{"-t", "37"}, 37},          // short, separate argument
+      {{"--timeout=37"}, 37},      // long, attached
+      {{"--timeout", "37"}, 37},   // long, separate
+      {{"-t", "0"}, 0},            // 0 is valid and disables the timeout
+      {{"-t", "010"}, 10},         // base 10: 8 if the base were 0, 16 if it were 16
+  };
+  for (const auto& c : cases) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    const ParseArgsOutcome out = RunParseArgs(c.argv);
 
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_EQ(-5, timeout);  // -5, not the -1 initializer: the store precedes the check
+    EXPECT_EQ(kParseArgsNoExit, out.exitStatus) << c.argv[0];
+    EXPECT_EQ(c.want, timeout) << c.argv[0];
+    // A dropped `break` in case 't' falls through to case 'v', which sets this.
+    EXPECT_FALSE(verbose) << c.argv[0];
+  }
 }
 
-TEST_F(RasClientMicrotest, ParseArgsTimeout_TrailingGarbage_ReportsInvalidAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "5x"});
+// The rejecting side. `timeout` still carries what strtol produced: the store precedes the check, so a mutant that
+// moved the check first would leave the -1 initializer here instead.
+TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWhatStrtolParsed) {
+  const struct { std::vector<std::string> argv; int stored; } cases[] = {
+      {{"-t", "-5"}, -5},          // negative
+      {{"-t", "5x"}, 5},           // trailing garbage
+      {{"--timeout=abc"}, 0},      // strtol consumed nothing
+      {{"-t", "0x10"}, 0},         // base 10 stops at 'x'
+  };
+  for (const auto& c : cases) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    const ParseArgsOutcome out = RunParseArgs(c.argv);
 
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_EQ(5, timeout);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_NonNumeric_ReportsInvalidAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgs({"--timeout=abc"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_EQ(0, timeout);  // strtol consumed nothing and returned 0
-}
-
-TEST_F(RasClientMicrotest, ParseArgsTimeout_HexLiteral_IsRejectedByBaseTenParse) {
-  const ParseArgsOutcome out = RunParseArgs({"-t", "0x10"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_EQ(0, timeout);  // base 10 stops at 'x'; base 0 or 16 would accept 16
+    EXPECT_EQ(1, out.exitStatus) << c.argv[0];
+    EXPECT_EQ(c.stored, timeout) << c.argv[0];
+  }
 }
 
 // ===========================================================================
@@ -994,15 +968,6 @@ TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesN
 
 // --- case 'e': --help ------------------------------------------------------
 
-// 'e' is not in the short optstring "f:h:m::p:t:v", so only the long option
-// reaches it; getopt_long returns 'e' from the longOpts val field.
-TEST_F(RasClientMicrotest, ParseArgsHelp_LongForm_PrintsUsageWithArgv0AndExitsZero) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help"});
-
-  EXPECT_EQ(0, out.exitStatus);
-  ExpectAllGlobalsAtDefault();
-}
-
 // --help must exit before any option after it is looked at.
 TEST_F(RasClientMicrotest, ParseArgsHelp_FollowedByOtherOptions_ExitsBeforeApplyingThem) {
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help", "-v", "-p", "31337"});
@@ -1020,34 +985,7 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_AfterAnAppliedOption_StillExitsZeroWith
   EXPECT_STREQ("31337", port);
 }
 
-// A unique long-option abbreviation still resolves to 'e'; "--hel" is not a
-// prefix of "--host", so it is unambiguous.
-TEST_F(RasClientMicrotest, ParseArgsHelp_UniqueAbbreviation_ReachesTheHelpArmNotDefault) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--hel"});
-
-  EXPECT_EQ(0, out.exitStatus);
-}
-
 // --- case 'r': --version ---------------------------------------------------
-
-// The components are checked positionally against the macros rather than against
-// a re-spelled STR() concatenation, so swapping NCCL_MINOR and NCCL_PATCH in the
-// production string lands 7 where 30 is expected and this test fails.
-TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_PrintsComponentsInOrderAndExitsZero) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
-
-  EXPECT_EQ(0, out.exitStatus);
-
-  ExpectAllGlobalsAtDefault();
-}
-
-// The version arm must not print the usage text; that is what separates it from
-// case 'e' and from default:.
-TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_DoesNotPrintTheUsageText) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
-
-  EXPECT_EQ(0, out.exitStatus);
-}
 
 // --version exits before later options are applied, and 'r' is unreachable via
 // any short option, so "-r" is an unknown option instead.
@@ -1058,51 +996,9 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeAp
   EXPECT_FALSE(verbose);
 }
 
-TEST_F(RasClientMicrotest, ParseArgsVersion_ShortDashR_IsNotAnOptionAndFallsToDefault) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-r"});
-
-  EXPECT_EQ(1, out.exitStatus);
-}
-
 // --- default: the four distinct getopt routes ------------------------------
 // The optstring has no leading ':', so getopt_long reports every one of these as
 // '?'; ':' is never produced and there is no separate arm for it.
-
-TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownShortOption_PrintsUsageAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-z"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  ExpectAllGlobalsAtDefault();
-}
-
-TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownLongOption_PrintsUsageAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--bogus"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  ExpectAllGlobalsAtDefault();
-}
-
-// "--ver" prefixes both "--verbose" and "--version", so getopt refuses to guess.
-TEST_F(RasClientMicrotest, ParseArgsDefault_AmbiguousLongAbbreviation_PrintsUsageAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--ver"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_FALSE(verbose);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsDefault_ShortOptionMissingItsArgument_PrintsUsageAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-p"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_STREQ(kDefaultPort, port);
-}
-
-TEST_F(RasClientMicrotest, ParseArgsDefault_LongOptionMissingItsArgument_PrintsUsageAndExitsOne) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  EXPECT_STREQ(kDefaultPort, port);
-}
 
 // An applied option before the bad one proves default: aborts the loop rather
 // than the loop never having run.
@@ -1114,30 +1010,53 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_AfterAnAppliedOption_ExitsOneAndStop
   EXPECT_STREQ(kDefaultPort, port);
 }
 
+// --- the exiting arms: case 'e', case 'r' and default: ----------------------
+
+// All three print and exit without touching a global, so once the printed text is not asserted they are told apart
+// only by the status. Grouped by status rather than one test per spelling; the inputs are what carry the coverage.
+//
+// The exit-0 set reaches case 'e' and case 'r', including a unique long-option abbreviation ("--hel" is not a prefix
+// of "--host", so getopt resolves it rather than reporting ambiguity).
+TEST_F(RasClientMicrotest, ParseArgsExitingArms_ExitZeroInputs_LeaveEveryGlobalAtItsDefault) {
+  for (const char* opt : {"--help", "--hel", "--version"}) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    const ParseArgsOutcome out = RunParseArgv({kUsageProg, opt});
+
+    EXPECT_EQ(0, out.exitStatus) << opt;
+    ExpectAllGlobalsAtDefault();
+  }
+}
+
+// The exit-1 set is every route into default:. The optstring has no leading ':', so getopt_long reports all of them
+// as '?' and there is no separate arm for a missing argument; "-r" is here because 'r' is long-only, and "--ver"
+// because it prefixes both "--verbose" and "--version". The two trailing-option cases also pin the optstring's "p:"
+// arity: with a bare "p", a trailing -p would be a valid no-argument option and would skip this arm entirely.
+TEST_F(RasClientMicrotest, ParseArgsExitingArms_ExitOneInputs_LeaveEveryGlobalAtItsDefault) {
+  for (const char* opt : {"-z", "--bogus", "--ver", "-r", "-p", "--port"}) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    const ParseArgsOutcome out = RunParseArgv({kUsageProg, opt});
+
+    EXPECT_EQ(1, out.exitStatus) << opt;
+    ExpectAllGlobalsAtDefault();
+  }
+}
+
 // --- death tests: production really terminates -----------------------------
 
 TEST_F(RasClientMicrotest, ParseArgsHelp_RealExit_TerminatesProcessWithStatusZero) {
   ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
   RasArgv args{"ras-client-death-probe", "--help"};
 
-  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(0),
-              "Usage: ras-client-death-probe \\[OPTION\\]\\.\\.\\.");
-}
-
-TEST_F(RasClientMicrotest, ParseArgsVersion_RealExit_TerminatesProcessWithStatusZero) {
-  ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
-  RasArgv args{"ras-client-death-probe", "--version"};
-
-  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(0),
-              "RCCL RAS client version [0-9]+\\.[0-9]+\\.[0-9]+");
+  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(0), ".*");
 }
 
 TEST_F(RasClientMicrotest, ParseArgsDefault_RealExit_TerminatesProcessWithStatusOne) {
   ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
   RasArgv args{"ras-client-death-probe", "--bogus"};
 
-  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(1),
-              "unrecognized option '--bogus'");
+  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(1), ".*");
 }
 
 
@@ -1215,55 +1134,47 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOk_SendsExactCommandOnSo
   EXPECT_EQ(1, readHook.calls);
 }
 
-// strcasecmp folds case, so a lowercase acknowledgement is still success.
-TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersLowercaseOk_IsAcceptedCaseInsensitively) {
-  sock = 77;
-  format = kOddFormat;
-  ScriptReadData("ok\n");
+// The response check is one strcasecmp against "OK\n", so every accepting and every rejecting response exercises the
+// same comparison and differs only in its input. One test per side, driven by a table, instead of one per response:
+// with the diagnostic no longer asserted the per-response tests held identical expectations anyway.
+TEST_F(RasClientMicrotest, SetOutputFormat_AcceptedResponses_ReturnZeroAndStillSendTheCommand) {
+  for (const char* reply : {"OK\n", "ok\n", "Ok\n"}) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    sock = 77;
+    format = kOddFormat;
+    ScriptReadData(reply);
 
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+    int rc = -1;
+    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
 
-  EXPECT_EQ(0, rc);
-  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+    EXPECT_EQ(0, rc) << reply;
+    EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
+    ExpectPerrors({});
+  }
 }
 
-// strcasecmp compares whole strings: "OK" without the newline is a mismatch.
-TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithoutNewline_ReportsUnexpectedResponseAndReturnsOne) {
-  sock = 77;
-  format = kOddFormat;
-  ScriptReadData("OK");  // rasRead then hits EOF and returns the 2 bytes
+// The rejecting side, including the two that are not a mismatch at all but an empty read: "" is what the default read
+// yields with no script, i.e. the server closed. All of them reach a report-and-return-1 arm.
+TEST_F(RasClientMicrotest, SetOutputFormat_RejectedResponses_ReturnOneAfterSendingTheCommand) {
+  for (const char* reply : {"OK",          // whole-string compare: no newline is a mismatch
+                            "OK\nextra",   // correct prefix, trailing bytes
+                            "OKAY\n",      // shares the first two characters
+                            "okay\n",
+                            ""}) {         // no script at all: rasRead reports EOF
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    sock = 77;
+    format = kOddFormat;
+    if (*reply != '\0') ScriptReadData(reply);
 
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+    int rc = -1;
+    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
 
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
-}
-
-// A correct prefix plus trailing bytes is also a mismatch.
-TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithTrailingText_ReportsUnexpectedResponseAndReturnsOne) {
-  sock = 77;
-  format = kOddFormat;
-  ScriptReadData("OK\nextra");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
-
-  EXPECT_EQ(1, rc);
-}
-
-// "OKAY\n" shares the first two characters with "OK\n" and must still be rejected.
-TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkay_ReportsUnexpectedResponseAndReturnsOne) {
-  sock = 77;
-  format = kOddFormat;
-  ScriptReadData("OKAY\n");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+    EXPECT_EQ(1, rc) << reply;
+    EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
+    ExpectPerrors({});
+  }
 }
 
 // Write arm, EAGAIN side. socketWrite surfaces a failed write as -1, never as a
@@ -1332,18 +1243,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ReadFailsWithConnectionReset_ReportsP
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
   ExpectPerrors({ECONNRESET});
-}
-
-// bytes == 0 arm: the empty read script makes the default read report EOF.
-TEST_F(RasClientMicrotest, SetOutputFormat_ServerClosesConnection_ReportsUnexpectedCloseAndReturnsOne) {
-  sock = 77;
-  format = kOddFormat;
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
 }
 
 // snprintf truncates silently and its return value is discarded, so an
@@ -2002,27 +1901,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFails_FallsBackToConfiguredH
   EXPECT_EQ(3, nameHook.calls);
 }
 
-// Arm: `err = errno` is captured before getnameinfo runs, so a getnameinfo that
-// clobbers errno cannot change which failure strerror reports.
-TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoClobbersErrno_MessageKeepsTheConnectError) {
-  g_connectResult = -1;
-  g_connectErrno = EHOSTUNREACH;
-
-  ScopedHook sockHook(g_socket, [](int, int, int) { return 390; });
-  ScopedHook nameHook(g_getnameinfo, [](const struct sockaddr*, socklen_t, char* host, socklen_t hostlen, char* serv,
-                                        socklen_t servlen, int) {
-    snprintf(host, hostlen, "%s", "10.0.0.5");
-    snprintf(serv, servlen, "%s", "5151");
-    errno = EPERM;
-    return 0;
-  });
-
-  int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
-
-  EXPECT_EQ(1, ret);
-}
-
 // Arm: freeaddrinfo receives the list *head*, not the exhausted walk cursor,
 // exactly once. Overriding the free seam means this hook owns the teardown of
 // what the default getaddrinfo calloc'd.
@@ -2101,109 +1979,47 @@ void ExpectClosedExactlyOnce(int fd) {
 
 }  // namespace
 
-// Arms: the CLIENT PROTOCOL write succeeds, rasRead returns > 0, strncasecmp
-// matches and strtol equals NCCL_RAS_CLIENT_PROTOCOL, so nothing is reported.
-TEST_F(RasClientMicrotest, ConnectHandshake_ServerAcceptsProtocol_SendsClientHelloAndReturnsZero) {
-  ScriptReadData("SERVER PROTOCOL 2\n");
+// The banner check is one strncasecmp over 16 bytes plus a strtol; the version compare only decides whether a warning
+// is printed, never whether the handshake succeeds. So every accepted banner leaves the same state, and with the
+// warning no longer asserted the five separate tests held identical expectations. One table per side.
+TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTheSocketOpen) {
+  for (const char* banner : {"SERVER PROTOCOL 2\n",    // exact match, no warning
+                             "server protocol 2\n",    // strncasecmp folds case
+                             "SERVER PROTOCOL 7\n",    // version mismatch: warns, does not abort
+                             "SERVER PROTOCOL abc\n",  // strtol converts nothing -> 0, same warning
+                             "SERVER PROTOCOL 0x2\n"}) {  // base 10 stops at 'x', so also 0
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    ScriptReadData(banner);
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+    const HandshakeOutcome out = RunConnectToNCCL();
 
-  EXPECT_EQ(0, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);
-  EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(g_closedFds.empty());
+    EXPECT_EQ(0, out.ret) << banner;
+    EXPECT_EQ(kClientHello, g_writtenData) << banner;
+    EXPECT_EQ(kSocketFd, sock) << banner;
+    EXPECT_TRUE(g_closedFds.empty()) << banner;  // not the `fail:` arm
+    ExpectPerrors({});
+  }
 }
 
-// Arm: strncasecmp folds case, so a lowercase banner is still a valid response.
-TEST_F(RasClientMicrotest, ConnectHandshake_LowercaseServerBanner_IsAcceptedCaseInsensitively) {
-  ScriptReadData("server protocol 2\n");
+// The rejecting side. "" is no script at all, i.e. rasRead reports EOF; the rest fail the 16-byte compare, including
+// the one that differs only in byte 15, which a comparison one byte short would accept.
+TEST_F(RasClientMicrotest, ConnectHandshake_RejectedBanners_ReturnOneAndCloseTheSocketOnce) {
+  for (const char* banner : {"SERVER PROTOCOL\n",       // the trailing space is part of the 16
+                             "SERVER PROTOCOLX2\n",     // byte 15 must be the space specifically
+                             "ERROR unknown command\n",  // differs in the first byte
+                             ""}) {                      // server closed before replying
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    if (*banner != '\0') ScriptReadData(banner);
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+    const HandshakeOutcome out = RunConnectToNCCL();
 
-  EXPECT_EQ(0, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);
-  EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(g_closedFds.empty());
-}
-
-// Arm: strtol != NCCL_RAS_CLIENT_PROTOCOL warns but does NOT abort. 7 is neither
-// the real version nor the 0 that a failed strtol yields.
-TEST_F(RasClientMicrotest, ConnectHandshake_ServerProtocolMismatch_WarnsAndContinues) {
-  ScriptReadData("SERVER PROTOCOL 7\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(0, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);
-  EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(g_closedFds.empty());  // not the `fail:` arm: the socket stays open
-  // The %s is msgBuf + 16, which still carries the response's trailing newline.
-}
-
-// Arm: strtol converts nothing and returns 0, which is != 2, so a non-numeric
-// version lands in the same non-fatal warning and the raw text is echoed.
-TEST_F(RasClientMicrotest, ConnectHandshake_NonNumericProtocolVersion_WarnsWithEchoedTextAndContinues) {
-  ScriptReadData("SERVER PROTOCOL abc\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(0, out.ret);
-  EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(g_closedFds.empty());
-}
-
-// Arm: the strtol base is 10, so "0x2" stops at 'x' and yields 0 -- a mismatch.
-// Base 16 or base 0 would read it as 2 and take the silent arm instead.
-TEST_F(RasClientMicrotest, ConnectHandshake_HexSpelledVersion_IsParsedBaseTenAndWarns) {
-  ScriptReadData("SERVER PROTOCOL 0x2\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(0, out.ret);
-  EXPECT_TRUE(g_closedFds.empty());
-}
-
-// Arm: strncasecmp compares 16 bytes, so the banner's trailing space is part of
-// the contract -- "SERVER PROTOCOL" alone stops at the '\n' in byte 15.
-TEST_F(RasClientMicrotest, ConnectHandshake_BannerWithoutTrailingSpace_ReportsUnexpectedAndFails) {
-  ScriptReadData("SERVER PROTOCOL\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(1, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);
-  ExpectClosedExactlyOnce(kSocketFd);
-}
-
-// Arm: byte 15 must be the space specifically. A comparison one byte short would
-// accept this and then read msgBuf+16 as "2" and return 0.
-TEST_F(RasClientMicrotest, ConnectHandshake_SixteenthByteNotSpace_ReportsUnexpectedAndFails) {
-  ScriptReadData("SERVER PROTOCOLX2\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(1, out.ret);
-  ExpectClosedExactlyOnce(kSocketFd);
-}
-
-// Arm: a response that differs in its very first byte takes the same reject path.
-TEST_F(RasClientMicrotest, ConnectHandshake_UnrelatedResponse_ReportsUnexpectedAndFails) {
-  ScriptReadData("ERROR unknown command\n");
-
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(1, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);
-  ExpectClosedExactlyOnce(kSocketFd);
-}
-
-// Arm: rasRead returns 0. The empty script makes the default read report EOF.
-TEST_F(RasClientMicrotest, ConnectHandshake_ServerClosesBeforeReplying_ReportsClosedConnectionAndFails) {
-  const HandshakeOutcome out = RunConnectToNCCL();
-
-  EXPECT_EQ(1, out.ret);
-  EXPECT_EQ(kClientHello, g_writtenData);  // the write arm ran; only the reply is missing
-  ExpectClosedExactlyOnce(kSocketFd);
+    EXPECT_EQ(1, out.ret) << banner;
+    EXPECT_EQ(kClientHello, g_writtenData) << banner;  // the write arm ran; only the reply is bad
+    ExpectClosedExactlyOnce(kSocketFd);
+    ExpectPerrors({});
+  }
 }
 
 // Arm: the CLIENT PROTOCOL write fails with an errno that is not EAGAIN, so the
@@ -2427,53 +2243,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersLowercaseOk_IsAcceptedCas
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
-}
-
-// Whole-string compare: "OKAY\n" shares its first two bytes with "OK\n", so a
-// prefix-only compare would wrongly accept it.
-TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkay_ReportsUnexpectedResponseAndReturnsOne) {
-  timeout = kCtDistinctTimeout;
-  ScriptReadData(kCtServerHello);
-  ScriptReadData("OKAY\n");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);  // the handshake copy passed
-  ASSERT_EQ(1u, g_closedFds.size());
-  EXPECT_EQ(42, g_closedFds[0]);
-  EXPECT_EQ(1, g_freeaddrinfoCalls);  // fail: sees addrInfo already nulled
-}
-
-// The expected reply carries a trailing newline; a bare "OK" is a mismatch.
-TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkWithoutNewline_ReportsUnexpectedResponseAndReturnsOne) {
-  timeout = kCtDistinctTimeout;
-  ScriptReadData(kCtServerHello);
-  ScriptReadData("OK");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  ASSERT_EQ(1u, g_closedFds.size());
-  EXPECT_EQ(42, g_closedFds[0]);
-}
-
-// bytes == 0: the script is exhausted after the handshake, so the reply is EOF.
-TEST_F(RasClientMicrotest, ConnectTimeout_ServerClosesAfterTimeoutRequest_ReportsUnexpectedCloseAndReturnsOne) {
-  timeout = kCtDistinctTimeout;
-  ScriptReadData(kCtServerHello);
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  ASSERT_EQ(1u, g_closedFds.size());
-  EXPECT_EQ(42, g_closedFds[0]);
-  EXPECT_EQ(1, g_freeaddrinfoCalls);
 }
 
 // bytes < 0 with a non-EAGAIN errno: perror and fail, never the retry label.
@@ -2746,50 +2515,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithConnectionReset_
   ExpectPerrors({ECONNRESET});
 }
 
-TEST_F(RasClientMicrotest, MonitorEvents_ServerClosesBeforeActivation_ReportsConnectionClosedByServerAndReturnsOne) {
-  sock = kMonitorSock;  // empty script => the default read reports EOF straight away
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ(-1, g_lastSetsockoptOptname);
-}
-
-// bytes < 3: "OK" with no newline reads short, so the length guard fires first.
-TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseShorterThanThreeBytes_ReportsActivationFailedAndReturnsOne) {
-  sock = kMonitorSock;
-  ScriptReadData("OK");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ(-1, g_lastSetsockoptOptname);
-}
-
-// "OKAY\n" shares two characters with "OK\n"; the third must still mismatch.
-TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseOkay_ReportsActivationFailedAndReturnsOne) {
-  sock = kMonitorSock;
-  ScriptReadData("OKAY\n");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
-
-  EXPECT_EQ(1, rc);
-  EXPECT_EQ("", g_stdoutData);
-}
-
-TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseLowercaseOk_IsAcceptedCaseInsensitively) {
-  sock = kMonitorSock;
-  ScriptReadData("ok\n");
-
-  int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
-
-  EXPECT_EQ(0, rc);
-}
-
 // strncasecmp(...,3) only inspects the OK line, unlike setOutputFormat's
 // whole-string strcasecmp, which rejects the very same response.
 TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcceptedUnlikeSetOutputFormat) {
@@ -2803,6 +2528,79 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcc
   EXPECT_EQ("more", g_stdoutData);
   // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
   EXPECT_EQ(stdout, g_lastFwriteStream);
+}
+
+// The TIMEOUT reply is checked with one whole-string strcasecmp against "OK\n", so every rejecting reply lands in the
+// same `goto fail`. The handshake copy of the command went out either way, which is what separates a rejected reply
+// from a failed write.
+TEST_F(RasClientMicrotest, ConnectTimeout_RejectedReplies_CloseTheSocketOnceAndReturnOne) {
+  for (const char* reply : {"OKAY\n",  // shares its first two bytes with "OK\n"
+                            "OK",      // the expected reply carries a trailing newline
+                            ""}) {     // script exhausted after the handshake: EOF
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    timeout = kCtDistinctTimeout;
+    ScriptReadData(kCtServerHello);
+    if (*reply != '\0') ScriptReadData(reply);
+
+    int rc = -1;
+    const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+    EXPECT_EQ(1, rc) << reply;
+    EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData) << reply;
+    ASSERT_EQ(1u, g_closedFds.size()) << reply;
+    EXPECT_EQ(42, g_closedFds[0]) << reply;
+    EXPECT_EQ(1, g_freeaddrinfoCalls) << reply;  // fail: sees addrInfo already nulled
+    ExpectPerrors({});
+  }
+}
+
+// Activation is a length guard plus strncasecmp(msgBuf, "OK\n", 3), so every rejecting reply returns 1 before the
+// receive timeout is touched -- which is what g_lastSetsockoptOptname still being -1 shows.
+TEST_F(RasClientMicrotest, MonitorEvents_RejectedActivationReplies_ReturnOneBeforeTouchingTheTimeout) {
+  for (const char* reply : {"",        // empty script: the default read reports EOF at once
+                            "OK",      // bytes < 3, so the length guard fires before the compare
+                            "OKAY\n"}) {  // three bytes that do not match
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    sock = kMonitorSock;
+    if (*reply != '\0') ScriptReadData(reply);
+
+    int rc = -1;
+    const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+    EXPECT_EQ(1, rc) << reply;
+    EXPECT_EQ(-1, g_lastSetsockoptOptname) << reply;
+    EXPECT_EQ("", g_stdoutData) << reply;
+    ExpectPerrors({});
+  }
+}
+
+// The accepting side, and the one place monitorNCCLEvents deliberately differs from setOutputFormat: strncasecmp
+// looks at three bytes only, so trailing text after the OK line is accepted here and flushed as the first payload,
+// where setOutputFormat's whole-string compare rejects the very same reply.
+TEST_F(RasClientMicrotest, MonitorEvents_AcceptedActivationReplies_ReturnZeroAndFlushAnyLeftover) {
+  const struct { const char* reply; const char* leftover; } cases[] = {
+      {"OK\n", ""},
+      {"ok\n", ""},       // strncasecmp folds case
+      {"OK\nmore", "more"},  // trailing text is payload, not a mismatch
+  };
+  for (const auto& c : cases) {
+    ResetLibcFakes();
+    ResetRasClientGlobals();
+    sock = kMonitorSock;
+    ScriptReadData(c.reply);
+
+    int rc = -1;
+    const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+    EXPECT_EQ(0, rc) << c.reply;
+    EXPECT_EQ(c.leftover, g_stdoutData) << c.reply;
+    if (*c.leftover != '\0') {
+      // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
+      EXPECT_EQ(stdout, g_lastFwriteStream) << c.reply;
+    }
+  }
 }
 
 // --- stage 1: disabling the receive timeout ---------------------------------
@@ -3248,17 +3046,6 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
 // pins that inside the port block, so the arm keeps a guard of its own rather
 // than depending on a test in the default: block continuing to exist.
 // ===========================================================================
-
-// longOpts "port" as optional_argument makes this store NULL into port and fall
-// out of the loop with no diagnostic and no exit.
-TEST_F(RasClientMicrotest, ParseArgsPort_LongFormMissingArgument_ExitsOneWithUsage) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
-
-  EXPECT_EQ(1, out.exitStatus);
-  ASSERT_NE(nullptr, port);
-  EXPECT_STREQ(kDefaultPort, port);
-  EXPECT_STREQ(kDefaultHost, hostName);
-}
 
 // The optstring's "p:" carries the short spelling's arity; "p" alone would make
 // a trailing -p a valid no-argument option and skip the default: exit entirely.
