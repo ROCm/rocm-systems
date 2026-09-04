@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
+
 ### Resolved issues
 
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
