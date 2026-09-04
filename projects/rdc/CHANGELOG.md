@@ -19,6 +19,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - `rdci health -s` / `-c` no longer abort priming, refreshing, or `memory_check` on the first field that fails; each sub-check is evaluated independently.
   - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable.
   - Health fields the platform cannot serve are probed at `rdci health -s`, reported per GPU at default verbosity (naming the fallback source where one exists), and left out of the 1 s watch.
+  - The EEPROM health component watches the field `eeprom_check` actually reads (`RDC_FI_ECC_UNCORRECT_TOTAL`) instead of polling `RDC_HEALTH_EEPROM_CONFIG_VALID`, which no check consumes.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 

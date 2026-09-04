@@ -422,7 +422,9 @@ std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int
   }
 
   if (components & RDC_HEALTH_WATCH_EEPROM) {
-    field_ids.push_back(RDC_HEALTH_EEPROM_CONFIG_VALID);
+    // eeprom_check reads the ECC total and looks for RDC_ST_CORRUPTED_EEPROM;
+    // RDC_HEALTH_EEPROM_CONFIG_VALID is consumed by no check, so don't poll it.
+    if (!(components & RDC_HEALTH_WATCH_MEM)) field_ids.push_back(RDC_FI_ECC_UNCORRECT_TOTAL);
   }
 
   if (components & RDC_HEALTH_WATCH_THERMAL) {
