@@ -1918,6 +1918,46 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// AICOMRCCL-2241: registering a symmetric window after ncclDevCommCreate is
+// legal. Anvil SDMA resolves the user VA via ncclDevrGetLsaSelfAddr, which
+// only walks memHead, so ginEnabled must already see this mem on the list.
+// BarrierSession_LsaOnly also registers after create, but it never activates
+// GIN (plain NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER), so it cannot catch this.
+TEST_F(GinMPIDeviceTests, WindowRegister_AfterDevCommCreate) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  constexpr size_t kBytes = 64;
+  void* dBuf = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dBuf, kBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dBuf) (void)ncclMemFree(dBuf);
+  });
+
+  ncclWindow_t win = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dBuf, kBytes, &win, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (win) (void)ncclCommWindowDeregister(comm, win);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Collective over the world team: composes the inner LSA barrier with the
 // outer rail-GIN barrier (ncclTeamTagWorld ctor). Mirrors Barrier_TwoRanks'
 // "completion == success" philosophy -- a broken inner LSA epoch or outer
