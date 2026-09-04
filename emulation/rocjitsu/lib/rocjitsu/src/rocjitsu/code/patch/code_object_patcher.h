@@ -29,6 +29,8 @@ struct KdTranslation;
 struct TextOffsetRelocation {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+  /// Source-image descriptor whose kernel translation scope emitted this copy.
+  uint64_t owner_descriptor_file_offset = 0;
   bool client_rewrite = false;
 };
 

@@ -94,18 +94,30 @@ struct TranslationTraceEvent {
 
 using TranslationTraceCallback = std::function<void(const TranslationTraceEvent &)>;
 
+/// @brief Source and kernel-scope identity presented to an instruction-rewrite client.
+///
+/// @details One source instruction may be emitted once per kernel that reaches a shared helper.
+/// The descriptor identity lets a client choose and later prove an owner-specific lowering rather
+/// than pretending that every emitted copy has one anonymous placement.
+struct InstructionRewriteContext {
+  const Instruction &instruction;
+  uint64_t source_offset = 0;
+  uint64_t owner_descriptor_file_offset = 0;
+  uint64_t owner_entry_source_offset = 0;
+  std::string_view owner_kernel_name;
+};
+
 /// @brief Optional whole-text rewrite for one ordinary source instruction.
 ///
-/// @details The callback runs after control-transfer relocation has claimed its
-/// instructions and before profile-specific semantic lowering. Returning words
-/// replaces the complete source instruction at every emitted copy of that
-/// source offset; returning nullopt leaves normal translation in charge. The
-/// replacement is emitted inline, so BinaryTranslator's existing block,
-/// branch, symbol, descriptor, and PC-relative relocation transaction owns the
-/// resulting text growth. Callers are responsible for including the guest
-/// instruction in the replacement when its semantics must still execute.
+/// @details The callback runs after control-transfer relocation has claimed its instructions and
+/// before profile-specific semantic lowering. Returning words replaces the complete source
+/// instruction in the identified kernel scope; returning nullopt leaves normal translation in
+/// charge. The replacement is emitted inline, so BinaryTranslator's existing block, branch,
+/// symbol, descriptor, and PC-relative relocation transaction owns the resulting text growth.
+/// Callers are responsible for including the guest instruction in the replacement when its
+/// semantics must still execute.
 using InstructionRewriteCallback =
-    std::function<std::optional<std::vector<uint32_t>>(const Instruction &, uint64_t)>;
+    std::function<std::optional<std::vector<uint32_t>>(const InstructionRewriteContext &)>;
 
 /// @brief One final placement of a source .text instruction or boundary.
 ///
@@ -115,6 +127,8 @@ using InstructionRewriteCallback =
 struct TranslatedTextPlacement {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+  /// @brief Source-image descriptor whose translation scope emitted this copy.
+  uint64_t owner_descriptor_file_offset = 0;
   /// @brief True only when the client rewrite callback replaced this instruction.
   bool client_rewrite = false;
 };

@@ -3611,9 +3611,8 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
 
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
   translator.set_instruction_rewrite_callback(
-      [&](const Instruction &, uint64_t source_offset)
-          -> std::optional<std::vector<uint32_t>> {
-        if (source_offset != 0)
+      [&](const InstructionRewriteContext &context) -> std::optional<std::vector<uint32_t>> {
+        if (context.source_offset != 0)
           return std::nullopt;
         return std::vector<uint32_t>{inserted_nop, source_nop};
       });
@@ -3626,9 +3625,8 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
   ASSERT_EQ(translated.text_sections().size(), 1u);
   const Section *text = translated.text_sections().front();
   ASSERT_GE(text->size(), 3 * sizeof(uint32_t));
-  const auto translated_words =
-      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
-                                text->size() / sizeof(uint32_t));
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text->data()), text->size() / sizeof(uint32_t));
   EXPECT_EQ(translated_words[0], inserted_nop);
   EXPECT_EQ(translated_words[1], source_nop);
   EXPECT_EQ(translated_words[2], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
@@ -3662,9 +3660,8 @@ TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
   options.preserve_source_text_prefix = true;
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4, 0, options);
   translator.set_instruction_rewrite_callback(
-      [&](const Instruction &, uint64_t source_offset)
-          -> std::optional<std::vector<uint32_t>> {
-        if (source_offset != 0)
+      [&](const InstructionRewriteContext &context) -> std::optional<std::vector<uint32_t>> {
+        if (context.source_offset != 0)
           return std::nullopt;
         return std::vector<uint32_t>{inserted_nop, source_nop};
       });
@@ -3678,13 +3675,11 @@ TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
   const Section &text = *translated.text_sections().front();
   ASSERT_GT(text.size(), source_text.size());
   EXPECT_TRUE(std::ranges::equal(
-      source_text,
-      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text.data()),
-                               source_text.size())));
+      source_text, std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text.data()),
+                                            source_text.size())));
 
-  const auto rewritten = std::ranges::find_if(result.text_placements, [](const auto &placement) {
-    return placement.source_offset == 0;
-  });
+  const auto rewritten = std::ranges::find_if(
+      result.text_placements, [](const auto &placement) { return placement.source_offset == 0; });
   ASSERT_NE(rewritten, result.text_placements.end());
   EXPECT_GE(rewritten->target_offset, source_text.size());
   ASSERT_LT(rewritten->target_offset + 2 * sizeof(uint32_t), text.size() + 1u);
@@ -4313,11 +4308,12 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
   BinaryTranslatorOptions options;
   options.preserve_source_text_prefix = true;
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0, options);
+  std::vector<uint64_t> rewrite_owners;
   translator.set_instruction_rewrite_callback(
-      [&](const Instruction &, uint64_t source_offset)
-          -> std::optional<std::vector<uint32_t>> {
-        if (source_offset != helper_offset)
+      [&](const InstructionRewriteContext &context) -> std::optional<std::vector<uint32_t>> {
+        if (context.source_offset != helper_offset)
           return std::nullopt;
+        rewrite_owners.push_back(context.owner_descriptor_file_offset);
         return std::vector<uint32_t>{first_nop, second_nop};
       });
   const auto result = translator.translate(source);
@@ -4332,6 +4328,17 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
   ASSERT_EQ(helper_placements.size(), 2u)
       << "the public placement map must retain both kernel-scope copies";
   EXPECT_NE(helper_placements[0], helper_placements[1]);
+  ASSERT_EQ(rewrite_owners.size(), 2u);
+  EXPECT_NE(rewrite_owners[0], rewrite_owners[1])
+      << "a shared-helper rewrite must identify the descriptor owning each clone";
+  std::vector<uint64_t> placement_owners;
+  for (const TranslatedTextPlacement &placement : result.text_placements) {
+    if (placement.source_offset == helper_offset)
+      placement_owners.push_back(placement.owner_descriptor_file_offset);
+  }
+  std::ranges::sort(rewrite_owners);
+  std::ranges::sort(placement_owners);
+  EXPECT_EQ(placement_owners, rewrite_owners);
 
   AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
@@ -4341,9 +4348,8 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
     ASSERT_LE(function.entry_text_offset, text.size());
     EXPECT_LE(function.code_size, text.size() - function.entry_text_offset);
   }
-  const auto translated_words =
-      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text.data()),
-                                text.size() / sizeof(uint32_t));
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
   for (const uint64_t placement : helper_placements) {
     ASSERT_LT(placement / sizeof(uint32_t) + 1u, translated_words.size());
     EXPECT_EQ(translated_words[placement / sizeof(uint32_t)], first_nop);
@@ -4371,7 +4377,6 @@ TEST(BinaryTranslatorE2E, VariantConflictedAddressTakenCloneRefusesInsteadOfNami
       << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
 }
-
 
 constexpr size_t kTestFileGrowthBudget = size_t{16} * 1024 * 1024;
 

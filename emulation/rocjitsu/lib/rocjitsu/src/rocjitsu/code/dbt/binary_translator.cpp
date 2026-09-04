@@ -2706,8 +2706,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   util::StringDiagnostic decode_error;
   auto block_result =
       BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
-                        ExternalEntryPolicy::ExplicitOnly, block_split_points,
-                        source_code_ranges);
+                        ExternalEntryPolicy::ExplicitOnly, block_split_points, source_code_ranges);
   if (block_result.failed()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();
@@ -4287,8 +4286,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         }
 
         if (instruction_rewrite_callback_) {
-          std::optional<std::vector<uint32_t>> rewrite =
-              instruction_rewrite_callback_(inst, offset);
+          std::optional<std::vector<uint32_t>> rewrite = instruction_rewrite_callback_(
+              {.instruction = inst,
+               .source_offset = offset,
+               .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
+               .owner_entry_source_offset = scope.translation->entry_text_offset,
+               .owner_kernel_name = scope.translation->kernel_name});
           if (rewrite) {
             std::vector<uint32_t> target_words = std::move(*rewrite);
             client_rewritten_source_offsets.insert(offset);
@@ -4834,6 +4837,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       text_relocations.push_back(
           {.source_offset = source_offset,
            .target_offset = target_offset + target_delta,
+           .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
            .client_rewrite = client_rewritten_source_offsets.contains(source_offset)});
     }
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
@@ -5152,9 +5156,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   result.elf_bytes = std::move(*materialized);
   result.text_placements.reserve(text_relocations.size());
   for (const TextOffsetRelocation &relocation : text_relocations) {
-    result.text_placements.push_back({.source_offset = relocation.source_offset,
-                                      .target_offset = relocation.target_offset,
-                                      .client_rewrite = relocation.client_rewrite});
+    result.text_placements.push_back(
+        {.source_offset = relocation.source_offset,
+         .target_offset = relocation.target_offset,
+         .owner_descriptor_file_offset = relocation.owner_descriptor_file_offset,
+         .client_rewrite = relocation.client_rewrite});
   }
   return result;
 }

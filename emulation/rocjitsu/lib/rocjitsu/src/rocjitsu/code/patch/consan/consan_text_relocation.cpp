@@ -63,7 +63,9 @@ try_rewrite_consan_text_in_place(std::span<const uint8_t> image, const AmdGpuCod
   for (const ConSanStagedTextRewrite &rewrite : rewrites) {
     std::memcpy(result.image.data() + text.sectionOffset() + rewrite.patch.anchor_offset,
                 rewrite.words.data(), rewrite.words.size() * sizeof(uint32_t));
-    result.placements.push_back({rewrite.patch.anchor_offset, rewrite.patch.anchor_offset, true});
+    result.placements.push_back({.source_offset = rewrite.patch.anchor_offset,
+                                 .target_offset = rewrite.patch.anchor_offset,
+                                 .client_rewrite = true});
   }
   return result;
 }
@@ -144,11 +146,10 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   const auto *header = reinterpret_cast<const Elf64_Ehdr *>(descriptor_patched_image.data());
   BinaryTranslator translator(arch, arch, header->e_flags & EF_AMDGPU_MACH, translator_options);
   translator.set_instruction_rewrite_callback(
-      [&](const Instruction &, uint64_t source_offset) -> std::optional<std::vector<uint32_t>> {
-        const auto rewrite =
-            std::ranges::find(rewrites, source_offset, [](const ConSanStagedTextRewrite &rewrite) {
-              return rewrite.patch.anchor_offset;
-            });
+      [&](const InstructionRewriteContext &context) -> std::optional<std::vector<uint32_t>> {
+        const auto rewrite = std::ranges::find(
+            rewrites, context.source_offset,
+            [](const ConSanStagedTextRewrite &rewrite) { return rewrite.patch.anchor_offset; });
         if (rewrite == rewrites.end())
           return std::nullopt;
         return rewrite->words;
