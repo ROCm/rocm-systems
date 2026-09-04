@@ -674,3 +674,174 @@ architecture-boundary tests pass. This deletes 72 governing production lines
 net. As with Section 12.5, the result is accepted groundwork rather than the
 required macro-slice: it collapses one duplicated application lifecycle but
 does not yet remove the large specialized placement planners that feed it.
+
+### 12.7 Accepted macro-slice: whole-text SuperCollider access programs
+
+Commits `56604905910` through `ec4e1e6c8ac` turned the Section 12.6
+transaction groundwork into the campaign's required lifted replacement. The
+old LDS and FLAT lowerers did not merely have different probe bodies. Each
+owned a complete parallel lifecycle for local-cave discovery, appended cave
+placement, dense-call grouping, entry-host displacement, indirect return,
+branch-only relay allocation, descriptor mutation, byte publication, patch
+geometry, and owner-local CFG/liveness reconstruction. Those lifecycles are
+gone.
+
+The deliberately smaller protocol is now:
+
+1. a mode leaf selects a source-coordinate site, owners, exact resource
+   effects, and a complete site-local instruction program;
+2. `stage_consan_text_rewrites` applies descriptor effects transactionally and
+   retains typed rewrite intent without publishing partial executable bytes;
+3. perturbation and the other SuperCollider access leaf may compose while all
+   facts still use pristine source coordinates;
+4. `relocate_consan_text` performs one structure-preserving identity
+   translation, replacing each selected instruction inline in the relocated
+   program; and
+5. `finalize_consan_text_rewrites` validates every translated placement and
+   atomically publishes the image, committed lowerings, patch geometry, and
+   relocation proof.
+
+LDS and FLAT are materially different consumers. LDS includes two-address
+expansion, D16/subword placement, selectable-bank transitions, accumulator
+boundaries, and bracket-local spill allocation. FLAT includes runtime group
+address gating, VCC preservation, address/data tuple rules, and readback of a
+global operation. Those remain typed mode-leaf mechanics. Neither consumer
+owns cave topology, routes, continuation ABI, byte mutation, final placement,
+or publication anymore. `ScOwnerAnalysis` also gives them one lazy owner,
+CFG, liveness, register-extent, descriptor, dynamic-stack, and scratch
+analysis instead of reconstructing that graph twice.
+
+The intentional representational slack is explicit. Every transformed object
+retains its pristine source text as an unreachable coordinate-stable prefix,
+and a one-site rewrite pays for the same object-wide relocation protocol as a
+many-site rewrite. The protocol can transport additional already-patched code
+ranges even though a pure access-only object has none. This is larger at
+runtime than a fortunate local NOP cave, but it removes all reachability- and
+workload-dependent cave orchestration while preserving exact executable
+behavior. The target profile, rather than common relocation code, now owns
+any same-revision selection required by the structural translation.
+
+Retired representations and authorities include the SuperCollider dense-route
+identity and target operations, dense and indirect route fragments, local and
+appended patch-kind distinctions, per-site placement planners, dispatcher and
+entry-host maps, relay-bank offers and retirement, route-specific validation,
+and the LDS/FLAT copies of owner CFG/liveness analysis. Comment-only filename
+tombstones remain where the no-file-deletion operating rule requires them;
+they contain no compatibility implementation.
+
+Fresh accounting from `4ac57f3a827` (immediately before the Section 12.6
+groundwork) through `ec4e1e6c8ac` is:
+
+| Signal | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Production files | 314 | 316 | +2 shared relocation owners |
+| Physical production lines | 95,966 | **91,888** | **-4,078** |
+| Nonblank production lines | 89,600 | **85,652** | **-3,948** |
+| Governing implementation lines | 82,090 | **78,287** | **-3,803** |
+| Git physical insertions/deletions | - | 979 / 5,056 | **-4,077** by diff accounting |
+
+The one-line difference between snapshot and Git physical accounting is an
+end-of-file newline. Governing counts use the campaign's lexical counter and
+are obtained by applying its exact differential to the canonical baseline;
+the counter's absolute parser convention is unchanged on both snapshots.
+There are no host additions and no new target implementation. Target code
+loses 104 physical route/profile lines. The two new shared relocation files
+cost 318 physical lines; all other insertion cost is the smaller staged
+transaction, shared owner analysis, migrated leaf assembly, proof, and tests.
+
+The focused regression set covered LDS-only, FLAT-only, combined LDS+FLAT,
+perturbation composition, inline and spill-backed sites, dense and long-range
+routes, all five targets, target conformance, invalid relocation geometry,
+growth limits, and architecture boundaries. The old route-specific tests were
+removed only where their represented mechanism ceased to exist; behavioral
+and corruption tests remain.
+
+### 12.8 Fresh whole-tree operation-matrix audit
+
+After the macro deletion, the production tree was reread by lifecycle rather
+than searched for matching names. The table records the largest remaining
+operation families, including the source size around each apparent frontier.
+Size is a navigation signal, not an estimate of removable code.
+
+| Family and present physical envelope | Shared outer operations now | Remaining specialized operations | Eighth-refactoring verdict |
+| --- | --- | --- | --- |
+| MOI access planning and application: 3,465 mode-planner lines plus 1,187 common access-program lines | candidate/resource products, dense-route selection, body/continuation algebra, compiled program geometry, descriptor/text transaction, attribution and commit | mode evidence construction, spill/guest-operand interaction, runtime gates, report identity/cardinality, deferred-guest ordering | The hard three-mode prototype was attempted and removed the former apply lifecycles. Further field or loop lifting still leaves each evidence state machine and measured near break-even. No second bounded 1,500-line deletion remains in this protocol. |
+| Versioned InlineShadow publication: 4,815 mode-emitter lines plus 214 common protocol lines | EXEC partition, coherent version loads, odd/even transition, bounded claim/retry/exhaustion | exact-cell provenance and conflict diagnosis versus release/acquire causal import, token-set cardinality, journaling, rollback, payload stores and evidence | The maximally different exact-slot/release hard pair was attempted. Common claim mechanics survived, but widening the algebra moves the two complete semantic state machines behind callbacks or a union. Measured checkpoint remained approximately line-neutral. |
+| Synchronization lowering: 3,661 mode lines plus 2,011 common barrier/sync lines | decoded sequence association, owner/resource facts, patch occupancy, generic barrier body/route mechanics, typed commit/publication | Record/Replay event logs, Sampled causal windows and metadata, InlineShadow exact epochs and atomic ordering | Similar control-flow verbs conceal different evidence and failure transitions. The large 2,563-line Sampled owner is one integrated barrier/atomic causal protocol, not a duplicate of the smaller record or exact-epoch transactions. Common placement and native emission are already singular. |
+| Persistent-state prologues: 2,919 lines | dispatch/workgroup capture, runtime selection, initialization suffixes, descriptor effects and publication | register persistence/borrowed-entry routing versus private offsets, dynamic-frame bootstrap, save/restore and private extent | The hard register/private comparison remains controlled by Section 14.16 of the seventh ledger. The common prefix and suffix already survive; lifting the storage-specific middle produces a union plan and is forecast below 350 lines before framework cost. |
+| Shared resource and placement solver: 5,227-line implementation fragment plus contracts | one object-wide CFG/liveness/resource authority already serves all three MOI engines and every supported target | target capabilities enter as data; mode demand enters through the mode operation registry | This is a large singular common implementation, not parallel domain orchestration. Splitting or wrapping it cannot satisfy semantic compression. |
+| Program/synchronization analysis and independent validation: 1,953 + 2,691 + 3,712 lines | normalized decoded inventory and synchronization graph; final proof separately reconstructs executable facts | validator independence, corruption diagnostics and fail-closed proof | Producer and validator intentionally have separate trust domains. Making validation consume mutable producer plans would delete code by weakening an invariant, so it is out of bounds. |
+| Host runtime and registries: 5,099-line main hook plus separated report/config owners | one interception layer coordinates reader, executable, replacement, report, dispatch and fault lifetimes | distinct keys and retirement events for each HSA object type | The registry hard comparison still finds no duplicated outer lifecycle: unifying records retains the maps and adds optional states. File size reflects one host coordinator, not an `N*M` family. |
+| Report regions and policy/intents | common ABI bounds, typed layouts, coverage ledger and render composition | caller-owned versus automatic identity/capacity/lifetime; policy reasons versus executable intent and independent proof | The hard comparisons in seventh Sections 14.14--14.15 remain valid. A generic schema or aggregate view preserves both representations and adds translation. |
+| SuperCollider LDS/FLAT: 2,099 lines including their common region | one owner analysis and one whole-text transaction | the two irreducible resource selectors and site-local probe builders | Accepted macro-slice. There is no surviving route, placement, or publication compatibility path to harvest. |
+
+One potentially large future direction did surface: make whole-text relocation
+the mutation backend for all MOI access, synchronization, and prologue
+programs. It is not a bounded missed hard-pair lift in this campaign. MOI
+currently applies access, barrier, atomic, fence, and entry-prologue mutations
+incrementally, and later phases consume active-image coordinates and prior
+patch geometry. Relocating only access sites would leave later commits and
+runtime mappings referring to the unreachable source prefix. A correct cutover
+must migrate every mutation family together, define composition for coincident
+and multi-instruction sites, and remap every committed lowering and proof.
+That is a replacement of the complete MOI mutation backend, not another
+adapter around the present access protocol. Its deletion potential is real,
+but it needs its own measured transaction and rollback contract before it is
+bounded; beginning it here would turn a completed deletion campaign into an
+open-ended dual-backend state.
+
+No other audited family has a credible unattempted 1,500-line bounded
+replacement. The large remaining files are either singular shared
+authorities, independent proof, or typed semantic leaves below mechanisms
+that are already common. The audit therefore finds no comparably strong
+unattempted lifting candidate appropriate to this campaign. It also records
+the whole-MOI relocation backend explicitly so a later campaign does not
+mistake this conclusion for evidence that the current mutation strategy is
+optimal.
+
+### 12.9 Campaign accounting and completion audit
+
+After moving structural-translation revision selection into the CDNA5 target
+profile, the final production inventory is:
+
+| Signal | Eighth baseline | Final | Campaign change |
+| --- | ---: | ---: | ---: |
+| Production files | 313 | **316** | +3 |
+| Physical production lines | 96,100 | **91,892** | **-4,208** |
+| Nonblank production lines | 89,764 | **85,656** | **-4,108** |
+| Governing implementation lines | 82,302 | **78,293** | **-4,009** |
+
+The file increase is the shared access-program implementation and the two
+shared text-relocation owners; each displaced private implementation was
+removed in place because operational rules prohibit deleting its filename.
+Tests, build files, generated code and documentation remain outside the
+governing count. No implementation moved into an excluded category.
+
+The completion requirements now have direct evidence:
+
+1. the governing reduction is 4,009 lines, leaving 78,293, nine lines below
+   the required maximum;
+2. the whole-text SuperCollider protocol replaces the materially different
+   LDS and FLAT placement/publication lifecycles and removes 3,803 governing
+   lines by itself;
+3. `stage_consan_text_rewrites`, `relocate_consan_text`, and
+   `finalize_consan_text_rewrites` are the sole outer authority, with LDS and
+   FLAT as real consumers and no route compatibility implementation;
+4. the algebra is site, owners, descriptor effects, typed program, relocation,
+   placement proof, and atomic commit--none of which enumerates a mode or
+   architecture;
+5. mode leaves remain under `modes/supercollider/`, architecture revision data
+   is target-owned, and the boundary test rejects either fact escaping;
+6. final validation remains independent, relocation and descriptor mutation
+   remain fail-closed and transactional, and runtime evidence stays typed;
+7. the malformed-ELF memory defect and HIP-fixture public-include defect found
+   during the campaign have bounded regression coverage;
+8. final nonphysical gate results are recorded below; and
+9. Section 12.8 is the required fresh operation-matrix audit.
+
+Validation checkpoint: a clean `ninja -j16` rebuild and
+`ConSan.ArchitectureBoundaries` pass. The first full nonphysical ConSan gate
+attempted 16 memory-heavy InlineShadow transforms concurrently and produced a
+cluster of timeouts and resource-admission failures; that overloaded run is not
+completion evidence. A resource-aware full ConSan gate and the full
+nonphysical RocJitsu gate remain pending.
