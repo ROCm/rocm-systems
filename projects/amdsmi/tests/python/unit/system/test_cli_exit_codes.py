@@ -803,6 +803,49 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                     int(self.ExitCode.MIXED_DEVICE_ERRORS),
                 )
 
+    def test_device_not_found_call_sites_name_their_device_kind(self):
+        """The parser builds this exception in five places and none of them runs
+        in any suite, so a bad signature ships silently: the NIC and switch sites
+        passed two arguments and raised TypeError instead of exiting
+        DEVICE_NOT_FOUND. Checked by reading the source, not running it.
+        """
+        import ast
+        import pathlib
+
+        def dotted_name(node):
+            """Rebuild "pkg.Class.MEMBER" from an AST attribute chain."""
+            parts = []
+            while isinstance(node, ast.Attribute):
+                parts.append(node.attr)
+                node = node.value
+            if isinstance(node, ast.Name):
+                parts.append(node.id)
+            return ".".join(reversed(parts))
+
+        parser_source = pathlib.Path(_CLI_DIR) / "amdsmi_parser.py"
+        self.assertTrue(parser_source.is_file(), f"cannot read {parser_source}")
+
+        raise_sites = [
+            node
+            for node in ast.walk(ast.parse(parser_source.read_text()))
+            if isinstance(node, ast.Call)
+            and dotted_name(node.func).endswith("AmdSmiDeviceNotFoundException")
+        ]
+        self.assertTrue(raise_sites, "matched no call sites -- this check would pass vacuously")
+
+        known_kinds = [f"AmdSmiDeviceKind.{name}" for name in cli_exc.AmdSmiDeviceKind.__members__]
+        for call in raise_sites:
+            with self.subTest(line=call.lineno):
+                self.assertEqual(
+                    len(call.args), 3, "expected (handles, output_format, device_kind)"
+                )
+                device_kind = dotted_name(call.args[2])
+                self.assertTrue(
+                    any(device_kind.endswith(kind) for kind in known_kinds),
+                    f"device_kind is {device_kind or ast.dump(call.args[2])!r}, "
+                    f"expected one of {known_kinds}",
+                )
+
     def test_power_cap_out_of_range_records_invalid_parameter_value(self):
         """validate_and_set_power_cap owns its recording; the set_gpu handler
         does none. Out of range must record and return a message rather than
@@ -1053,7 +1096,9 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                 err = io.StringIO()
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                     with self.assertRaises(SystemExit) as ctx:
-                        amdsmi_commands._exit_on_init_error(fmt, _FakeLibErr(), "GPU")
+                        amdsmi_commands._exit_on_init_error(
+                            fmt, _FakeLibErr(), cli_exc.AmdSmiDeviceKind.GPU
+                        )
 
                 printed = out.getvalue().strip()
                 self.assertEqual(ctx.exception.code, cli_exc.library_code_to_exit_code(code))
