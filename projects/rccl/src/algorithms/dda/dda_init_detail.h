@@ -61,7 +61,9 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
   size_t ll128Floor = 0;
   if ((llEnabled || ll128Enabled) && ll128Threshold > 0) {
     const size_t perRank = ((size_t)ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
-    ll128Floor = (size_t)2 * nRanks * ddaLL128Slices(perRank) * (size_t)kDdaLL128WireBytesPerSlice;
+    size_t slotSlices = ddaLL128Slices(perRank);
+    slotSlices += slotSlices & 1; // even: the two-shot tier halves this slot
+    ll128Floor = (size_t)2 * nRanks * slotSlices * (size_t)kDdaLL128WireBytesPerSlice;
   }
 
   size_t bytes = simpleCap;
