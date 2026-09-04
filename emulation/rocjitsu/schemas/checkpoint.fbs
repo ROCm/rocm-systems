@@ -42,6 +42,14 @@ table WavefrontState {
   wg_coord: [uint32];
   kernel_wave_size: ubyte; // Architectural wave width.
   vgpr_lane_count: ubyte; // Per-register lane count in the VGPR payload.
+  // Descriptor-derived allocation metadata. The payload above intentionally
+  // contains the complete simulator backing block, so it cannot recover these
+  // bounds. `has_vgpr_allocation` distinguishes an old checkpoint (all appended
+  // scalar fields read as zero) from a valid allocation with no AccVGPR window.
+  vgpr_allocation_count: uint32; // Total/unified count charged to occupancy.
+  ordinary_vgpr_count: uint32; // Ordinary v0-based prefix.
+  accvgpr_count: uint32; // Accumulator acc0-based window.
+  has_vgpr_allocation: bool;
 }
 
 /// Serialized state of a compute unit.
