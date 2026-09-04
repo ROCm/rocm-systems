@@ -370,7 +370,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
             dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
-        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
+        if not 1 <= int(dispatch_id) <= len(df):
             console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
     if (
@@ -383,7 +383,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
         ]
-        df = df.loc[selected_dispatches]
+        df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
 

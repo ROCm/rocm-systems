@@ -369,7 +369,7 @@ def _filter_workload() -> SimpleNamespace:
         raw_pmc=pd.DataFrame({
             "GPU_ID": [0, 0, 1, 1],
             "Kernel_Name": ["vecCopy", "vecAdd", "vecCopy", "vecMul"],
-            "Dispatch_ID": [0, 1, 2, 3],
+            "Dispatch_ID": [1, 2, 3, 4],
         }),
         filter_gpu_ids=None,
         filter_kernel_ids=None,
@@ -425,7 +425,7 @@ class TestApplyFilters:
     def test_dispatch_id_filter(self) -> None:
         """A dispatch-ID filter keeps only matching rows."""
         workload = _filter_workload()
-        workload.filter_dispatch_ids = ["0", "1"]
+        workload.filter_dispatch_ids = ["1", "2"]
         assert len(apply_filters(workload, "/tmp", False, False)) == 2
 
     def test_gpu_integer_list_filter(self) -> None:

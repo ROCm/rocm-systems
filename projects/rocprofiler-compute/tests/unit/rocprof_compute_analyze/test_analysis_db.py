@@ -1307,9 +1307,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
         (2, "vecCopy"),
+        (3, "vecCopy"),
     ]
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
@@ -1374,8 +1374,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
@@ -2953,7 +2953,7 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+@pytest.mark.parametrize("filter_dispatch_ids", [["2"], [">1"], ["> 1"]])
 def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     tmp_path, filter_dispatch_ids
 ):

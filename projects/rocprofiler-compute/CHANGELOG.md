@@ -11,6 +11,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Dispatch IDs now start at 1 instead of 0.
+
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
   * Each edge now reports the traffic measured at the interface it represents.

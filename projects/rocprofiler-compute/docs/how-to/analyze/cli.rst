@@ -390,7 +390,7 @@ First, list the top kernels in your application using `--list-stats`.
    ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
    │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
    ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-   │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+   │  0 │             1 │ vecCopy(double*, double*, double*, int, int) │        0 │
    ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
 Second, select the index of the kernel you would like to filter; for example,

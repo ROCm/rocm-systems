@@ -68,7 +68,7 @@ with ROCm Compute Profiler, we see:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 7 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 8 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -172,7 +172,7 @@ in the IPC example:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 8 -b 11.2 --decimal 4
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2 --decimal 4
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -265,7 +265,7 @@ Running this kernel through ROCm Compute Profiler yields:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 10 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -366,7 +366,7 @@ scalar register (``s0``). Running this kernel through ROCm Compute Profiler yiel
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 10 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 11 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -430,7 +430,7 @@ through ROCm Compute Profiler yields:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 11 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 12 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat

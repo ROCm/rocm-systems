@@ -79,16 +79,27 @@ class GroupIdAssigner:
     Ids are handed out one row at a time so a CSV never has to be held in
     memory.
 
+    The first id is ``start``, and each new combination gets the next one.
+
     Example:
         assigner = GroupIdAssigner(["name", "value"], "group_id")
         assigner.apply({"name": "A", "value": 1})  # group_id 0
         assigner.apply({"name": "B", "value": 2})  # group_id 1
         assigner.apply({"name": "A", "value": 1})  # group_id 0 again
+
+        assigner = GroupIdAssigner(["name"], "group_id", start=1)
+        assigner.apply({"name": "A"})  # group_id 1
     """
 
-    def __init__(self, group_by_columns: Sequence[str], new_column_name: str) -> None:
+    def __init__(
+        self,
+        group_by_columns: Sequence[str],
+        new_column_name: str,
+        start: int = 0,
+    ) -> None:
         self._columns = tuple(group_by_columns)
         self._target = new_column_name
+        self._start = start
         self._ids: dict[tuple, int] = {}
 
     def apply(self, row: dict) -> dict:
@@ -96,7 +107,7 @@ class GroupIdAssigner:
         # A row missing one of the columns contributes None for it rather than
         # raising, so a malformed row still gets an id.
         key = tuple(row.get(col) for col in self._columns)
-        row[self._target] = self._ids.setdefault(key, len(self._ids))
+        row[self._target] = self._ids.setdefault(key, len(self._ids) + self._start)
         return row
 
 
