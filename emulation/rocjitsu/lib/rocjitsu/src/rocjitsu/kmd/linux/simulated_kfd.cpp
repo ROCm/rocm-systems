@@ -3312,25 +3312,46 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
 
   const auto arch = wave.cu().arch();
   bool profiling_interrupt = false;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    // ROCr's GFX9 handler has two MSG_INTERRUPT sites. At the profiling site it
-    // loads the event id from TTMP7; at the queue-exception site it loads the
-    // packed exception from TTMP3. Both insert an s_nop immediately before the
-    // message. Classify the actual control-flow site instead of inspecting the
-    // TTMP values: a signal pointer can equal saved M0, and a concurrent trap
-    // can legitimately rewrite those registers before the second interrupt.
-    constexpr uint32_t kSMovM0Ttmp7 = 0xBEFC0073u;
-    constexpr uint32_t kSMovM0Ttmp3 = 0xBEFC006Fu;
+  uint32_t profiling_move_encoding = 0;
+  uint32_t exception_move_encoding = 0;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    profiling_move_encoding = 0xBEFC0073u;
+    exception_move_encoding = 0xBEFC006Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    profiling_move_encoding = 0xBEFC0373u;
+    exception_move_encoding = 0xBEFC036Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    profiling_move_encoding = 0xBEFD0073u;
+    exception_move_encoding = 0xBEFD006Fu;
+    break;
+  default:
+    break;
+  }
+  if (profiling_move_encoding != 0) {
+    // ROCr's pre-GFX12 handler has two MSG_INTERRUPT sites. At the profiling
+    // site it loads the event id from TTMP7; at the queue-exception site it
+    // loads the packed exception from TTMP3. Both insert an s_nop immediately
+    // before the message. Classify the actual control-flow site instead of
+    // inspecting the TTMP values: a signal pointer can equal saved M0, and a
+    // concurrent trap can legitimately rewrite those registers before the
+    // second interrupt.
     constexpr uint32_t kSNop0 = 0xBF800000u;
     if (wave.pc >= 2 * sizeof(uint32_t)) {
       const uint32_t payload_move =
           wave.cu().fetch_instruction_word(wave.pc - 2 * sizeof(uint32_t), wave.process_id());
       const uint32_t delay =
           wave.cu().fetch_instruction_word(wave.pc - sizeof(uint32_t), wave.process_id());
-      if (delay == kSNop0 && payload_move == kSMovM0Ttmp7)
+      if (delay == kSNop0 && payload_move == profiling_move_encoding)
         profiling_interrupt = true;
-      else if (delay != kSNop0 || payload_move != kSMovM0Ttmp3)
+      else if (delay != kSNop0 || payload_move != exception_move_encoding)
         return false;
     } else {
       return false;
