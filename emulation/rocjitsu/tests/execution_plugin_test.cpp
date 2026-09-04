@@ -2713,6 +2713,47 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   EXPECT_EQ(cu->read_vgpr_storage(adjacent->vgpr_alloc().base, 0), kAdjacentSentinel);
 }
 
+TEST(ExecutionPluginTest, DualResultLdsLoadRejectsBothWritesWhenSecondDestinationIsInvalid) {
+  constexpr uint32_t kAllocatedVgprs = 8;
+  constexpr uint32_t kSentinel = 0xA5A55A5Au;
+
+  for (uint32_t elem_size : {4u, 8u}) {
+    SCOPED_TRACE(elem_size == 4 ? "ds_read2_b32" : "ds_read2_b64");
+    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                    /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/16);
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128,
+                               /*vgprs=*/kAllocatedVgprs, /*wave_size=*/32);
+    ASSERT_NE(wf, nullptr);
+
+    const uint32_t result_vgprs = elem_size / sizeof(uint32_t);
+    const uint32_t primary = wf->vgpr_alloc().base + kAllocatedVgprs - result_vgprs;
+    const uint32_t secondary = primary + 1;
+    for (uint32_t reg = primary; reg < secondary + result_vgprs; ++reg)
+      cu->write_vgpr(reg, /*lane=*/0, kSentinel);
+
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = elem_size;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wf->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = primary;
+    state->per_lane_addr[0] = 0;
+    state->ds2_active = true;
+    state->ds2_dst_reg_base = secondary;
+    state->ds2_per_lane_addr[0] = 16;
+
+    LocalMemPipeline pipeline;
+    pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+    EXPECT_EQ(cu->register_allocation_violation_count(), 1u);
+    for (uint32_t reg = primary; reg < secondary + result_vgprs; ++reg)
+      EXPECT_EQ(cu->read_vgpr_storage(reg, /*lane=*/0), kSentinel) << "physical VGPR " << reg;
+  }
+}
+
 TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();

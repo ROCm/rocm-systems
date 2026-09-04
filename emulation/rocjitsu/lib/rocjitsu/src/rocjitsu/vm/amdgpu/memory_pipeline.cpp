@@ -123,6 +123,12 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
                                                        : MemoryAccessCompletion::Complete;
 }
 
+uint32_t vector_destination_vgpr_count(const VectorMemState &d) {
+  const bool is_atomic = d.atomic_op != AtomicOp::NONE;
+  const uint32_t bytes = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
+  return std::max(1u, (bytes + 3u) / 4u);
+}
+
 MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                        MemoryAccessDeferredCompletion complete) {
   if (!d.is_load)
@@ -138,11 +144,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);
   uint32_t stride = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
   // Number of destination VGPRs: total bytes / 4, rounded up.
-  // For sub-dword elements (u8, u16), at least 1 VGPR is used.
-  // For 8-byte elements (b64), 2 VGPRs per element.
-  uint32_t total_bytes = d.num_elems * d.elem_size;
-  uint32_t vgpr_count =
-      is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
+  const uint32_t vgpr_count = vector_destination_vgpr_count(d);
   if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
     return MemoryAccessCompletion::Complete;
 
@@ -635,12 +637,24 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
+
+  // A dual-result DS operation commits both destinations atomically with
+  // respect to register-allocation validation. Checking before vector_complete
+  // prevents either result from being written when the other range is invalid.
+  if (d.ds2_active && d.is_load) {
+    auto &cu = wf.raw_cu();
+    const uint32_t primary_count = vector_destination_vgpr_count(d);
+    const uint32_t secondary_count = std::max(1u, (d.elem_size + 3u) / 4u);
+    if (!cu.owns_vgpr_range(wf, d.dst_reg_base, primary_count) ||
+        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, secondary_count))
+      return MemoryAccessCompletion::Complete;
+  }
   MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 
   // DS dual-access: write the second load or returning-atomic result.
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
-    uint32_t vgpr_count = d.elem_size / 4;
+    uint32_t vgpr_count = std::max(1u, (d.elem_size + 3u) / 4u);
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
         continue;
