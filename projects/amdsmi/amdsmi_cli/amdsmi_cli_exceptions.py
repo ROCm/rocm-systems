@@ -56,7 +56,9 @@ class AmdSmiExitCode(enum.IntEnum):
     IMPORT_ERROR = (193, "Python import failure")
     INVALID_COMMAND = (194, "unrecognized command")
     INVALID_PARAMETER = (195, "invalid parameter")
-    DEVICE_NOT_FOUND = (196, "target device not found")
+    # No devices present = a live driver enumerating zero handles. A missing
+    # driver never reaches here, it exits DRIVERS_NOT_LOADED.
+    DEVICE_NOT_FOUND = (196, "requested device not found, or no devices present")
     INVALID_FILE_PATH = (197, "invalid file path")
     INVALID_PARAMETER_VALUE = (198, "invalid parameter value")
     MISSING_PARAMETER_VALUE = (199, "missing parameter value")
