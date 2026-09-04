@@ -3372,6 +3372,7 @@ bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
   // that surface is deliberately kept identical to the real KFD driver.
   if (kmd::cwsr_layout_modelled(gpu->soc->arch()))
     return true;
+  std::lock_guard<std::mutex> warning_lock(cwsr_layout_warning_mutex_);
   if (!gpu->cwsr_layout_warned) {
     gpu->cwsr_layout_warned = true;
     util::Logger::warn(

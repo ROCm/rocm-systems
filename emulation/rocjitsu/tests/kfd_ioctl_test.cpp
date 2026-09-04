@@ -94,12 +94,27 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
 
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
   callback_removed_itself.get_future().wait();
-  auto external_removal =
-      std::async(std::launch::async, [&] { cp.set_interrupt_callback(nullptr); });
-  EXPECT_EQ(external_removal.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  std::atomic<bool> replacement_seen = false;
+  auto external_replacement = std::async(std::launch::async, [&] {
+    cp.set_interrupt_callback(
+        [&](uint32_t, uint32_t) { replacement_seen.store(true, std::memory_order_release); });
+  });
+
+  // Observing the replacement proves its setter has published the new
+  // generation and reached the old-generation drain. A timeout before this
+  // handshake could merely mean the async worker had not been scheduled.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (!replacement_seen.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline) {
+    cp.invoke_interrupt_callback_for_test(1, 2);
+    std::this_thread::yield();
+  }
+  ASSERT_TRUE(replacement_seen.load(std::memory_order_acquire));
+  EXPECT_EQ(external_replacement.wait_for(std::chrono::milliseconds(20)),
+            std::future_status::timeout);
 
   release_callback.set_value();
-  EXPECT_EQ(external_removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_EQ(external_replacement.wait_for(std::chrono::seconds(1)), std::future_status::ready);
   caller.join();
   cp.invoke_interrupt_callback_for_test(1, 2);
   EXPECT_EQ(calls.load(), 1u);
@@ -259,6 +274,32 @@ class KfdIoctlRdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
 };
+
+TEST_F(KfdIoctlRdna3Test, ConcurrentUnpublishableStopsAreRaceFree) {
+  constexpr uint32_t kThreadCount = 8;
+  std::atomic<uint32_t> ready = 0;
+  std::atomic<bool> start = false;
+  std::atomic<bool> unexpectedly_publishable = false;
+  {
+    std::vector<std::jthread> callers;
+    callers.reserve(kThreadCount);
+    for (uint32_t i = 0; i < kThreadCount; ++i) {
+      callers.emplace_back([&] {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        for (uint32_t call = 0; call < 100; ++call) {
+          if (driver_->debug_stop_publishable_for_testing(kRdna3GpuId))
+            unexpectedly_publishable.store(true, std::memory_order_relaxed);
+        }
+      });
+    }
+    while (ready.load(std::memory_order_acquire) != kThreadCount)
+      std::this_thread::yield();
+    start.store(true, std::memory_order_release);
+  }
+  EXPECT_FALSE(unexpectedly_publishable.load(std::memory_order_relaxed));
+}
 
 struct PreGfx12TrapParam {
   const char *config_path;
