@@ -3083,8 +3083,16 @@ validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResour
     const uint16_t width = kMoiDispatchStateSgprCount;
     const bool overlaps_owner = point.moi_owner_sgpr.base() &&
                                 range_overlaps(base, width, *point.moi_owner_sgpr.base(), 1u);
+    const bool owner_components_replace_global_exec =
+        point.automatic_moi_partial_exec_save_sgprs &&
+        point.moi_dispatch_identity.private_fallback() && !point.owner_transient_sgprs.empty();
+    // A partial operating point keeps the object-wide pair as the entry
+    // preload destination, but every affected owner replaces the overlapping
+    // probe-local EXEC window and captures dispatch identity privately. Those
+    // values are not live concurrently. The component planner established
+    // complete coverage before setting both markers above.
     const bool overlaps_exec =
-        point.moi_exec_save_sgpr &&
+        !owner_components_replace_global_exec && point.moi_exec_save_sgpr &&
         range_overlaps(base, width, *point.moi_exec_save_sgpr,
                        moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
                                                     request, resources, point, mode_semantics),

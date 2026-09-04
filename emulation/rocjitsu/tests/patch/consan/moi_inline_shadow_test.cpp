@@ -3215,21 +3215,31 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
     }));
     ASSERT_EQ(result.resource_plans.size(), 1u);
     EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-      return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
-    })) << testing::PrintToString(result.warnings);
     const auto shadow_patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
     ASSERT_NE(shadow_patch, result.patches.end());
     if (uses_dynamic_stack) {
+      EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+        return warning.find("automatically assigned spill-backed Inline SGPRs") !=
+               std::string::npos;
+      })) << testing::PrintToString(result.warnings);
+      EXPECT_TRUE(result.moi_operating_point.owner_transient_sgprs.empty());
+      EXPECT_TRUE(result.moi_operating_point.moi_scalar_spill_setup);
       EXPECT_GT(shadow_patch->required_private_segment_size, 0u);
       EXPECT_GT(shadow_patch->dynamic_private_segment_addend, 0u);
     } else {
+      ASSERT_EQ(result.moi_operating_point.owner_transient_sgprs.size(), 1u);
+      const ConSanMoiTransientSgprAssignment &assignment =
+          result.moi_operating_point.owner_transient_sgprs.front();
+      EXPECT_FALSE(assignment.dispatch_id_sgpr);
+      EXPECT_TRUE(assignment.branch_only_spill);
+      EXPECT_TRUE(result.moi_operating_point.moi_dispatch_identity.private_fallback());
       EXPECT_EQ(shadow_patch->required_private_segment_size, 0u);
-      AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-      ASSERT_TRUE(patched.is_valid());
-      expect_lane_backed_scalar_spill(result, patched, *shadow_patch,
-                                      *test_moi_exec_save_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
+      const auto prologue =
+          std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(prologue, result.patches.end());
+      EXPECT_FALSE(prologue->entry_scalar_backup);
     }
   }
 }

@@ -4872,23 +4872,21 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_operating_point.owner_transient_sgprs.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.moi_operating_point.owner_transient_sgprs.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_spill);
+  EXPECT_FALSE(assignment.scalar_spill_setup);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
-  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
-      continue;
-    ASSERT_TRUE(patch.scratch_vgpr);
-    EXPECT_EQ(patch.required_private_segment_size, 0u);
-    expect_lane_backed_scalar_spill(result, patched, patch, *test_moi_exec_save_sgpr(result),
-                                    ROCJITSU_CODE_ARCH_RDNA4);
-  }
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  // This component-local window begins above the descriptor-declared entry
+  // SGPR prefix, so its probe-local spill needs no redundant entry backup.
+  EXPECT_FALSE(prologue->entry_scalar_backup);
 
   std::vector<uint32_t> atomic_only_words = text_words;
   atomic_only_words[lds_access_word] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
