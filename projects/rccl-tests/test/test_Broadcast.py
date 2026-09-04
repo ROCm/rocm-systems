@@ -236,9 +236,9 @@ def _data_failed(out):
 def _read_debug_logs(debug_dir):
     """Merged per-rank NCCL debug output written under debug_dir."""
     chunks = []
-    for path in sorted(glob.glob(os.path.join(debug_dir, "nccl-debug.*"))):
+    for log_path in sorted(glob.glob(os.path.join(debug_dir, "nccl-debug.*"))):
         try:
-            with open(path, errors="replace") as fh:
+            with open(log_path, errors="replace") as fh:
                 chunks.append(fh.read())
         except OSError:
             pass
