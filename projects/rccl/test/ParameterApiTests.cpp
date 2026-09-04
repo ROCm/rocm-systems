@@ -136,14 +136,8 @@ TEST(ParameterApiTests, Bind_NullArgs) {
   });
 }
 
-TEST(ParameterApiTests, Bind_BothArgsNull_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("Bind_BothArgsNull", []() {
-    ASSERT_EQ(ncclParamBind(nullptr, nullptr), ncclInvalidArgument);
-  });
-}
-
 TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
-  RUN_ISOLATED_TEST("Bind_KnownKey_SameHandle", []() {
+  RUN_ISOLATED_TEST("Bind_KnownKey_ReturnsSameHandleOnRebind", []() {
     ncclParamHandle_t first = nullptr;
     ncclParamHandle_t second = nullptr;
     ASSERT_EQ(ncclParamBind(&first, kI32Key), ncclSuccess);
@@ -152,23 +146,35 @@ TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
   });
 }
 
-// ncclParamBind must succeed for every flag combination. Flags only steer the advisory messages
-// ncclParamCheckFlag emits; they never change the return code or the handle.
+// ncclParamBind succeeds for every flag combination, and PUBLISHED decides enumeration: only
+// published params appear in ncclParamGetAllParameterKeys, whatever their other flags.
 TEST(ParameterApiTests, Bind_AllFlagCombinations_Succeed) {
-  RUN_ISOLATED_TEST("Bind_AllFlagCombinations", []() {
-    constexpr const char* kKeys[] = {
-        kI32Key,            // PUBLISHED
-        kPrivateKey,        // no flags
-        kUnusedKey,         // UNUSED
-        kUnusedPubKey,      // UNUSED | PUBLISHED
-        kDeprecatedKey,     // DEPRECATED
-        kDeprecatedPubKey,  // DEPRECATED | PUBLISHED
-        kUnusedDepKey,      // UNUSED | DEPRECATED
+  RUN_ISOLATED_TEST("Bind_AllFlagCombinations_Succeed", []() {
+    struct FlagCase {
+      const char* key;
+      bool published;
     };
-    for (const char* key : kKeys) {
+    constexpr FlagCase kCases[] = {
+        {kI32Key, true},             // PUBLISHED
+        {kPrivateKey, false},        // no flags
+        {kUnusedKey, false},         // UNUSED
+        {kUnusedPubKey, true},       // UNUSED | PUBLISHED
+        {kDeprecatedKey, false},     // DEPRECATED
+        {kDeprecatedPubKey, true},   // DEPRECATED | PUBLISHED
+        {kUnusedDepKey, false},      // UNUSED | DEPRECATED
+    };
+    for (const FlagCase& c : kCases) {
       ncclParamHandle_t h = nullptr;
-      EXPECT_EQ(ncclParamBind(&h, key), ncclSuccess) << "key: " << key;
-      EXPECT_NE(h, nullptr) << "key: " << key;
+      EXPECT_EQ(ncclParamBind(&h, c.key), ncclSuccess) << "key: " << c.key;
+      EXPECT_NE(h, nullptr) << "key: " << c.key;
+    }
+
+    const char** table = nullptr;
+    int len = 0;
+    ASSERT_EQ(ncclParamGetAllParameterKeys(&table, &len), ncclSuccess);
+    for (const FlagCase& c : kCases) {
+      EXPECT_EQ(tableContains(table, len, c.key), c.published)
+          << "key: " << c.key << " should " << (c.published ? "" : "not ") << "be enumerated";
     }
   });
 }
@@ -183,7 +189,7 @@ TEST(ParameterApiTests, Bind_PrivateKey_HandleReadsValue) {
         ASSERT_EQ(ncclParamBind(&h, kPrivateKey), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
-        EXPECT_EQ(v, 13) << "private param must resolve from the environment like any other";
+        ASSERT_EQ(v, 13) << "private param must resolve from the environment like any other";
       },
       {{"NCCL_TEST_PARAM_PRIVATE", "13"}});
 }
@@ -284,14 +290,19 @@ TEST(ParameterApiTests, GetI16_MatchingType_ReturnsValue) {
       {{"NCCL_TEST_PARAM_I16", "32767"}});
 }
 
+// clearVariable, not plain RUN_ISOLATED_TEST: the child inherits the parent environment, so an
+// exported NCCL_TEST_PARAM_I16 would otherwise turn "unset" into whatever the developer had set.
 TEST(ParameterApiTests, GetI16_Unset_ReturnsDefault) {
-  RUN_ISOLATED_TEST("GetI16_Unset_ReturnsDefault", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
-    int16_t v = 0;
-    ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
-    ASSERT_EQ(v, 7) << "default value from DEFINE_NCCL_PARAM";
-  });
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                         "GetI16_Unset_ReturnsDefault",
+                         []() {
+                           ncclParamHandle_t h = nullptr;
+                           ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
+                           int16_t v = 0;
+                           ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
+                           ASSERT_EQ(v, 7) << "default value from DEFINE_NCCL_PARAM";
+                         })
+                         .clearVariable("NCCL_TEST_PARAM_I16"));
 }
 
 TEST(ParameterApiTests, GetI16_NullArgs) {
@@ -304,7 +315,7 @@ TEST(ParameterApiTests, GetI16_NullArgs) {
   });
 }
 
-// Reading an I16 param through a different width is a typeId mismatch.
+// Reading an I32 param through the I16 accessor is a typeId mismatch.
 TEST(ParameterApiTests, GetI16_CrossWidth_ReturnsInvalidArg) {
   RUN_ISOLATED_TEST("GetI16_CrossWidth", []() {
     ncclParamHandle_t h = nullptr;
