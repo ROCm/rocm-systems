@@ -2973,7 +2973,9 @@ if(RJ_ENABLE_HIP_TESTS)
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${ARG_COMPILE_OPTIONS}
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_FLAGS}
+                -I${CMAKE_CURRENT_SOURCE_DIR}
+                -I${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${HIP_INCLUDE_FLAGS}
                 ${HIP_DEFINITION_FLAGS} -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} ${ARG_EXTRA_DEPENDS}
             COMMENT
