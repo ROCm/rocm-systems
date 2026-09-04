@@ -63,7 +63,6 @@ function(rj_add_consan_unit_sources target)
     target_sources(
         ${target}
         PRIVATE
-            patch/consan/branch_only_relay_router_test.cpp
             patch/consan/analysis_test.cpp
             patch/consan/atomic_fence_policy_test.cpp
             patch/consan/atomic_classifier_test.cpp

@@ -307,7 +307,6 @@ file(
     "${_consan_dir}/consan_fault_injection.cpp"
     "${_consan_dir}/consan_perturbation.cpp"
     "${_consan_dir}/consan_barrier_move_proof.cpp"
-    "${_consan_dir}/consan_branch_only_relay_router.cpp"
     "${_consan_dir}/consan_descriptor_growth.cpp"
     "${_consan_dir}/consan_placement.cpp"
     "${_consan_dir}/consan_resource.cpp"

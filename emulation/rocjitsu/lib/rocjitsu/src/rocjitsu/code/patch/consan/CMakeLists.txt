@@ -26,7 +26,6 @@ rj_add_object_library(
     rocjitsu_consan_targets
         targets/consan_fault_target_ops.cpp
         targets/consan_program_analysis_target_ops.cpp
-        targets/consan_relay_target_ops.cpp
         targets/consan_supercollider_target_ops.cpp
         targets/consan_validation_target_ops.cpp
         targets/rdna3/consan_program_analysis_rdna3_target_ops.cpp
@@ -62,7 +61,6 @@ target_link_libraries(
 rj_add_object_library(
     rocjitsu_consan_transform
         consan_barrier_move_proof.cpp
-        consan_branch_only_relay_router.cpp
         consan_descriptor_growth.cpp
         consan_fault_injection.cpp
         consan_moi.cpp
@@ -81,7 +79,6 @@ rj_add_object_library(
         modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp
         consan_moi_memory_emission.cpp
         consan_moi_mode_planning.cpp
-        consan_moi_model.cpp
         consan_moi_native_abi.cpp
         consan_moi_pipeline.cpp
         consan_moi_placement.cpp
@@ -155,9 +152,8 @@ set(
 )
 set(ROCJITSU_CONSAN_OBJECT_LIBS ${ROCJITSU_CONSAN_OBJECT_LIBS} PARENT_SCOPE)
 
-# Make source ownership exhaustive and exclusive. The retained lowerer file is
-# an intentionally inert tombstone and is the only production .cpp outside the
-# component graph.
+# Make source ownership exhaustive and exclusive. Retired comment-only
+# tombstones stay outside the compiled component graph.
 set(_consan_component_sources)
 foreach(_component IN LISTS ROCJITSU_CONSAN_OBJECT_LIBS)
     get_target_property(_component_sources ${_component} SOURCES)
@@ -171,7 +167,12 @@ if(NOT _consan_component_source_count EQUAL _consan_unique_component_source_coun
     message(FATAL_ERROR "a ConSan source belongs to more than one component")
 endif()
 file(GLOB_RECURSE _consan_production_sources RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cpp")
-list(REMOVE_ITEM _consan_production_sources consan_lowerer.cpp)
+list(REMOVE_ITEM _consan_production_sources
+    consan_branch_only_relay_router.cpp
+    consan_lowerer.cpp
+    consan_moi_model.cpp
+    targets/consan_relay_target_ops.cpp
+)
 list(SORT _consan_production_sources)
 list(SORT _consan_unique_component_sources)
 if(NOT _consan_production_sources STREQUAL _consan_unique_component_sources)
