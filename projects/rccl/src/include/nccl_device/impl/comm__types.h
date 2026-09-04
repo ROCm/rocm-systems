@@ -63,6 +63,14 @@ struct ncclDevComm {
   ncclGinBarrierHandle_t hybridRailGinBarrier;
 
   ncclGinBarrierHandle_t worldGinBarrier;
+
+  // MI455 fabric DDA small-message AllToAll lane (gfx1250 + MNNVL).
+  void** ginFabricPeerScratch;
+  uint32_t* ginFabricLLEpoch;
+  int ginFabricLLEpochLen;
+  size_t ginFabricScratchBytes;
+  size_t ginFabricLLThreshold;
+  bool ginFabricSmallMsgEnabled;
 };
 
 #endif // _NCCL_DEVICE_COMM__TYPES_H_
