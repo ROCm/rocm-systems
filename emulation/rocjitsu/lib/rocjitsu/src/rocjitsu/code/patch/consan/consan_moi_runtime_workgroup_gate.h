@@ -75,9 +75,4 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
                                                     uint16_t quotient, uint16_t residue,
                                                     rj_code_arch_t arch);
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
-    std::span<const uint8_t> guest_bytes, const MoiRuntimeWorkgroupGatePlan &plan,
-    const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,
-    uint64_t return_text_offset, uint64_t reserved_word_count, rj_code_arch_t arch);
-
 } // namespace rocjitsu::consan_moi_impl

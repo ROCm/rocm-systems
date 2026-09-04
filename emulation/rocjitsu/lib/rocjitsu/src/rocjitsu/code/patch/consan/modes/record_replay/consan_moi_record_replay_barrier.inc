@@ -137,9 +137,8 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
         active_bytes, planned.candidate, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
-        layout.barrier_record_capacity, layout.barrier_records_offset, barrier_word,
-        /*cave_text_offset=*/0u, /*return_text_offset=*/0u, result.errors, &guest_offset,
-        /*fallthrough=*/true);
+        layout.barrier_record_capacity, layout.barrier_records_offset, barrier_word, result.errors,
+        &guest_offset);
     if (!words)
       return;
     ConSanPatchInfo patch;

@@ -28,7 +28,6 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiPersistentWorkgroupRegisters moi_exact_workgroup_vgprs;
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
@@ -45,38 +44,26 @@ struct MoiRecordEventEmissionPlan {
       words, layout, low_field_address, plan.dispatch_id_sources, slot_vgpr, scratch_vgpr, arch);
 }
 
-[[nodiscard]] inline bool
-append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
-                                     uint64_t return_text_offset,
-                                     const MoiRecordEventEmissionPlan &plan, rj_code_arch_t arch) {
-  return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              plan.indirect_jump, arch);
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiBarrierEvidenceSitePlan &candidate,
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
-    size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr, bool fallthrough = false);
+    size_t barrier_records_offset, uint32_t original_barrier_word, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
-    uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors, bool fallthrough = false);
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiFenceEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
-    uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
-    bool fallthrough = false);
+    std::span<const uint32_t> displaced_tail_words, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr);
 
 } // namespace rocjitsu::consan_moi_impl

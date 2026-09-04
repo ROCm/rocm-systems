@@ -3,35 +3,11 @@
 
 /// InlineShadow scalar- and VGPR-epoch barrier body emission. This fragment
 /// is included by the shared barrier transaction after its common helpers.
-[[nodiscard]] bool
-append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
-                             uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
-                             const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
-                             rj_code_arch_t arch) {
-  const uint64_t branch_pc =
-      cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
-  if (call_return_sgpr) {
-    words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
-    return true;
-  }
-  if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
-    words.push_back(build_s_branch(*direct, arch));
-    return true;
-  }
-  return indirect_jump && append_moi_scc_preserving_indirect_jump(
-                              words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
-                              indirect_jump->scc_save_sgpr,
-                              /*capture_scc=*/true, arch);
-}
-
-[[nodiscard]] bool
-append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words, const VgprSpillSequence *spill,
-                                      const SgprSpillSequence *scalar_spill,
-                                      std::optional<uint16_t> selectable_vgpr_bank_mode,
-                                      uint64_t cave_text_offset, uint64_t return_text_offset,
-                                      std::optional<uint16_t> call_return_sgpr,
-                                      const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
-                                      rj_code_arch_t arch, bool fallthrough) {
+void append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words,
+                                           const VgprSpillSequence *spill,
+                                           const SgprSpillSequence *scalar_spill,
+                                           std::optional<uint16_t> selectable_vgpr_bank_mode,
+                                           rj_code_arch_t arch) {
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
@@ -40,18 +16,13 @@ append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words, const VgprSp
   if (consan_arch_has_selectable_vgpr_bank(arch) && selectable_vgpr_bank_mode.value_or(0u) != 0u)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
-  if (fallthrough)
-    return true;
-  return append_inline_barrier_return(words, cave_text_offset, return_text_offset, call_return_sgpr,
-                                      indirect_jump, arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
-    const ConSanBarrierSite &site, const MoiInlineBarrierEpochEmissionPlan &plan,
-    rj_code_arch_t arch, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset, bool fallthrough) {
+    const MoiInlineBarrierEpochEmissionPlan &plan, rj_code_arch_t arch,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    uint32_t original_barrier_word, std::optional<uint16_t> selectable_vgpr_bank_mode,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset) {
   const bool publish_visible_evidence = plan.visible_evidence.has_value();
   const bool control_selectable_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
@@ -135,12 +106,8 @@ append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words, const VgprSp
     } else {
       words.push_back(*restore_scc);
     }
-    if (!append_inline_shadow_barrier_epilogue(
-            words, spill, scalar_spill, selectable_vgpr_bank_mode, cave_text_offset,
-            return_text_offset, call_return_sgpr, plan.indirect_jump, arch, fallthrough)) {
-      errors.emplace_back("ConSan MOI scalar inline barrier could not encode long return");
-      return std::nullopt;
-    }
+    append_inline_shadow_barrier_epilogue(words, spill, scalar_spill, selectable_vgpr_bank_mode,
+                                          arch);
     return words;
   }
   const auto increment_epoch = instrumentation::build_v_add_u32(
@@ -180,13 +147,8 @@ append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words, const VgprSp
     errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
     return std::nullopt;
   }
-  if (!append_inline_shadow_barrier_epilogue(words, spill, scalar_spill, selectable_vgpr_bank_mode,
-                                             cave_text_offset, return_text_offset, call_return_sgpr,
-                                             plan.indirect_jump, arch, fallthrough)) {
-    errors.emplace_back("ConSan MOI inline-shadow barrier epoch could not encode long return at " +
-                        std::to_string(site.text_offset));
-    return std::nullopt;
-  }
+  append_inline_shadow_barrier_epilogue(words, spill, scalar_spill, selectable_vgpr_bank_mode,
+                                        arch);
   return words;
 }
 
@@ -213,15 +175,12 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
       std::max(access_patch.required_private_segment_size, spill->total_private_bytes);
   ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
       owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
-  const MoiScalarAbiPlan scalar_abi =
-      plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
   return PlannedBarrierLowering{
       .candidate = candidate,
       .body =
           MoiInlinePrivateEpochBarrierEmissionPlan{
               .scratch_vgpr = *access_patch.scratch_vgpr,
               .epoch_offset = private_state_layout.epoch_offset,
-              .indirect_jump = scalar_abi.indirect_jump,
           },
       .spill = std::move(spill),
       .scalar_spill = std::nullopt,

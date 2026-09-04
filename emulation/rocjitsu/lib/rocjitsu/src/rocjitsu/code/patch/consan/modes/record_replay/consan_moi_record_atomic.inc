@@ -184,10 +184,8 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
         active_bytes, candidate, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
-        layout.atomic_record_capacity, layout.atomic_records_offset,
-        /*cave_text_offset=*/0u, /*return_text_offset=*/0u,
-        /*already_runtime_workgroup_gated=*/true, guest_instruction_offset, result.errors,
-        /*fallthrough=*/true);
+        layout.atomic_record_capacity, layout.atomic_records_offset, guest_instruction_offset,
+        result.errors);
     if (!cave_words)
       return;
 

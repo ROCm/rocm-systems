@@ -73,7 +73,6 @@ struct MoiInlineAtomicEmissionPlan {
   consan_detail::MoiWorkgroupKeyRegisterPlan workgroup_key_registers;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
   std::optional<MoiInlineAtomicPrivateStatePlan> private_state;
   ConSanPatchAbiEffects patch_abi;
 };

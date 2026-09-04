@@ -81,10 +81,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, const ConSanMoiPrivateStateLayout *private_layout,
+    const ConSanMoiReportBufferLayout &layout, const ConSanMoiPrivateStateLayout *private_layout,
     std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr, bool fallthrough = false) {
+    uint32_t *guest_instruction_offset = nullptr) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
       !plan.workitem_owner || !candidate.barrier.kernel_descriptor_file_offset ||
@@ -507,22 +506,6 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     if (!sequence.emit(instrumentation::build_s_set_vgpr_msb_transition(
             0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch)))
       return std::nullopt;
-  if (!fallthrough) {
-    const uint64_t branch_pc = cave_text_offset + words.size() * sizeof(uint32_t);
-    const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset);
-    if (ret) {
-      words.push_back(build_s_branch(*ret, arch));
-    } else {
-      const auto jump_sgprs = plan.scalar_abi.indirect_jump;
-      if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
-                             words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
-                             jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
-        errors.emplace_back("ConSan MOI sampled barrier could not encode its long return");
-        return std::nullopt;
-      }
-    }
-  }
-
   if (!sequence.resolve_branches(arch)) {
     errors.emplace_back("ConSan MOI sampled barrier local branch is out of range");
     return std::nullopt;
@@ -860,9 +843,8 @@ void try_apply_sampled_barrier_sync_patch(
     auto words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, *emission_plan, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout,
-        /*cave_text_offset=*/0u, /*return_text_offset=*/0u,
         planned.private_layout ? &*planned.private_layout : nullptr, selectable_vgpr_bank_mode,
-        result.errors, &guest_instruction_offset, /*fallthrough=*/true);
+        result.errors, &guest_instruction_offset);
     if (!words)
       return;
     ConSanPatchInfo patch;
@@ -1454,27 +1436,24 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       return;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;
-    auto words = planned.candidate.deferred_acquire
-                     ? build_sampled_pending_acquire_cave_words(
-                           bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
-                           planned.spill ? &*planned.spill : nullptr,
-                           planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-                           planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                           planned.candidate.selected_slot, planned.candidate.bank_count,
-                           planned.candidate.release_selected_slot, layout,
-                           /*cave_text_offset=*/0u, /*return_text_offset=*/0u, result.errors,
-                           &guest_instruction_offset, planned.trailing_guest_words,
-                           /*fallthrough=*/true, &emitted_guest_size)
-                     : build_sampled_atomic_sync_cave_words(
-                           bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
-                           planned.spill ? &*planned.spill : nullptr,
-                           planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-                           planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                           planned.candidate.selected_slot, planned.candidate.bank_count, layout,
-                           /*cave_text_offset=*/0u, /*return_text_offset=*/0u, result.errors,
-                           &guest_instruction_offset, planned.trailing_guest_words,
-                           /*preserve_guest_at_anchor=*/false, /*leading_guest_words=*/{},
-                           /*fallthrough=*/true, &emitted_guest_size);
+    auto words =
+        planned.candidate.deferred_acquire
+            ? build_sampled_pending_acquire_cave_words(
+                  bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
+                  planned.spill ? &*planned.spill : nullptr,
+                  planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                  planned.candidate.selected_slot, planned.candidate.bank_count,
+                  planned.candidate.release_selected_slot, layout, result.errors,
+                  &guest_instruction_offset, planned.trailing_guest_words, &emitted_guest_size)
+            : build_sampled_atomic_sync_cave_words(
+                  bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
+                  planned.spill ? &*planned.spill : nullptr,
+                  planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                  planned.candidate.selected_slot, planned.candidate.bank_count, layout,
+                  result.errors, &guest_instruction_offset, planned.trailing_guest_words,
+                  &emitted_guest_size);
     if (!words)
       return;
     ConSanPatchInfo patch;

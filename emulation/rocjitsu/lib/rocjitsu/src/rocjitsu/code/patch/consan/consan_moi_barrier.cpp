@@ -66,7 +66,6 @@ using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;

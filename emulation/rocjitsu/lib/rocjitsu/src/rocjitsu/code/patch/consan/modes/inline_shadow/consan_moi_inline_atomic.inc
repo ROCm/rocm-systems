@@ -104,7 +104,6 @@
       .workgroup_key_registers = workgroup_key_registers,
       .workgroup_sources = *workgroup_sources,
       .dispatch_id = dispatch_id,
-      .indirect_jump = scalar_abi.indirect_jump,
       .private_state = std::move(private_state),
       .patch_abi = {},
   };
@@ -399,9 +398,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     auto words = build_inline_atomic_ordering_cave_words(
         active_bytes, candidate, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
-        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
-        /*cave_text_offset=*/0u, /*return_text_offset=*/0u, guest_instruction_offset, result.errors,
-        planned.trailing_guest_words, /*fallthrough=*/true);
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, guest_instruction_offset,
+        result.errors, planned.trailing_guest_words);
     if (!words)
       return;
 

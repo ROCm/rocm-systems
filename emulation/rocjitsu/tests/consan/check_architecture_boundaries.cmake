@@ -1083,12 +1083,12 @@ if(NOT _consan_options_contract MATCHES
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_record_event_emission.h" _record_event_contract)
-if(NOT _record_event_contract MATCHES
-       "std::optional<ConSanIndirectJumpSgprs>[ \t]+indirect_jump" OR
+if(_record_event_contract MATCHES
+       "ConSanIndirectJumpSgprs|cave_text_offset|return_text_offset|fallthrough|call_return_sgpr|build_moi_runtime_workgroup_gate_call_words" OR
    _record_event_contract MATCHES
        "ConSanMoiScalarRouterAllocation|automatic_moi_record_replay_sgpr_spill|router_(dispatch_key|call_return)_sgpr")
     message(FATAL_ERROR
-        "Record/Replay event emission must retain its exact indirect routing product"
+        "Record/Replay fragment emission must not recover the retired cave-return routing API"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_record_planning.h" _moi_record_planning_contract)
@@ -1175,12 +1175,12 @@ if(NOT _moi_barrier_source MATCHES
        "build_inline_shadow_barrier_epoch_cave_words" OR
    NOT _inline_barrier_owner MATCHES
        "append_inline_shadow_barrier_epilogue" OR
-   NOT _inline_barrier_owner MATCHES
-       "append_inline_barrier_return" OR
    NOT _inline_private_barrier_owner MATCHES
        "append_inline_shadow_barrier_epilogue" OR
-   _moi_barrier_planning MATCHES
-       "append_inline_barrier_return" OR
+   _inline_barrier_owner MATCHES
+       "append_inline_barrier_return|cave_text_offset|return_text_offset|fallthrough" OR
+   _inline_private_barrier_owner MATCHES
+       "cave_text_offset|return_text_offset|fallthrough" OR
    _inline_private_barrier_owner MATCHES "scalar_spill->restore_words[.]begin")
     message(FATAL_ERROR
         "InlineShadow barrier emission must remain in its mode-named owners"
@@ -2415,12 +2415,10 @@ _consan_assert_no_match(
     "InlineShadow scratch sizing must consume its exact atomic-tracking fact"
 )
 file(READ "${_consan_dir}/consan_moi_relocation.cpp" _moi_relocation_owner)
-string(REGEX MATCHALL "append_pc_delta_builder" _moi_indirect_target_recipes
-       "${_moi_relocation_owner}")
-list(LENGTH _moi_indirect_target_recipes _moi_indirect_target_recipe_count)
-if(NOT _moi_indirect_target_recipe_count EQUAL 1)
+if(_moi_relocation_owner MATCHES
+       "append_pc_delta_builder|append_moi_(scc_preserving_indirect_jump|prepare_scc_preserving_indirect_jump|direct_or_indirect_return)")
     message(FATAL_ERROR
-        "ConSan SCC-preserving indirect jumps must share one target-preparation recipe"
+        "whole-text MOI relocation must not recover legacy cave-return emission"
     )
 endif()
 # Barrier and atomic synchronization consume the same Sampled causal-window

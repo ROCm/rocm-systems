@@ -55,7 +55,6 @@ using consan_detail::plan_moi_workgroup_shadow_clear;
   return {};
 }
 using consan_detail::range_overlaps;
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 [[nodiscard]] bool append_moi_entry_salu_write(std::vector<uint32_t> &words, uint32_t word,

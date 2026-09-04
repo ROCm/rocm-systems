@@ -205,9 +205,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset,
-        /*cave_text_offset=*/0u, /*return_text_offset=*/0u, std::nullopt,
-        /*displaced_tail_words=*/{}, result.errors, &guest_instruction_offset,
-        /*fallthrough=*/true);
+        /*displaced_tail_words=*/{}, result.errors, &guest_instruction_offset);
     if (!cave_words)
       return;
     ConSanPatchInfo info;

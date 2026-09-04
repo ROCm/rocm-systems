@@ -5,11 +5,10 @@
 /// by the shared barrier transaction after its common helper definitions.
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_private_epoch_barrier_cave_words(
-    const ConSanBarrierSite &site, const MoiInlinePrivateEpochBarrierEmissionPlan &plan,
-    const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset, bool fallthrough) {
+    const MoiInlinePrivateEpochBarrierEmissionPlan &plan, const VgprSpillSequence &spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t original_barrier_word,
+    std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset) {
   const auto load_epoch =
       instrumentation::build_private_load_b32(plan.scratch_vgpr, plan.epoch_offset, arch);
   const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
@@ -56,12 +55,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
   words.insert(words.end(), store_epoch->begin(), store_epoch->end());
   words.push_back(*wait_store);
-  if (!append_inline_shadow_barrier_epilogue(words, &spill, scalar_spill, selectable_vgpr_bank_mode,
-                                             cave_text_offset, return_text_offset, call_return_sgpr,
-                                             plan.indirect_jump, arch, fallthrough)) {
-    errors.emplace_back("ConSan MOI inline-shadow private epoch could not encode long return at " +
-                        std::to_string(site.text_offset));
-    return std::nullopt;
-  }
+  append_inline_shadow_barrier_epilogue(words, &spill, scalar_spill, selectable_vgpr_bank_mode,
+                                        arch);
   return words;
 }

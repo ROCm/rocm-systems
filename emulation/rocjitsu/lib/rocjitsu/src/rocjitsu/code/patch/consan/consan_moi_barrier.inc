@@ -238,21 +238,17 @@ plan_barrier_patch_abi(std::span<const uint64_t> owners, std::optional<uint16_t>
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
-    const ConSanBarrierSite &site, const MoiInlineBarrierEpochEmissionPlan &plan,
-    rj_code_arch_t arch, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
-    bool fallthrough = false);
+    const MoiInlineBarrierEpochEmissionPlan &plan, rj_code_arch_t arch,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    uint32_t original_barrier_word, std::optional<uint16_t> selectable_vgpr_bank_mode,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_private_epoch_barrier_cave_words(
-    const ConSanBarrierSite &site, const MoiInlinePrivateEpochBarrierEmissionPlan &plan,
-    const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
-    bool fallthrough = false);
+    const MoiInlinePrivateEpochBarrierEmissionPlan &plan, const VgprSpillSequence &spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t original_barrier_word,
+    std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr);
 void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                     ConSanProbeIntentKind evidence_kind,
                                     MoiBarrierBodyPlanner plan_body,
@@ -533,25 +529,20 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
           active_bytes, candidate, *record, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
-          original_barrier_word, /*cave_text_offset=*/0u, /*return_text_offset=*/0u, result.errors,
-          &guest_instruction_offset, /*fallthrough=*/true);
+          original_barrier_word, result.errors, &guest_instruction_offset);
     } else if (const auto *private_epoch =
                    std::get_if<MoiInlinePrivateEpochBarrierEmissionPlan>(&planned.body);
                private_epoch && planned.spill) {
       words = build_inline_shadow_private_epoch_barrier_cave_words(
-          site, *private_epoch, *planned.spill,
-          planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, original_barrier_word,
-          /*cave_text_offset=*/0u, /*return_text_offset=*/0u, std::nullopt,
-          selectable_vgpr_bank_mode, result.errors, &guest_instruction_offset,
-          /*fallthrough=*/true);
+          *private_epoch, *planned.spill, planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+          arch, original_barrier_word, selectable_vgpr_bank_mode, result.errors,
+          &guest_instruction_offset);
     } else if (const auto *inline_epoch =
                    std::get_if<MoiInlineBarrierEpochEmissionPlan>(&planned.body)) {
       words = build_inline_shadow_barrier_epoch_cave_words(
-          site, *inline_epoch, arch, planned.spill ? &*planned.spill : nullptr,
+          *inline_epoch, arch, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, original_barrier_word,
-          /*cave_text_offset=*/0u, /*return_text_offset=*/0u, std::nullopt,
-          selectable_vgpr_bank_mode, result.errors, &guest_instruction_offset,
-          /*fallthrough=*/true);
+          selectable_vgpr_bank_mode, result.errors, &guest_instruction_offset);
     } else {
       result.errors.emplace_back("ConSan MOI barrier lost its planned emission state");
       return;

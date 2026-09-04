@@ -1900,9 +1900,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words,
-    bool fallthrough) {
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
+    std::span<const uint32_t> trailing_guest_words) {
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
   const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const bool scalar_persistent = plan.persistent_sgprs.complete();
@@ -1940,11 +1939,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                    scalar_spill->restore_words.end());
     if (spill)
       words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  };
-  const auto append_return = [&]() {
-    return fallthrough ||
-           append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                                plan.indirect_jump, arch);
   };
   if (address_plan.requires_materialization()) {
     const auto address_words = build_consan_moi_atomic_address_materialization(
@@ -2061,10 +2055,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_return()) {
-      errors.emplace_back("ConSan MOI inline release could not encode its return");
-      return std::nullopt;
-    }
     return words;
   }
   // CDNA4 can let a following wave reach the guest RMW before the preceding
@@ -2086,10 +2076,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_return()) {
-      errors.emplace_back("ConSan MOI inline acquire-release could not encode its return");
-      return std::nullopt;
-    }
     return words;
   }
 
@@ -2112,10 +2098,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_return()) {
-      errors.emplace_back("ConSan MOI inline compare-exchange could not encode its return");
-      return std::nullopt;
-    }
     return words;
   }
 
@@ -2138,10 +2120,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_return()) {
-      errors.emplace_back("ConSan MOI inline read-only acquire could not encode its return");
-      return std::nullopt;
-    }
     return words;
   }
 
@@ -2270,10 +2248,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_return()) {
-      errors.emplace_back("ConSan MOI inline release could not encode its return");
-      return std::nullopt;
-    }
     return words;
   }
 
@@ -2289,10 +2263,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
 
   append_spill_restore();
-  if (!append_return()) {
-    errors.emplace_back("ConSan MOI inline atomic could not encode its return");
-    return std::nullopt;
-  }
   return words;
 }
 } // namespace consan_moi_impl

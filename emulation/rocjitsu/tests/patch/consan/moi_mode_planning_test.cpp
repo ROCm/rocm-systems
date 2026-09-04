@@ -412,7 +412,8 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
   auto emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
                                                          ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(emission);
-  EXPECT_EQ(emission->indirect_jump, scalar_abi.indirect_jump);
+  ASSERT_TRUE(scalar_abi.special_state);
+  EXPECT_EQ(emission->special_state, *scalar_abi.special_state);
 
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
@@ -423,7 +424,8 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
   emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
                                                     ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(emission);
-  EXPECT_EQ(emission->indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  ASSERT_TRUE(scalar_abi.special_state);
+  EXPECT_EQ(emission->special_state, *scalar_abi.special_state);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers) {

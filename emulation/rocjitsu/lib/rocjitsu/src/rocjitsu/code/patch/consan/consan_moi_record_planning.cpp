@@ -94,7 +94,6 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_exact_workgroup_vgprs = point.moi_exact_workgroup_vgprs,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
-      .indirect_jump = scalar_abi.indirect_jump,
       .workgroup_sources = *workgroup_sources,
       .special_state = *scalar_abi.special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources(

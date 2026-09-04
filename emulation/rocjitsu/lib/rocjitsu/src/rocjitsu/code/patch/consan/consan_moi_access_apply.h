@@ -30,7 +30,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 

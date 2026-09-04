@@ -17,14 +17,12 @@ struct MoiInlineBarrierEpochEmissionPlan {
   std::optional<uint16_t> epoch_vgpr;
   std::optional<MoiInlineBarrierVisibleEvidencePlan> visible_evidence;
   std::optional<MoiSpecialStateSgprs> special_state;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
 /// Exact private-epoch state consumed by one InlineShadow barrier body.
 struct MoiInlinePrivateEpochBarrierEmissionPlan {
   uint16_t scratch_vgpr = 0;
   uint32_t epoch_offset = 0;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
 [[nodiscard]] std::optional<MoiInlineBarrierEpochEmissionPlan>
@@ -38,7 +36,6 @@ plan_inline_shadow_barrier_epoch_emission(const BoundRuntimeResources &bound_res
       .epoch_vgpr = point.moi_owner_epoch_vgprs.epoch(),
       .visible_evidence = std::nullopt,
       .special_state = scalar_abi.special_state,
-      .indirect_jump = scalar_abi.indirect_jump,
   };
   if (visible_evidence_scratch_vgpr) {
     const ConSanTargetProfile *target = consan_target_profile(arch);

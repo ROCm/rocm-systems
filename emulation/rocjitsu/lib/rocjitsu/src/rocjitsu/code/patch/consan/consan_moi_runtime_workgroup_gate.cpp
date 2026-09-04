@@ -54,8 +54,6 @@ plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
   };
 }
 
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
-
 [[nodiscard]] bool append_moi_runtime_workgroup_residue_compare(std::vector<uint32_t> &words,
                                                                 uint16_t residue_sgpr,
                                                                 uint16_t temporary_sgpr,
@@ -214,55 +212,6 @@ build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
       !sequence.resolve_branches(arch))
     return std::nullopt;
   return result;
-}
-
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
-    std::span<const uint8_t> guest_bytes, const MoiRuntimeWorkgroupGatePlan &plan,
-    const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,
-    uint64_t return_text_offset, uint64_t reserved_word_count, rj_code_arch_t arch) {
-  if (plan.sample_stride <= 1u)
-    return std::nullopt;
-  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
-  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
-  // Dense CDNA5 Record/Replay callers keep their s_call_i64 return PC in
-  // base+6:base+7 until the body returns with s_setpc. The indirect-PC pair at
-  // base+0 is dead after the dispatcher reaches this gate and is reinitialized
-  // by the non-selected return jump or the selected body, so reuse its low
-  // word for that engine without destroying the live call return. Sampled
-  // returns with its ordinary indirect-PC pair and retains the established
-  // residue slot.
-  const uint16_t residue = plan.flavor == MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay &&
-                                   plan.direct_call_form == ConSanDirectCallForm::SCallI64
-                               ? plan.exec_save_sgpr
-                               : static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
-
-  std::vector<uint32_t> words;
-  words.reserve(reserved_word_count);
-  InstructionSequence sequence(words);
-  if (!append_moi_runtime_workgroup_predicate(words, plan, workgroup_sources, saved_scc, quotient,
-                                              residue, arch))
-    return std::nullopt;
-  const InstructionSequence::Label selected = sequence.make_label();
-  if (!sequence.emit_branch(selected, InstructionSequence::BranchKind::SccNonzero) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)))
-    return std::nullopt;
-  for (uint64_t offset = 0; offset < guest_bytes.size(); offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, guest_bytes.data() + offset, sizeof(word));
-    (void)sequence.emit(word);
-  }
-  if (!append_moi_scc_preserving_indirect_jump(words, gate_text_offset, return_text_offset,
-                                               plan.exec_save_sgpr, saved_scc,
-                                               /*capture_scc=*/false, arch))
-    return std::nullopt;
-  if (!sequence.bind(selected) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)) ||
-      !sequence.resolve_branches(arch) || words.size() > reserved_word_count)
-    return std::nullopt;
-  words.resize(reserved_word_count, build_s_nop(0, arch));
-  return words;
 }
 
 } // namespace rocjitsu::consan_moi_impl
