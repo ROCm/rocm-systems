@@ -6,12 +6,17 @@
 Parse the per-process code-object info artifact emitted by the native PC
 sampling collector into a per-code-object instruction tree. The artifact holds
 the full disassembly of every loaded code object, including un-sampled ones.
+
+Also maps a disassembled instruction to the execution pipeline that runs it.
 """
 
 import json
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+import yaml
+
+import config
 from utils.logger import console_warning
 
 CODE_OBJ_INFO_GLOB = "**/*_code_obj_info.json"
@@ -105,3 +110,45 @@ def _to_instruction(instruction: dict[str, Any]) -> CodeObjectInstruction:
         instruction=instruction.get("name"),
         source=instruction.get("comment"),
     )
+
+
+class InstructionPipelines:
+    """The generated mnemonic-to-pipeline table, read once and kept."""
+
+    table: Optional[dict[str, str]] = None
+
+    @classmethod
+    def lookup(cls, instruction: Optional[str]) -> Optional[str]:
+        """Return the execution pipeline that runs a disassembled instruction.
+
+        The pipeline (VALU, MATRIX, SCALAR, and so on) is a property of the
+        instruction itself, so it applies to every disassembled line, not only
+        the offsets PC sampling landed on. Returns None for an instruction the
+        table does not hold, leaving the type unset rather than guessing.
+        """
+        if not instruction:
+            return None
+        if cls.table is None:
+            cls.table = cls.load()
+        return cls.table.get(instruction.split(maxsplit=1)[0])
+
+    @classmethod
+    def load(cls) -> dict[str, str]:
+        """Read the table, inverting it into the mnemonic lookup."""
+        path = (
+            config.rocprof_compute_home
+            / "rocprof_compute_soc"
+            / "analysis_configs"
+            / "instruction_pipelines.yaml"
+        )
+        if not path.is_file():
+            return {}
+        # The C loader is far faster on a file this size, and ships with PyYAML
+        # wherever libyaml is available.
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+        document = yaml.load(path.read_text(encoding="utf-8"), Loader=loader)
+        return {
+            mnemonic: pipeline
+            for pipeline, mnemonics in ((document or {}).get("pipelines") or {}).items()
+            for mnemonic in mnemonics
+        }

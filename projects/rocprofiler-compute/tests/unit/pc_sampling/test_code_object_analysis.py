@@ -5,11 +5,15 @@ import json
 from pathlib import Path
 
 import common
+import pytest
+import yaml
 
+from pc_sampling import code_object_analysis
 from pc_sampling.code_object_analysis import (
     CodeObjectDisassembly,
     CodeObjectInstruction,
     CodeObjectSymbol,
+    InstructionPipelines,
     load_code_object_disassemblies,
     parse_code_object_info,
 )
@@ -171,3 +175,53 @@ def test_load_skips_malformed_json():
         assert load_code_object_disassemblies(str(workload_dir)) == {}
     finally:
         common.clean_output_dir(True, str(workload_dir))
+
+
+# =============================================================================
+# Execution pipeline lookup
+# =============================================================================
+
+
+@pytest.fixture
+def pipeline_table(tmp_path, monkeypatch):
+    """Point the loader at a small generated table."""
+    analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
+    analysis_configs.mkdir(parents=True)
+    (analysis_configs / "instruction_pipelines.yaml").write_text(
+        yaml.safe_dump({
+            "commit": "0" * 40,
+            "pipelines": {
+                "VALU": ["v_mov_b32_e32"],
+                "INTERNAL": ["s_waitcnt"],
+                "MATRIX": ["v_mfma_f32_16x16x16f16"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(InstructionPipelines, "table", None)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "instruction, expected",
+    [
+        ("v_mov_b32_e32 v1, 0", "VALU"),
+        ("s_waitcnt", "INTERNAL"),
+        ("s_waitcnt lgkmcnt(0)", "INTERNAL"),
+        ("v_mfma_f32_16x16x16f16 a[0:3], v0, v1, a[0:3]", "MATRIX"),
+        ("v_not_a_real_instruction v0", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_lookup_reads_the_leading_mnemonic(pipeline_table, instruction, expected):
+    assert InstructionPipelines.lookup(instruction) == expected
+
+
+def test_lookup_without_a_table_leaves_every_type_unset(tmp_path, monkeypatch):
+    """A missing table degrades to empty types instead of failing analyze."""
+    monkeypatch.setattr(InstructionPipelines, "table", None)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+
+    assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
+    assert InstructionPipelines.lookup("s_waitcnt") is None

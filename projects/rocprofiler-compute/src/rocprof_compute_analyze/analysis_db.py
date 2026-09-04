@@ -14,6 +14,7 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
+    InstructionPipelines,
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
@@ -704,6 +705,20 @@ class db_analysis(OmniAnalyze_Base):
         return kernel_symbols[key]
 
     @staticmethod
+    def _get_instruction_type(
+        instruction: Optional[str],
+    ) -> Optional[orm.InstructionTypeLookup]:
+        """Return the lookup row for an instruction's execution pipeline.
+
+        None when the mnemonic is unknown, which leaves the column NULL and
+        makes the missing table entry visible.
+        """
+        pipeline = InstructionPipelines.lookup(instruction)
+        if pipeline is None:
+            return None
+        return Database.get_or_create_type(orm.InstructionTypeLookup, pipeline)
+
+    @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
@@ -715,6 +730,7 @@ class db_analysis(OmniAnalyze_Base):
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             instruction=line.instruction,
+            instruction_type_lookup=db_analysis._get_instruction_type(line.instruction),
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
@@ -841,6 +857,9 @@ class db_analysis(OmniAnalyze_Base):
             instruction_line = orm.InstructionLine(
                 code_object_offset=code_object_offset,
                 instruction=instruction.instruction,
+                instruction_type_lookup=db_analysis._get_instruction_type(
+                    instruction.instruction
+                ),
                 kernel_symbol=kernel_symbol,
             )
             Database.get_session().add(instruction_line)

@@ -28,6 +28,7 @@ BASE_COLUMNS = (
     "Instruction line number",
     "Code object offset",
     "Instruction line",
+    "Instruction type",
     "Total count",
     "Active count",
     "Stall count",

@@ -10,6 +10,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Docstrings](#docstrings)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
+- [Caching Loaded Data](#caching-loaded-data)
 - [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
@@ -263,6 +264,59 @@ with open(config_path, encoding="utf-8") as f:
 ```python
 with open(config_path) as f:
     data = yaml.safe_load(f)
+```
+
+## Caching Loaded Data
+
+Data read from disk once and reused for the rest of the run needs somewhere to
+live. Put it on the class that owns it, as a class attribute filled on first
+use. Do not reach for `functools.lru_cache` on a module-level function.
+
+A decorated function hides the dependency. The call site reads as an ordinary
+function call, so nothing at that line says the first call in the process opens
+a file and every later one does not, or that some unrelated code path already
+populated it. Reviewers cannot see the coupling, and a traceback does not show
+which caller paid for the load.
+
+It also promises less than it appears to across processes. The cache is
+per-interpreter, so every forked or spawned worker re-reads the file and
+rebuilds its own copy. Work that reads as "paid once" is paid once per process,
+which is a cost worth being able to see.
+
+### Rules
+
+- Never use `functools.lru_cache` or `functools.cache` to hold loaded data.
+- Hold it as a class attribute on the class that owns it, filled on first use,
+  following `Database._type_cache` in `src/utils/analysis_orm.py`.
+- Pass the data as an argument instead whenever the caller already has it.
+
+### Example
+
+**Good:** the state is a named attribute of the class that owns it
+
+```python
+class InstructionPipelines:
+    """The generated mnemonic-to-pipeline table, read once and kept."""
+
+    _table: Optional[dict[str, str]] = None
+
+    @classmethod
+    def lookup(cls, mnemonic: str) -> Optional[str]:
+        if cls._table is None:
+            cls._table = cls._load()
+        return cls._table.get(mnemonic)
+```
+
+**Bad:** the file read is invisible at every call site
+
+```python
+@functools.lru_cache(maxsize=1)
+def _load_table() -> dict[str, str]:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def lookup(mnemonic: str) -> Optional[str]:
+    return _load_table().get(mnemonic)
 ```
 
 ## Nested Functions
@@ -875,6 +929,7 @@ Before adding or modifying tests, read the existing test modules to understand t
 
 | Principle | Guideline |
 |-----------|-----------|
+| **Visible state** | Cache loaded data on the class that owns it, never with `lru_cache` |
 | **Readability first** | Code is read far more than written — optimize for clarity and maintainability over brevity |
 | **Single responsibility** | Each function should do exactly one thing well |
 | **Consistent abstraction** | Keep operations at the same conceptual level within a function |
