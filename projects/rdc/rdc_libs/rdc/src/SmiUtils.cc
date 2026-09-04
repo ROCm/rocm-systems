@@ -92,6 +92,10 @@ bool is_capability_miss(rdc_status_t status) {
   }
 }
 
+bool is_health_field(rdc_field_t field_id) {
+  return field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST;
+}
+
 // Dual index semantics for gpu_id:
 //   Physical/instance-0: device_index is a flat index into s_flat_gpu_table.
 //   Partition-instance:  device_index is a socket index, instance_index the per-socket proc.

@@ -51,6 +51,9 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
 //!< opposed to a transient failure.
 bool is_capability_miss(rdc_status_t status);
 
+//!< Whether the field is in the RDC_HEALTH_* range.
+bool is_health_field(rdc_field_t field_id);
+
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
