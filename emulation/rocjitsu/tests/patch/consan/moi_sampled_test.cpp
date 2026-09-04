@@ -7103,16 +7103,15 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
             0u);
 }
 
-TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
+TEST(ConSanMoi, Cdna4SampledSpillSafeRuntimeSelectionUsesBodyGate) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto guest =
       build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
   ASSERT_TRUE(guest);
 
   // Exhaust ordinary scalar routing state while leaving enough VGPR capacity
-  // for persistent workgroup coordinates. A branch-only entry has no external
-  // island in which to emit the register-backed fast gate, so runtime
-  // selection must remain in the spill-safe access body.
+  // for persistent workgroup coordinates. Runtime selection must remain in
+  // the spill-safe access body.
   std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
   std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
   size_t cursor = 1u + guest->size();
@@ -7148,7 +7147,6 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
-  EXPECT_FALSE(access->private_state_layout->exact_workgroup_offsets.complete());
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);

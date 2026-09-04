@@ -394,14 +394,14 @@ foreach(_source IN ITEMS consan_final_validation.cpp consan_validation_inventory
     )
 endforeach()
 
-# Relay proofs consume one independently derived patch-inventory product. The
-# continuation, donor, and reservoir facets stay distinct so sharing the scan
-# cannot broaden any validator's accepted graph.
+# Final validation consumes a narrow immutable view and must not regain the
+# retired branch-relay proof graph.
 file(READ "${_consan_dir}/consan_validation.inc" _consan_validation)
-if(NOT _consan_validation MATCHES "struct BranchRelayValidationInventory" OR
-   NOT _consan_validation MATCHES "make_branch_relay_validation_inventory")
-    message(FATAL_ERROR "ConSan relay validation lost its shared typed inventory")
-endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation.inc"
+    "BranchRelayValidationInventory|validate_branch_only_continuation_semantics|validate_branch_relay_reservoir_semantics"
+    "retired branch-relay validation must not return"
+)
 if(NOT _consan_validation MATCHES "struct ConSanFinalValidationInput")
     message(FATAL_ERROR "ConSan final proof lost its narrow immutable input")
 endif()
@@ -2032,50 +2032,24 @@ foreach(_sc_retired_route_owner IN LISTS _consan_production_files)
 endforeach()
 
 # SCC-preserving indirect jumps have one mode/target-neutral scalar contract.
-# Branch-only MOI publication retains one exact typed effect instead of a
-# flattened optional union whose meaning depends on patch kind.
+# Whole-text relocation must not retain the obsolete branch-only route schema.
 file(READ
     "${_consan_dir}/consan_indirect_jump_sgprs.h.inc"
     _indirect_jump_contract
 )
-file(READ
-    "${_consan_dir}/consan_branch_only_continuation.h.inc"
-    _branch_only_route_contract
-)
 if(NOT _shared_aggregate_contract MATCHES
        "consan_indirect_jump_sgprs[.]h[.]inc" OR
-   NOT _shared_aggregate_contract MATCHES
-       "consan_branch_only_continuation[.]h[.]inc" OR
    NOT _indirect_jump_contract MATCHES
-       "struct ConSanIndirectJumpSgprs" OR
-   NOT _branch_only_route_contract MATCHES
-       "struct ConSanBranchOnlyContinuation" OR
-   NOT _branch_only_route_contract MATCHES
-       "std::variant<ConSanBranchOnlyRelayEntry, ConSanBranchOnlyBorrowedEntry" OR
-   NOT _branch_only_route_contract MATCHES
-       "ConSanIndirectJumpSgprs[ \t]+jump" OR
-   NOT _patch_proof_contract MATCHES
-       "std::optional<ConSanBranchOnlyContinuation>[ \t]+branch_only_route" OR
-   NOT _consan_validation MATCHES
-       "validate_indirect_route_effect_roles" OR
-   NOT _consan_validation MATCHES
-       "[.]borrowed_entry[(]" OR
-   NOT _consan_validation MATCHES
-       "[.]prologue_entry[(]")
+       "struct ConSanIndirectJumpSgprs")
     message(FATAL_ERROR
-        "indirect control flow lost its shared primitive or exact branch-only effect"
+        "indirect control flow lost its shared scalar primitive"
     )
 endif()
-_consan_assert_no_match(
-    "${_consan_dir}/consan_code_object_types.h.inc"
-    "(bool[ \t]+branch_only_(continuation|borrowed_indirect_entry)|std::optional<uint(16|64)_t>[ \t]+branch_only_(borrowed_backup_vgpr|borrowed_continuation_offset|entry_prologue_offset)|std::vector<uint64_t>[ \t]+branch_only_(entry|return)_relay_offsets|std::optional<ConSanIndirectJumpSgprs>[ \t]+moi_borrowed_entry_jump)"
-    "branch-only routing must retain one mutually exclusive typed effect"
-)
-foreach(_branch_only_owner IN LISTS _consan_production_files)
+foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
-        "${_branch_only_owner}"
-        "[.]branch_only_continuation|requires_branch_only_route"
-        "branch-only route presence must not regain a parallel stored boolean"
+        "${_file}"
+        "ConSanBranchOnly|branch_only_route|branch_relay_offsets|TrampolineBranchRelayReservoir|TrampolineNopBranchRelay"
+        "retired branch-only routing metadata must not return"
     )
 endforeach()
 _consan_assert_no_match(

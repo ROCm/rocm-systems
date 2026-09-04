@@ -2857,7 +2857,6 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatUsesRelocatedInlineBody) {
       std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
   ASSERT_NE(body, result.patches.end());
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_FALSE(body->branch_only_route);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_GE(body->trampoline_offset, result.text_relocation->source_text_size);
 }

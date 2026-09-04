@@ -121,12 +121,8 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineMoiFenceRecord,
   InlineMalformedBarrierAbort,
   TrampolineScPerturbation,
-  TrampolineBranchRelayReservoir,
   TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
-  /// Appended after the original patch-kind sequence so existing numeric
-  /// diagnostics remain stable across this addition.
-  TrampolineNopBranchRelay,
   /// An s_clause scheduling hint neutralized because one of its covered
   /// memory instructions is replaced by an instrumentation trampoline.
   InlineScalarClauseNopRewrite,
@@ -507,14 +503,6 @@ struct ConSanCommittedPatchGeometry {
 /// Exact control-flow routing proof retained for final validation. Emitters
 /// populate this slice, but semantic policy and runtime reporting never see it.
 struct ConSanPatchRoutingProof {
-  /// Branch-relay words owned by this patch, either in a dead tail of its
-  /// replaced anchor or after its primary trampoline body. Relay-reservoir
-  /// validation uses this exact provenance when proving routes.
-  std::vector<uint64_t> branch_relay_offsets;
-  /// Exact forward/return route for a trampoline body whose continuation uses
-  /// branch-only control flow. The entry variant prevents ordinary relays, a
-  /// borrowed scalar tuple, and a composed kernel prologue from coexisting.
-  std::optional<ConSanBranchOnlyContinuation> branch_only_route;
   /// Trampoline reached after this entry prologue completes. This is recorded
   /// on the prologue patch so final validation can prove composed entry
   /// ownership without treating the overwritten anchor branch as live.

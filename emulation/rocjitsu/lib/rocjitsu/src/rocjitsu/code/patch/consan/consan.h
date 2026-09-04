@@ -38,8 +38,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_indirect_jump_sgprs.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_branch_only_continuation.h.inc"
-
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
 #include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_scalar_vcc_spill.h.inc"

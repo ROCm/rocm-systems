@@ -197,12 +197,8 @@ TEST(ConSan, FlatCheckTrapRelocationIsIndependentOfFarNopRelays) {
       std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
-  EXPECT_FALSE(patch->branch_only_route);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_GE(patch->trampoline_offset, result.text_relocation->source_text_size);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, FlatCheckTrapRelocationIsIndependentOfInstructionReservoirs) {
@@ -235,10 +231,6 @@ TEST(ConSan, FlatCheckTrapRelocationIsIndependentOfInstructionReservoirs) {
   const auto body =
       std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
   ASSERT_NE(body, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(body->branch_only_route);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_GE(body->trampoline_offset, result.text_relocation->source_text_size);
 }
@@ -328,7 +320,6 @@ TEST(ConSan, FlatRelocationHandlesBothFormerReservoirCandidates) {
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
 }
 
 TEST(ConSan, FlatCheckTrapRelocatesMultipleFarBodiesWithoutAnchorTails) {
@@ -369,12 +360,8 @@ TEST(ConSan, FlatCheckTrapRelocatesMultipleFarBodiesWithoutAnchorTails) {
   std::ranges::sort(bodies, {}, &ConSanPatchInfo::anchor_offset);
   ASSERT_TRUE(result.text_relocation);
   for (const ConSanPatchInfo *body : bodies) {
-    EXPECT_FALSE(body->branch_only_route);
     EXPECT_GE(body->trampoline_offset, result.text_relocation->source_text_size);
   }
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, FlatCheckTrapReportsPartialSelectionReason) {
@@ -6997,7 +6984,6 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       3u);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
   ASSERT_TRUE(result.text_relocation);
 }
 
@@ -7035,7 +7021,6 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       3u);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
   ASSERT_TRUE(result.text_relocation);
 }
 
@@ -7065,10 +7050,6 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       1u);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
@@ -7103,10 +7084,6 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       2u);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
@@ -7170,9 +7147,6 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       2u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughCommonDirectReservoir) {
@@ -7205,9 +7179,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughCommonDirectReservoir) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       2u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality) {
@@ -7252,16 +7223,10 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       3u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 
   const ConSanTransformArtifacts repeated = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(repeated));
   EXPECT_EQ(repeated.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(std::ranges::count(repeated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
   EXPECT_EQ(repeated.replacement, result.replacement);
 
   ConSanOptions exhausted_options = options;
@@ -7312,9 +7277,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesCommonDirectRelayReservoirForCdna4Wave64) 
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       3u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
@@ -7352,9 +7314,6 @@ TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       3u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
   ASSERT_TRUE(result.text_relocation);
 }
 
@@ -7430,7 +7389,6 @@ TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       kSiteCount);
-  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 0u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeReservesMultipleAppendedTextCaves) {

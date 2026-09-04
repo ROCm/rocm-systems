@@ -208,8 +208,6 @@ void expect_record_replay_text_transaction(const ConSanTransformArtifacts &resul
     EXPECT_LT(patch.anchor_offset, result.text_relocation->source_text_size);
     EXPECT_GE(patch.trampoline_offset, result.text_relocation->source_text_size);
     EXPECT_GT(patch.trampoline_size, 0u);
-    EXPECT_TRUE(patch.branch_relay_offsets.empty());
-    EXPECT_FALSE(patch.branch_only_route);
     if (patch.relocated_guest_instruction_offset) {
       EXPECT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
       EXPECT_LT(*patch.relocated_guest_instruction_offset,
@@ -9614,8 +9612,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossFollowingFence) {
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(barrier_patch->original_size, sizeof(uint32_t));
-  EXPECT_FALSE(barrier_patch->branch_only_route &&
-               barrier_patch->branch_only_route->borrowed_entry());
   EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -9664,7 +9660,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossReconvergenceEntry) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->original_size, sizeof(uint32_t));
-  EXPECT_FALSE(patch->branch_only_route && patch->branch_only_route->borrowed_entry());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 

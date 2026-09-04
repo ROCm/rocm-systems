@@ -1202,9 +1202,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
   EXPECT_EQ(
       std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
       1u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 } // namespace
