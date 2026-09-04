@@ -241,6 +241,8 @@ struct ConSanTextFragment {
   uint64_t id = 0;
   ConSanTextFragmentKind kind = ConSanTextFragmentKind::Replacement;
   std::vector<ConSanProbeIntentId> intent_ids;
+  /// Mode-owned runtime interpretation retained until final placement is known.
+  ConSanRuntimeStaticMapping runtime_mapping;
   std::vector<uint32_t> before_words;
   std::vector<uint32_t> replacement_words;
   std::vector<uint32_t> after_words;

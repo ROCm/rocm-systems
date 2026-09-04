@@ -44,13 +44,12 @@ enum class FragmentMarkerRole : uint64_t {
                                              uint64_t owner_source_entry) {
   if (fragment.patch.owner_descriptor_file_offsets.empty())
     return true;
-  return std::ranges::any_of(fragment.patch.owner_descriptor_file_offsets,
-                             [&](uint64_t descriptor_file_offset) {
-                               const ConSanKernelInfo *owner =
-                                   inventory.find_kernel_by_descriptor(descriptor_file_offset);
-                               return owner != nullptr && owner->has_text_range &&
-                                      owner->entry_text_offset == owner_source_entry;
-                             });
+  return std::ranges::any_of(
+      fragment.patch.owner_descriptor_file_offsets, [&](uint64_t descriptor_file_offset) {
+        const ConSanKernelInfo *owner = inventory.find_kernel_by_descriptor(descriptor_file_offset);
+        return owner != nullptr && owner->has_text_range &&
+               owner->entry_text_offset == owner_source_entry;
+      });
 }
 
 [[nodiscard]] std::optional<InstructionRewrite> compose_consan_text_fragments(
@@ -395,8 +394,9 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
                                          placement.owner_descriptor_file_offset == owner;
                                 });
   };
-  for (const ConSanTextFragment &staged : result.staged_text_fragments) {
+  for (ConSanTextFragment &staged : result.staged_text_fragments) {
     std::optional<ConSanPatchInfo> primary;
+    std::vector<ConSanPatchInfo> fragment_placements;
     for (const TranslatedTextPlacement &placement : relocated->placements) {
       if (placement.source_offset != staged.patch.anchor_offset || !placement.client_rewrite)
         continue;
@@ -447,6 +447,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
       }
       if (!primary)
         primary = placed;
+      fragment_placements.push_back(placed);
       placed_patches.push_back(std::move(placed));
     }
     if (!primary) {
@@ -455,13 +456,28 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
       return false;
     }
     if (!staged.intent_ids.empty()) {
-      auto commit = make_consan_instrumented_patch_lowering(result.observation_plan(),
-                                                            staged.intent_ids, *primary);
+      auto commit =
+          make_consan_instrumented_patch_lowering(result.observation_plan(), staged.intent_ids,
+                                                  *primary, std::move(staged.runtime_mapping));
       if (!commit) {
         result.errors.emplace_back("ConSan " + std::string(subject) +
                                    " produced an invalid intent-bound lowering");
         result.discard_candidate_modification();
         return false;
+      }
+      for (size_t index = 1u; index < fragment_placements.size(); ++index) {
+        auto clone = make_consan_instrumented_patch_lowering(
+            result.observation_plan(), staged.intent_ids, fragment_placements[index]);
+        if (!clone) {
+          result.errors.emplace_back("ConSan " + std::string(subject) +
+                                     " produced invalid cloned lowering geometry");
+          result.discard_candidate_modification();
+          return false;
+        }
+        for (ConSanCommittedLoweringLocation &location : clone->locations) {
+          if (std::ranges::find(commit->locations, location) == commit->locations.end())
+            commit->locations.push_back(std::move(location));
+        }
       }
       commits.push_back(std::move(*commit));
     }
