@@ -126,6 +126,8 @@ struct InstructionRewrite {
   std::vector<uint32_t> prefix_words;
   std::optional<std::vector<uint32_t>> replacement_words;
   std::vector<InstructionRewriteMarker> markers;
+  /// Number of contiguous source bytes replaced; zero means the first instruction only.
+  uint32_t source_size = 0;
 };
 
 /// @brief Optional whole-text rewrite for one source instruction.
@@ -149,6 +151,8 @@ struct TranslatedTextPlacement {
   uint64_t owner_descriptor_file_offset = 0;
   /// @brief True only when the client rewrite callback replaced this instruction.
   bool client_rewrite = false;
+  /// @brief Source bytes owned by the client rewrite; zero for translator-owned placements.
+  uint32_t client_rewrite_source_size = 0;
 };
 
 /// @brief Final placement of one client-defined marker in one kernel-scope copy.

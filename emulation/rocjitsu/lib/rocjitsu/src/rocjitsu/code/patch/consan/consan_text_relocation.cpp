@@ -65,7 +65,8 @@ try_rewrite_consan_text_in_place(std::span<const uint8_t> image, const AmdGpuCod
                 rewrite.words.data(), rewrite.words.size() * sizeof(uint32_t));
     result.placements.push_back({.source_offset = rewrite.patch.anchor_offset,
                                  .target_offset = rewrite.patch.anchor_offset,
-                                 .client_rewrite = true});
+                                 .client_rewrite = true,
+                                 .client_rewrite_source_size = rewrite.patch.original_size});
   }
   return result;
 }
@@ -152,8 +153,10 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
             [](const ConSanStagedTextRewrite &rewrite) { return rewrite.patch.anchor_offset; });
         if (rewrite == rewrites.end())
           return std::nullopt;
-        return InstructionRewrite{
-            .prefix_words = {}, .replacement_words = rewrite->words, .markers = {}};
+        return InstructionRewrite{.prefix_words = {},
+                                  .replacement_words = rewrite->words,
+                                  .markers = {},
+                                  .source_size = rewrite->patch.original_size};
       });
   TranslatedCodeObject translated = translator.translate(source);
   if (!translated.dispatchable()) {

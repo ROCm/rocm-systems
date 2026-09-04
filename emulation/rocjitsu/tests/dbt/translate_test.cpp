@@ -3617,7 +3617,8 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words =
                                       std::vector<uint32_t>{inserted_nop, source_nop},
-                                  .markers = {}};
+                                  .markers = {},
+                                  .source_size = 0};
       });
   const auto result = translator.translate(source);
 
@@ -3666,7 +3667,8 @@ TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMar
         return InstructionRewrite{
             .prefix_words = {prefix_nop},
             .replacement_words = std::nullopt,
-            .markers = {{.id = 41, .byte_offset = 0}, {.id = 42, .byte_offset = sizeof(uint32_t)}}};
+            .markers = {{.id = 41, .byte_offset = 0}, {.id = 42, .byte_offset = sizeof(uint32_t)}},
+            .source_size = 0};
       });
   const auto result = translator.translate(source);
 
@@ -3703,6 +3705,80 @@ TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMar
   EXPECT_EQ(descriptor_entry, 0u) << "branches to the source entry must execute its prefix";
 }
 
+TEST(BinaryTranslator, ClientRewriteOwnsBoundedMultiInstructionSourceSpan) {
+  const uint32_t replacement_nop = build_s_nop(9, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> words = {
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_nop(1, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != 0)
+          return std::nullopt;
+        return InstructionRewrite{.prefix_words = {},
+                                  .replacement_words = std::vector<uint32_t>{replacement_nop},
+                                  .markers = {},
+                                  .source_size = 2 * sizeof(uint32_t)};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  ASSERT_GE(translated_words.size(), 2u);
+  EXPECT_EQ(translated_words[0], replacement_nop);
+  EXPECT_EQ(translated_words[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+
+  const auto rewrite = std::ranges::find_if(
+      result.text_placements, [](const auto &placement) { return placement.source_offset == 0; });
+  ASSERT_NE(rewrite, result.text_placements.end());
+  EXPECT_EQ(rewrite->client_rewrite_source_size, 2 * sizeof(uint32_t));
+  EXPECT_EQ(std::ranges::count(result.text_placements, sizeof(uint32_t),
+                               &TranslatedTextPlacement::source_offset),
+            0);
+  const auto continuation = std::ranges::find(result.text_placements, 2 * sizeof(uint32_t),
+                                              &TranslatedTextPlacement::source_offset);
+  ASSERT_NE(continuation, result.text_placements.end());
+  EXPECT_EQ(continuation->target_offset, sizeof(uint32_t));
+}
+
+TEST(BinaryTranslator, ClientRewriteRejectsSourceSpanContainingControlTransfer) {
+  const std::vector<uint32_t> words = {
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != 0)
+          return std::nullopt;
+        return InstructionRewrite{.prefix_words = {},
+                                  .replacement_words = std::vector<uint32_t>{words[0]},
+                                  .markers = {},
+                                  .source_size = 2 * sizeof(uint32_t)};
+      });
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "bounded basic-block source span"));
+}
+
 TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
   const uint32_t source_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t inserted_nop = build_s_nop(2, ROCJITSU_CODE_ARCH_CDNA4);
@@ -3725,7 +3801,8 @@ TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words =
                                       std::vector<uint32_t>{inserted_nop, source_nop},
-                                  .markers = {}};
+                                  .markers = {},
+                                  .source_size = 0};
       });
   const auto result = translator.translate(source);
 
@@ -4378,7 +4455,8 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
         rewrite_owners.push_back(context.owner_descriptor_file_offset);
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words = std::vector<uint32_t>{first_nop, second_nop},
-                                  .markers = {}};
+                                  .markers = {},
+                                  .source_size = 0};
       });
   const auto result = translator.translate(source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""

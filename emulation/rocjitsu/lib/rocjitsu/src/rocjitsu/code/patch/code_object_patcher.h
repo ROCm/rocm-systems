@@ -32,6 +32,7 @@ struct TextOffsetRelocation {
   /// Source-image descriptor whose kernel translation scope emitted this copy.
   uint64_t owner_descriptor_file_offset = 0;
   bool client_rewrite = false;
+  uint32_t client_rewrite_source_size = 0;
 };
 
 /// @brief One relocated literal64 PC builder whose target is outside `.text`.

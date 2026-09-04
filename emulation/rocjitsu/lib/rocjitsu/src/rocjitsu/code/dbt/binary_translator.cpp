@@ -3965,7 +3965,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::unordered_map<uint64_t, uint64_t> target_offset_by_source_offset;
     target_offset_by_source_offset.reserve(
         static_cast<size_t>(source_body_size / sizeof(uint32_t)) + scope.blocks.size());
-    std::unordered_set<uint64_t> client_rewritten_source_offsets;
+    std::unordered_map<uint64_t, uint32_t> client_rewrite_size_by_source_offset;
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = first_direct_branch_island_pool_offset();
@@ -3992,6 +3992,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       return lhs->start_offset() < rhs->start_offset();
     }));
     for (BasicBlock *block : scope.blocks) {
+      uint64_t client_consumed_source_end = 0;
       std::optional<ActiveGeneratedIslandPool> block_generated_island_pool;
       if (active_generated_island_pool &&
           block->start_offset() < active_generated_island_pool->source_end) {
@@ -4013,6 +4014,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const uint64_t offset = inst.src_loc();
         uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+
+        if (offset < client_consumed_source_end)
+          continue;
 
         if (active_generated_island_pool && offset < active_generated_island_pool->source_end)
           continue;
@@ -4162,6 +4166,45 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .owner_entry_source_offset = scope.translation->entry_text_offset,
                .owner_kernel_name = scope.translation->kernel_name});
           if (client_rewrite) {
+            const uint32_t client_source_size =
+                client_rewrite->source_size == 0u ? inst_size : client_rewrite->source_size;
+            bool source_span_valid = client_source_size >= inst_size &&
+                                     client_source_size % sizeof(uint32_t) == 0u &&
+                                     client_source_size <= block->end_offset() - offset;
+            uint64_t checked_source_end = offset;
+            for (auto span_it = it;
+                 source_span_valid && checked_source_end < offset + client_source_size; ++span_it) {
+              if (span_it == block->instructions().end()) {
+                source_span_valid = false;
+                break;
+              }
+              const Instruction &span_instruction = *span_it;
+              const bool control_transfer =
+                  (span_instruction.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH |
+                                               INDIRECT_CALL | PROGRAM_TERMINATOR)) != 0 ||
+                  span_instruction.branch_offset_bytes().has_value();
+              if (span_instruction.src_loc() != checked_source_end ||
+                  (client_source_size > inst_size && control_transfer) ||
+                  (client_rewrite->replacement_words && control_transfer)) {
+                source_span_valid = false;
+                break;
+              }
+              checked_source_end += span_instruction.size();
+            }
+            source_span_valid &= checked_source_end == offset + client_source_size;
+            if (client_source_size > inst_size && !client_rewrite->replacement_words)
+              source_span_valid = false;
+            if (!source_span_valid) {
+              auto failure = make_kernel_failure(
+                  DiagnosticKind::Legalization,
+                  "client instruction rewrite does not own one bounded basic-block source span",
+                  offset, std::string(inst.mnemonic()));
+              if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+                skip_scope = true;
+                break;
+              }
+              return leave_unchanged();
+            }
             const uint64_t supplied_size =
                 (client_rewrite->prefix_words.size() +
                  (client_rewrite->replacement_words ? client_rewrite->replacement_words->size()
@@ -4183,7 +4226,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               }
               return leave_unchanged();
             }
-            client_rewritten_source_offsets.insert(offset);
+            client_rewrite_size_by_source_offset.emplace(offset, client_source_size);
+            client_consumed_source_end = offset + client_source_size;
             for (const InstructionRewriteMarker &marker : client_rewrite->markers) {
               pending_client_markers.push_back(
                   {.id = marker.id,
@@ -4887,7 +4931,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           {.source_offset = source_offset,
            .target_offset = target_offset + target_delta,
            .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
-           .client_rewrite = client_rewritten_source_offsets.contains(source_offset)});
+           .client_rewrite = client_rewrite_size_by_source_offset.contains(source_offset),
+           .client_rewrite_source_size = [&] {
+             const auto rewrite = client_rewrite_size_by_source_offset.find(source_offset);
+             return rewrite == client_rewrite_size_by_source_offset.end() ? 0u : rewrite->second;
+           }()});
     }
     for (const PendingClientTextMarker &marker : pending_client_markers) {
       client_marker_placements.push_back(
@@ -5217,7 +5265,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         {.source_offset = relocation.source_offset,
          .target_offset = relocation.target_offset,
          .owner_descriptor_file_offset = relocation.owner_descriptor_file_offset,
-         .client_rewrite = relocation.client_rewrite});
+         .client_rewrite = relocation.client_rewrite,
+         .client_rewrite_source_size = relocation.client_rewrite_source_size});
   }
   return result;
 }
