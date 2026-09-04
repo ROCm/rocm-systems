@@ -319,19 +319,6 @@ foreach(_file IN LISTS _transform_component_sources)
     )
 endforeach()
 
-# Whole-text relocation retired branch-only relay routing. Keep its tombstone
-# files free of implementation so the deleted graph cannot regrow unnoticed.
-foreach(_relay_router_file IN ITEMS
-    consan_branch_only_relay_router.h
-    consan_branch_only_relay_router.cpp
-)
-    _consan_assert_no_match(
-        "${_consan_dir}/${_relay_router_file}"
-        "BranchOnlyRelayOwner|owner_affinity|owner_materialization|offer_materialized_owner|has_deferred_owner_affinity|RelayOwnerGrouping|route_optimization|BoundedOptimizationMode"
-        "retired branch-only routing must not regain owner or optimizer lifecycles"
-    )
-endforeach()
-
 # Descriptor resource mutation has one mechanical owner. MOI contributes its
 # narrow policy adapter; SuperCollider's two access regions submit batches
 # directly. Retired per-field and mode-local mutation APIs must not reappear.
@@ -4175,10 +4162,17 @@ endif()
 # they must never regain definitions, declarations, or include closure.
 set(
     _retired_fragments
+    consan_branch_only_continuation.h.inc
+    consan_branch_only_relay_router.cpp
+    consan_branch_only_relay_router.h
     consan_moi_access_apply.inc
     consan_moi_candidates.inc
     consan_moi_emission.inc
+    consan_moi_local_island_allocator.h
+    consan_moi_model.cpp
     modes/inline_shadow/consan_moi_inline_shadow_emission.inc
+    modes/supercollider/consan_supercollider_dense_route.h.inc
+    modes/supercollider/consan_supercollider_indirect_route.h.inc
     consan_moi_probe_planning.inc
     consan_moi_prologue.inc
     consan_moi_record_event_emission.inc
@@ -4187,6 +4181,8 @@ set(
     modes/sampled/consan_moi_sampled_access_emission.inc
     modes/sampled/consan_moi_sampled_atomic_emission.inc
     consan_moi_sync_common.inc
+    targets/consan_relay_target_ops.cpp
+    targets/consan_relay_target_ops.h
 )
 foreach(_fragment IN LISTS _retired_fragments)
     _consan_assert_no_match(
@@ -4239,10 +4235,4 @@ _consan_assert_reviewed_mode_switch_budget(
 _consan_assert_reviewed_mode_switch_budget(
     modes/sampled/consan_moi_sampled_model.cpp 0 "Sampled-only report model"
 )
-_consan_assert_no_match(
-    "${_consan_dir}/consan_moi_model.cpp"
-    "#include|[{};]"
-    "retired mixed report model must remain an inert comment-only tombstone"
-)
-
 message(STATUS "ConSan architectural boundary checks passed")
