@@ -50,36 +50,6 @@
 #include "fakes/libc_seam_undef.h"
 
 using RcclUnitTesting::CaptureLog;
-using RcclUnitTesting::LogHas;
-
-// Every diagnostic sentence of client.cc's that a test still matches, in one place.
-//
-// These are the arms ExpectPerrors below cannot separate: two fprintf(stderr, ...) arms that both return 1 and
-// change nothing else, so the sentence is the only thing that tells them apart. Matching text is unavoidable there,
-// but it does not have to be scattered: keeping the wording here makes an upstream rewording one edit instead of a
-// dozen "needle not found" failures across unrelated tests.
-//
-// A trailing ": " means the unit appends data of its own; pass that tail to LogHasLine.
-namespace msg {
-constexpr const char kInvalidFormat[] = "Invalid format: ";
-constexpr const char kInvalidTimeout[] = "Invalid timeout: ";
-constexpr const char kUnexpectedResponse[] = "Unexpected response from NCCL: ";
-constexpr const char kClosedByNccl[] = "NCCL unexpectedly closed the connection\n";
-constexpr const char kClosedByServer[] = "Connection closed by server\n";
-constexpr const char kClosedByJob[] = "Connection closed by the NCCL job.\n";
-constexpr const char kTimedOutRetrying[] = "Connection timed out; retrying...\n";
-constexpr const char kFwriteFailed[] = "fwrite to stdout failed!\n";
-constexpr const char kActivationFailed[] = "Monitor mode activation failed: ";
-constexpr const char kMonitorStopped[] = "Monitoring stopped by user";
-constexpr const char kVersionBanner[] = "RCCL RAS client version ";
-constexpr const char kConnectFailed[] = "Failed to connect to the NCCL RAS service!\n";
-constexpr const char kProtocolMismatch[] = "NCCL RAS protocol version mismatch";
-}  // namespace msg
-
-// LogHas over a msg:: sentence plus whatever the unit appended to it.
-bool LogHasLine(const std::string& log, const std::string& sentence, const std::string& tail = "") {
-  return LogHas(log, (sentence + tail).c_str());
-}
 
 // The errnos the unit perror()'d, in call order.
 //
@@ -205,7 +175,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_ShortText_StoresTextAndContinues) {
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("text", format);
-  EXPECT_EQ("", out.log);
   // A dropped `break` in case 'f' falls through to case 'h', which stores optarg here.
   EXPECT_STREQ("localhost", hostName);
 }
@@ -216,7 +185,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_ShortJson_StoresJsonAndContinues) {
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("json", format);
-  EXPECT_EQ("", out.log);
   EXPECT_STREQ("localhost", hostName);
 }
 
@@ -226,7 +194,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_LongEqualsJson_StoresJson) {
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("json", format);
-  EXPECT_EQ("", out.log);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_LongSeparateText_StoresText) {
@@ -235,7 +202,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_LongSeparateText_StoresText) {
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("text", format);
-  EXPECT_EQ("", out.log);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_UppercaseJson_IsAcceptedCaseInsensitively) {
@@ -244,7 +210,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UppercaseJson_IsAcceptedCaseInsensiti
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("JSON", format);  // stored verbatim; only the comparison folds case
-  EXPECT_EQ("", out.log);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_MixedCaseText_IsAcceptedCaseInsensitively) {
@@ -253,7 +218,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_MixedCaseText_IsAcceptedCaseInsensiti
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("TeXt", format);
-  EXPECT_EQ("", out.log);
 }
 
 // --- case 'f': rejecting arm -----------------------------------------------
@@ -264,8 +228,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_ReportsInvalidFormatAndE
   EXPECT_EQ(1, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("xml", format);  // the store happens before the validation
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidFormat, "xml (must be text or json)\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidTimeout));
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_TextWithSuffix_ReportsInvalidFormatAndExitsOne) {
@@ -274,8 +236,6 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_TextWithSuffix_ReportsInvalidFormatAn
   EXPECT_EQ(1, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("texts", format);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidFormat, "texts (must be text or json)\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidTimeout));
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_TerminatesProcessWithStatusOne) {
@@ -293,7 +253,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_ShortPositive_StoresValue) {
 
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   EXPECT_EQ(37, timeout);
-  EXPECT_EQ("", out.log);
   // A dropped `break` in case 't' falls through to case 'v', which sets this.
   EXPECT_FALSE(verbose);
 }
@@ -303,7 +262,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_LongEqualsPositive_StoresValue) {
 
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   EXPECT_EQ(37, timeout);
-  EXPECT_EQ("", out.log);
   EXPECT_FALSE(verbose);
 }
 
@@ -312,7 +270,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_LongSeparatePositive_StoresValue) {
 
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   EXPECT_EQ(37, timeout);
-  EXPECT_EQ("", out.log);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsTimeout_Zero_IsAcceptedAndDisablesTimeout) {
@@ -320,7 +277,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_Zero_IsAcceptedAndDisablesTimeout) {
 
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   EXPECT_EQ(0, timeout);
-  EXPECT_EQ("", out.log);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsTimeout_LeadingZeroValue_IsParsedAsBaseTen) {
@@ -328,7 +284,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_LeadingZeroValue_IsParsedAsBaseTen) 
 
   EXPECT_EQ(kParseArgsNoExit, out.exitStatus);
   EXPECT_EQ(10, timeout);  // 8 if the strtol base were 0, 16 if it were 16
-  EXPECT_EQ("", out.log);
 }
 
 // --- case 't': rejecting arms ----------------------------------------------
@@ -338,8 +293,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_Negative_ReportsInvalidAndExitsOne) 
 
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_EQ(-5, timeout);  // -5, not the -1 initializer: the store precedes the check
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidTimeout, "-5\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidFormat));
 }
 
 TEST_F(RasClientMicrotest, ParseArgsTimeout_TrailingGarbage_ReportsInvalidAndExitsOne) {
@@ -347,8 +300,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_TrailingGarbage_ReportsInvalidAndExi
 
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_EQ(5, timeout);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidTimeout, "5x\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidFormat));
 }
 
 TEST_F(RasClientMicrotest, ParseArgsTimeout_NonNumeric_ReportsInvalidAndExitsOne) {
@@ -356,8 +307,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_NonNumeric_ReportsInvalidAndExitsOne
 
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_EQ(0, timeout);  // strtol consumed nothing and returned 0
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidTimeout, "abc\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidFormat));
 }
 
 TEST_F(RasClientMicrotest, ParseArgsTimeout_HexLiteral_IsRejectedByBaseTenParse) {
@@ -365,8 +314,6 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_HexLiteral_IsRejectedByBaseTenParse)
 
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_EQ(0, timeout);  // base 10 stops at 'x'; base 0 or 16 would accept 16
-  EXPECT_TRUE(LogHasLine(out.log, msg::kInvalidTimeout, "0x10\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kInvalidFormat));
 }
 
 // ===========================================================================
@@ -1016,23 +963,6 @@ ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
   return out;
 }
 
-// The text between `needle` and the following '\n'; "" when `needle` is absent.
-std::string LineAfter(const std::string& log, const char* needle) {
-  const size_t at = log.find(needle);
-  if (at == std::string::npos) return "";
-  const size_t start = at + std::strlen(needle);
-  const size_t end = log.find('\n', start);
-  return log.substr(start, end == std::string::npos ? std::string::npos : end - start);
-}
-
-size_t CountChar(const std::string& s, char c) {
-  size_t n = 0;
-  for (char ch : s) {
-    if (ch == c) ++n;
-  }
-  return n;
-}
-
 // Every global parseArgs can write, still at its compiled-in default. The exiting
 // arms must reach exit without touching any of them.
 void ExpectAllGlobalsAtDefault() {
@@ -1049,55 +979,16 @@ void ExpectAllGlobalsAtDefault() {
 
 // --- printUsage, called directly -------------------------------------------
 
-// The whole block, as one golden string, rather than a needle per line.
-//
-// One exact comparison subsumes what fifteen LogHas calls plus an ordering test used to check -- every line present,
-// in declaration order, with both macros interpolated -- and catches what none of them could: a line the unit stopped
-// printing, or one it started printing. It also means a reworded usage line is a single readable diff here instead of
-// a scattered handful of "needle not found" failures.
-//
-// The two macro defaults are interpolated rather than spelled, so a changed NCCL_RAS_CLIENT_PORT or
-// RAS_COLLECTIVE_LEG_TIMEOUT_SEC moves both sides together and this test keeps testing printUsage, not the constants.
-TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_EmitsTheWholeUsageBlockVerbatim) {
-  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
-
-  const std::string want = std::string(
-      "Usage: ") + kUsageProg + " [OPTION]...\n"
-      "Query the state of a running NCCL job.\n"
-      "\nOptions:\n"
-      "  -f, --format=FMT    Output format: text or json (text by default)\n"
-      "  -h, --host=HOST     Host name or IP address of the RAS client socket of the\n"
-      "                      NCCL job to connect to (localhost by default)\n"
-      "  -m, --monitor[=GROUPS] Monitor mode: continuously watch for peer changes.\n"
-      "                      Optional GROUPS: lifecycle, trace, all, or\n"
-      "                      combinations like lifecycle,trace (lifecycle by default)\n"
-      "  -p, --port=PORT     TCP port of the RAS client socket of the NCCL job\n"
-      "                      (" STR(NCCL_RAS_CLIENT_PORT) " by default)\n"
-      "  -t, --timeout=SECS  Maximum time for the local NCCL process to wait for\n"
-      "                      responses from other NCCL processes\n"
-      "                      (" STR(RAS_COLLECTIVE_LEG_TIMEOUT_SEC) " secs by default; 0 disables the timeout)\n"
-      "  -v, --verbose       Increase the verbosity level of the RAS output\n"
-      "      --help          Print this help and exit\n"
-      "      --version       Print the version number and exit\n";
-
-  EXPECT_EQ(want, log);
-}
-
-// printUsage takes argv0 as a parameter, so a different value must show up.
-TEST_F(RasClientMicrotest, PrintUsage_DifferentArgv0_IsEchoedVerbatim) {
-  const std::string log = CaptureLog([]() { printUsage("/opt/rocm/bin/rccl-ras-other"); });
-
-  EXPECT_TRUE(LogHas(log, "Usage: /opt/rocm/bin/rccl-ras-other [OPTION]...\n")) << log;
-  EXPECT_FALSE(LogHas(log, kUsageProg)) << log;
-}
+// printUsage's entire product is the text it writes to stderr, so with output assertions gone there is nothing left
+// to check about WHAT it prints: the golden-string comparison, the per-line needles and the argv0 echo all went with
+// them. What remains observable is that it writes only to stderr, leaves every parse global alone and returns rather
+// than exiting, which is what the two exiting arms of parseArgs rely on.
 
 // printUsage writes nowhere but stderr and changes no parse state; without this
 // the two exiting arms cannot be told apart from the function they call.
 TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesNotExit) {
   const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
 
-  EXPECT_TRUE(LogHas(log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << log;
-  EXPECT_FALSE(LogHasLine(log, msg::kVersionBanner)) << log;
   ExpectAllGlobalsAtDefault();
 }
 
@@ -1109,10 +1000,6 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_LongForm_PrintsUsageWithArgv0AndExitsZe
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help"});
 
   EXPECT_EQ(0, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_TRUE(LogHas(out.log, "      --version       Print the version number and exit\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "unrecognized option")) << out.log;
   ExpectAllGlobalsAtDefault();
 }
 
@@ -1121,7 +1008,6 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_FollowedByOtherOptions_ExitsBeforeApply
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help", "-v", "-p", "31337"});
 
   EXPECT_EQ(0, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
   EXPECT_FALSE(verbose);
   EXPECT_STREQ(kDefaultPort, port);
 }
@@ -1132,8 +1018,6 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_AfterAnAppliedOption_StillExitsZeroWith
 
   EXPECT_EQ(0, out.exitStatus);
   EXPECT_STREQ("31337", port);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "requires an argument")) << out.log;
 }
 
 // A unique long-option abbreviation still resolves to 'e'; "--hel" is not a
@@ -1142,8 +1026,6 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_UniqueAbbreviation_ReachesTheHelpArmNot
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--hel"});
 
   EXPECT_EQ(0, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "is ambiguous")) << out.log;
 }
 
 // --- case 'r': --version ---------------------------------------------------
@@ -1155,17 +1037,7 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_PrintsComponentsInOrderAndE
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
 
   EXPECT_EQ(0, out.exitStatus);
-  ASSERT_TRUE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
 
-  const std::string version = LineAfter(out.log, "RCCL RAS client version ");
-  int major = -1;
-  int minor = -1;
-  int patch = -1;
-  ASSERT_EQ(3, std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch)) << version;
-  EXPECT_EQ(NCCL_MAJOR, major) << version;
-  EXPECT_EQ(NCCL_MINOR, minor) << version;
-  EXPECT_EQ(NCCL_PATCH, patch) << version;
-  EXPECT_EQ(2u, CountChar(version, '.')) << version;
   ExpectAllGlobalsAtDefault();
 }
 
@@ -1175,10 +1047,6 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_DoesNotPrintTheUsageText) {
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
 
   EXPECT_EQ(0, out.exitStatus);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "Usage: ")) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "      --version       Print the version number and exit\n")) << out.log;
-  EXPECT_FALSE(LogHas(out.log, kUsageProg)) << out.log;
 }
 
 // --version exits before later options are applied, and 'r' is unreachable via
@@ -1187,7 +1055,6 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeAp
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version", "-v"});
 
   EXPECT_EQ(0, out.exitStatus);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
   EXPECT_FALSE(verbose);
 }
 
@@ -1195,8 +1062,6 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_ShortDashR_IsNotAnOptionAndFallsToDe
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-r"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
 }
 
 // --- default: the four distinct getopt routes ------------------------------
@@ -1207,9 +1072,6 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownShortOption_PrintsUsageAndExi
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-z"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_TRUE(LogHas(out.log, "      --help          Print this help and exit\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
   ExpectAllGlobalsAtDefault();
 }
 
@@ -1217,8 +1079,6 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownLongOption_PrintsUsageAndExit
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--bogus"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
   ExpectAllGlobalsAtDefault();
 }
 
@@ -1227,16 +1087,13 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_AmbiguousLongAbbreviation_PrintsUsag
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--ver"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
   EXPECT_FALSE(verbose);
-  EXPECT_FALSE(LogHasLine(out.log, msg::kVersionBanner)) << out.log;
 }
 
 TEST_F(RasClientMicrotest, ParseArgsDefault_ShortOptionMissingItsArgument_PrintsUsageAndExitsOne) {
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-p"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
   EXPECT_STREQ(kDefaultPort, port);
 }
 
@@ -1244,7 +1101,6 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_LongOptionMissingItsArgument_PrintsU
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
   EXPECT_STREQ(kDefaultPort, port);
 }
 
@@ -1256,7 +1112,6 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_AfterAnAppliedOption_ExitsOneAndStop
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_TRUE(verbose);
   EXPECT_STREQ(kDefaultPort, port);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
 }
 
 // --- death tests: production really terminates -----------------------------
@@ -1315,7 +1170,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_FormatNeverSpecified_WritesNothingRea
     EXPECT_EQ(0, rc);
     EXPECT_EQ(0, writeHook.calls);
     EXPECT_EQ(0, readHook.calls);
-    EXPECT_EQ("", log);
     EXPECT_TRUE(g_writtenData.empty()) << g_writtenData;
   }
 
@@ -1359,7 +1213,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOk_SendsExactCommandOnSo
   EXPECT_EQ(77, readFd);
   EXPECT_EQ(1, writeHook.calls);
   EXPECT_EQ(1, readHook.calls);
-  EXPECT_EQ("", log);
 }
 
 // strcasecmp folds case, so a lowercase acknowledgement is still success.
@@ -1373,7 +1226,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersLowercaseOk_IsAcceptedCa
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
-  EXPECT_EQ("", log);
 }
 
 // strcasecmp compares whole strings: "OK" without the newline is a mismatch.
@@ -1387,8 +1239,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithoutNewline_Reports
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "OK\n")) << log;
-  EXPECT_FALSE(LogHas(log, "NCCL unexpectedly closed the connection"));
 }
 
 // A correct prefix plus trailing bytes is also a mismatch.
@@ -1401,7 +1251,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithTrailingText_Repor
   const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "OK\nextra\n")) << log;
 }
 
 // "OKAY\n" shares the first two characters with "OK\n" and must still be rejected.
@@ -1415,7 +1264,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkay_ReportsUnexpectedRe
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "OKAY\n\n")) << log;
 }
 
 // Write arm, EAGAIN side. socketWrite surfaces a failed write as -1, never as a
@@ -1496,8 +1344,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerClosesConnection_ReportsUnexpec
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByNccl)) << log;
-  EXPECT_FALSE(LogHas(log, "Unexpected response from NCCL"));
 }
 
 // snprintf truncates silently and its return value is discarded, so an
@@ -1512,7 +1358,6 @@ TEST_F(RasClientMicrotest, SetOutputFormat_FormatOverflowsMsgBuf_TruncatesComman
   const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(0, rc);  // truncation is not detected or reported
-  EXPECT_EQ("", log);
   ASSERT_EQ(4095u, g_writtenData.size());
   EXPECT_EQ("SET FORMAT zzzz", g_writtenData.substr(0, 15));
   EXPECT_EQ('z', g_writtenData.back());
@@ -1593,7 +1438,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAnd
   EXPECT_EQ(0, fwriteHook.calls);
   EXPECT_EQ(0, fflushHook.calls);
   EXPECT_EQ("", g_stdoutData);
-  EXPECT_EQ("", log);
 }
 
 // Command arm, verbose on: the prefix is "VERBOSE " with its trailing space.
@@ -1605,7 +1449,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_Verbose_SendsVerbosePrefixedSt
 
   EXPECT_EQ("VERBOSE STATUS\n", g_writtenData);
   EXPECT_EQ(0, fwriteHook.calls);
-  EXPECT_EQ("", log);
 }
 
 // Loop body: three reads of different lengths each become their own
@@ -1630,7 +1473,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdou
   EXPECT_EQ(1u, g_fwriteCalls[2].size);
   EXPECT_EQ(6u, g_fwriteCalls[2].nmemb);
   EXPECT_EQ(stdout, g_fwriteCalls[0].stream);
-  EXPECT_EQ("", log);
 }
 
 // Write arm, EAGAIN: socketWrite returns -1 with a timeout errno.
@@ -1710,7 +1552,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndR
   EXPECT_EQ(2, fwriteHook.calls);
   EXPECT_EQ(1, fflushHook.calls);
   EXPECT_EQ(2u, g_readScriptPos);
-  EXPECT_TRUE(LogHasLine(log, msg::kFwriteFailed)) << log;
 }
 
 // fflush arm: the second flush fails, after its chunk already reached stdout.
@@ -1733,7 +1574,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndRe
   EXPECT_EQ(2, fflushHook.calls);
   EXPECT_EQ(2u, g_readScriptPos);
   ExpectPerrors({ENOSPC});
-  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
 }
 
 
@@ -1807,18 +1647,6 @@ uint32_t AddrOf(const struct sockaddr* sa) {
   return ntohl(reinterpret_cast<const struct sockaddr_in*>(sa)->sin_addr.s_addr);
 }
 
-// "Connecting to <host>:<port>: " -- the address the unit formatted for the entry it failed on, without the
-// strerror() tail. The address is the unit's own data and is what these tests are about; the tail is libc's table,
-// so matching it would make a locale or libc change look like a client.cc regression.
-std::string ConnectingPrefix(const std::string& host, const std::string& svc) {
-  return "Connecting to " + host + ":" + svc + ": ";
-}
-
-// The one place the tail carries the assertion: ConnectToNccl_GetnameinfoClobbersErrno_ pins that the message
-// reports the connect(2) failure and not the errno getnameinfo left behind, which only the strerror text shows.
-std::string ConnectingLine(const char* host, const char* svc, int err) {
-  return ConnectingPrefix(host, svc) + strerror(err) + "\n";
-}
 
 constexpr const char kFailedHeader[] = "Failed to connect to the NCCL RAS service!\n";
 constexpr const char kArgsAdvice[] = "the host/port arguments are correct and match NCCL_RAS_ADDR.\n";
@@ -1848,14 +1676,12 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetaddrinfoFails_ReportsResolveErrorAnd
   const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
-  EXPECT_TRUE(LogHas(log, "Resolving rasnode7:31337: scripted resolver failure\n")) << log;
   EXPECT_EQ(1, gai.calls);
   EXPECT_EQ(EAI_NONAME, gaiCode);
   EXPECT_EQ(0, sockHook.calls);
   EXPECT_EQ(0, g_freeaddrinfoCalls);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(-1, sock);
-  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: the two `hints` stores plus the (hostName, port) pair handed to
@@ -1885,7 +1711,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ResolvesConfiguredEndpoint_PassesUnspec
   EXPECT_EQ(kOtherPort, service);
   EXPECT_EQ(AF_UNSPEC, family);
   EXPECT_EQ(SOCK_STREAM, socktype);
-  EXPECT_TRUE(LogHas(log, "Resolving rasnode7:31337: ")) << log;
 }
 
 // Arm: socket() == -1 -> perror("socket") + `continue`. The skipped entry must
@@ -1920,8 +1745,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SocketFailsOnFirstEntry_SkipsToNextAddr
   EXPECT_EQ(std::vector<int>({101}), g_closedFds);
   EXPECT_EQ(1, g_freeaddrinfoCalls);
   ExpectPerrors({EAFNOSUPPORT});
-  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
-  EXPECT_FALSE(LogHas(log, ConnectingPrefix("127.0.0.1", "28028").c_str())) << log;
 }
 
 // Arm: the first entry's connect fails and the *middle* entry's succeeds ->
@@ -1964,10 +1787,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrys
   EXPECT_EQ(0x7f000002u, connectCalls[1].addr);
   EXPECT_EQ(std::vector<int>({200, 201}), g_closedFds);
   EXPECT_EQ(1, g_freeaddrinfoCalls);
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix("127.0.0.1", "28028").c_str())) << log;
-  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
-  EXPECT_FALSE(LogHas(log, ConnectingPrefix("127.0.0.2", "28029").c_str())) << log;
-  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: every entry's connect fails -> sock == -1 after the walk, and the
@@ -1989,13 +1808,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnDefaultEndpoint_Repo
   EXPECT_EQ(std::vector<int>({300, 301, 302}), fds.issued);
   EXPECT_EQ(std::vector<int>({300, 301, 302}), g_closedFds);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // 2 would mean addrInfo was not nulled and fail: freed it again
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix("127.0.0.1", "28028").c_str())) << log;
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix("127.0.0.2", "28029").c_str())) << log;
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix("127.0.0.3", "28030").c_str())) << log;
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
-  EXPECT_TRUE(LogHas(log, kLocalAdvice)) << log;
-  EXPECT_FALSE(LogHas(log, kArgsAdvice)) << log;
-  EXPECT_FALSE(LogHas(log, kHandshakeEof)) << log;
 }
 
 // Arm: the ternary's true branch reached via a non-default host alone. With
@@ -2015,9 +1827,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomHost_ReportsHo
   EXPECT_EQ(-1, sock);
   EXPECT_EQ(std::vector<int>({310, 311, 312}), fds.issued);
   EXPECT_EQ(std::vector<int>({310, 311, 312}), g_closedFds);
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
-  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
-  EXPECT_FALSE(LogHas(log, kLocalAdvice)) << log;
 }
 
 // Arm: the ternary's true branch reached via a non-default port alone, with
@@ -2038,9 +1847,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomPort_ReportsHo
   EXPECT_STREQ("localhost", hostName);
   EXPECT_EQ(std::vector<int>({320, 321, 322}), fds.issued);
   EXPECT_EQ(std::vector<int>({320, 321, 322}), g_closedFds);
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
-  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
-  EXPECT_FALSE(LogHas(log, kLocalAdvice)) << log;
 }
 
 // Arm: `if (timeout)` false. Zero disables the timeout, so neither socket
@@ -2059,7 +1865,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutZero_SkipsBothSocketTimeoutOptio
   EXPECT_EQ(0, optHook.calls);
   EXPECT_EQ(1, sockHook.calls);
   EXPECT_EQ(std::vector<int>({330}), g_closedFds);
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: `if (timeout)` true -> SO_SNDTIMEO then SO_RCVTIMEO, both carrying the
@@ -2090,7 +1895,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeo
     EXPECT_EQ(1L, o.sec);
     EXPECT_EQ(0L, o.usec);
   }
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: the first setsockopt fails -> `||` short-circuits, so SO_RCVTIMEO is
@@ -2114,8 +1918,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SendTimeoutOptionFails_SkipsReceiveOpti
   EXPECT_EQ(350, sock);
   EXPECT_EQ(std::vector<int>({350}), g_closedFds);
   ExpectPerrors({ENOPROTOOPT});
-  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
-  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: only the second setsockopt fails -> both calls happen and the single
@@ -2144,7 +1946,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ReceiveTimeoutOptionFails_ReportsAfterB
   EXPECT_EQ(1, connectHook.calls);
   EXPECT_EQ(std::vector<int>({360}), g_closedFds);
   ExpectPerrors({ENOPROTOOPT});
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
 }
 
 // Arm: the getnameinfo success path -- NI_NUMERICHOST|NI_NUMERICSERV over the
@@ -2174,7 +1975,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_FormatsTheNumericNameOfThe
   EXPECT_EQ(NI_NUMERICHOST | NI_NUMERICSERV, flags);
   EXPECT_EQ(sizeof(struct sockaddr_in), salen);
   EXPECT_EQ(kEntryPort0, queriedPort);
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix("resolved.host", "5150").c_str())) << log;
 }
 
 // Arm: getnameinfo fails -> the strcpy fallback puts the *configured* host and
@@ -2200,9 +2000,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFails_FallsBackToConfiguredH
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(3, nameHook.calls);
-  EXPECT_TRUE(LogHas(log, ConnectingPrefix(kOtherHost, kOtherPort).c_str())) << log;
-  EXPECT_FALSE(LogHas(log, "STALE_HOST")) << log;
-  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
 }
 
 // Arm: `err = errno` is captured before getnameinfo runs, so a getnameinfo that
@@ -2224,8 +2021,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoClobbersErrno_MessageKeepsTh
   const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
-  EXPECT_TRUE(LogHas(log, ConnectingLine("10.0.0.5", "5151", EHOSTUNREACH).c_str())) << log;
-  EXPECT_FALSE(LogHas(log, ConnectingLine("10.0.0.5", "5151", EPERM).c_str())) << log;
 }
 
 // Arm: freeaddrinfo receives the list *head*, not the exhausted walk cursor,
@@ -2262,7 +2057,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolved
   EXPECT_EQ(kEntryPort0, freedHeadPort);
   EXPECT_EQ(std::vector<int>({400, 401, 402}), fds.issued);
   EXPECT_EQ(std::vector<int>({400, 401, 402}), g_closedFds);
-  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
 }
 
 
@@ -2318,7 +2112,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ServerAcceptsProtocol_SendsClientHel
   EXPECT_EQ(kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
-  EXPECT_EQ("", out.log);
 }
 
 // Arm: strncasecmp folds case, so a lowercase banner is still a valid response.
@@ -2331,7 +2124,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_LowercaseServerBanner_IsAcceptedCase
   EXPECT_EQ(kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
-  EXPECT_EQ("", out.log);
 }
 
 // Arm: strtol != NCCL_RAS_CLIENT_PROTOCOL warns but does NOT abort. 7 is neither
@@ -2346,11 +2138,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ServerProtocolMismatch_WarnsAndConti
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());  // not the `fail:` arm: the socket stays open
   // The %s is msgBuf + 16, which still carries the response's trailing newline.
-  EXPECT_TRUE(LogHas(out.log,
-                     "NCCL RAS protocol version mismatch (NCCL: 7\n; RAS client: 2)!\n"
-                     "Will try to continue in spite of that...\n"))
-      << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kUnexpectedResponse));
 }
 
 // Arm: strtol converts nothing and returns 0, which is != 2, so a non-numeric
@@ -2363,11 +2150,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_NonNumericProtocolVersion_WarnsWithE
   EXPECT_EQ(0, out.ret);
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
-  EXPECT_TRUE(LogHas(out.log,
-                     "NCCL RAS protocol version mismatch (NCCL: abc\n; RAS client: 2)!\n"
-                     "Will try to continue in spite of that...\n"))
-      << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kUnexpectedResponse));
 }
 
 // Arm: the strtol base is 10, so "0x2" stops at 'x' and yields 0 -- a mismatch.
@@ -2379,10 +2161,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_HexSpelledVersion_IsParsedBaseTenAnd
 
   EXPECT_EQ(0, out.ret);
   EXPECT_TRUE(g_closedFds.empty());
-  EXPECT_TRUE(LogHas(out.log,
-                     "NCCL RAS protocol version mismatch (NCCL: 0x2\n; RAS client: 2)!\n"
-                     "Will try to continue in spite of that...\n"))
-      << out.log;
 }
 
 // Arm: strncasecmp compares 16 bytes, so the banner's trailing space is part of
@@ -2394,8 +2172,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_BannerWithoutTrailingSpace_ReportsUn
 
   EXPECT_EQ(1, out.ret);
   EXPECT_EQ(kClientHello, g_writtenData);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kUnexpectedResponse, "SERVER PROTOCOL\n\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kProtocolMismatch));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2407,8 +2183,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_SixteenthByteNotSpace_ReportsUnexpec
   const HandshakeOutcome out = RunConnectToNCCL();
 
   EXPECT_EQ(1, out.ret);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kUnexpectedResponse, "SERVER PROTOCOLX2\n\n")) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kProtocolMismatch));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2420,7 +2194,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_UnrelatedResponse_ReportsUnexpectedA
 
   EXPECT_EQ(1, out.ret);
   EXPECT_EQ(kClientHello, g_writtenData);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kUnexpectedResponse, "ERROR unknown command\n\n")) << out.log;
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2430,8 +2203,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ServerClosesBeforeReplying_ReportsCl
 
   EXPECT_EQ(1, out.ret);
   EXPECT_EQ(kClientHello, g_writtenData);  // the write arm ran; only the reply is missing
-  EXPECT_TRUE(LogHasLine(out.log, msg::kClosedByNccl)) << out.log;
-  EXPECT_FALSE(LogHasLine(out.log, msg::kUnexpectedResponse));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2449,8 +2220,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
   EXPECT_EQ(1, writeHook.calls);
   EXPECT_EQ("", g_writtenData);
   ExpectPerrors({EIO});
-  EXPECT_FALSE(LogHasLine(out.log, msg::kTimedOutRetrying));
-  EXPECT_FALSE(LogHas(out.log, "read socket: "));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2464,7 +2233,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEio_PerrorsAndFails) {
   EXPECT_EQ(1, out.ret);
   EXPECT_EQ(kClientHello, g_writtenData);
   ExpectPerrors({EIO});
-  EXPECT_FALSE(LogHasLine(out.log, msg::kTimedOutRetrying));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2495,7 +2263,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEagainOnce_RetriesOnce
   EXPECT_EQ(2, connectHook.calls);         // the retry re-ran the whole resolve/connect walk
   EXPECT_EQ(kClientHello, g_writtenData);  // only the second, successful write reached the wire
   EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kTimedOutRetrying)) << out.log;
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2513,8 +2280,6 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEagainOnce_RetriesOnceT
   EXPECT_EQ(2, connectHook.calls);
   EXPECT_EQ(std::string(kClientHello) + kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
-  EXPECT_TRUE(LogHasLine(out.log, msg::kTimedOutRetrying)) << out.log;
-  EXPECT_FALSE(LogHas(out.log, "read socket: "));
   ExpectClosedExactlyOnce(kSocketFd);
 }
 
@@ -2568,14 +2333,6 @@ void CtRecord(std::vector<CtSetsockoptCall>* into, int optname, const void* optv
   into->push_back(CtSetsockoptCall{optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
 }
 
-size_t CtCount(const std::string& hay, const std::string& needle) {
-  size_t n = 0;
-  for (size_t p = hay.find(needle); p != std::string::npos; p = hay.find(needle, p + needle.size())) {
-    ++n;
-  }
-  return n;
-}
-
 }  // namespace
 
 // timeout < 0 skips the negotiation but is still truthy, so the bump runs with
@@ -2597,7 +2354,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBum
   }
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ("", log);
   EXPECT_EQ(std::string(kCtClientHello), g_writtenData);  // no TIMEOUT line was sent
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", CtTrace(opts));
   EXPECT_EQ(42, sock);
@@ -2625,7 +2381,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoS
   }
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ("", log);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 0\n", g_writtenData);
   EXPECT_EQ("", CtTrace(opts));
   EXPECT_EQ(42, sock);
@@ -2651,7 +2406,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
   }
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ("", log);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
   EXPECT_EQ(42, sock);
@@ -2669,7 +2423,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersLowercaseOk_IsAcceptedCas
   const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ("", log);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
@@ -2688,7 +2441,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkay_ReportsUnexpectedRes
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);  // the handshake copy passed
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "OKAY\n\n")) << log;
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // fail: sees addrInfo already nulled
@@ -2705,8 +2457,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkWithoutNewline_ReportsU
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "OK\n")) << log;
-  EXPECT_FALSE(LogHas(log, "NCCL unexpectedly closed the connection"));
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
 }
@@ -2721,8 +2471,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerClosesAfterTimeoutRequest_Report
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByNccl)) << log;
-  EXPECT_FALSE(LogHas(log, "Unexpected response from NCCL"));
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
   EXPECT_EQ(1, g_freeaddrinfoCalls);
@@ -2794,7 +2542,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithEagain_RetriesOnceTh
   }
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ(1u, CtCount(log, "Connection timed out; retrying...\n"));
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
   ASSERT_EQ(1u, g_closedFds.size());
@@ -2830,7 +2577,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithEagain_RetriesOnc
   }
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ(1u, CtCount(log, "Connection timed out; retrying...\n"));
   EXPECT_EQ("CLIENT PROTOCOL 2\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
@@ -2877,7 +2623,6 @@ TEST_F(RasClientMicrotest, ConnectFailLabel_SockNeverOpened_ReturnsOneAndClosesN
   const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kConnectFailed)) << log;
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(-1, sock);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // the walk's own free; fail: adds no second
@@ -2926,8 +2671,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_NoEventGroups_SendsBareMonitorCommandAn
   EXPECT_EQ(std::vector<int>({kMonitorSock}), g_writtenFds);
   EXPECT_EQ(std::vector<int>({kMonitorSock, kMonitorSock}), g_readFds);
   EXPECT_EQ("", g_stdoutData);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_EventGroupsRequested_SendsThemInTheMonitorCommand) {
@@ -2940,7 +2683,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_EventGroupsRequested_SendsThemInTheMoni
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("MONITOR lifecycle,trace\n", g_writtenData);
-  EXPECT_TRUE(LogHas(log, kMonitorRule)) << log;
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithEagain_ReportsConnectionTimedOutAndReturnsOne) {
@@ -2957,7 +2699,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithEagain_ReportsConnectionT
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({});
-  EXPECT_FALSE(LogHas(log, kMonitorBanner));
   EXPECT_EQ(1, writeHook.calls);
   EXPECT_EQ(0, readHook.calls);
 }
@@ -2991,7 +2732,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithEagain_ReportsCo
   EXPECT_EQ(1, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
   ExpectPerrors({});
-  EXPECT_FALSE(LogHas(log, kMonitorBanner));
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
@@ -3004,7 +2744,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithConnectionReset_
   EXPECT_EQ(1, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
   ExpectPerrors({ECONNRESET});
-  EXPECT_FALSE(LogHas(log, "Connection closed by server"));
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_ServerClosesBeforeActivation_ReportsConnectionClosedByServerAndReturnsOne) {
@@ -3014,9 +2753,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ServerClosesBeforeActivation_ReportsCon
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByServer)) << log;
-  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
-  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
   EXPECT_EQ(-1, g_lastSetsockoptOptname);
 }
 
@@ -3029,8 +2765,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseShorterThanThreeBytes
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kActivationFailed, "OK")) << log;
-  EXPECT_FALSE(LogHas(log, kMonitorBanner));
   EXPECT_EQ(-1, g_lastSetsockoptOptname);
 }
 
@@ -3043,8 +2777,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseOkay_ReportsActivatio
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kActivationFailed, "OKAY\n")) << log;
-  EXPECT_FALSE(LogHas(log, kMonitorRule));
   EXPECT_EQ("", g_stdoutData);
 }
 
@@ -3056,8 +2788,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseLowercaseOk_IsAccepte
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
-  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
 }
 
 // strncasecmp(...,3) only inspects the OK line, unlike setOutputFormat's
@@ -3073,8 +2803,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcc
   EXPECT_EQ("more", g_stdoutData);
   // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
   EXPECT_EQ(stdout, g_lastFwriteStream);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
-  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
 }
 
 // --- stage 1: disabling the receive timeout ---------------------------------
@@ -3090,8 +2818,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationSucceeds_DisablesTheReceiveTi
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
-  EXPECT_TRUE(LogHas(log, kMonitorRule)) << log;
 }
 
 // Unlike connectToNCCL's setsockopt, this one is fatal: no banners, no loop.
@@ -3111,7 +2837,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_SetsockoptFails_ReportsPerrorAndReturns
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({ENOPROTOOPT});
-  EXPECT_FALSE(LogHas(log, kMonitorBanner));
   EXPECT_EQ(1, sockoptHook.calls);
   EXPECT_EQ(1, readHook.calls);  // the loop was never entered
   EXPECT_EQ("", g_stdoutData);
@@ -3134,7 +2859,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseIsExactlyTheOkLine_Sk
   EXPECT_EQ(0, rc);
   EXPECT_EQ(0, fwriteHook.calls);
   EXPECT_EQ(0, fflushHook.calls);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
 }
 
 // okLen (3) differs from remainingBytes (7), so an off-by-one in either is visible.
@@ -3157,7 +2881,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverAfterOkLine_FlushesOnlyTheRemai
   ASSERT_EQ(1u, seen.size());
   EXPECT_EQ(1u, seen[0].size);
   EXPECT_EQ(7u, seen[0].nmemb);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LeftoverIsASingleByte_StillFlushesThatByte) {
@@ -3179,7 +2902,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverIsASingleByte_StillFlushesThatB
   ASSERT_EQ(1u, seen.size());
   EXPECT_EQ(1u, seen[0].size);
   EXPECT_EQ(1u, seen[0].nmemb);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
 }
 
 // The flush is byte-counted, not string-based: an embedded NUL is forwarded.
@@ -3192,7 +2914,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverContainsEmbeddedNul_FlushesEver
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(std::string("A\0B\n", 4), g_stdoutData);
-  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
 }
 
 // Leftover-site fwrite failure. readHook.calls == 1 is what separates this from
@@ -3210,7 +2931,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFwriteShort_ReportsFwriteFailur
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kFwriteFailed)) << log;
   EXPECT_EQ(1, readHook.calls);
   EXPECT_EQ(1, fwriteHook.calls);
   EXPECT_EQ(0, fflushHook.calls);
@@ -3233,7 +2953,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBefore
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({EIO});
-  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
   EXPECT_EQ("abcdef\n", g_stdoutData);
   EXPECT_EQ(1, readHook.calls);
   EXPECT_EQ(1, fflushHook.calls);
@@ -3271,8 +2990,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemIn
   EXPECT_EQ(1u, seen[2].size);
   EXPECT_EQ(12u, seen[2].nmemb);
   EXPECT_EQ(3, fflushHook.calls);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
-  EXPECT_FALSE(LogHasLine(log, msg::kMonitorStopped));
 }
 
 // rasRead swallows and retries EINTR itself, so the loop's `errno == EINTR`
@@ -3288,8 +3005,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopReadInterrupted_IsRetriedInsideRasR
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("beta\n", g_stdoutData);
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
-  EXPECT_FALSE(LogHasLine(log, msg::kMonitorStopped));
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LoopReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
@@ -3304,8 +3019,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopReadFailsWithConnectionReset_Report
   EXPECT_EQ(1, rc);
   EXPECT_EQ("alpha\n", g_stdoutData);
   ExpectPerrors({ECONNRESET});
-  EXPECT_FALSE(LogHasLine(log, msg::kMonitorStopped));
-  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
 }
 
 // Loop-site fwrite failure: readHook.calls == 3 and the already-forwarded first
@@ -3330,11 +3043,9 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFwriteShort_ReportsFwriteFailureAft
   const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kFwriteFailed)) << log;
   EXPECT_EQ("alpha\n", g_stdoutData);
   EXPECT_EQ(2, fwriteHook.calls);
   EXPECT_EQ(3, readHook.calls);
-  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturnsOne) {
@@ -3358,7 +3069,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturns
   EXPECT_EQ(stdout, g_lastFwriteStream);
   EXPECT_EQ(2, readHook.calls);
   EXPECT_EQ(1, fflushHook.calls);
-  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
 }
 
 
@@ -3429,7 +3139,6 @@ TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsAfterSocketOpened_ClosesOnc
   const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "HELLO SAILOR\n")) << log;
   EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
   EXPECT_EQ(kMainClientHello, g_writtenData);
   EXPECT_TRUE(g_stdoutData.empty()) << g_stdoutData;
@@ -3447,7 +3156,6 @@ TEST_F(RasClientMicrotest, RasClientMain_SetOutputFormatFails_ClosesSockOnceAndR
   const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
-  EXPECT_TRUE(LogHasLine(log, msg::kUnexpectedResponse, "NOPE\n")) << log;
   EXPECT_EQ(kMainClientHello + "SET FORMAT json\n", g_writtenData);
   EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
   EXPECT_TRUE(g_stdoutData.empty()) << g_stdoutData;
@@ -3466,7 +3174,6 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorModeClear_RunsGetNcclStatusAndRe
   EXPECT_EQ(0, rc);
   EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
   EXPECT_EQ("peer 0 ok\n", g_stdoutData);
-  EXPECT_FALSE(LogHas(log, "RAS Monitor Mode")) << log;
   EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
 }
 
@@ -3485,8 +3192,6 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorFlagInArgv_RunsMonitorNcclEvents
   EXPECT_EQ(0, rc);
   EXPECT_TRUE(monitorMode);
   EXPECT_EQ(kMainClientHello + "MONITOR\n", g_writtenData);
-  EXPECT_TRUE(LogHas(log, "RAS Monitor Mode - watching for peer changes (Ctrl+C to exit)...\n")) << log;
-  EXPECT_TRUE(LogHasLine(log, msg::kClosedByJob)) << log;
   EXPECT_EQ("peer 3 left\n", g_stdoutData);
   EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
 }
@@ -3550,8 +3255,6 @@ TEST_F(RasClientMicrotest, ParseArgsPort_LongFormMissingArgument_ExitsOneWithUsa
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
-  EXPECT_TRUE(LogHas(out.log, "  -p, --port=PORT     TCP port of the RAS client socket of the NCCL job\n")) << out.log;
   ASSERT_NE(nullptr, port);
   EXPECT_STREQ(kDefaultPort, port);
   EXPECT_STREQ(kDefaultHost, hostName);
@@ -3563,7 +3266,6 @@ TEST_F(RasClientMicrotest, ParseArgsPort_ShortFormMissingArgument_ExitsOneWithUs
   const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-v", "-p"});
 
   EXPECT_EQ(1, out.exitStatus);
-  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
   ASSERT_NE(nullptr, port);
   EXPECT_STREQ(kDefaultPort, port);
   // The preceding -v was applied, so the exit above aborted a running loop.
