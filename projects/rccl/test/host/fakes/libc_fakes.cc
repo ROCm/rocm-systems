@@ -29,6 +29,7 @@
 std::string g_writtenData;
 std::string g_stdoutData;
 FILE* g_lastFwriteStream = nullptr;
+std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
 std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
@@ -177,6 +178,13 @@ static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE* st
 
 static int DefaultFflush(FILE*) { return 0; }
 
+// Records the prefix and the errno the unit branched on, then forwards to the real perror so stderr still carries the
+// message. Tests assert on the record: the errno is the branch condition, where the sentence is only its wording.
+static void DefaultPerror(const char* prefix) {
+  g_perrorCalls.push_back(MicroPerrorCall{prefix ? prefix : "", errno});
+  ::perror(prefix);
+}
+
 static void DefaultExit(int status) { throw MicroExit{status}; }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +203,7 @@ std::function<int(const struct sockaddr*, socklen_t, char*, socklen_t, char*, so
 std::function<const char*(int)> g_gaiStrerror = DefaultGaiStrerror;
 std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwrite;
 std::function<int(FILE*)> g_fflush = DefaultFflush;
+std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
@@ -219,11 +228,13 @@ void ResetLibcFakes() {
   g_gaiStrerror = DefaultGaiStrerror;
   g_fwrite = DefaultFwrite;
   g_fflush = DefaultFflush;
+  g_perror = DefaultPerror;
   g_exit = DefaultExit;
 
   g_writtenData.clear();
   g_stdoutData.clear();
   g_lastFwriteStream = nullptr;
+  g_perrorCalls.clear();
   g_closedFds.clear();
   g_writtenFds.clear();
   g_readFds.clear();
@@ -270,6 +281,7 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
   return g_fwrite(ptr, size, nmemb, stream);
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
+void micro_perror(const char* prefix) { g_perror(prefix); }
 
 // noreturn: the default throws MicroExit. If a hook ever returns normally
 // the unit would fall through a path production treats as unreachable, so make

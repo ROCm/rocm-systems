@@ -49,6 +49,7 @@ int micro_getnameinfo(const struct sockaddr*, socklen_t, char*, socklen_t, char*
 const char* micro_gai_strerror(int);
 size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
+void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
 }  // extern "C"
 
@@ -64,4 +65,5 @@ void micro_exit(int) __attribute__((noreturn));
 #define gai_strerror micro_gai_strerror
 #define fwrite micro_fwrite
 #define fflush micro_fflush
+#define perror micro_perror
 #define exit micro_exit

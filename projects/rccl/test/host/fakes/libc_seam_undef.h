@@ -11,6 +11,7 @@
 // No include guard on purpose: the push/pop pair is positional.
 
 #undef exit
+#undef perror
 #undef fflush
 #undef fwrite
 #undef gai_strerror

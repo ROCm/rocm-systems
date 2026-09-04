@@ -48,6 +48,13 @@ struct MicroExit {
 // you. The delivery is truncated to the caller's buffer, so a read asking for
 // fewer bytes than the step offers gets a short read, not an overrun; the tail
 // is dropped rather than requeued, and the step is spent either way.
+// One perror() the unit made. `err` is errno as the unit left it at the call, which for every diagnostic in a
+// report-and-return-1 unit IS the branch condition: asserting it checks which arm ran, without matching the prose.
+struct MicroPerrorCall {
+  std::string prefix;
+  int err;
+};
+
 struct MicroReadStep {
   ssize_t ret;
   int err;
@@ -69,6 +76,7 @@ extern std::function<int(const struct sockaddr*, socklen_t, char*, socklen_t, ch
 extern std::function<const char*(int)> g_gaiStrerror;
 extern std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite;
 extern std::function<int(FILE*)> g_fflush;
+extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
 
 // ---------------------------------------------------------------------------
@@ -78,6 +86,7 @@ extern std::function<void(int)> g_exit;
 extern std::string g_writtenData;       // every byte the unit wrote to a descriptor
 extern std::string g_stdoutData;        // every byte the unit fwrite()'d, whichever stream it chose
 extern FILE* g_lastFwriteStream;        // stream of the last fwrite; distinguishes stdout from stderr
+extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order; prefer this over matching stderr text
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
 extern std::vector<int> g_writtenFds;   // fds passed to write(), in order; without it a unit writing to the wrong
 extern std::vector<int> g_readFds;      // descriptor still produces the expected bytes and no test notices
