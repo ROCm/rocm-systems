@@ -104,13 +104,23 @@ bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersio
 }
 int getFirmwareVersion() { return g_firmwareVersion; }
 
-struct amdsmiFabricDeviceInfo;
-ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
+ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
   return ncclSuccess;
 }
-ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo*) {
+std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId =
+    DefaultAmdSmiGetDeviceIndexByPciBusId;
+ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex) {
+  return g_amdSmiGetDeviceIndexByPciBusId(busId, deviceIndex);
+}
+
+ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo*) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo =
+    DefaultAmdSmiGetFabricDeviceInfo;
+ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
+  return g_amdSmiGetFabricDeviceInfo(deviceIndex, info);
 }
 ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {
   if (supported) *supported = false;
@@ -320,6 +330,8 @@ void ResetInitFakes() {
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
+  g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_pciDeviceClass = kDefaultPciDeviceClass;
   g_pciDeviceClassCalls = 0;
   g_lastPciDeviceClassBusId.clear();

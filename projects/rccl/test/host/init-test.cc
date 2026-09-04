@@ -17,6 +17,7 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -58,8 +59,19 @@ static ncclResult_t g_tunerFinalizeResult = ncclSuccess;
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
+#include "ScopedHook.h"
+
+// Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
+std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
+static void MicroFree(void* p) { g_microFree(p); }
+
+#define free(p) MicroFree(p)
+
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
+
+#undef malloc  // scoped to the UUT: leaving it defined would silently reroute every malloc() in the tests below
+#undef free
 
 // These net fakes live here, not in init_fakes.cc: they set comm->ncclNet, which needs the layout only this TU sees.
 static ncclNet_t g_microFakeNet = [] {
@@ -3669,4 +3681,1268 @@ TEST_F(InitMicrotest, GetUniqueId_RecorderFails_StillReturnsSuccess) {
   ncclUniqueId id{};
   EXPECT_EQ(ncclSuccess, ncclGetUniqueId_impl(&id));
   EXPECT_EQ(1, g_recorderIdCalls);  // positive anchor: the ignored call really happened
+}
+
+// --- parseCommConfig: version negotiation, per-field validation, defaulting (init.cc:3243-3462) ---
+
+namespace {
+constexpr char ParseCfg_kNetName[] = "microfake-net";
+
+class ParseCfg_Scene {
+ public:
+  ParseCfg_Scene() : comm_(new ncclComm{}) {}
+  // envConfigOverride re-mallocs config.netName and never frees it, so the scene owns that buffer.
+  ~ParseCfg_Scene() { free(const_cast<char*>(comm_->config.netName)); }
+  ncclConfig_t& config() { return cfg_; }
+  const ncclConfig_t& result_config() const { return comm_->config; }
+  ncclResult_t Run() { return parseCommConfig(comm_.get(), &cfg_); }
+  std::string RunCapturingWarn(ncclResult_t* result) {
+    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
+  }
+  std::string RunCapturingInfo(ncclResult_t* result) {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
+  }
+
+ private:
+  ncclConfig_t cfg_ = NCCL_CONFIG_INITIALIZER;
+  std::unique_ptr<ncclComm> comm_;
+};
+
+// The return code alone cannot tell which field's check fired, so the diagnostic carries the oracle.
+void ParseCfg_ExpectRejected(const std::function<void(ncclConfig_t&)>& tweak, const char* warning) {
+  ParseCfg_Scene s;
+  tweak(s.config());
+  ncclResult_t res = ncclSuccess;
+  const std::string log = s.RunCapturingWarn(&res);
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(LogHas(log, warning)) << "actual log:\n" << log;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ParseCommConfig_BadSplitShare_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.splitShare = 7; },
+                          "Invalid config splitShare attribute value 7");
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadShrinkShare_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.shrinkShare = 9; },
+                          "Invalid config shrinkShare attribute value 9");
+}
+TEST_F(InitMicrotest, ParseCommConfig_NonPositiveNvlsCTAs_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = -3; },
+                          "Invalid config nvlsCTAs attribute value -3");
+}
+TEST_F(InitMicrotest, ParseCommConfig_NChannelsPerNetPeerAboveMax_RejectsAndNamesTheField) {
+  const std::string warning =
+      "Invalid config nChannelsPerNetPeer attribute value " + std::to_string(MAXCHANNELS + 1);
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nChannelsPerNetPeer = MAXCHANNELS + 1; },
+                          warning.c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroNChannelsPerNetPeer_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nChannelsPerNetPeer = 0; },
+                          "Invalid config nChannelsPerNetPeer attribute value 0");
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadNvlinkCentricSched_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlinkCentricSched = 5; },
+                          "Invalid config nvlinkCentricSched attribute value 5");
+}
+TEST_F(InitMicrotest, ParseCommConfig_GraphUsageModeAboveTwo_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.graphUsageMode = 3; },
+                          "Invalig config graphUsageMode attribute value 3");
+}
+TEST_F(InitMicrotest, ParseCommConfig_NegativeNumRmaCtx_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.numRmaCtx = -11; },
+                          "Invalid config numRmaCtx attribute value -11");
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadGraphStreamOrdering_RejectsAndNamesTheField) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.graphStreamOrdering = 13; },
+                          "Invalid config graphStreamOrdering attribute value 13");
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_ZeroNvlsCTAs_IsRejectedAtTheBoundary) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = 0; },
+                          "Invalid config nvlsCTAs attribute value 0");
+}
+TEST_F(InitMicrotest, ParseCommConfig_OneNvlsCTA_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().nvlsCTAs = 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().nvlsCTAs);
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroNumRmaCtx_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().numRmaCtx = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().numRmaCtx);
+}
+TEST_F(InitMicrotest, ParseCommConfig_NChannelsPerNetPeerAtMax_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().nChannelsPerNetPeer = MAXCHANNELS;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(MAXCHANNELS, s.result_config().nChannelsPerNetPeer);
+}
+TEST_F(InitMicrotest, ParseCommConfig_GraphUsageModeTwo_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().graphUsageMode = 2;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(2, s.result_config().graphUsageMode);
+}
+TEST_F(InitMicrotest, ParseCommConfig_BinaryFlagsAtTheirBounds_AreAcceptedAndAssignedIndependently) {
+  ParseCfg_Scene s;
+  s.config().splitShare = 1;
+  s.config().shrinkShare = 0;
+  s.config().nvlinkCentricSched = 1;
+  s.config().graphStreamOrdering = 0;
+  s.config().graphUsageMode = 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().splitShare);
+  EXPECT_EQ(0, s.result_config().shrinkShare);
+  EXPECT_EQ(1, s.result_config().nvlinkCentricSched);
+  EXPECT_EQ(0, s.result_config().graphStreamOrdering);
+  EXPECT_EQ(1, s.result_config().graphUsageMode);
+}
+TEST_F(InitMicrotest, ParseCommConfig_BinaryFlagsAtTheirOtherBound_AreAcceptedAndAssignedIndependently) {
+  ParseCfg_Scene s;
+  s.config().splitShare = 0;
+  s.config().shrinkShare = 1;
+  s.config().nvlinkCentricSched = 0;
+  s.config().graphStreamOrdering = 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().splitShare);
+  EXPECT_EQ(1, s.result_config().shrinkShare);
+  EXPECT_EQ(0, s.result_config().nvlinkCentricSched);
+  EXPECT_EQ(1, s.result_config().graphStreamOrdering);
+}
+
+// --- version gates: below the gate a field is reset to the initializer default, at the gate it survives ---
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow214_ResetsBlockingToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 14, 0) - 1;
+  s.config().blocking = 2;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().blocking);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt214_KeepsBlocking) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 14, 0);
+  s.config().blocking = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().blocking);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_ResetsCgaClusterSizeToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0) - 1;
+  s.config().cgaClusterSize = -5;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(4, s.result_config().cgaClusterSize);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_ResetsMinCTAsToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0) - 1;
+  s.config().minCTAs = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().minCTAs);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_ResetsMaxCTAsToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0) - 1;
+  s.config().maxCTAs = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(MAXCHANNELS, s.result_config().maxCTAs);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_DropsNetNameBeforeDefaulting) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0) - 1;
+  s.config().netName = ParseCfg_kNetName;
+  s.config().blocking = 0;
+  ncclResult_t res = ncclInternalError;
+  const std::string log = s.RunCapturingInfo(&res);
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_FALSE(LogHas(log, "Comm config Net name set to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config Blocking set to 0")) << "actual log:\n" << log;
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsCgaClusterSizeAndCtaBounds) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0);
+  s.config().cgaClusterSize = 3;
+  s.config().minCTAs = 2;
+  s.config().maxCTAs = 5;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(3, s.result_config().cgaClusterSize);
+  EXPECT_EQ(2, s.result_config().minCTAs);
+  EXPECT_EQ(5, s.result_config().maxCTAs);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsNetName) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 17, 0);
+  s.config().netName = ParseCfg_kNetName;
+  ncclResult_t res = ncclInternalError;
+  const std::string log = s.RunCapturingInfo(&res);
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_TRUE(LogHas(log, "Comm config Net name set to microfake-net")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow225_ResetsTrafficClassToUndefined) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 25, 0) - 1;
+  s.config().trafficClass = 42;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, s.result_config().trafficClass);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt225_KeepsTrafficClass) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 25, 0);
+  s.config().trafficClass = 42;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(42, s.result_config().trafficClass);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow227_ResetsCollnetEnableToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 27, 0) - 1;
+  s.config().collnetEnable = 2;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().collnetEnable);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow227_ResetsCTAPolicyToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 27, 0) - 1;
+  s.config().CTAPolicy =
+      (NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO) + 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, s.result_config().CTAPolicy);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow227_ResetsShrinkShareToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 27, 0) - 1;
+  s.config().shrinkShare = 9;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().shrinkShare);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow227_ResetsNvlsCTAsToUndefined) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 27, 0) - 1;
+  s.config().nvlsCTAs = -3;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, s.result_config().nvlsCTAs);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt227_KeepsCollnetShrinkShareAndNvlsCTAs) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 27, 0);
+  s.config().collnetEnable = 1;
+  s.config().CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  s.config().shrinkShare = 0;
+  s.config().nvlsCTAs = 6;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().collnetEnable);
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, s.result_config().CTAPolicy);
+  EXPECT_EQ(0, s.result_config().shrinkShare);
+  EXPECT_EQ(6, s.result_config().nvlsCTAs);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow228_ResetsNChannelsPerNetPeerToUndefined) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 28, 0) - 1;
+  s.config().nChannelsPerNetPeer = MAXCHANNELS + 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, s.result_config().nChannelsPerNetPeer);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow228_ResetsNvlinkCentricSchedToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 28, 0) - 1;
+  s.config().nvlinkCentricSched = 5;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().nvlinkCentricSched);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt228_KeepsNChannelsPerNetPeerAndNvlinkCentricSched) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 28, 0);
+  s.config().nChannelsPerNetPeer = 7;
+  s.config().nvlinkCentricSched = 1;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(7, s.result_config().nChannelsPerNetPeer);
+  EXPECT_EQ(1, s.result_config().nvlinkCentricSched);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow229_ResetsGraphUsageModeToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 29, 0) - 1;
+  s.config().graphUsageMode = 3;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().graphUsageMode);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow229_ResetsNumRmaCtxToPlatformDefault) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 29, 0) - 1;
+  s.config().numRmaCtx = -11;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().numRmaCtx);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt229_KeepsGraphUsageModeAndNumRmaCtx) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 29, 0);
+  s.config().graphUsageMode = 2;
+  s.config().numRmaCtx = 3;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(2, s.result_config().graphUsageMode);
+  EXPECT_EQ(3, s.result_config().numRmaCtx);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow230_ResetsMaxP2pPeersToUndefined) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 30, 0) - 1;
+  s.config().maxP2pPeers = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, s.result_config().maxP2pPeers);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt230_KeepsMaxP2pPeers) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 30, 0);
+  s.config().maxP2pPeers = 12;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(12, s.result_config().maxP2pPeers);
+}
+
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow2305_ResetsGraphStreamOrderingToSerialize) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 30, 5) - 1;
+  s.config().graphStreamOrdering = 13;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(1, s.result_config().graphStreamOrdering);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionAt2305_KeepsGraphStreamOrdering) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 30, 5);
+  s.config().graphStreamOrdering = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().graphStreamOrdering);
+}
+
+// --- graphStreamOrdering=0 is unsupported with graph mixing and is forced back to 1 (init.cc:3452) ---
+
+TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithGraphMixing_WarnsAndForcesSerialize) {
+  ParseCfg_Scene s;
+  s.config().graphStreamOrdering = 0;
+  s.config().graphUsageMode = 2;
+  ncclResult_t res = ncclInternalError;
+  const std::string log = s.RunCapturingWarn(&res);
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(1, s.result_config().graphStreamOrdering);
+  EXPECT_EQ(2, s.result_config().graphUsageMode);
+  EXPECT_TRUE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
+}
+TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithoutGraphMixing_StaysZeroAndIsSilent) {
+  ParseCfg_Scene s;
+  s.config().graphStreamOrdering = 0;
+  s.config().graphUsageMode = 1;
+  ncclResult_t res = ncclInternalError;
+  const std::string log = s.RunCapturingInfo(&res);
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(0, s.result_config().graphStreamOrdering);
+  EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering set to 0")) << "actual log:\n" << log;
+}
+TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneAndIsSilent) {
+  ParseCfg_Scene s;
+  s.config().graphStreamOrdering = 1;
+  s.config().graphUsageMode = 2;
+  ncclResult_t res = ncclInternalError;
+  const std::string log = s.RunCapturingInfo(&res);
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(1, s.result_config().graphStreamOrdering);
+  EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering set to 1")) << "actual log:\n" << log;
+}
+
+// --- computeBuffSizes: the multi-node, chunk-clamp and shared-resource arms (init.cc:1299-1315) ---
+
+namespace {
+class ParseCfg_BuffScene {
+ public:
+  ParseCfg_BuffScene() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}) {
+    comm_->sharedRes = sr_.get();
+    sr_->owner = comm_.get();
+  }
+  ncclComm* comm() { return comm_.get(); }
+  ncclSharedResources* shared() { return sr_.get(); }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sr_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_MultiNode_UsesNetChunkSizeNotTheNvlinkOne) {
+  ParseCfg_BuffScene s;
+  s.comm()->nNodes = 2;
+  s.comm()->isAllNvlink = true;  // would yield the 512 kB NVL size if the node count were misread
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSize) {
+  ParseCfg_BuffScene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = true;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
+  ParseCfg_BuffScene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  SetParams({{"BUFFSIZE", 1 << 16}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 16, s.comm()->buffSizes[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ((1 << 16) / NCCL_STEPS, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
+  ParseCfg_BuffScene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  SetParams({{"BUFFSIZE", 1 << 22}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSize) {
+  ParseCfg_BuffScene s;
+  auto other = std::make_unique<ncclComm>();
+  s.shared()->owner = other.get();
+  s.shared()->tpP2pChunkSize = 4096;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  SetParams({{"P2P_PCI_CHUNKSIZE", 1 << 15}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(4096, s.comm()->p2pChunkSize);
+  EXPECT_EQ(4096, s.shared()->tpP2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsItsOwnChunkSize) {
+  ParseCfg_BuffScene s;
+  auto other = std::make_unique<ncclComm>();
+  s.shared()->owner = other.get();
+  s.shared()->tpP2pChunkSize = 1 << 20;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  SetParams({{"P2P_PCI_CHUNKSIZE", 1 << 15}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
+  EXPECT_EQ(1 << 20, s.shared()->tpP2pChunkSize);
+}
+
+// --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---
+
+namespace {
+constexpr uint32_t ParseCfg_kFabricDeviceIndex = 3;
+
+void ParseCfg_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
+  info->fabricSupported = true;
+  info->acceleratorId = 11;
+  info->bandwidth = 400000;
+  info->latency = 250;
+  info->ppodSize = 8;
+  info->cliqueId = 5;
+  info->vpodSize = 4;
+  for (std::size_t i = 0; i < sizeof(info->clusterUuid); ++i) {
+    info->clusterUuid[i] = static_cast<uint8_t>(i + 1);
+  }
+}
+}  // namespace
+
+TEST_F(InitMicrotest, FillInfo_NoAmdSmiFabricDevice_SkipsTheProbeAndLeavesFabricInfoAlone) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  ncclPeerInfo info{};
+  info.fabricInfo.fabricSupported = true;
+  std::string probedBusId = "not-probed";
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [&](const char* busId, uint32_t* out) {
+    probedBusId = busId;
+    *out = static_cast<uint32_t>(-1);
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo*) { return ncclSuccess; });
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(1, index.calls);
+  EXPECT_EQ(0, fabric.calls);
+  EXPECT_TRUE(info.fabricInfo.fabricSupported);
+  char expected[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+  ASSERT_EQ(ncclSuccess, int64ToBusId(info.busId, expected));
+  EXPECT_EQ(std::string(expected), probedBusId);
+}
+
+TEST_F(InitMicrotest, FillInfo_FabricDeviceWithoutFabricSupport_ClearsTheFlagAndLogsNothing) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  g_pciComputePartition = "CPX";  // makes fillInfo emit the MLOPart line, anchoring the log capture
+  ncclPeerInfo info{};
+  info.fabricInfo.fabricSupported = true;
+  uint32_t handedIndex = 0;
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = ParseCfg_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [&](uint32_t deviceIndex, struct amdsmiFabricDeviceInfo*) {
+                      handedIndex = deviceIndex;
+                      return ncclSuccess;
+                    });
+  ncclResult_t res = ncclInternalError;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    res = fillInfo(c.get(), &info, 0);
+  });
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(1, fabric.calls);
+  EXPECT_EQ(ParseCfg_kFabricDeviceIndex, handedIndex);
+  EXPECT_FALSE(info.fabricInfo.fabricSupported);
+  EXPECT_FALSE(LogHas(log, "UALoE-enabled")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "MLOPart: physical device")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  ncclPeerInfo info{};
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = ParseCfg_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
+                      ParseCfg_FillFabricInfo(out);
+                      return ncclSuccess;
+                    });
+  ncclResult_t res = ncclInternalError;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    res = fillInfo(c.get(), &info, 0);
+  });
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_TRUE(info.fabricInfo.fabricSupported);
+  EXPECT_EQ(11u, info.fabricInfo.acceleratorId);
+  EXPECT_TRUE(LogHas(log, "UALoE-enabled (aka MNNVL) device busId 0x11000")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "acceleratorId 11 bandwidth 400000 Mb/s latency 250 ns")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "UUID 807060504030201.100f0e0d0c0b0a09")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "ppodSize 8 cliqueId 5 clique size 4")) << "actual log:\n" << log;
+}
+
+// envConfigOverride (init.cc:2963): the NCCL_* env and ncclConfig_t validation ladders.
+
+namespace {
+// Every NCCL_PARAM body in this TU routes through g_loadParam(env, deft); this maps an env name to a forced value.
+using Env_ParamMap = std::map<std::string, int64_t>;
+
+// NCCL_CONFIG_UNDEF_INT is INT_MIN, so an undefined config field always trips the 0/1 clamps at :3189 and :3194.
+constexpr char Env_kUndefSplitShareLog[] = "splitShare -2147483648 is not a valid value 0/1, set it to 0";
+constexpr char Env_kUndefCollnetLog[] = "collnetEnable -2147483648 is not a valid value 0/1, set it to 0";
+
+// Large enough that a minCTAs case never trips the min > max clamp at :3183.
+constexpr int Env_kAmpleMaxCTAs = 64;
+
+class Env_ConfigComm {
+ public:
+  Env_ConfigComm() : comm_(new ncclComm{}) {
+    const ncclConfig_t fresh = NCCL_CONFIG_INITIALIZER;
+    comm_->config = fresh;
+  }
+  ~Env_ConfigComm() {
+    if (ran_) {
+      ::free(const_cast<char*>(comm_->config.netName));
+    }
+  }
+  Env_ConfigComm(const Env_ConfigComm&) = delete;
+  Env_ConfigComm& operator=(const Env_ConfigComm&) = delete;
+
+  ncclConfig_t& config() { return comm_->config; }
+  ncclComm* comm() { return comm_.get(); }
+  ncclResult_t result() const { return result_; }
+
+  ncclResult_t Run(const Env_ParamMap& params) {
+    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
+      const auto it = params.find(env);
+      return it == params.end() ? deft : it->second;
+    });
+    ran_ = true;
+    result_ = envConfigOverride(comm_.get());
+    return result_;
+  }
+
+  std::string RunCapturingLog(const Env_ParamMap& params) {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { Run(params); });
+  }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  ncclResult_t result_ = ncclNumResults;
+  bool ran_ = false;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
+  EXPECT_EQ(ncclSuccess, c.result());
+  EXPECT_EQ(4, c.config().cgaClusterSize);
+  EXPECT_FALSE(LogHas(log, "cgaClusterSize reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().cgaClusterSize = 2;
+  const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
+  EXPECT_EQ(4, c.config().cgaClusterSize);
+  EXPECT_TRUE(LogHas(log, "Comm config cgaClusterSize reset to NCCL_MAX_CGA_CLUSTER_SIZE=4"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaAtUpperBound_AcceptedNotClamped) {
+  Env_ConfigComm c;
+  c.config().cgaClusterSize = 2;
+  const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE}});
+  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
+  EXPECT_TRUE(LogHas(log, "Comm config cgaClusterSize reset to NCCL_MAX_CGA_CLUSTER_SIZE=8"))
+      << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "is too big")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaAtLowerBound_AcceptedAndOverwritesConfig) {
+  Env_ConfigComm c;
+  c.config().cgaClusterSize = 2;
+  EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", 0}}));
+  EXPECT_EQ(0, c.config().cgaClusterSize);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaAboveMax_ClampsToMaxAndLogs) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE + 1}});
+  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
+  EXPECT_TRUE(LogHas(log, "NCCL_CGA_CLUSTER_SIZE value 9 is too big. Limiting value to 8."))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CgaNegative_LeavesConfigUntouched) {
+  Env_ConfigComm c;
+  c.config().cgaClusterSize = 2;
+  const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", -1}});
+  EXPECT_EQ(2, c.config().cgaClusterSize);
+  EXPECT_FALSE(LogHas(log, "cgaClusterSize")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "CGA_CLUSTER_SIZE")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = Env_kAmpleMaxCTAs;
+  const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
+  EXPECT_EQ(7, c.config().minCTAs);
+  EXPECT_EQ(Env_kAmpleMaxCTAs, c.config().maxCTAs);
+  EXPECT_FALSE(LogHas(log, "minCTAs reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 3;
+  c.config().maxCTAs = Env_kAmpleMaxCTAs;
+  const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
+  EXPECT_EQ(7, c.config().minCTAs);
+  EXPECT_TRUE(LogHas(log, "Comm config minCTAs reset to NCCL_MIN_CTAS=7")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsZero_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 5;
+  c.config().maxCTAs = Env_kAmpleMaxCTAs;
+  const std::string log = c.RunCapturingLog({{"MIN_CTAS", 0}});
+  EXPECT_EQ(5, c.config().minCTAs);
+  EXPECT_TRUE(LogHas(log, "NCCL_MIN_CTAS 0 is too low, leaving it set at 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsNegative_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 5;
+  c.config().maxCTAs = Env_kAmpleMaxCTAs;
+  const std::string log = c.RunCapturingLog({{"MIN_CTAS", -3}});
+  EXPECT_EQ(5, c.config().minCTAs);
+  EXPECT_TRUE(LogHas(log, "NCCL_MIN_CTAS -3 is too low, leaving it set at 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
+  EXPECT_EQ(9, c.config().maxCTAs);
+  EXPECT_FALSE(LogHas(log, "maxCTAs reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = 3;
+  const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
+  EXPECT_EQ(9, c.config().maxCTAs);
+  EXPECT_TRUE(LogHas(log, "Comm config maxCTAs reset to NCCL_MAX_CTAS=9")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsZero_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = 5;
+  const std::string log = c.RunCapturingLog({{"MAX_CTAS", 0}});
+  EXPECT_EQ(5, c.config().maxCTAs);
+  EXPECT_TRUE(LogHas(log, "NCCL_MAX_CTAS 0 is too low, leaving it set at 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsNegative_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = 5;
+  const std::string log = c.RunCapturingLog({{"MAX_CTAS", -3}});
+  EXPECT_EQ(5, c.config().maxCTAs);
+  EXPECT_TRUE(LogHas(log, "NCCL_MAX_CTAS -3 is too low, leaving it set at 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinAndMaxCTAsBothSet_EachTakesItsOwnValue) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 1;
+  c.config().maxCTAs = 2;
+  EXPECT_EQ(ncclSuccess, c.Run({{"MIN_CTAS", 6}, {"MAX_CTAS", 11}}));
+  EXPECT_EQ(6, c.config().minCTAs);
+  EXPECT_EQ(11, c.config().maxCTAs);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
+  EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
+  EXPECT_FALSE(LogHas(log, "nChannelsPerNetPeer reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().nChannelsPerNetPeer = 1;
+  const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
+  EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
+  EXPECT_TRUE(LogHas(log, "Comm config nChannelsPerNetPeer reset to NCCL_NCHANNELS_PER_NET_PEER=3"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerZero_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().nChannelsPerNetPeer = 2;
+  const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 0}});
+  EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
+  EXPECT_TRUE(LogHas(log, "NCCL_NCHANNELS_PER_NET_PEER 0 is too low, leaving it set at 2"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerNegative_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().nChannelsPerNetPeer = 2;
+  const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", -5}});
+  EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
+  EXPECT_TRUE(LogHas(log, "NCCL_NCHANNELS_PER_NET_PEER -5 is too low, leaving it set at 2"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
+  EXPECT_EQ(1, c.config().nvlinkCentricSched);
+  EXPECT_FALSE(LogHas(log, "nvlinkCentricSched reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedZeroConfigOne_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().nvlinkCentricSched = 1;
+  const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 0}});
+  EXPECT_EQ(0, c.config().nvlinkCentricSched);
+  EXPECT_TRUE(LogHas(log, "Comm config nvlinkCentricSched reset to NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE=0"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigZero_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().nvlinkCentricSched = 0;
+  const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
+  EXPECT_EQ(1, c.config().nvlinkCentricSched);
+  EXPECT_TRUE(LogHas(log, "Comm config nvlinkCentricSched reset to NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE=1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedTwo_KeepsConfigAndLogsNotValid) {
+  Env_ConfigComm c;
+  c.config().nvlinkCentricSched = 1;
+  const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 2}});
+  EXPECT_EQ(1, c.config().nvlinkCentricSched);
+  EXPECT_TRUE(LogHas(log, "NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE 2 is not valid, leaving it set at 1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedNegative_KeepsConfigAndLogsNotValid) {
+  Env_ConfigComm c;
+  c.config().nvlinkCentricSched = 0;
+  const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", -1}});
+  EXPECT_EQ(0, c.config().nvlinkCentricSched);
+  EXPECT_TRUE(LogHas(log, "NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE -1 is not valid, leaving it set at 0"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigUndef_SetsUsageModeTwoSilently) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
+  EXPECT_EQ(2, c.config().graphUsageMode);
+  EXPECT_FALSE(LogHas(log, "graphUsageMode reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigSet_SetsUsageModeTwoAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().graphUsageMode = 7;
+  const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
+  EXPECT_EQ(2, c.config().graphUsageMode);
+  EXPECT_TRUE(LogHas(log, "Comm config graphUsageMode reset to 2 by NCCL_GRAPH_MIXING_SUPPORT=1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportZeroConfigSet_SetsUsageModeZeroAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().graphUsageMode = 7;
+  const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 0}});
+  EXPECT_EQ(0, c.config().graphUsageMode);
+  EXPECT_TRUE(LogHas(log, "Comm config graphUsageMode reset to 0 by NCCL_GRAPH_MIXING_SUPPORT=0"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportInvalid_KeepsUsageModeAndLogsNotValid) {
+  Env_ConfigComm c;
+  c.config().graphUsageMode = 7;
+  const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 5}});
+  EXPECT_EQ(7, c.config().graphUsageMode);
+  EXPECT_TRUE(LogHas(log, "NCCL_GRAPH_MIXING_SUPPORT 5 is not valid, leaving it set at 7"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxPositive_AssignsWithoutDisabledLog) {
+  Env_ConfigComm c;
+  c.config().numRmaCtx = 9;
+  const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 4}});
+  EXPECT_EQ(4, c.config().numRmaCtx);
+  EXPECT_FALSE(LogHas(log, "RMA disabled")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxZero_AssignsZeroAndLogsRmaDisabled) {
+  Env_ConfigComm c;
+  c.config().numRmaCtx = 9;
+  const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 0}});
+  EXPECT_EQ(0, c.config().numRmaCtx);
+  EXPECT_TRUE(LogHas(log, "NCCL_NUM_RMA_CTX=0, RMA disabled for this communicator")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxNegative_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().numRmaCtx = 9;
+  const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", -1}});
+  EXPECT_EQ(9, c.config().numRmaCtx);
+  EXPECT_TRUE(LogHas(log, "NCCL_NUM_RMA_CTX -1 is too low, leaving it set at 9")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "RMA disabled")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
+  EXPECT_EQ(6, c.config().maxP2pPeers);
+  EXPECT_FALSE(LogHas(log, "maxP2pPeers reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().maxP2pPeers = 2;
+  const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
+  EXPECT_EQ(6, c.config().maxP2pPeers);
+  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=6")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().maxP2pPeers = 2;
+  const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
+  EXPECT_EQ(2, c.config().maxP2pPeers);
+  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
+  Env_ConfigComm c;
+  c.config().maxP2pPeers = 2;
+  const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
+  EXPECT_EQ(2, c.config().maxP2pPeers);
+  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {
+  Env_ConfigComm c;
+  c.config().graphStreamOrdering = 1;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(1, c.config().graphStreamOrdering);
+  EXPECT_FALSE(LogHas(log, "GRAPH_STREAM_ORDERING")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
+  EXPECT_EQ(0, c.config().graphStreamOrdering);
+  EXPECT_FALSE(LogHas(log, "graphStreamOrdering reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingOneConfigZero_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().graphStreamOrdering = 0;
+  const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 1}});
+  EXPECT_EQ(1, c.config().graphStreamOrdering);
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering reset to NCCL_GRAPH_STREAM_ORDERING=1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigOne_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().graphStreamOrdering = 1;
+  const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
+  EXPECT_EQ(0, c.config().graphStreamOrdering);
+  EXPECT_TRUE(LogHas(log, "Comm config graphStreamOrdering reset to NCCL_GRAPH_STREAM_ORDERING=0"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingTwo_KeepsConfigAndLogsNotValid) {
+  Env_ConfigComm c;
+  c.config().graphStreamOrdering = 1;
+  const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 2}});
+  EXPECT_EQ(1, c.config().graphStreamOrdering);
+  EXPECT_TRUE(LogHas(log, "NCCL_GRAPH_STREAM_ORDERING 2 is not valid, leaving it set at 1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingNegative_KeepsConfigAndLogsNotValid) {
+  Env_ConfigComm c;
+  c.config().graphStreamOrdering = 0;
+  const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", -1}});
+  EXPECT_EQ(0, c.config().graphStreamOrdering);
+  EXPECT_TRUE(LogHas(log, "NCCL_GRAPH_STREAM_ORDERING -1 is not valid, leaving it set at 0"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigUndef_LeavesNetNameNull) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(nullptr, c.config().netName);
+  EXPECT_FALSE(LogHas(log, "netName reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigUndef_CopiesEnvValueWithoutResetLog) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_NET", "Socket");
+  const std::string log = c.RunCapturingLog({});
+  ASSERT_NE(nullptr, c.config().netName);
+  EXPECT_STREQ("Socket", c.config().netName);
+  EXPECT_FALSE(LogHas(log, "netName reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIb_TranslatesToIbCast) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_NET", "ROCM-IB");
+  EXPECT_EQ(ncclSuccess, c.Run({}));
+  ASSERT_NE(nullptr, c.config().netName);
+  EXPECT_STREQ("IB-CAST", c.config().netName);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIbLowerCase_TranslatesToIbCast) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_NET", "rocm-ib");
+  EXPECT_EQ(ncclSuccess, c.Run({}));
+  ASSERT_NE(nullptr, c.config().netName);
+  EXPECT_STREQ("IB-CAST", c.config().netName);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigSet_ReplacesConfigNameAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().netName = "IB";
+  SetMicroEnv("NCCL_NET", "Socket");
+  const std::string log = c.RunCapturingLog({});
+  ASSERT_NE(nullptr, c.config().netName);
+  EXPECT_STREQ("Socket", c.config().netName);
+  EXPECT_TRUE(LogHas(log, "Comm config netName reset to NCCL_NET=Socket")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigSet_CopiesIntoFreshBufferAndNeverFreesTheIncumbent) {
+  Env_ConfigComm c;
+  const char* const configured = "IB";
+  c.config().netName = configured;
+  int incumbentFrees = 0;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) {
+      if (p == static_cast<const void*>(configured)) {
+        ++incumbentFrees;
+        return;
+      }
+      ::free(p);
+    });
+    EXPECT_EQ(ncclSuccess, c.Run({}));
+  }
+  ASSERT_NE(nullptr, c.config().netName);
+  EXPECT_STREQ("IB", c.config().netName);
+  EXPECT_NE(configured, c.config().netName);
+  EXPECT_EQ(0, incumbentFrees);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
+  EXPECT_EQ(1, c.config().splitShare);
+  EXPECT_FALSE(LogHas(log, "splitShare reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefCollnetLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().splitShare = 0;
+  const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
+  EXPECT_EQ(1, c.config().splitShare);
+  EXPECT_TRUE(LogHas(log, "Comm config splitShare reset to NCCL_COMM_SPLIT_SHARE_RESOURCES=1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_SplitShareOutOfRange_ClampedToZeroWithLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 5}});
+  EXPECT_EQ(0, c.config().splitShare);
+  EXPECT_TRUE(LogHas(log, "splitShare 5 is not a valid value 0/1, set it to 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
+  EXPECT_EQ(1, c.config().shrinkShare);
+  EXPECT_FALSE(LogHas(log, "shrinkShare reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().shrinkShare = 0;
+  const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
+  EXPECT_EQ(1, c.config().shrinkShare);
+  EXPECT_TRUE(LogHas(log, "Comm config shrinkShare reset to NCCL_COMM_SHRINK_SHARE_RESOURCES=1"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareOutOfRange_KeptVerbatimUnlikeSplitShare) {
+  Env_ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SHRINK_SHARE_RESOURCES", 5}}));
+  EXPECT_EQ(5, c.config().shrinkShare);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_SplitAndShrinkShareBothSet_EachTakesItsOwnValue) {
+  Env_ConfigComm c;
+  c.config().splitShare = 9;
+  c.config().shrinkShare = 9;
+  EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SPLIT_SHARE_RESOURCES", 1}, {"COMM_SHRINK_SHARE_RESOURCES", 0}}));
+  EXPECT_EQ(1, c.config().splitShare);
+  EXPECT_EQ(0, c.config().shrinkShare);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableEnvSetConfigUndef_AssignsAndLogsEnvironment) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(1, c.config().collnetEnable);
+  EXPECT_TRUE(LogHas(log, "NCCL_COLLNET_ENABLE set by environment to 1.")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "collnetEnable reset to")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().collnetEnable = 0;
+  SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(1, c.config().collnetEnable);
+  EXPECT_TRUE(LogHas(log, "Comm config collnetEnable reset to NCCL_COLLNET_ENABLE=1")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableHexValue_ParsedBaseZeroThenClampedToZero) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_COLLNET_ENABLE", "0x3");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(0, c.config().collnetEnable);
+  EXPECT_TRUE(LogHas(log, "NCCL_COLLNET_ENABLE set by environment to 3.")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "collnetEnable 3 is not a valid value 0/1, set it to 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableParsesToUndefSentinel_LeavesConfigUntouched) {
+  Env_ConfigComm c;
+  c.config().collnetEnable = 1;
+  SetMicroEnv("NCCL_COLLNET_ENABLE", "-2147483648");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(1, c.config().collnetEnable);
+  EXPECT_FALSE(LogHas(log, "NCCL_COLLNET_ENABLE set by environment")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  SetMicroEnvAbsent("NCCL_CTA_POLICY");
+  ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, c.config().CTAPolicy);
+  EXPECT_FALSE(LogHas(log, "CTAPolicy reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  SetMicroEnvAbsent("NCCL_CTA_POLICY");
+  ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
+  c.config().CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, c.config().CTAPolicy);
+  const std::string needle =
+      "Comm config CTAPolicy reset to NCCL_CTA_POLICY=" + std::to_string(NCCL_CTA_POLICY_ZERO);
+  EXPECT_TRUE(LogHas(log, needle.c_str())) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyZeroAndEfficiency_UnsetsEfficiencyWithWarn) {
+  Env_ConfigComm c;
+  SetMicroEnvAbsent("NCCL_CTA_POLICY");
+  ctaPolicyEnv = NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, c.config().CTAPolicy);
+  EXPECT_TRUE(LogHas(log, "Unsetting POLICY_EFFICIENCY")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
+  EXPECT_EQ(4, c.config().nvlsCTAs);
+  EXPECT_FALSE(LogHas(log, "nvlsCTAs reset to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigSet_OverwritesAndLogsReset) {
+  Env_ConfigComm c;
+  c.config().nvlsCTAs = 2;
+  const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
+  EXPECT_EQ(4, c.config().nvlsCTAs);
+  EXPECT_TRUE(LogHas(log, "Comm config nvlsCTAs reset to NCCL_NVLS_NCHANNELS=4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsZero_AssignedThenRestoredToUndefined) {
+  Env_ConfigComm c;
+  c.config().nvlsCTAs = 2;
+  const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 0}});
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
+  EXPECT_TRUE(LogHas(log, "Comm config nvlsCTAs reset to NCCL_NVLS_NCHANNELS=0")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "nvlsCTAs 0 is not a valid value")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsNegative_AssignedThenRestoredToUndefined) {
+  Env_ConfigComm c;
+  c.config().nvlsCTAs = 2;
+  const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", -1}});
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
+  EXPECT_TRUE(LogHas(log, "nvlsCTAs -1 is not a valid value")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveChannelLimit_CappedToMaxChannels) {
+  Env_ConfigComm c;
+  c.config().minCTAs = MAXCHANNELS + 1;
+  c.config().maxCTAs = MAXCHANNELS;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(MAXCHANNELS, c.config().minCTAs);
+  EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
+  const std::string needle = "minCTAs " + std::to_string(MAXCHANNELS + 1) +
+                             " is larger than #channels upper limit " + std::to_string(MAXCHANNELS) +
+                             ", cap it to " + std::to_string(MAXCHANNELS);
+  EXPECT_TRUE(LogHas(log, needle.c_str())) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "is larger than maxCTAs")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAtChannelLimit_NotCapped) {
+  Env_ConfigComm c;
+  c.config().minCTAs = MAXCHANNELS;
+  c.config().maxCTAs = MAXCHANNELS;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(MAXCHANNELS, c.config().minCTAs);
+  EXPECT_FALSE(LogHas(log, "#channels upper limit")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAboveChannelLimit_CappedToMaxChannels) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = MAXCHANNELS + 1;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
+  const std::string needle = "maxCTAs " + std::to_string(MAXCHANNELS + 1) +
+                             " is larger than #channels upper limit " + std::to_string(MAXCHANNELS) +
+                             ", cap it to " + std::to_string(MAXCHANNELS);
+  EXPECT_TRUE(LogHas(log, needle.c_str())) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAtChannelLimit_NotCapped) {
+  Env_ConfigComm c;
+  c.config().maxCTAs = MAXCHANNELS;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
+  EXPECT_FALSE(LogHas(log, "#channels upper limit")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveMaxCTAs_LowersMinToMax) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 8;
+  c.config().maxCTAs = 4;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(4, c.config().minCTAs);
+  EXPECT_EQ(4, c.config().maxCTAs);
+  EXPECT_TRUE(LogHas(log, "minCTAs 8 is larger than maxCTAs 4, set both to 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsEqualsMaxCTAs_LeavesBothAlone) {
+  Env_ConfigComm c;
+  c.config().minCTAs = 4;
+  c.config().maxCTAs = 4;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(4, c.config().minCTAs);
+  EXPECT_EQ(4, c.config().maxCTAs);
+  EXPECT_FALSE(LogHas(log, "is larger than maxCTAs")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, Env_kUndefSplitShareLog)) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveBothLimits_CapsToChannelLimitBeforeLoweringToMaxCTAs) {
+  Env_ConfigComm c;
+  c.config().minCTAs = MAXCHANNELS + 1;
+  c.config().maxCTAs = 4;
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(4, c.config().minCTAs);
+  EXPECT_EQ(4, c.config().maxCTAs);
+  const std::string capped = "minCTAs " + std::to_string(MAXCHANNELS + 1) +
+                             " is larger than #channels upper limit " + std::to_string(MAXCHANNELS);
+  const std::string lowered = "minCTAs " + std::to_string(MAXCHANNELS) + " is larger than maxCTAs 4, set both to 4";
+  EXPECT_TRUE(LogHas(log, capped.c_str())) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, lowered.c_str())) << "actual log:\n" << log;
+}
+
+// A MIN_CTAS override does apply, then :3183 lowers it to the still-undefined maxCTAs (AICOMRCCL-1685 TODO at :1163).
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBackToUndefined) {
+  Env_ConfigComm c;
+  const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().minCTAs);
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().maxCTAs);
+  EXPECT_TRUE(LogHas(log, "minCTAs 7 is larger than maxCTAs -2147483648, set both to -2147483648"))
+      << "actual log:\n" << log;
 }

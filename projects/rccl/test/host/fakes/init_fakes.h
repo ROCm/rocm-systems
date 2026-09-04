@@ -27,6 +27,16 @@ struct ncclTopoSystem;
 // hipified copy init.cc includes, and the two enum definitions collide.
 struct ncclBootstrapHandle;
 
+struct amdsmiFabricDeviceInfo;
+
+// fillInfo's UALoE/MNNVL probe. The default answers -1, i.e. what a host with no fabric device reports.
+ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex);
+extern std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId;
+
+// The default leaves the caller's struct untouched, so fillInfo's own fabricSupported=false stands.
+ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info);
+extern std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo;
+
 void SetGethostnameFail(bool fail);
 void SetDladdrFail(bool fail);
 size_t LastGethostnameLen();
