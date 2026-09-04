@@ -136,6 +136,7 @@ struct config : output_config
     bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
     bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
     bool   hipfile_api_trace             = get_env("ROCPROF_HIPFILE_API_TRACE", false);
+    bool   hip_event_trace               = get_env("ROCPROF_HIP_EVENT_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
@@ -154,6 +155,11 @@ struct config : output_config
     size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
+
+    // Route counter collection through in-process kernel replay: collect every --pmc counter group
+    // in a single application run by replaying each dispatch once per group (device-memory
+    // snapshot/restore between passes). The pass count is the number of counter groups.
+    bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
 
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
@@ -250,7 +256,8 @@ config::get_attach_invariants() const
                            benchmark_mode,
                            spm_counter_collection,
                            rocshmem_api_trace,
-                           hipfile_api_trace);
+                           hipfile_api_trace,
+                           hip_event_trace);
 }
 
 inline bool
@@ -306,6 +313,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(ompt_trace_operations);
     CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
     CFG_SERIALIZE_MEMBER(hipfile_api_trace);
+    CFG_SERIALIZE_MEMBER(hip_event_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
@@ -340,6 +348,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_interval);
     CFG_SERIALIZE_MEMBER(pc_sampling_method_value);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
+
+    CFG_SERIALIZE_MEMBER(kernel_replay);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
     CFG_SERIALIZE_MEMBER(att_no_intercept);

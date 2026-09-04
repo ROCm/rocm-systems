@@ -13,20 +13,19 @@
 #include <string>
 #include <vector>
 
+#include "env_fakes.h"    // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
 #include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
+#include "rccl_wrap_fakes.h"  // src/rccl_wrap.cc seams (shared)
+#include "recorder_fakes.h"  // rccl::Recorder no-ops (shared)
+#include "transport_stubs.h"  // g_rcclUseAinic (shared)
+#include "tuning_fakes.h"  // g_tuningIndexValue / g_tuningIndexLastArch (shared)
 
 struct ncclTopoSystem;
 // Forward-declared, not #include "bootstrap.h": including it here would pull src/include/recorder.h in alongside the
 // hipified copy init.cc includes, and the two enum definitions collide.
 struct ncclBootstrapHandle;
-
-// Returns a pointer into the map's own std::string: re-scripting a name invalidates a pointer a caller may still hold.
-const char* micro_getenv(const char* name);
-void SetMicroEnv(const char* name, const char* value);
-void SetMicroEnvAbsent(const char* name);
-void ClearMicroEnv();
 
 void SetGethostnameFail(bool fail);
 void SetDladdrFail(bool fail);
@@ -55,6 +54,14 @@ extern int g_gdrSupportCalls;
 extern std::string g_pciDeviceClass;
 extern int g_pciDeviceClassCalls;
 extern std::string g_lastPciDeviceClassBusId;
+
+// fillInfo asks the physical device for its compute partition mode before falling back to the class
+// probe above. The default is "SPX", i.e. an unpartitioned GPU. Set "CPX"/"DPX" for a partitioned
+// device, or "" for a platform that reports no mode at all. The recorded busId is how a test sees
+// that the probe targeted function 0 rather than the caller's own alias BDF.
+extern std::string g_pciComputePartition;
+extern int g_pciComputePartitionCalls;
+extern std::string g_lastPciComputePartitionBusId;
 
 extern bool g_bootstrapNetInitFail;
 
@@ -85,13 +92,7 @@ extern ncclResult_t g_ncclEnvPluginInitResult;
 extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
 
-// Recorder is instrumentation, but ncclGetUniqueId_impl's record() call is a line of the unit; observe it.
-extern ncclResult_t g_recorderRecordResult;
-extern int g_recorderIdCalls;
-extern int g_recorderLastIdCall;      // rcclCall_t as int, so the header needs no recorder.h
-extern ncclUniqueId* g_recorderLastId;
-extern int g_recorderLastRank;
-extern int g_recorderLastNranks;
+// g_recorderResult and the ncclGetUniqueId_impl argument recorder come from recorder_fakes.h.
 
 // The fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one; callers must supply storage.
 extern ncclResult_t g_initChannelResult;
@@ -128,8 +129,8 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, con
 // ncclTopoGetSystem played for rung 1. ncclTopoComputePaths gets a FailAt index rather than a result
 // because :1591 and :1596 call it twice and a single knob cannot separate them.
 // -------------------------------------------------------------------------
-extern int g_tuningIndexValue;
-extern std::string g_tuningIndexLastArch;  // :1577 forwards comm->archName; without this that is untested
+// g_tuningIndexValue / g_tuningIndexLastArch come from tuning_fakes.h: :1577
+// forwards comm->archName, and without the recorder that is untested.
 extern int g_ncclTopoComputePathsCalls;
 extern int g_ncclTopoComputePathsFailAt;   // -1 = never fail; 0 = the :1591 call, 1 = the :1596 one
 extern ncclResult_t g_ncclTopoTrimSystemResult;
