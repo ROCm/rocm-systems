@@ -37,6 +37,14 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
 }
 
+bool ginAnvilUseFabricMem(ncclComm* comm) {
+  if (comm == nullptr) return false;
+  if (!ncclDdaUseFabricPath(comm)) return false;
+  if (comm->clique.size != comm->nRanks) return false;
+  if (!ncclCuMemEnable()) return false;
+  return true;
+}
+
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;

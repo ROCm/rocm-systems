@@ -824,6 +824,8 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
 
+    target_include_directories(rccl-UnitTestsMPI PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
     # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
     # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process
     # via STATIC_PLUGIN (dlopen(NULL))
