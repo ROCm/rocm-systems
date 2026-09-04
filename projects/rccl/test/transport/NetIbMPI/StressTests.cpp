@@ -625,18 +625,32 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// A2.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
-//      then drain all via matching sends, then verify slots are recycled.
+// A2.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs, then
+//      drain all via matching sends. The serial body establishes that much: 32
+//      operations in flight on one comm.
 //      Parameterized by MPIEnvironment::nThreads: request pools are per-comm, so
 //      the point is N x 32 requests in flight on one NIC and the confirmation
-//      that completion routing never crosses communicators.
+//      that completion routing never crosses communicators. The threaded body
+//      also cycles more than a whole pool through each comm, which is what makes
+//      recycling assertable rather than assumed -- see kRounds below.
 TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
-    static constexpr int kMaxReqsPerComm = 32; // NCCL_NET_MAX_REQUESTS
+    // 32 is the API's cap on operations in flight per comm, not the size of the
+    // plugin's request pool: NET_IB_MAX_REQUESTS is NCCL_NET_MAX_REQUESTS *
+    // NCCL_NET_IB_MAX_RECVS = 256 entries per comm, and ncclIbGetRequest returns
+    // the first unused one (src/transport/net_ib/common.h:308, p2p.cc:37).
+    static constexpr int kMaxReqsPerComm = 32;      // NCCL_NET_MAX_REQUESTS
+    static constexpr int kReqPoolPerComm = 32 * 8;  // NET_IB_MAX_REQUESTS
+    // One batch is an eighth of that pool, so on its own it shows 32 requests can
+    // be outstanding but says nothing about completed ones coming back: a plugin
+    // that stopped freeing them would still find room and pass. Cycling more than
+    // the whole pool through one comm separates the two -- without recycling there
+    // is nothing left to allocate on the ninth round and the post fails.
+    static constexpr int kRounds = kReqPoolPerComm / kMaxReqsPerComm + 1;  // 288 > 256
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         RunThreadedBody(
@@ -663,11 +677,15 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
                 // the failure this test is pointed at. Slot identity rests on the tag
                 // instead, which is what the plugin matches on.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
-                result = WorkerBatchPostDrain(rank, pair, buffer, sz, kMaxReqsPerComm, mh,
-                                              workerPattern, /*where=*/"");
-                if (!result.ok) return result;
+                for (int round = 0; round < kRounds; round++) {
+                    result = WorkerBatchPostDrain(rank, pair, buffer, sz, kMaxReqsPerComm, mh,
+                                                  workerPattern,
+                                                  "round " + std::to_string(round) + " ");
+                    if (!result.ok) return result;
+                }
 
-                // Slots must be recycled: another round on the same comm.
+                // And ordinary traffic still works on a comm whose whole request
+                // pool has been cycled through.
                 for (int i = 0; i < 4; i++) {
                     result = WorkerSendRecvPattern(rank, pair, buffer, sz, 100 + i, mh,
                                                    workerPattern, kStressTimeoutMs);
