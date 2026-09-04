@@ -1909,20 +1909,11 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       size_t filteredIdx = enabledPackets.size();
       enabledPackets.push_back(dispatchPackets[i]);
       enabledKernelNames.push_back(dispatchKernelNames[i]);
-      // appendPacketToFlatBuffer also appends the index-aligned metadata slot
-      // (zero-filled when this index has no metadata packet). Empty slots
-      // (barriers / uncaptured dispatches) are then stamped
-      // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them — a zeroed
-      // slot would be type 0 (VENDOR_SPECIFIC), which the CP could process.
       const uint8_t* metadata_raw =
           (hasMetadata && i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i]
                                                               : nullptr;
       appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      if (hasMetadata && metadata_raw == nullptr) {
-        invalidateMetadataSlot(filteredFlatMetadataData.data() +
-                               filteredFlatMetadataData.size() - kMetadataPktSize);
-      }
 
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
     } else {
@@ -1964,10 +1955,6 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       enabledKernelNames.push_back(nullptr);
       appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      if (hasMetadata) {
-        invalidateMetadataSlot(filteredFlatMetadataData.data() +
-                               filteredFlatMetadataData.size() - kMetadataPktSize);
-      }
       patch.flat_packet =
           filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
     }
@@ -2460,11 +2447,13 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
   memset(dst + kSigOff, 0, sizeof(uint64_t));
 
   // Append the matching metadata-prefetch packet so flatMetadata stays index-
-  // aligned with flatData. A nullptr |metadata_raw| yields a zeroed slot.
+  // aligned with flatData. A nullptr |metadata_raw| yields an invalid slot.
   const size_t metaOff = flatMetadata.size();
   flatMetadata.insert(flatMetadata.end(), kMetadataPktSize, 0);
   if (metadata_raw != nullptr) {
     memcpy(flatMetadata.data() + metaOff, metadata_raw, kMetadataPktSize);
+  } else {
+    invalidateMetadataSlot(flatMetadata.data() + metaOff);
   }
 }
 
@@ -2496,20 +2485,6 @@ void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
         (i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i] : nullptr;
     appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, flatPacketData,
                              validPacketFullHeaders, flatMetadataData);
-  }
-  // Build flat metadata buffer (kMetadataPktSize per slot).
-  // Slots without captured metadata (barriers, uncaptured dispatches) are published as
-  // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them.
-  if (!dispatchMetadataPackets.empty()) {
-    flatMetadataData.resize(n * kMetadataPktSize, 0);
-    for (size_t i = 0; i < n; ++i) {
-      uint8_t* slot = flatMetadataData.data() + i * kMetadataPktSize;
-      if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
-        std::memcpy(slot, dispatchMetadataPackets[i], kMetadataPktSize);
-      } else {
-        invalidateMetadataSlot(slot);
-      }
-    }
   }
 }
 

@@ -1358,7 +1358,7 @@ class GraphExecSegmented : public GraphExecBase {
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
     // Also appends the matching kMetadataPktSize metadata packet to flatMetadata,
     // keeping it index-aligned with flatData. |metadata_raw| may be nullptr, in
-    // which case a zeroed metadata slot is appended.
+    // which case an invalid metadata slot is appended.
     static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
                                          const uint8_t* metadata_raw,
                                          amd::AlignedVector64<uint8_t>& flatData,
