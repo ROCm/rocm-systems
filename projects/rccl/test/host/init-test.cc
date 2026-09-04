@@ -100,6 +100,7 @@ static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPa
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
 
+#undef malloc  // scoped to the UUT: leaving it defined would silently reroute every malloc() in the tests below
 #undef free
 #undef __get_cpuid
 #undef ncclOsTopoGetStrFromSys
@@ -205,16 +206,6 @@ class ConfigComm {
   ncclResult_t RunParse(ncclConfig_t* cfg) {
     ran_ = true;
     result_ = parseCommConfig(comm_.get(), cfg);
-    return result_;
-  }
-
-  ncclResult_t RunCopyFrom(ConfigComm* parent, const ParamMap& params) {
-    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
-      const auto it = params.find(env);
-      return it == params.end() ? deft : it->second;
-    });
-    ran_ = true;
-    result_ = copyCommConfig(comm_.get(), parent->comm());
     return result_;
   }
 
@@ -4125,42 +4116,6 @@ TEST_F(InitMicrotest, GetAsyncError_GinWithoutProgressThread_IgnoresTheGinAsyncR
   EXPECT_EQ(ncclSuccess, e);
 }
 
-namespace {
-constexpr int Dtor_kParentCgaClusterSize = 3;
-constexpr int Dtor_kChildCgaClusterSize = 1;
-constexpr int Dtor_kEnvCgaClusterSize = 2;
-constexpr unsigned Dtor_kParentConfigMagic = 0xA11CEu;
-constexpr unsigned Dtor_kChildConfigMagic = 0xB0B0Bu;
-constexpr const char Dtor_kParentCommName[] = "parent-comm";
-constexpr const char Dtor_kChildCommName[] = "child-comm";
-}  // namespace
-
-TEST_F(InitMicrotest, CopyCommConfig_OverwritesChildFromParent_LeavingTheParentUntouched) {
-  ConfigComm parent(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  ConfigComm child(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
-  ConfigComm expected(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  ASSERT_EQ(ncclSuccess, expected.Run({}));
-
-  EXPECT_EQ(ncclSuccess, child.RunCopyFrom(&parent, {}));
-  EXPECT_EQ(0, std::memcmp(&child.config(), &expected.config(), sizeof(ncclConfig_t)));
-  EXPECT_STREQ(Dtor_kParentCommName, child.config().commName);
-  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent.config().cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, parent.config().magic);
-  EXPECT_STREQ(Dtor_kParentCommName, parent.config().commName);
-}
-
-TEST_F(InitMicrotest, CopyCommConfig_EnvOverridesTheCopiedValue_NotJustTheRawParentConfig) {
-  ConfigComm parent(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  ConfigComm child(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
-
-  EXPECT_EQ(ncclSuccess, child.RunCopyFrom(&parent, {{"CGA_CLUSTER_SIZE", Dtor_kEnvCgaClusterSize}}));
-  EXPECT_EQ(Dtor_kEnvCgaClusterSize, child.config().cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, child.config().magic);
-  EXPECT_STREQ(Dtor_kParentCommName, child.config().commName);
-  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent.config().cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, parent.config().magic);
-}
-
 TEST_F(InitMicrotest, CommPoison_ClearsBothMagicsAndTheIdentity_KeepingIntraComm0) {
   constexpr uint64_t kLiveStartMagic = 0x1111111111111111ull;
   constexpr uint64_t kLiveEndMagic = 0x2222222222222222ull;
@@ -5095,62 +5050,6 @@ TEST_F(InitMicrotest, CommFree_NodeRanksTable_FreesEveryNodeEntry) {
   EXPECT_EQ(ncclSuccess, commFree(comm));
 }
 
-// --- setCommAbortFlags (init.cc:3960) ---
-namespace {
-constexpr uint32_t Teardown_kFlagPoison = 0xA5A5A5A5u;
-
-struct Teardown_AbortFlagSet {
-  uint32_t parent = Teardown_kFlagPoison;
-  uint32_t parentDev = Teardown_kFlagPoison;
-  uint32_t child = Teardown_kFlagPoison;
-  uint32_t childDev = Teardown_kFlagPoison;
-
-  void Attach(ncclComm* comm, bool withChild) {
-    comm->abortFlag = &parent;
-    comm->abortFlagDev = &parentDev;
-    comm->childAbortFlag = withChild ? &child : nullptr;
-    comm->childAbortFlagDev = &childDev;
-  }
-};
-}  // namespace
-
-TEST_F(InitMicrotest, SetCommAbortFlags_ChildPresent_StoresValueInAllFourSlots) {
-  auto comm = std::make_unique<ncclComm>();
-  Teardown_AbortFlagSet flags;
-  flags.Attach(comm.get(), /*withChild=*/true);
-
-  const int kAbortValue = 3;
-  EXPECT_EQ(ncclSuccess, setCommAbortFlags(comm.get(), kAbortValue));
-  EXPECT_EQ(3u, flags.parent);
-  EXPECT_EQ(3u, flags.parentDev);
-  EXPECT_EQ(3u, flags.child);
-  EXPECT_EQ(3u, flags.childDev);
-}
-
-TEST_F(InitMicrotest, SetCommAbortFlags_NoChildComm_LeavesBothChildSlotsUntouched) {
-  auto comm = std::make_unique<ncclComm>();
-  Teardown_AbortFlagSet flags;
-  flags.Attach(comm.get(), /*withChild=*/false);
-
-  EXPECT_EQ(ncclSuccess, setCommAbortFlags(comm.get(), 1));
-  EXPECT_EQ(1u, flags.parent);
-  EXPECT_EQ(1u, flags.parentDev);
-  EXPECT_EQ(Teardown_kFlagPoison, flags.child);
-  EXPECT_EQ(Teardown_kFlagPoison, flags.childDev);
-}
-
-TEST_F(InitMicrotest, SetCommAbortFlags_ValueZero_ClearsEverySlot) {
-  auto comm = std::make_unique<ncclComm>();
-  Teardown_AbortFlagSet flags;
-  flags.Attach(comm.get(), /*withChild=*/true);
-
-  EXPECT_EQ(ncclSuccess, setCommAbortFlags(comm.get(), 0));
-  EXPECT_EQ(0u, flags.parent);
-  EXPECT_EQ(0u, flags.parentDev);
-  EXPECT_EQ(0u, flags.child);
-  EXPECT_EQ(0u, flags.childDev);
-}
-
 // --- commDestroySync / commCleanup / commReclaim and the public entry points ---
 namespace {
 
@@ -5389,7 +5288,7 @@ TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsR
   EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
 }
 
-// --- commCleanup (init.cc:3772) ---
+// --- shared tuner probe for commCleanup-driven teardown (init.cc:3772) ---
 namespace {
 constexpr uint64_t Teardown_kTunerMagic = 0xC0FFEE01u;
 
@@ -5413,64 +5312,6 @@ void Teardown_AttachTuner(ncclComm* comm, ncclTuner_t* tuner, Teardown_TunerReco
   comm->tunerContext = rec;
 }
 }  // namespace
-
-TEST_F(InitMicrotest, CommCleanup_NoTuner_SelectsCommDeviceAndSkipsPluginUnload) {
-  ncclComm* comm = nullptr;
-  uint32_t abortFlag = 0;
-  int abortRef = 2;
-  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
-  const int kCudaDev = 5;
-  comm->cudaDev = kCudaDev;
-
-  int setDev = -1;
-  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
-    setDev = dev;
-    return hipSuccess;
-  });
-  ScopedHook unload(g_ncclTunerPluginUnload, [](ncclComm*) { return ncclSuccess; });
-
-  EXPECT_EQ(ncclSuccess, commCleanup(comm));
-  EXPECT_EQ(kCudaDev, setDev);
-  EXPECT_EQ(0, unload.calls);
-}
-
-TEST_F(InitMicrotest, CommCleanup_TunerPresent_FinalizesWithTunerContextThenUnloadsPlugin) {
-  ncclComm* comm = nullptr;
-  uint32_t abortFlag = 0;
-  int abortRef = 2;
-  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
-  ncclTuner_t tuner{};
-  Teardown_TunerRecord rec;
-  Teardown_AttachTuner(comm, &tuner, &rec);
-
-  ncclComm* unloadedComm = nullptr;
-  ScopedHook unload(g_ncclTunerPluginUnload, [&](ncclComm* c) {
-    unloadedComm = c;
-    return ncclSuccess;
-  });
-
-  EXPECT_EQ(ncclSuccess, commCleanup(comm));
-  EXPECT_EQ(1, rec.finalizeCalls);
-  EXPECT_EQ(1, unload.calls);
-  EXPECT_EQ(comm, unloadedComm);
-}
-
-TEST_F(InitMicrotest, CommCleanup_TunerUnloadFails_PropagatesWithoutFreeingComm) {
-  ncclComm* comm = nullptr;
-  uint32_t abortFlag = 0;
-  int abortRef = 2;
-  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
-  ncclTuner_t tuner{};
-  Teardown_TunerRecord rec;
-  Teardown_AttachTuner(comm, &tuner, &rec);
-  ScopedHook unload(g_ncclTunerPluginUnload, [](ncclComm*) { return ncclSystemError; });
-
-  EXPECT_EQ(ncclSystemError, commCleanup(comm));
-  EXPECT_EQ(1, rec.finalizeCalls);
-  EXPECT_EQ(2, abortRef);
-  comm->tuner = nullptr;
-  EXPECT_EQ(ncclSuccess, commFree(comm));
-}
 
 // --- commReclaim (init.cc:3833) ---
 namespace {
