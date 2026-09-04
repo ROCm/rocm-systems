@@ -44,6 +44,21 @@ Hardware performance counters are collected across multiple profiling passes. Wh
 
 This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
 
+Why does the CLI memory chart look wrapped or garbled?
+=======================================================
+
+The visualized memory chart needs a terminal width of at least 240 columns.
+If the terminal is narrower or wraps long lines, the diagram breaks across
+lines:
+
+.. image:: ../data/faq/mem_chart_wrapped.png
+   :align: center
+   :alt: Memory chart wrapped in a narrow terminal
+   :width: 800
+
+See :ref:`cli-memory-chart-viewing` for how to page the chart in a terminal
+(``less -RS``) or open it in Visual Studio Code.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
