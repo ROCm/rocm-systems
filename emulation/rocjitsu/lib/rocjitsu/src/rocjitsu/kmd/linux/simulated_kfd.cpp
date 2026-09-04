@@ -3177,11 +3177,7 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   if (!debug_stop_publishable(gpu_id))
     return;
 
-  if (debug_event_claim_hook_) {
-    DebugEventClaimHook hook = std::move(debug_event_claim_hook_);
-    debug_event_claim_hook_ = {};
-    hook();
-  }
+  run_debug_event_claim_hook_for_testing();
 
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
@@ -3436,6 +3432,14 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   return true;
 }
 
+void SimulatedKfd::run_debug_event_claim_hook_for_testing() {
+  if (!debug_event_claim_hook_)
+    return;
+  DebugEventClaimHook hook = std::move(debug_event_claim_hook_);
+  debug_event_claim_hook_ = {};
+  hook();
+}
+
 bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   auto proc = find_process(wave.process_id());
   if (!proc)
@@ -3459,6 +3463,11 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
     wave.set_debug_single_step(false);
     return false;
   }
+  amdgpu::Wavefront::DebugStopState saved = wave.debug_stop_state();
+  // The completed step is consumed even when publication loses its debugger
+  // claim. Restoring single_step would make ComputeUnitCore call us after every
+  // subsequent instruction because it intentionally ignores our return value.
+  saved.single_step = false;
   wave.set_debug_single_step(false);
   wave.debug_trap(0);
   // gfx9.4 reports completed single-step through TRAPSTS.TRAP_AFTER_INST. This
@@ -3473,7 +3482,12 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // queue. The debugger's ensuing SUSPEND_QUEUES request publishes one stable,
   // authoritative CWSR snapshot instead of redundantly serializing every
   // resident wave here first.
-  return notify_debug_event(proc, wave.queue_id(), gpu_id);
+  run_debug_event_claim_hook_for_testing();
+  if (!notify_debug_event(proc, wave.queue_id(), gpu_id)) {
+    wave.restore_debug_stop_state(saved);
+    return false;
+  }
+  return true;
 }
 
 bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address, uint32_t bytes,

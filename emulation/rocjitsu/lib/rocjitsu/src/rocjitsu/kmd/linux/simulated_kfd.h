@@ -453,6 +453,7 @@ private:
                                       uint64_t exception_mask);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+  void run_debug_event_claim_hook_for_testing();
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                         uint32_t gpu_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
