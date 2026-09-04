@@ -1307,6 +1307,11 @@ if(INSTALL_TESTS)
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
     )
+    install(
+        FILES tests/marker_args_codec.json
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        COMPONENT tests
+    )
     # The conjugate_gradient driver resolves its kernel libraries relative to
     # its own path, so the whole directory installs as a unit.
     install(
