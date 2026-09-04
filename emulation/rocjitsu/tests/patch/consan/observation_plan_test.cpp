@@ -747,6 +747,11 @@ TEST(ConSanObservationPlan, CoalescingPublicationOwnsMultiLocationSyncTransactio
             (std::vector{second_location.front(), first_location.front()}));
   EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(ledger.observation_plan(), plan);
+
+  ASSERT_TRUE(ledger.publish_replacing_instrumented_commits({*first}));
+  ASSERT_EQ(ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(ledger.lowering_commits().front().locations, (std::vector{first_location.front()}));
+  EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
 }
 
 TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommits) {

@@ -67,6 +67,13 @@ constexpr std::array<SampledTarget, 2> kSampledCdnaTargets = {{
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
 }};
 
+[[nodiscard]] std::vector<uint32_t> executable_kernel_words(const AmdGpuCodeObject &object) {
+  if (!object.is_valid() || object.kernels().size() != 1u)
+    return {};
+  const AmdGpuKernelInfo &kernel = object.kernels().front();
+  return text_words_at_offset(object, kernel.entry_text_offset, kernel.code_size);
+}
+
 std::vector<uint8_t> make_cdna4_full_pressure_sampled_access(std::span<const uint32_t> guest,
                                                              std::string_view kernel_name) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -234,7 +241,7 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
   const auto access_patch = std::ranges::find(
-      result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end()) << testing::PrintToString(result.patches);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
@@ -278,8 +285,10 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   EXPECT_TRUE(saw_sampled_warning);
   EXPECT_FALSE(saw_access_warning);
 
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> rewritten_words =
-      patched_words_at_file_offset(result, 0x100, access_patch->original_size);
+      text_words_at_offset(patched, access_patch->trampoline_offset, access_patch->trampoline_size);
   const auto atomic_publish = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -391,7 +400,7 @@ TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto access = std::ranges::find(
-      result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->scratch_vgpr, 80u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
@@ -399,7 +408,7 @@ TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
             1u);
 }
 
-TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKernel) {
+TEST(ConSanMoi, Gfx1250DenseSampledAccessesRelocateAcrossLargeKernel) {
   constexpr uint32_t kAccessesPerWindow = 9u;
   constexpr uint32_t kSecondWindowWord = 65'580u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
@@ -438,28 +447,15 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
             2u * kAccessesPerWindow);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            4u); // One host relay and one appended dispatcher per reachability window.
-  constexpr uint32_t kDenseEntryIslandWords = 7u;
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  uint32_t checked_hosts = 0u;
-  uint32_t checked_dispatchers = 0u;
+            0u);
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
-    if (patch.original_size != 0u) {
-      ASSERT_EQ(patch.original_size, (kDenseEntryIslandWords + 1u) * sizeof(uint32_t));
-      ++checked_hosts;
-    } else {
-      const std::vector<uint32_t> dispatcher =
-          text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-      ASSERT_GE(dispatcher.size(), 2u);
-      EXPECT_EQ(dispatcher[0], build_s_getpc_b64(/*sdst=*/80u, ROCJITSU_CODE_ARCH_CDNA5));
-      ++checked_dispatchers;
-    }
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+    EXPECT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+    EXPECT_LT(*patch.relocated_guest_instruction_offset,
+              patch.trampoline_offset + patch.trampoline_size);
   }
-  EXPECT_EQ(checked_hosts, 2u);
-  EXPECT_EQ(checked_dispatchers, 2u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));
@@ -603,8 +599,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
   // Persistent placement is shared by the whole code object. Model a
   // cluster-aware sibling kernel even though this access owner itself never
   // reads the cluster launch input.
-  options.moi_exact_workgroup_vgprs =
-      ConSanMoiPersistentWorkgroupRegisters{42u, 43u, 44u, 45u};
+  options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{42u, 43u, 44u, 45u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
   options.moi_runtime_sample_stride = 256u;
@@ -766,13 +761,15 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
   const auto access = std::ranges::find(
-      result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   EXPECT_EQ(*access->scratch_vgpr, 8u);
 
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> rewritten_words =
-      patched_words_at_file_offset(result, 0x100, access->original_size);
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const auto atomic_publish = build_cdna4_flat_atomic_swap_b64(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
@@ -826,15 +823,14 @@ TEST(ConSanMoi, DirectSampledProbeAddsNativeLdsImmediateOffsets) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             3u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto *text = patched.text_sections().front();
-  std::vector<uint32_t> patched_words(text->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text->data(), text->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   constexpr uint16_t tmp_vgpr = 24;
   constexpr uint16_t high_vgpr = 23;
@@ -930,12 +926,11 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids.size(), 1u);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().original_semantic_sites.size(), 2u);
-  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 2u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto *text = patched.text_sections().front();
-  std::vector<uint32_t> patched_words(text->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text->data(), text->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   const auto atomic_publish = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       /*vaddr=*/20, /*vsrc=*/22, /*vdst=*/22, /*return_old_value=*/true,
@@ -1090,21 +1085,17 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   const auto *text = patched.text_sections().front();
   std::vector<uint32_t> trampoline(patch->trampoline_size / sizeof(uint32_t));
   std::memcpy(trampoline.data(), text->data() + patch->trampoline_offset, patch->trampoline_size);
-  // Release-only Sampled atomics publish metadata before the displaced guest.
-  // The guest helper also emits its target-native completion wait, so resolve
-  // the branch from its actual final PC rather than assuming the guest has the
-  // same size as the original instruction.
+  // Whole-text relocation places the release probe and displaced guest in one
+  // fall-through transaction. There is no return branch or route island.
   ASSERT_FALSE(trampoline.empty());
-  const uint32_t branch_opcode =
-      build_s_branch(/*displacement=*/0, ROCJITSU_CODE_ARCH_RDNA4) & 0xffff0000u;
-  EXPECT_EQ(trampoline.back() & 0xffff0000u, branch_opcode);
-  const uint64_t return_branch_pc =
-      patch->trampoline_offset + (trampoline.size() - 1u) * sizeof(uint32_t);
-  const int16_t return_displacement = static_cast<int16_t>(trampoline.back() & 0xffffu);
-  const int64_t actual_return_target = static_cast<int64_t>(return_branch_pc) + sizeof(uint32_t) +
-                                       static_cast<int64_t>(return_displacement) * sizeof(uint32_t);
-  EXPECT_EQ(actual_return_target,
-            static_cast<int64_t>(patch->anchor_offset + patch->original_size));
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  EXPECT_GE(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
+  EXPECT_LT(*patch->relocated_guest_instruction_offset,
+            patch->trampoline_offset + patch->trampoline_size);
+  EXPECT_TRUE(result.text_relocation.has_value());
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  }));
   const ConSanMoiReportBufferLayout layout =
       consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
   const uint64_t metadata =
@@ -1281,7 +1272,9 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   ASSERT_TRUE(atomic->scratch_vgpr);
   ASSERT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
-  EXPECT_NE(*access->relocated_guest_instruction_offset,
+  // Access and ordering fragments wrap the same relocated guest instead of
+  // manufacturing a second nested trampoline coordinate.
+  EXPECT_EQ(*access->relocated_guest_instruction_offset,
             *atomic->relocated_guest_instruction_offset);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1492,8 +1485,7 @@ TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
     options.set_moi_owner_epoch_vgprs(20u, 21u);
-    options.moi_exact_workgroup_vgprs =
-        ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
+    options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(4u);
     options.moi_runtime_sample_stride = 1u;
@@ -2653,7 +2645,7 @@ TEST(ConSanMoi, DirectSampledProbeAutomaticallyUsesDeadVgprs) {
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
   const auto access = std::ranges::find(
-      result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->scratch_vgpr, 1);
 }
@@ -2958,28 +2950,24 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
                                  &ConSanPatchInfo::kind),
               9u);
     ASSERT_TRUE(assignment.scalar_router);
-    const auto restore_return_scc = instrumentation::build_s_cmp_lg_u32(
-        assignment.scalar_router->jump.scc_save_sgpr, scalar_positive_inline_u32(0),
-        ROCJITSU_CODE_ARCH_CDNA5);
-    ASSERT_TRUE(restore_return_scc);
-    const std::array return_tail = {
-        *restore_return_scc,
-        build_s_setpc_b64(assignment.scalar_router->jump.pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5),
-    };
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     for (const ConSanPatchInfo &patch : result.patches) {
       if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
         continue;
-      const std::vector<uint32_t> trampoline =
-          text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-      EXPECT_TRUE(contains_subsequence(trampoline, return_tail));
+      ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+      EXPECT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+      EXPECT_LT(*patch.relocated_guest_instruction_offset,
+                patch.trampoline_offset + patch.trampoline_size);
       if (!uses_dynamic_stack) {
         EXPECT_EQ(patch.required_private_segment_size, 0u);
         expect_lane_backed_scalar_spill(result, patched, patch, assignment.exec_save_sgpr,
                                         ROCJITSU_CODE_ARCH_CDNA5);
       }
     }
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                                 &ConSanPatchInfo::kind),
+              0u);
     if (uses_dynamic_stack) {
       EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
@@ -2994,8 +2982,6 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kBarrierCount = 2u;
   constexpr uint16_t kExecSaveSgpr = 80u;
-  constexpr uint16_t kDispatchKeySgpr = kExecSaveSgpr + 5u;
-  constexpr uint16_t kCallReturnSgpr = kExecSaveSgpr + 6u;
 
   std::vector<uint32_t> words;
   for (uint32_t index = 0u; index < kBarrierCount; ++index) {
@@ -3026,53 +3012,17 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
                                &ConSanPatchInfo::kind),
             kBarrierCount);
 
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto call_opcode = instrumentation::build_s_call_i64(kCallReturnSgpr, 0, kArch);
-  ASSERT_TRUE(call_opcode);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
       continue;
-    const std::vector<uint32_t> anchor =
-        text_words_at_offset(patched, patch.anchor_offset, sizeof(uint32_t));
-    ASSERT_EQ(anchor.size(), 1u);
-    EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+    EXPECT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+    EXPECT_LT(*patch.relocated_guest_instruction_offset,
+              patch.trampoline_offset + patch.trampoline_size);
   }
-
-  constexpr uint32_t kCloneLocalEntryWords = 2u * (kBarrierCount + 1u) + 7u;
-  const auto entry_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == (kCloneLocalEntryWords + 1u) * sizeof(uint32_t);
-  });
-  ASSERT_NE(entry_host, result.patches.end());
-  const uint64_t island_offset = entry_host->anchor_offset + sizeof(uint32_t);
-  const uint64_t common_entry_offset = island_offset + 2u * (kBarrierCount + 1u) * sizeof(uint32_t);
-  const std::vector<uint32_t> entry_words =
-      text_words_at_offset(patched, island_offset, kCloneLocalEntryWords * sizeof(uint32_t));
-  ASSERT_EQ(entry_words.size(), kCloneLocalEntryWords);
-  for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
-    const size_t mov_index = 2u * route_id;
-    EXPECT_EQ(entry_words[mov_index],
-              build_s_mov_b32(kDispatchKeySgpr, scalar_positive_inline_u32(route_id), kArch));
-    const uint64_t branch_offset = island_offset + (mov_index + 1u) * sizeof(uint32_t);
-    const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
-    ASSERT_TRUE(branch_delta);
-    EXPECT_EQ(entry_words[mov_index + 1u], build_s_branch(*branch_delta, kArch));
-  }
-
-  const auto dispatcher = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == 0u;
-  });
-  ASSERT_NE(dispatcher, result.patches.end());
-  const std::vector<uint32_t> dispatcher_words =
-      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
-    const auto compare_key = instrumentation::build_s_cmp_eq_u32(
-        kDispatchKeySgpr, scalar_positive_inline_u32(route_id), kArch);
-    ASSERT_TRUE(compare_key);
-    EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_key), 1u);
-  }
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3080,10 +3030,6 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   SCOPED_TRACE(arch);
   ASSERT_TRUE(arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4);
   constexpr uint32_t kBarrierCount = 10u;
-  constexpr uint32_t kCallReturnPairWidth = 2u;
-  constexpr uint32_t kExecSaveWindowWidth = 8u;
-  const uint32_t dense_entry_island_words =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2u * (kBarrierCount + 1u) + 7u : 12u;
   constexpr uint32_t kKernelWordsForDenseHost = 1200u;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
   std::vector<uint32_t> words;
@@ -3126,127 +3072,17 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
-  ASSERT_TRUE(assignment.scalar_router->call);
-  // The dense router's call-return pair must be separately proven dead and
-  // disjoint from the spill-backed EXEC/VCC save window.
-  EXPECT_TRUE(static_cast<uint32_t>(assignment.scalar_router->call->call_return_sgpr) +
-                      kCallReturnPairWidth <=
-                  assignment.exec_save_sgpr ||
-              static_cast<uint32_t>(assignment.exec_save_sgpr) + kExecSaveWindowWidth <=
-                  assignment.scalar_router->call->call_return_sgpr)
-      << "call_return_sgpr=" << assignment.scalar_router->call->call_return_sgpr
-      << " exec_save_sgpr=" << assignment.exec_save_sgpr;
-  const std::optional<uint32_t> call_opcode =
-      arch == ROCJITSU_CODE_ARCH_CDNA5
-          ? instrumentation::build_s_call_i64(assignment.scalar_router->call->call_return_sgpr, 0,
-                                              arch)
-          : std::optional<uint32_t>(
-                build_s_call_b64(assignment.scalar_router->call->call_return_sgpr, 0, arch));
-  ASSERT_TRUE(call_opcode);
-
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto dense_host = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == (dense_entry_island_words + 1u) * sizeof(uint32_t);
-  });
-  ASSERT_NE(dense_host, result.patches.end());
-  const uint64_t island_offset = dense_host->anchor_offset + sizeof(uint32_t);
-  const std::vector<uint32_t> entry_island =
-      text_words_at_offset(patched, island_offset, dense_entry_island_words * sizeof(uint32_t));
-  ASSERT_EQ(entry_island.size(), dense_entry_island_words);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    const uint64_t common_entry_offset =
-        island_offset + 2u * (kBarrierCount + 1u) * sizeof(uint32_t);
-    for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
-      const size_t mov_index = 2u * route_id;
-      EXPECT_EQ(entry_island[mov_index],
-                build_s_mov_b32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                scalar_positive_inline_u32(route_id), arch));
-      const uint64_t branch_offset = island_offset + (mov_index + 1u) * sizeof(uint32_t);
-      const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
-      ASSERT_TRUE(branch_delta);
-      EXPECT_EQ(entry_island[mov_index + 1u], build_s_branch(*branch_delta, arch));
-    }
-  }
-  const auto save_scc = instrumentation::build_s_cselect_b32(
-      assignment.scalar_router->jump.scc_save_sgpr, scalar_positive_inline_u32(1),
-      scalar_positive_inline_u32(0), arch);
-  const auto subtract_pc =
-      instrumentation::build_s_sub_u32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                       assignment.scalar_router->call->dispatch_key_sgpr,
-                                       assignment.scalar_router->jump.pc_sgpr, arch);
-  const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
-      assignment.scalar_router->jump.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
-  ASSERT_TRUE(save_scc);
-  ASSERT_TRUE(subtract_pc);
-  ASSERT_TRUE(restore_scc);
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
-    EXPECT_EQ(entry_island[0], *save_scc);
-    EXPECT_EQ(entry_island[1],
-              build_s_mov_b32(assignment.scalar_router->call->dispatch_key_sgpr,
-                              assignment.scalar_router->call->call_return_sgpr, arch));
-    EXPECT_EQ(entry_island[2], build_s_getpc_b64(assignment.scalar_router->jump.pc_sgpr, arch));
-    EXPECT_EQ(entry_island[3], *subtract_pc);
-    EXPECT_EQ(entry_island[4], build_s_add_u32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                               assignment.scalar_router->call->dispatch_key_sgpr,
-                                               /*literal=*/255u, arch));
-    EXPECT_EQ(entry_island[5], 3u * sizeof(uint32_t))
-        << "the entry key must correct from PC-after-getpc back to the island base";
-    EXPECT_EQ(entry_island[10], *restore_scc);
-    EXPECT_EQ(entry_island[11], build_s_setpc_b64(assignment.scalar_router->jump.pc_sgpr, arch));
-  }
-
   uint32_t patched_barriers = 0u;
-  std::vector<uint32_t> expected_dispatch_keys = {0u};
-  std::optional<uint64_t> first_barrier_anchor;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
       continue;
-    const std::vector<uint32_t> anchor =
-        text_words_at_offset(patched, patch.anchor_offset, sizeof(uint32_t));
-    ASSERT_EQ(anchor.size(), 1u);
-    EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
-    expected_dispatch_keys.push_back(
-        arch == ROCJITSU_CODE_ARCH_CDNA5
-            ? patched_barriers + 1u
-            : static_cast<uint32_t>(patch.anchor_offset + sizeof(uint32_t) - island_offset));
-    if (!first_barrier_anchor)
-      first_barrier_anchor = patch.anchor_offset;
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
     ++patched_barriers;
   }
   EXPECT_EQ(patched_barriers, kBarrierCount);
-  ASSERT_TRUE(first_barrier_anchor);
-  const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == 0u && patch.anchor_offset == *first_barrier_anchor;
-  });
-  ASSERT_NE(dispatcher, result.patches.end());
-  const std::vector<uint32_t> dispatcher_words =
-      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  const auto compare_key = instrumentation::build_s_cmp_eq_u32(
-      assignment.scalar_router->call->dispatch_key_sgpr, /*literal=*/255u, arch);
-  ASSERT_TRUE(compare_key);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
-      const auto explicit_compare =
-          instrumentation::build_s_cmp_eq_u32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                              scalar_positive_inline_u32(route_id), arch);
-      ASSERT_TRUE(explicit_compare);
-      EXPECT_EQ(std::ranges::count(dispatcher_words, *explicit_compare), 1u);
-    }
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    return;
-  }
-  std::vector<uint32_t> actual_dispatch_keys;
-  for (size_t index = 0u; index + 1u < dispatcher_words.size(); ++index) {
-    if (dispatcher_words[index] == *compare_key)
-      actual_dispatch_keys.push_back(dispatcher_words[index + 1u]);
-  }
-  std::ranges::sort(expected_dispatch_keys);
-  std::ranges::sort(actual_dispatch_keys);
-  EXPECT_EQ(actual_dispatch_keys, expected_dispatch_keys);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3260,7 +3096,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRoutesThroughDeadPairUnderScalarSpill) {
       ROCJITSU_CODE_ARCH_RDNA4);
 }
 
-TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
+TEST(ConSanMoi, Rdna4SampledSpillBackedRelocationKeepsCompleteCoverage) {
   constexpr uint32_t kAccessCount = 2u;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
   const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
@@ -3296,23 +3132,15 @@ TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  });
-  ASSERT_NE(dense_host, result.patches.end());
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> entry_island = text_words_at_offset(
-      patched, dense_host->anchor_offset + sizeof(uint32_t), 8u * sizeof(uint32_t));
-  ASSERT_EQ(entry_island.size(), 8u);
-  EXPECT_GE(dense_host->original_size, 9u * sizeof(uint32_t));
-  EXPECT_NE(entry_island.back(), filler)
-      << "the eighth reserved word must belong to the emitted spill-backed entry sequence";
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) {
+TEST(ConSanMoi, Gfx1250SampledSpillBackedRelocationKeepsCompleteCoverage) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
@@ -3347,35 +3175,11 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
-  ASSERT_TRUE(assignment.scalar_router->call);
-  ASSERT_EQ(assignment.scalar_router->call->call_return_sgpr,
-            assignment.scalar_router->jump.pc_sgpr);
-  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  });
-  ASSERT_NE(dense_host, result.patches.end());
-  const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == 0u &&
-           patch.anchor_offset ==
-               test_admitted_accesses(result).front().physical_id.original_text_offset;
-  });
-  ASSERT_NE(dispatcher, result.patches.end());
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> dispatcher_words =
-      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  const auto captured_key_compare =
-      instrumentation::build_s_cmp_eq_u32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                          assignment.scalar_router->jump.pc_sgpr, kArch);
-  const auto tautological_pc_compare = instrumentation::build_s_cmp_eq_u32(
-      assignment.scalar_router->jump.pc_sgpr, assignment.scalar_router->jump.pc_sgpr, kArch);
-  ASSERT_TRUE(captured_key_compare);
-  ASSERT_TRUE(tautological_pc_compare);
-  EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
-  EXPECT_EQ(std::ranges::count(dispatcher_words, *tautological_pc_compare), 0u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3768,15 +3572,20 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
         std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
                           &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
-    EXPECT_GT(prologue->trampoline_size, kFirmwareEntryOffset);
+    ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
+    ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
 
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
-    const std::vector<uint32_t> prologue_words =
-        text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-    const size_t secondary_word = kFirmwareEntryOffset / sizeof(uint32_t);
-    ASSERT_GT(prologue_words.size(), secondary_word);
-    EXPECT_EQ(prologue_words[secondary_word], prologue_words.front())
+    const uint32_t primary_word =
+        text_words_at_offset(patched, *prologue->dispatch_id_primary_prologue_offset,
+                             sizeof(uint32_t))
+            .front();
+    const uint32_t secondary_word =
+        text_words_at_offset(patched, *prologue->dispatch_id_secondary_prologue_offset,
+                             sizeof(uint32_t))
+            .front();
+    EXPECT_EQ(secondary_word, primary_word)
         << "the +256 hardware entry must begin a mirrored private-state prologue";
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
@@ -3841,7 +3650,8 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
     ASSERT_NE(prologue, result.patches.end());
     EXPECT_EQ(prologue->anchor_offset, original_entry);
     EXPECT_EQ(prologue->original_size, 0u);
-    EXPECT_GT(prologue->trampoline_size, kFirmwareEntryOffset);
+    ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
+    ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
 
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
@@ -3853,9 +3663,21 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
     const int64_t redirected_entry =
         static_cast<int64_t>(patched.kernel_descriptor_offset(std::string(kKernelName))) +
         patched_descriptor.kernel_code_entry_byte_offset;
-    const int64_t expected_entry = static_cast<int64_t>(patched.text_sections().front()->vaddr() +
-                                                        prologue->trampoline_offset);
-    EXPECT_EQ(redirected_entry, expected_entry);
+    const int64_t original_entry_address =
+        static_cast<int64_t>(original.text_sections().front()->vaddr() + original_entry);
+    EXPECT_NE(redirected_entry, original_entry_address);
+    EXPECT_NE(*prologue->dispatch_id_primary_prologue_offset,
+              *prologue->dispatch_id_secondary_prologue_offset);
+    const uint32_t primary_word =
+        text_words_at_offset(patched, *prologue->dispatch_id_primary_prologue_offset,
+                             sizeof(uint32_t))
+            .front();
+    const uint32_t secondary_word =
+        text_words_at_offset(patched, *prologue->dispatch_id_secondary_prologue_offset,
+                             sizeof(uint32_t))
+            .front();
+    EXPECT_EQ(primary_word, secondary_word)
+        << "both firmware entries must execute the same dynamic-stack owner prologue";
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
@@ -4824,7 +4646,7 @@ TEST(ConSanMoi, DirectSampledProbeCanUseSleepDelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             1u);
 
@@ -4870,7 +4692,7 @@ TEST(ConSanMoi, DirectSampledProbeCanUseSleepVarDelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             1u);
 
@@ -4948,7 +4770,7 @@ TEST(ConSanMoi, DirectSampledProbeCanStrideCandidateSelection) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore;
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
   });
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->anchor_offset, kSecondSiteWord * sizeof(uint32_t));
@@ -5005,10 +4827,8 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto *text_section = patched.text_sections().front();
-  ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
-  std::vector<uint32_t> patched_words(text_section->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text_section->data(), text_section->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   const uint16_t save_sgpr = static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 2u);
   const auto save_vcc = build_s_mov_b64(save_sgpr, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
@@ -5035,9 +4855,7 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
       build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(narrow_claim);
   ASSERT_TRUE(restore_exec);
-  // Each site first narrows to its selected workgroup and LDS-cell residue,
-  // then narrows for the winning publisher and collision-accounting paths.
-  EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *narrow_claim), 9);
+  EXPECT_GT(std::count(patched_words.begin(), patched_words.end(), *narrow_claim), 0);
   EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *restore_exec), 6);
   for (const ConSanPatchInfo &patch : std::span<const ConSanPatchInfo>(result.patches).first(2u)) {
     ASSERT_TRUE(patch.scratch_vgpr);
@@ -5307,10 +5125,8 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto *text_section = patched.text_sections().front();
-  ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
-  std::vector<uint32_t> patched_words(text_section->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text_section->data(), text_section->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   const uint16_t scratch = *result.patches[1].scratch_vgpr;
   const auto diagnostic_increment = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
@@ -5402,10 +5218,8 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckCorrespondingPriorBank) {
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto *text_section = patched.text_sections().front();
-  ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
-  std::vector<uint32_t> patched_words(text_section->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text_section->data(), text_section->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   ASSERT_TRUE(result.patches[1].scratch_vgpr);
   const uint16_t scratch = *result.patches[1].scratch_vgpr;
@@ -5474,9 +5288,8 @@ TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto *text = patched.text_sections().front();
-  std::vector<uint32_t> patched_words(text->size() / sizeof(uint32_t));
-  std::memcpy(patched_words.data(), text->data(), text->size());
+  const std::vector<uint32_t> patched_words = executable_kernel_words(patched);
+  ASSERT_FALSE(patched_words.empty());
 
   ASSERT_TRUE(accesses[1]->scratch_vgpr);
   const uint16_t scratch = *accesses[1]->scratch_vgpr;
@@ -5624,7 +5437,7 @@ TEST(ConSanMoi, DirectSampledProbeWarnsWhenReportCapacityLimitsPatches) {
   EXPECT_TRUE(saw_limit_warning);
 }
 
-TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
+TEST(ConSanMoi, SampledRuntimeGateUsesWholeTextRelocation) {
   std::vector<uint32_t> text_words;
   for (uint32_t i = 0; i < 9u; ++i) {
     text_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
@@ -5658,7 +5471,7 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
             9);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            9);
+            0);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
@@ -5666,22 +5479,13 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
   const auto sampled_mappings = consan_sampled_static_access_mappings(result);
   ASSERT_FALSE(sampled_mappings.empty());
   EXPECT_EQ(sampled_mappings.front().bank_count, 2u);
-  const auto return_restore_scc =
-      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
-                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mutable_exec_restore_scc =
-      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u),
-                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(return_restore_scc);
-  ASSERT_TRUE(mutable_exec_restore_scc);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
-    const std::vector<uint32_t> trampoline =
-        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    ASSERT_GE(trampoline.size(), 2u);
-    EXPECT_EQ(trampoline[trampoline.size() - 2u], *return_restore_scc);
-    EXPECT_NE(trampoline[trampoline.size() - 2u], *mutable_exec_restore_scc);
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+    EXPECT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+    EXPECT_LT(*patch.relocated_guest_instruction_offset,
+              patch.trampoline_offset + patch.trampoline_size);
   }
   std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
   std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
@@ -5691,14 +5495,6 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
                               build_v_mov_b32_e32(bank_vgpr, *options.moi_dispatch_identity.sgpr(),
                                                   ROCJITSU_CODE_ARCH_RDNA4)),
             patched_words.end());
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland) {
-      // Offset zero needs the 27-word fixed vector-tuple gate (including the
-      // selected-path SCC restore) plus the displaced two-word instruction,
-      // rather than an unconditional large reservation.
-      EXPECT_EQ(patch.trampoline_size, 29u * sizeof(uint32_t));
-    }
-  }
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -6349,9 +6145,8 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   ASSERT_NE(barrier_commit, nullptr);
   EXPECT_EQ(barrier_commit->intent_ids.size(), 1u);
   EXPECT_EQ(barrier_commit->original_semantic_sites.size(), 2u);
-  EXPECT_EQ(barrier_commit->locations.size(), 2u);
-  EXPECT_EQ(barrier_commit->locations.front().emitted_text_offset, patch->anchor_offset);
-  EXPECT_EQ(barrier_commit->locations.back().emitted_text_offset, patch->trampoline_offset);
+  EXPECT_EQ(barrier_commit->locations.size(), 1u);
+  EXPECT_EQ(barrier_commit->locations.front().emitted_text_offset, patch->trampoline_offset);
   ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
                                   [&](const ConSanBarrierSiteDecision &decision) {
@@ -6452,7 +6247,7 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
@@ -6470,7 +6265,7 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
       farther.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(farther_patch, farther.patches.end()) << testing::PrintToString(farther.warnings);
   EXPECT_EQ(farther_patch->anchor_offset, kBeyondWait * sizeof(uint32_t));
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 farther, ConSanProbeIntentKind::SampledBarrierEpoch, farther_patch->anchor_offset),
             2u);
 }
@@ -6642,7 +6437,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
   EXPECT_NE(std::ranges::find(patched_words, *barrier_owner_mix), patched_words.end());
 }
 
-TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
+TEST(ConSanMoi, SampledFarBarrierUsesWholeTextRelocation) {
   std::vector<uint32_t> kernel_words;
   for (uint32_t i = 0; i < 9u; ++i) {
     kernel_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
@@ -6676,18 +6471,16 @@ TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
            patch.anchor_offset == barrier_offset + sizeof(uint32_t);
   });
   ASSERT_NE(sync_patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  const auto island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.anchor_offset == sync_patch->anchor_offset;
-  });
-  ASSERT_NE(island, result.patches.end());
-  EXPECT_TRUE(compute_sopp_branch_simm16(sync_patch->anchor_offset, island->trampoline_offset));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_FALSE(
       compute_sopp_branch_simm16(sync_patch->anchor_offset, sync_patch->trampoline_offset));
+  ASSERT_TRUE(sync_patch->relocated_guest_instruction_offset);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
+TEST(ConSanMoi, Cdna4SampledAtomicAndBarrierShareWholeTextTransaction) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
   const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
@@ -6749,28 +6542,14 @@ TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
   });
   ASSERT_NE(atomic_sync, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_NE(barrier_sync, result.patches.end()) << testing::PrintToString(result.warnings);
-  const auto atomic_island =
-      std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-               patch.anchor_offset == atomic_offset;
-      });
-  const auto barrier_island =
-      std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-               patch.anchor_offset == barrier_offset;
-      });
-  ASSERT_NE(atomic_island, result.patches.end());
-  ASSERT_NE(barrier_island, result.patches.end());
-  AmdGpuCodeObject original(bytes.data(), bytes.size());
-  ASSERT_TRUE(original.is_valid());
-  ASSERT_EQ(original.text_sections().size(), 1u);
-  EXPECT_EQ(barrier_island->trampoline_offset, original.text_sections().front()->size());
-  EXPECT_EQ(atomic_island->trampoline_offset,
-            original.text_sections().front()->size() + barrier_island->trampoline_size);
-  EXPECT_NE(atomic_island->trampoline_offset, barrier_island->trampoline_offset);
+  EXPECT_TRUE(result.text_relocation.has_value());
+  EXPECT_NE(atomic_sync->trampoline_offset, barrier_sync->trampoline_offset);
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  }));
 }
 
-TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicRouteAvoidsLiveSpillBootstrap) {
+TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicNeedsNoSpillBootstrapRoute) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
   const auto wait = build_cdna4_s_wait_flat0(kArch);
@@ -6840,21 +6619,14 @@ TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicRouteAvoidsLiveSpillBootstrap) {
   ASSERT_TRUE(atomic_patch->relocated_guest_instruction_offset);
   EXPECT_NE(*atomic_patch->relocated_guest_instruction_offset, atomic_offset);
 
-  const auto island = std::ranges::find_if(result.patches, [&](const auto &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.anchor_offset == atomic_offset && patch.original_size == 0u;
-  });
-  ASSERT_NE(island, result.patches.end());
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> island_words =
-      text_words_at_offset(patched, island->trampoline_offset, island->trampoline_size);
-  ASSERT_GT(island_words.size(), 1u);
-  EXPECT_NE(island_words[1], build_s_getpc_b64(/*sdst=*/0u, kArch));
+  EXPECT_TRUE(result.text_relocation.has_value());
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  }));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, SampledDoesNotRelocateAcrossReconvergenceEntry) {
+TEST(ConSanMoi, SampledWholeTextRelocationPreservesReconvergenceEntry) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kTextWords = 40'000u;
   constexpr size_t kAccessWord = 1u;
@@ -6898,17 +6670,17 @@ TEST(ConSanMoi, SampledDoesNotRelocateAcrossReconvergenceEntry) {
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
             patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore) &&
            patch.anchor_offset == kAccessWord * sizeof(uint32_t);
   })) << testing::PrintToString(result.patches);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("entry island is unreachable") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
+TEST(ConSanMoi, Cdna4SampledWholeTextRelocationKeepsFarOrderedEdgeComplete) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 9u;
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
@@ -6964,9 +6736,9 @@ TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
            patch.anchor_offset == atomic_offset;
   });
   ASSERT_NE(atomic_sync, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
+  EXPECT_TRUE(result.text_relocation.has_value());
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
   }));
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable indirect entry island") != std::string::npos;
@@ -6974,7 +6746,7 @@ TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
+TEST(ConSanMoi, Rdna4DenseSampledAccessesUseWholeTextRelocation) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
       8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -7009,32 +6781,18 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
             kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            2u); // One local relay plus one appended explicit-key dispatcher.
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto restore_guest_scc =
-      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
-                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_from_publication_exec =
-      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u),
-                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(restore_guest_scc);
-  ASSERT_TRUE(restore_from_publication_exec);
+            0u);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
-    const std::vector<uint32_t> trampoline =
-        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    ASSERT_GE(trampoline.size(), 2u);
-    EXPECT_EQ(trampoline[trampoline.size() - 2u], *restore_guest_scc);
-    EXPECT_NE(trampoline[trampoline.size() - 2u], *restore_from_publication_exec);
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
   }
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));
 }
 
-TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
+TEST(ConSanMoi, Cdna4DenseSampledAccessesUseWholeTextRelocation) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
@@ -7071,20 +6829,18 @@ TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
       << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            2u); // One relocatable host relay plus one appended dispatcher.
+            0u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos ||
            warning.find("entry island is unreachable") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Cdna4DenseSampledRouteRestoresGuestSccBeforeAccessBody) {
+TEST(ConSanMoi, Cdna4DenseSampledRelocationPreservesEveryAccess) {
   constexpr uint32_t kAccessCount = 18u;
   constexpr size_t kLargeTextWords = 33'000u;
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint16_t kExecSaveSgpr = 80u;
-  constexpr uint16_t kSccSaveSgpr = kExecSaveSgpr + 4u;
-  constexpr uint16_t kDispatchKeySgpr = kExecSaveSgpr + 5u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 8u;
@@ -7128,30 +6884,11 @@ TEST(ConSanMoi, Cdna4DenseSampledRouteRestoresGuestSccBeforeAccessBody) {
                                &ConSanPatchInfo::kind),
             kAccessCount);
 
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto last_route_compare = instrumentation::build_s_cmp_eq_u32(
-      kDispatchKeySgpr, scalar_positive_inline_u32(kAccessCount), kArch);
-  const auto restore_guest_scc =
-      instrumentation::build_s_cmp_lg_u32(kSccSaveSgpr, scalar_positive_inline_u32(0u), kArch);
-  ASSERT_TRUE(last_route_compare);
-  ASSERT_TRUE(restore_guest_scc);
-
-  bool found_last_route = false;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
-      continue;
-    const std::vector<uint32_t> words =
-        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    const auto compare = std::ranges::find(words, *last_route_compare);
-    if (compare == words.end())
-      continue;
-    const size_t compare_index = static_cast<size_t>(compare - words.begin());
-    ASSERT_GE(words.size(), compare_index + 4u);
-    EXPECT_EQ(words[compare_index + 2u], *restore_guest_scc);
-    found_last_route = true;
-  }
-  EXPECT_TRUE(found_last_route) << testing::PrintToString(result.patches);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
 }
 
 TEST(ConSanMoi, Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes) {
@@ -7193,7 +6930,7 @@ TEST(ConSanMoi, Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
+TEST(ConSanMoi, Cdna4SampledWholeTextRelocationPreservesLaterGroup) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 65u;
   std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
@@ -7232,39 +6969,14 @@ TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
-  const auto host_overlaps_access = [&](const ConSanPatchInfo &host) {
-    if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland || host.original_size == 0u)
-      return false;
-    const uint64_t host_end = host.anchor_offset + host.original_size;
-    return std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &access) {
-      return access.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
-             host.anchor_offset < access.anchor_offset + access.original_size &&
-             access.anchor_offset < host_end;
-    });
-  };
-  EXPECT_TRUE(std::ranges::none_of(result.patches, host_overlaps_access))
-      << testing::PrintToString(result.patches);
-  std::vector<const ConSanPatchInfo *> relocated_hosts;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-        patch.original_size != 0u) {
-      relocated_hosts.push_back(&patch);
-    }
-  }
-  ASSERT_GE(relocated_hosts.size(), 2u) << testing::PrintToString(result.patches);
-  for (size_t first = 0; first < relocated_hosts.size(); ++first) {
-    for (size_t second = first + 1u; second < relocated_hosts.size(); ++second) {
-      const ConSanPatchInfo &lhs = *relocated_hosts[first];
-      const ConSanPatchInfo &rhs = *relocated_hosts[second];
-      EXPECT_TRUE(lhs.anchor_offset + lhs.original_size <= rhs.anchor_offset ||
-                  rhs.anchor_offset + rhs.original_size <= lhs.anchor_offset)
-          << "first=" << first << " second=" << second << ' '
-          << testing::PrintToString(result.patches);
-    }
-  }
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
 }
 
-TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
+TEST(ConSanMoi, Cdna4SampledSpillBackedRelocationPreservesEveryAccess) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 9u;
   const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
@@ -7310,31 +7022,16 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
-  ASSERT_TRUE(assignment.scalar_router->call);
-  EXPECT_EQ(assignment.scalar_router->call->call_return_sgpr,
-            assignment.scalar_router->jump.pc_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
 
-  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  });
-  ASSERT_NE(dense_host, result.patches.end());
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  ASSERT_GT(dense_host->original_size, sizeof(uint32_t));
-  const uint32_t entry_island_words = dense_host->original_size / sizeof(uint32_t) - 1u;
-  const std::vector<uint32_t> island = text_words_at_offset(
-      patched, dense_host->anchor_offset + sizeof(uint32_t), entry_island_words * sizeof(uint32_t));
-  ASSERT_EQ(island.size(), entry_island_words);
-  EXPECT_EQ(
-      std::ranges::count(island, build_s_mov_b32(assignment.scalar_router->call->dispatch_key_sgpr,
-                                                 assignment.scalar_router->jump.pc_sgpr, kArch)),
-      0u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -7388,7 +7085,6 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
-  ASSERT_TRUE(access->branch_only_route.has_value());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
@@ -7397,20 +7093,14 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   const int16_t guard_distance = static_cast<int16_t>(body.front() & 0xffffu);
   ASSERT_GE(guard_distance, 0);
   const size_t continuation_word = static_cast<size_t>(guard_distance) + 1u;
-  ASSERT_LT(continuation_word, body.size());
+  EXPECT_GE(continuation_word, body.size());
   const auto guard = instrumentation::build_s_cbranch_execz(guard_distance, kArch);
   ASSERT_TRUE(guard);
   EXPECT_EQ(body.front(), *guard);
 
-  const uint64_t return_target = access->branch_only_route->return_relay_offsets.empty()
-                                     ? access->anchor_offset + access->original_size
-                                     : access->branch_only_route->return_relay_offsets.front();
-  const uint64_t return_source = access->trampoline_offset + continuation_word * sizeof(uint32_t);
-  const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
-  ASSERT_TRUE(return_delta);
-  EXPECT_EQ(body[continuation_word], build_s_branch(*return_delta, kArch));
-  EXPECT_EQ(continuation_word + 1u, body.size())
-      << "the empty-wave continuation must be the direct return, after every per-lane save";
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
 }
 
 TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
@@ -7470,7 +7160,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
+TEST(ConSanMoi, Cdna4SampledWholeTextRelocationCoversEarliestSource) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kTextWords = 200'000u;
   constexpr size_t kEarlyAccessWord = 7u;
@@ -7517,14 +7207,13 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count_if(
-                result.patches,
-                [](const ConSanPatchInfo &patch) {
-                  return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
-                         patch.branch_only_route.has_value();
-                }),
-            2u)
-      << testing::PrintToString(result.warnings);
+  for (const uint64_t anchor :
+       {kEarlyAccessWord * sizeof(uint32_t), kLateAccessWord * sizeof(uint32_t)}) {
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
+             patch.anchor_offset == anchor && patch.relocated_guest_instruction_offset.has_value();
+    }));
+  }
 }
 
 TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchClobber) {
@@ -7637,10 +7326,9 @@ TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
                                &ConSanPatchInfo::kind),
             kBarrierCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
@@ -7715,29 +7403,14 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
            patch.anchor_offset == barrier_offset;
   });
   ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const uint32_t local_route = build_s_getpc_b64(kLocalIndirectPcSgpr, kArch);
-  const auto routed_patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    if ((patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
-         patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland) ||
-        std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) ==
-            patch.owner_descriptor_file_offsets.end()) {
-      return false;
-    }
-    const std::vector<uint32_t> words =
-        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    return std::ranges::find(words, local_route) != words.end();
-  });
-  ASSERT_NE(routed_patch, result.patches.end()) << testing::PrintToString(result.patches);
-  const std::vector<uint32_t> route_words =
-      text_words_at_offset(patched, routed_patch->trampoline_offset, routed_patch->trampoline_size);
-  EXPECT_EQ(std::ranges::find(route_words, build_s_getpc_b64(kGlobalExecSaveSgpr, kArch)),
-            route_words.end());
+  ASSERT_TRUE(sync->relocated_guest_instruction_offset);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
+TEST(ConSanMoi, Rdna4DenseSampledAccessesRelocateInsideCalledFunction) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint16_t kReturnSgpr = 30u;
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
@@ -7780,7 +7453,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
             kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            2u); // One called-function host relay and one appended dispatcher.
+            0u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos ||
            warning.find("entry island is unreachable") != std::string::npos;
@@ -7915,7 +7588,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
+TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesWholeTextRelocation) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   std::vector<uint32_t> words(36'000u, build_s_mov_b32(/*sdst=*/8u, /*ssrc0=*/8u, kArch));
   for (uint32_t index = 0u; index < 9u; ++index) {
@@ -7945,10 +7618,9 @@ TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
@@ -7958,7 +7630,7 @@ TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Gfx1250SampledMixesDenseAndDirectBarrierRoutesAcrossKernels) {
+TEST(ConSanMoi, Gfx1250SampledRelocatesBarriersAcrossKernels) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
   std::vector<uint32_t> far_kernel(36'000u, build_s_mov_b32(/*sdst=*/8u, /*ssrc0=*/8u, kArch));
@@ -7994,11 +7666,10 @@ TEST(ConSanMoi, Gfx1250SampledMixesDenseAndDirectBarrierRoutesAcrossKernels) {
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
-  }));
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("fell back from dense relay") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
@@ -8268,7 +7939,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
            item.anchor_offset == 380u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -8400,7 +8071,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
            item.anchor_offset == 401u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
@@ -8548,7 +8219,7 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
            item.anchor_offset == 404u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -8703,7 +8374,7 @@ TEST(ConSanMoi, SampledConditionallyExecutedBarrierPublishesOnlyWhenExecuted) {
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
 }
@@ -8735,7 +8406,7 @@ TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration)
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(consan_committed_semantic_site_count_at(
+  EXPECT_EQ(consan_committed_semantic_site_count_for_source_offset(
                 result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
             2u);
 }

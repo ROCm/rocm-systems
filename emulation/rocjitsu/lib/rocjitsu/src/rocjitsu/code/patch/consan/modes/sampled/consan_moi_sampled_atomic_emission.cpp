@@ -70,7 +70,9 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
                                                std::span<const uint8_t> bytes,
                                                const MoiAtomicEvidenceSitePlan &candidate,
                                                rj_code_arch_t arch,
-                                               uint32_t *guest_instruction_offset) {
+                                               uint32_t *guest_instruction_offset,
+                                               uint32_t *emitted_guest_size = nullptr) {
+  const size_t guest_begin = words.size();
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -80,7 +82,11 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
   }
   // A non-RMW candidate carries its compiler-emitted wait/cache suffix. Do
   // not splice a generic atomic wait into that target-native sequence.
-  return !candidate.is_rmw || append_moi_flat_load_wait(words, arch);
+  if (candidate.is_rmw && !append_moi_flat_load_wait(words, arch))
+    return false;
+  if (emitted_guest_size)
+    *emitted_guest_size = static_cast<uint32_t>((words.size() - guest_begin) * sizeof(uint32_t));
+  return true;
 }
 
 struct SampledAtomicPreludeState {
@@ -180,7 +186,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
-    std::span<const uint32_t> trailing_guest_words) {
+    std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
   const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas) {
     assert(candidate.site.data_vgpr && candidate.site.dst_vgpr);
@@ -197,11 +203,14 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
     return false;
   }
-  if (guest_first &&
-      !append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
+  if (guest_first && !append_sampled_atomic_guest(words, bytes, candidate, arch,
+                                                  guest_instruction_offset, emitted_guest_size))
     return false;
-  if (guest_first)
+  if (guest_first) {
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
+    if (emitted_guest_size)
+      *emitted_guest_size += static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
+  }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -270,9 +279,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   }
   if (!guest_first) {
     if (!defer_guest) {
-      if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
+      if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset,
+                                       emitted_guest_size))
         return false;
       words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
+      if (emitted_guest_size)
+        *emitted_guest_size +=
+            static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
     }
     if (guest_preserves_address) {
       words.push_back(build_v_mov_b32_e32(
@@ -293,7 +306,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words) {
+    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
+    bool fallthrough, uint32_t *emitted_guest_size) {
   const uint32_t pending_owner_bank_count = consan_moi_sampled_pending_acquire_owner_bank_count(
       layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
   if (!plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
@@ -362,7 +376,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, plan, spill,
                                      scalar_spill, private_layout, arch, saved_address,
                                      /*defer_guest=*/false, prelude, errors,
-                                     guest_instruction_offset, trailing_guest_words))
+                                     guest_instruction_offset, trailing_guest_words,
+                                     emitted_guest_size))
     return std::nullopt;
   if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
@@ -561,7 +576,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+  if (!fallthrough &&
+      !append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
                                             plan.scalar_abi.indirect_jump, arch))
     return std::nullopt;
 
@@ -577,7 +593,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     uint32_t bank_count, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
-    bool preserve_guest_at_anchor, std::span<const uint32_t> leading_guest_words) {
+    bool preserve_guest_at_anchor, std::span<const uint32_t> leading_guest_words, bool fallthrough,
+    uint32_t *emitted_guest_size) {
   if (!plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
       static_cast<uint32_t>(plan.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
       bank_count == 0u || !std::has_single_bit(bank_count) ||
@@ -678,7 +695,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, plan, spill,
                                      scalar_spill, private_layout, arch, saved_address, defer_guest,
                                      prelude, errors, guest_instruction_offset,
-                                     trailing_guest_words))
+                                     trailing_guest_words, emitted_guest_size))
     return std::nullopt;
   if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
@@ -939,31 +956,36 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   } else if (defer_guest) {
     std::vector<uint32_t> deferred_guest_words;
     if (!append_sampled_atomic_guest(deferred_guest_words, bytes, candidate, arch,
-                                     /*guest_instruction_offset=*/nullptr)) {
+                                     /*guest_instruction_offset=*/nullptr, emitted_guest_size)) {
       return std::nullopt;
     }
     deferred_guest_words.insert(deferred_guest_words.end(), trailing_guest_words.begin(),
                                 trailing_guest_words.end());
-    const uint64_t branch_text_offset =
-        cave_text_offset + (words.size() + deferred_guest_words.size()) * sizeof(uint32_t);
-    if (const auto direct = compute_sopp_branch_simm16(branch_text_offset, return_text_offset)) {
-      if (guest_instruction_offset)
-        *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    if (emitted_guest_size)
+      *emitted_guest_size += static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    if (fallthrough) {
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
-      words.push_back(build_s_branch(*direct, arch));
     } else {
-      const auto jump_sgprs = plan.scalar_abi.indirect_jump;
-      if (!jump_sgprs || !append_moi_prepare_scc_preserving_indirect_jump(
-                             words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
-                             jump_sgprs->scc_save_sgpr, arch)) {
-        return std::nullopt;
+      const uint64_t branch_text_offset =
+          cave_text_offset + (words.size() + deferred_guest_words.size()) * sizeof(uint32_t);
+      if (const auto direct = compute_sopp_branch_simm16(branch_text_offset, return_text_offset)) {
+        words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
+        words.push_back(build_s_branch(*direct, arch));
+      } else {
+        const auto jump_sgprs = plan.scalar_abi.indirect_jump;
+        if (!jump_sgprs || !append_moi_prepare_scc_preserving_indirect_jump(
+                               words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
+                               jump_sgprs->scc_save_sgpr, arch)) {
+          return std::nullopt;
+        }
+        words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
+        words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
       }
-      if (guest_instruction_offset)
-        *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-      words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
-      words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
     }
-  } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+  } else if (!fallthrough &&
+             !append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
                                                    plan.scalar_abi.indirect_jump, arch)) {
     return std::nullopt;
   }

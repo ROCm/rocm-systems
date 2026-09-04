@@ -965,7 +965,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
       << "ordinary release store must not inherit an RMW predecessor release sequence";
 }
 
-TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
+TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint16_t kIndirectPcSgpr = 48u;
   constexpr uint16_t kKeyAndSccSgpr = 50u;
@@ -984,8 +984,8 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   text_words.insert(text_words.end(), atomic->begin(), atomic->end());
   text_words.push_back(*wait);
   text_words.insert(text_words.end(), acquire.begin(), acquire.end());
-  // Keep the appended body outside SOPP reach and deny the ordinary island
-  // allocator an eight-word zero-NOP cave.
+  // Keep the relocated body outside SOPP reach. Whole-text relocation must
+  // make this distance irrelevant without reintroducing a local relay.
   text_words.resize(33'000u, build_s_nop(1u, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
@@ -1040,23 +1040,21 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
            patch.anchor_offset == atomic_offset;
   });
   ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size != 0u;
+  ASSERT_TRUE(result.text_relocation);
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
   }));
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reachable indirect entry island") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(atomic_patch->relocated_guest_instruction_offset);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> anchor_words =
-      text_words_at_offset(patched, atomic_offset, 2u * sizeof(uint32_t));
-  ASSERT_EQ(anchor_words.size(), 2u);
-  const auto tagged_key = instrumentation::build_s_cselect_b32(
-      kKeyAndSccSgpr, scalar_positive_inline_u32(3u), scalar_positive_inline_u32(2u), kArch);
-  ASSERT_TRUE(tagged_key);
-  EXPECT_EQ(anchor_words.front(), *tagged_key);
+  const std::vector<uint32_t> body_words =
+      text_words_at_offset(patched, atomic_patch->trampoline_offset, atomic_patch->trampoline_size);
+  const size_t guest_word =
+      (*atomic_patch->relocated_guest_instruction_offset - atomic_patch->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_LE(guest_word + atomic->size(), body_words.size());
+  EXPECT_TRUE(std::equal(atomic->begin(), atomic->end(), body_words.begin() + guest_word));
 }
 
 TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
@@ -3487,9 +3485,6 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   }
   for (const ConSanPatchInfo *fence : fences) {
     EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
-      return location.emitted_text_offset == fence->anchor_offset;
-    }));
-    EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
       return location.emitted_text_offset == fence->trampoline_offset;
     }));
   }
@@ -5067,33 +5062,18 @@ TEST(ConSanMoi, InlineAtomicFitsAboveMetadataOwnedOddSgprCount) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->original_size, 3u * sizeof(uint32_t));
+  EXPECT_EQ(prologue->original_size, 0u);
+  EXPECT_GT(prologue->trampoline_size, 0u);
+  ASSERT_TRUE(result.text_relocation);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
-  KD original_descriptor{};
-  KD patched_descriptor{};
-  std::memcpy(&original_descriptor,
-              bytes.data() + original.kernels().front().descriptor_file_offset,
-              sizeof(original_descriptor));
-  std::memcpy(&patched_descriptor,
-              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
-              sizeof(patched_descriptor));
-  EXPECT_EQ(static_cast<int64_t>(patched.kernel_descriptor_offset("atomic_high_sgpr_pressure")) +
-                patched_descriptor.kernel_code_entry_byte_offset,
-            static_cast<int64_t>(original.kernel_descriptor_offset("atomic_high_sgpr_pressure")) +
-                original_descriptor.kernel_code_entry_byte_offset);
-  uint32_t entry_word = 0;
-  std::memcpy(&entry_word,
-              patched.text_sections().front()->data() + patched.kernels().front().entry_text_offset,
-              sizeof(entry_word));
-  EXPECT_NE(entry_word, 0xEE0B0000u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("automatically assigned EXEC-save SGPRs s84:s105") != std::string::npos;
   }));
 }
 
-TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
+TEST(ConSanMoi, InlineAtomicRelocatesFarHelpersWithoutIndirectIslands) {
   constexpr size_t kLargeTextWords = 33000u;
   const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
@@ -5121,8 +5101,8 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   constexpr uint64_t kReleaseOffset = 3u * sizeof(uint32_t);
   constexpr uint64_t kAcquireOffset = 6u * sizeof(uint32_t);
   constexpr uint64_t kOwnerCodeBytes = 13u * sizeof(uint32_t);
-  // Three local indirect islands: one for the dynamic-stack entry prologue
-  // and two for the far release/acquire helpers.
+  // Keep the helpers beyond SOPP reach to prove that the object transaction,
+  // rather than local islands, owns the distance.
   text_words.resize(37u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words.resize(kLargeTextWords - 1u, build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_RDNA4));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
@@ -5154,12 +5134,17 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
             2u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            3u);
+            0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
+  ASSERT_TRUE(result.text_relocation);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+      EXPECT_TRUE(patch.relocated_guest_instruction_offset);
+  }
 }
 
 TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseComparison) {

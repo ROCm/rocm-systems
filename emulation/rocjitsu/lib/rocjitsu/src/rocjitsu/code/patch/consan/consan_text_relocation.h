@@ -32,6 +32,11 @@ stage_consan_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t a
                            std::string_view subject, std::vector<ConSanTextFragment> fragments,
                            ConSanTransformArtifacts &result);
 
+/// Add position-independent fragments after a caller has staged its exact
+/// descriptor mutations in `result.replacement`.
+[[nodiscard]] bool stage_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
+                                               ConSanTransformArtifacts &result);
+
 /// Commit all staged access programs through one object-wide relocation.
 [[nodiscard]] bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
                                                  rj_code_arch_t arch, const ConSanOptions &options,

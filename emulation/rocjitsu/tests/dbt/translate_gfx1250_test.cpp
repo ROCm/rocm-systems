@@ -2342,6 +2342,18 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
+  const uint32_t client_nop = rocjitsu::build_s_nop(9, ROCJITSU_CODE_ARCH_CDNA5);
+  translator.set_instruction_rewrite_callback(
+      [&](const rocjitsu::InstructionRewriteContext &context)
+          -> std::optional<rocjitsu::InstructionRewrite> {
+        if (context.source_offset != kFarTargetWord * sizeof(uint32_t))
+          return std::nullopt;
+        return rocjitsu::InstructionRewrite{
+            .prefix_words = {client_nop},
+            .replacement_words = std::nullopt,
+            .markers = {{.id = 71, .byte_offset = 0}, {.id = 72, .byte_offset = sizeof(uint32_t)}},
+            .source_size = 0};
+      });
   const auto result = translator.translate(source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
@@ -2357,6 +2369,17 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   EXPECT_EQ(target_words[1], marker);
   const auto translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   EXPECT_EQ(std::count(target_words, target_words + translated_word_count, marker), 2);
+
+  const auto relocated_endpgm = std::ranges::find_if(result.text_placements, [](const auto &item) {
+    return item.source_offset == kFarTargetWord * sizeof(uint32_t);
+  });
+  ASSERT_NE(relocated_endpgm, result.text_placements.end());
+  ASSERT_EQ(result.client_marker_placements.size(), 2u);
+  EXPECT_EQ(result.client_marker_placements[0].id, 71u);
+  EXPECT_EQ(result.client_marker_placements[0].target_offset, relocated_endpgm->target_offset);
+  EXPECT_EQ(result.client_marker_placements[1].id, 72u);
+  EXPECT_EQ(result.client_marker_placements[1].target_offset,
+            relocated_endpgm->target_offset + sizeof(uint32_t));
 
   rocjitsu::BinaryTranslator verifier(
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,

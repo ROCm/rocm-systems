@@ -24,12 +24,14 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
                               /*capture_scc=*/true, arch);
 }
 
-[[nodiscard]] bool append_inline_shadow_barrier_epilogue(
-    std::vector<uint32_t> &words, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr,
-    const std::optional<ConSanIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch) {
+[[nodiscard]] bool
+append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words, const VgprSpillSequence *spill,
+                                      const SgprSpillSequence *scalar_spill,
+                                      std::optional<uint16_t> selectable_vgpr_bank_mode,
+                                      uint64_t cave_text_offset, uint64_t return_text_offset,
+                                      std::optional<uint16_t> call_return_sgpr,
+                                      const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
+                                      rj_code_arch_t arch, bool fallthrough) {
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
@@ -38,6 +40,8 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
   if (consan_arch_has_selectable_vgpr_bank(arch) && selectable_vgpr_bank_mode.value_or(0u) != 0u)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
+  if (fallthrough)
+    return true;
   return append_inline_barrier_return(words, cave_text_offset, return_text_offset, call_return_sgpr,
                                       indirect_jump, arch);
 }
@@ -47,7 +51,7 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
     rj_code_arch_t arch, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset, bool fallthrough) {
   const bool publish_visible_evidence = plan.visible_evidence.has_value();
   const bool control_selectable_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
@@ -108,6 +112,8 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
     } else {
       words.push_back(*save_scc);
     }
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     words.push_back(original_barrier_word);
     words.push_back(*at_maximum);
     words.push_back(consan_moi_exact_shadow::max_epoch);
@@ -131,7 +137,7 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
     }
     if (!append_inline_shadow_barrier_epilogue(
             words, spill, scalar_spill, selectable_vgpr_bank_mode, cave_text_offset,
-            return_text_offset, call_return_sgpr, plan.indirect_jump, arch)) {
+            return_text_offset, call_return_sgpr, plan.indirect_jump, arch, fallthrough)) {
       errors.emplace_back("ConSan MOI scalar inline barrier could not encode long return");
       return std::nullopt;
     }
@@ -152,6 +158,8 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
       40u + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u) +
       (control_selectable_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.push_back(original_barrier_word);
   if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
@@ -174,7 +182,7 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
   }
   if (!append_inline_shadow_barrier_epilogue(words, spill, scalar_spill, selectable_vgpr_bank_mode,
                                              cave_text_offset, return_text_offset, call_return_sgpr,
-                                             plan.indirect_jump, arch)) {
+                                             plan.indirect_jump, arch, fallthrough)) {
     errors.emplace_back("ConSan MOI inline-shadow barrier epoch could not encode long return at " +
                         std::to_string(site.text_offset));
     return std::nullopt;
@@ -191,16 +199,14 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
   const auto private_limit = consan_address_free_private_limit(arch);
   if (!private_limit) {
-    warnings.emplace_back(
-        "ConSan MOI private epoch barrier has no address-free scratch support");
+    warnings.emplace_back("ConSan MOI private epoch barrier has no address-free scratch support");
     return std::nullopt;
   }
   SpillManager manager(ephemeral_base, *private_limit);
   auto spill = build_vgpr_spill_sequence(manager, *access_patch.scratch_vgpr,
                                          /*vgpr_count=*/1, arch);
   if (!spill) {
-    warnings.emplace_back(
-        "ConSan MOI private epoch barrier could not preserve its temporary VGPR");
+    warnings.emplace_back("ConSan MOI private epoch barrier could not preserve its temporary VGPR");
     return std::nullopt;
   }
   const uint32_t required_private_bytes =
@@ -223,11 +229,12 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   };
 }
 
-[[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_inline_shadow_barrier_body(
-    const ConSanOptions &options, ConSanMoiOperatingPoint &point,
-    const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
-    std::span<const uint64_t>, rj_code_arch_t arch, MoiOwnerAssignments,
-    std::vector<std::string> &, std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<MoiBarrierBodyPlan>
+plan_inline_shadow_barrier_body(const ConSanOptions &options, ConSanMoiOperatingPoint &point,
+                                const MoiScalarAbiPlan &scalar_abi,
+                                std::optional<uint16_t> scratch_vgpr, std::span<const uint64_t>,
+                                rj_code_arch_t arch, MoiOwnerAssignments,
+                                std::vector<std::string> &, std::vector<std::string> &errors) {
   auto plan = plan_inline_shadow_barrier_epoch_emission(options, point, scalar_abi, scratch_vgpr,
                                                         arch, errors);
   if (!plan)
@@ -235,19 +242,18 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   return MoiBarrierBodyPlan{std::move(*plan)};
 }
 
-void try_apply_inline_shadow_barrier_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
-    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state,
-    const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
-    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
+void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
+                                           const ConSanOptions &options,
+                                           const ConSanMoiOperatingPoint &operating_point,
+                                           rj_code_arch_t arch,
+                                           const MoiObjectModeSemantics &semantics,
+                                           ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   ConSanMoiOperatingPoint barrier_point = operating_point;
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
-  try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch,
-                                 plan_inline_shadow_barrier_body,
-                                 plan_inline_shadow_private_barrier, barrier_point, arch,
-                                 resource_state, reserved_sync_islands, semantics, result);
+  try_apply_shared_barrier_patch(
+      bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch, plan_inline_shadow_barrier_body,
+      plan_inline_shadow_private_barrier, barrier_point, arch, semantics, result);
 }

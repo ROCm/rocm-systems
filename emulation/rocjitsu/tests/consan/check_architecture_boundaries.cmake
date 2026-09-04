@@ -1144,13 +1144,12 @@ if(NOT _moi_barrier_planning MATCHES
         "planned shared barriers must retain exactly one typed mode body"
     )
 endif()
-if(NOT _moi_barrier_planning MATCHES "moi_barrier_body_indirect_jump" OR
-   NOT _moi_barrier_planning MATCHES "struct PlannedBarrierLowering" OR
-   NOT _moi_barrier_planning MATCHES "uses_scalar_epoch[(][)] const" OR
+if(NOT _moi_barrier_planning MATCHES "struct PlannedBarrierLowering" OR
+   NOT _moi_barrier_planning MATCHES "ConSanPatchAbiEffects[ \t]+patch_abi" OR
    _moi_barrier_planning MATCHES
-       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|PlannedInlineEpochBarrier|plan_inline_barrier_patch_abi|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedBarrierLowering[^}]*(std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets|derived_owner)")
+       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|PlannedInlineEpochBarrier|moi_barrier_body_indirect_jump|plan_inline_barrier_patch_abi|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedBarrierLowering[^}]*(std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets|derived_owner)")
     message(FATAL_ERROR
-        "planned barriers must derive routing, scalar-epoch, and owner facts from their retained products"
+        "planned barriers must retain typed mode bodies and one shared ABI product without routing side channels"
     )
 endif()
 file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc"
@@ -1197,15 +1196,13 @@ if(NOT _moi_barrier_source MATCHES
     )
 endif()
 if(NOT _record_replay_barrier_owner MATCHES
-       "try_apply_record_replay_barrier_record_patch" OR
+       "try_stage_record_replay_barrier_fragments" OR
    NOT _record_replay_barrier_owner MATCHES
-       "try_apply_record_replay_barrier_patch" OR
+       "build_barrier_record_cave_words" OR
    NOT _record_replay_barrier_owner MATCHES
-       "try_apply_shared_barrier_patch[^;]*ConSanProbeIntentKind::BarrierRecord" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "prune_unused_record_replay_direct_reservoirs")
+       "stage_consan_text_rewrites")
     message(FATAL_ERROR
-        "the Record/Replay barrier owner must retain its complete mode transaction"
+        "the Record/Replay barrier owner must retain its complete staged mode transaction"
     )
 endif()
 if(NOT _inline_barrier_owner MATCHES
@@ -1220,10 +1217,6 @@ if(NOT _moi_barrier_planning MATCHES
        "MoiBarrierBodyPlanner[ \t]+plan_body" OR
    NOT _moi_barrier_planning MATCHES
        "body[ \t]*=[ \t]*plan_body" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "plan_record_replay_barrier_body" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "try_apply_shared_barrier_patch[^;]*plan_record_replay_barrier_body" OR
    NOT _inline_barrier_owner MATCHES
        "plan_inline_shadow_barrier_body" OR
    NOT _inline_barrier_owner MATCHES
@@ -1236,10 +1229,6 @@ if(NOT _moi_barrier_planning MATCHES
        "MoiPrivateBarrierPlanner[ \t]+plan_private_body" OR
    NOT _moi_barrier_planning MATCHES
        "plan_private_body[(]MoiPrivateBarrierPlanningContext" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "plan_record_replay_private_barrier" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "try_apply_shared_barrier_patch[^;]*plan_record_replay_private_barrier" OR
    NOT _inline_barrier_owner MATCHES
        "plan_inline_shadow_private_barrier" OR
    NOT _inline_barrier_owner MATCHES
@@ -1308,17 +1297,13 @@ if(NOT _moi_barrier_planning MATCHES
    _inline_barrier_owner MATCHES
        "apply_moi_transient_sgpr_assignment" OR
    NOT _record_replay_barrier_owner MATCHES
-       "plan_record_replay_barrier_emission" OR
-   _record_replay_barrier_owner MATCHES
-       "plan_record_replay_private_barrier[^}]*resolve_moi_record_event_emission_plan" OR
-   _record_replay_barrier_owner MATCHES
-       "plan_record_replay_barrier_body[^}]*resolve_moi_record_event_emission_plan")
+       "plan_moi_record_event")
     message(FATAL_ERROR
         "shared private assignment and Record/Replay barrier emission must each have one owner"
     )
 endif()
 if(NOT _record_replay_barrier_owner MATCHES
-       "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
+       "try_stage_record_replay_barrier_fragments[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
        "try_apply_inline_shadow_barrier_patch[^}]*moi_track_barriers" OR
    _moi_barrier_planning MATCHES
@@ -1327,28 +1312,18 @@ if(NOT _record_replay_barrier_owner MATCHES
         "mode entry points, rather than their shared barrier mechanism, must own enablement policy"
     )
 endif()
-if(NOT _moi_barrier_contract MATCHES
-       "struct MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
-   NOT _record_replay_contract MATCHES
-       "std::optional<MoiBarrierIslandReservation>[ \t]+reserved_sync_islands" OR
-   NOT _record_replay_contract MATCHES
-       "try_apply_record_replay_barrier_patch" OR
-   _moi_barrier_contract MATCHES
-       "consan_moi_record_replay[.]h|MoiRecordReplayAccessOutput|try_apply_record_replay_barrier_patch" OR
-   NOT _record_replay_barrier_owner MATCHES
-       "access_output[.]reserved_sync_islands" OR
-   NOT _inline_shadow_access_owner MATCHES
-       "barrier_reservation[ \t]*=[ \t]*MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
-   NOT _record_replay_access_owner MATCHES
-       "reserved_sync_islands[ \t]*=[ \t]*MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
-   NOT _inline_shadow_mode_owner MATCHES
-       "std::optional<MoiBarrierIslandReservation>[ \t]+barrier_reservation" OR
-   NOT _inline_shadow_mode_owner MATCHES
-       "try_apply_inline_shadow_patch[(][^;]*barrier_reservation" OR
-   NOT _inline_shadow_mode_owner MATCHES
-       "try_apply_inline_shadow_barrier_patch[(][^;]*barrier_reservation")
+if(NOT _record_replay_contract MATCHES
+       "try_stage_record_replay_barrier_fragments" OR
+   _record_replay_barrier_owner MATCHES
+       "MoiBarrierIslandReservation|reserved_sync_islands|generated_branch_relays" OR
+   _record_replay_access_owner MATCHES
+       "MoiBarrierIslandReservation|reserved_sync_islands|generated_branch_relays" OR
+   _inline_shadow_access_owner MATCHES
+       "MoiBarrierIslandReservation|barrier_reservation|generated_branch_relays" OR
+   _inline_shadow_mode_owner MATCHES
+       "MoiBarrierIslandReservation|barrier_reservation|generated_branch_relays")
     message(FATAL_ERROR
-        "access producers and mode entry points must retain exact barrier reservation ownership"
+        "whole-text mode transactions must not retain legacy barrier reservations or branch relays"
     )
 endif()
 if(NOT _inline_shadow_contract MATCHES
@@ -1366,23 +1341,17 @@ endif()
 if(NOT _moi_placement_contract MATCHES
        "kMoiCompactIndirectIslandWords" OR
    NOT _moi_placement_contract MATCHES
-       "moi_compact_entry_island_words" OR
-   NOT _moi_barrier_planning MATCHES
-       "kMoiCompactIndirectIslandWords")
+       "moi_compact_entry_island_words")
     message(FATAL_ERROR
-        "shared compact-entry geometry must retain one mode-neutral contract"
+        "Sampled compact-entry geometry must retain one shared contract"
     )
 endif()
-if(NOT _record_replay_contract MATCHES
-       "kMoiRecordReplayBarrierRelayWords" OR
-   NOT _record_replay_contract MATCHES
-       "kMoiRecordReplayBarrierRelaySlotWords" OR
-   NOT _record_replay_contract MATCHES
-       "kMoiRecordReplayBorrowedEntryIslandWords" OR
+if(_record_replay_contract MATCHES
+       "kMoiRecordReplay(BarrierRelay|BorrowedEntry)" OR
    _moi_placement_contract MATCHES
        "kMoiRecordReplay(BarrierRelay|BorrowedEntry)")
     message(FATAL_ERROR
-        "Record/Replay-only relay geometry must remain in its mode contract"
+        "Record/Replay whole-text transactions must not retain relay geometry"
     )
 endif()
 foreach(
@@ -1406,13 +1375,11 @@ _consan_assert_no_match(
 )
 if(NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
    NOT _moi_barrier_planning MATCHES
-       "validate_reserved_barrier_island_layout" OR
-   NOT _moi_barrier_planning MATCHES
-       "std::optional<MoiBarrierIslandReservation>[^;]*reserved_sync_islands" OR
+       "stage_consan_text_rewrites" OR
    _moi_barrier_planning MATCHES
-       "try_apply_inline_shadow_barrier_epoch_patch|find_record_replay_reserved_barrier_island_begin|resolve_reserved_barrier_island_layout|MoiRecordReplayAccessOutput|access_anchors|first_access_body|access_island_(begin|end)|generated_branch_relays")
+       "try_apply_inline_shadow_barrier_epoch_patch|find_record_replay_reserved_barrier_island_begin|resolve_reserved_barrier_island_layout|MoiRecordReplayAccessOutput|access_anchors|first_access_body|access_island_(begin|end)|generated_branch_relays|MoiBarrierIslandReservation|reserved_sync_islands")
     message(FATAL_ERROR
-        "the shared barrier mechanism must retain its exact mode-neutral reservation contract"
+        "the shared InlineShadow barrier mechanism must stage fragments without legacy routing state"
     )
 endif()
 _consan_assert_no_match(
@@ -1570,7 +1537,7 @@ _consan_assert_no_match(
 file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
 string(FIND "${_moi_sampled_sync_owner}" "plan_sampled_sync_emission"
        _sampled_sync_plan_begin)
-string(FIND "${_moi_sampled_sync_owner}" "struct SampledDenseSyncRoute"
+string(FIND "${_moi_sampled_sync_owner}" "using SampledCfgDistance"
        _sampled_sync_plan_end)
 if(_sampled_sync_plan_begin LESS 0 OR
    _sampled_sync_plan_end LESS_EQUAL _sampled_sync_plan_begin)
@@ -1792,15 +1759,10 @@ foreach(_file IN LISTS _consan_production_files)
     if(NOT _name STREQUAL "consan_moi_sampled.cpp")
         _consan_assert_no_match(
             "${_file}"
-            "semantics[.]reserved_(barrier|atomic)_island_count[ \t]*="
-            "Sampled island reservations must be selected only by Sampled planning"
+            "semantics[.]reserved_atomic_patch_count[ \t]*="
+            "Sampled atomic patch reservation must be selected only by Sampled planning"
         )
     endif()
-    _consan_assert_no_match(
-        "${_file}"
-        "sampled_reserved_(barrier|atomic)_island_count"
-        "Sampled lowering must consume its once-selected island reservations"
-    )
     if(NOT _name STREQUAL "consan_moi_engine_contracts.cpp" AND
        NOT _name STREQUAL "consan_moi_engine_contracts.h" AND
        NOT _name STREQUAL "consan_moi_record_replay.cpp" AND
@@ -2740,30 +2702,17 @@ if(NOT _moi_sampled_sync_indexed_address_count EQUAL 5)
         "ConSan Sampled barrier tables must share indexed addressing"
     )
 endif()
-string(
-    REGEX MATCHALL
-    "build_sampled_dense_sync_dispatcher"
-    _moi_sampled_dense_sync_dispatcher_refs
-    "${_moi_sampled_sync_owner}"
-)
-list(LENGTH _moi_sampled_dense_sync_dispatcher_refs _moi_sampled_dense_sync_dispatcher_ref_count)
-if(NOT _moi_sampled_dense_sync_dispatcher_ref_count EQUAL 3)
+if(NOT _moi_sampled_sync_owner MATCHES "stage_consan_text_rewrites")
     message(FATAL_ERROR
-        "ConSan Sampled barrier and atomic relays must share one dense dispatcher"
+        "ConSan Sampled synchronization must contribute to the whole-text transaction"
     )
 endif()
-foreach(_recipe IN ITEMS
-    "dispatcher_offset - island_offset"
-    "append_restore_moi_scc_from_route_key"
-)
-    string(REGEX MATCHALL "${_recipe}" _moi_sampled_dense_recipe_refs "${_moi_sampled_sync_owner}")
-    list(LENGTH _moi_sampled_dense_recipe_refs _moi_sampled_dense_recipe_ref_count)
-    if(NOT _moi_sampled_dense_recipe_ref_count EQUAL 1)
-        message(FATAL_ERROR
-            "ConSan Sampled dense dispatcher recipe '${_recipe}' must have one owner"
-        )
-    endif()
-endforeach()
+if(_moi_sampled_sync_owner MATCHES
+   "build_sampled_dense_sync_dispatcher|MoiLocalNopIslandAllocator|DbiPatchPlacementPlanner|publish_moi_sync_patch|apply_moi_descriptor_requirements")
+    message(FATAL_ERROR
+        "ConSan Sampled synchronization must not restore relay or incremental publication"
+    )
+endif()
 file(READ
     "${_consan_dir}/modes/record_replay/consan_moi_record_replay_access_emission.cpp"
     _moi_record_replay_access_emission_owner
@@ -3394,10 +3343,10 @@ foreach(_inline_atomic_assignment IN ITEMS
     string(REGEX MATCHALL "${_inline_atomic_assignment}[(]"
            _inline_atomic_assignment_calls "${_moi_inline_atomic_owner}")
     list(LENGTH _inline_atomic_assignment_calls _inline_atomic_assignment_call_count)
-    if(NOT _inline_atomic_assignment_call_count EQUAL 2)
+    if(NOT _inline_atomic_assignment_call_count EQUAL 1)
         message(
             FATAL_ERROR
-            "ConSan InlineShadow atomic lowering may apply ${_inline_atomic_assignment} only during candidate and dense-group planning"
+            "ConSan InlineShadow atomic lowering must apply ${_inline_atomic_assignment} exactly once during fragment planning"
         )
     endif()
 endforeach()
@@ -3423,18 +3372,14 @@ if(_moi_barrier_owner MATCHES
         "ConSan exact-subset barrier dispatch must not reopen broad body state"
     )
 endif()
-foreach(_inline_barrier_assignment_count IN ITEMS 3 2)
-    if(_inline_barrier_assignment_count EQUAL 3)
-        set(_inline_barrier_assignment apply_moi_transient_sgpr_assignment)
-        set(_inline_barrier_assignment_owners "${_moi_barrier_owner}")
-    else()
-        set(_inline_barrier_assignment apply_moi_persistent_vgpr_assignment)
-        set(_inline_barrier_assignment_owners "${_moi_barrier_owner}")
-    endif()
+foreach(_inline_barrier_assignment IN ITEMS
+    apply_moi_transient_sgpr_assignment
+    apply_moi_persistent_vgpr_assignment
+)
     string(REGEX MATCHALL "${_inline_barrier_assignment}[(]"
-           _inline_barrier_assignment_calls "${_inline_barrier_assignment_owners}")
+           _inline_barrier_assignment_calls "${_moi_barrier_owner}")
     list(LENGTH _inline_barrier_assignment_calls _inline_barrier_actual_assignment_count)
-    if(NOT _inline_barrier_actual_assignment_count EQUAL _inline_barrier_assignment_count)
+    if(NOT _inline_barrier_actual_assignment_count EQUAL 2)
         message(
             FATAL_ERROR
             "ConSan exact-subset barrier lowering has an unexpected ${_inline_barrier_assignment} replay"
@@ -3448,10 +3393,10 @@ foreach(_sampled_assignment IN ITEMS
     string(REGEX MATCHALL "${_sampled_assignment}[(]"
            _sampled_assignment_calls "${_moi_sampled_access_owner}")
     list(LENGTH _sampled_assignment_calls _sampled_assignment_call_count)
-    if(NOT _sampled_assignment_call_count EQUAL 2)
+    if(NOT _sampled_assignment_call_count EQUAL 1)
         message(
             FATAL_ERROR
-            "ConSan Sampled access lowering may apply ${_sampled_assignment} only during candidate and descriptor planning"
+            "ConSan Sampled access lowering must resolve ${_sampled_assignment} exactly once during candidate planning"
         )
     endif()
 endforeach()
@@ -3703,27 +3648,27 @@ _consan_assert_no_match(
     "SuperCollider LDS access construction must publish local bytes and proof through the shared access transaction"
 )
 foreach(
-    _access_mode_source
+    _staged_access_mode_source
     IN ITEMS
         modes/record_replay/consan_moi_record_replay.inc
-        modes/sampled/consan_moi_sampled_access.inc
         modes/inline_shadow/consan_moi_inline_shadow.inc
+        modes/sampled/consan_moi_sampled_access.inc
 )
-    file(READ "${_consan_dir}/${_access_mode_source}" _access_mode_contents)
-    if(NOT _access_mode_contents MATCHES "compile_moi_access_program")
+    file(READ "${_consan_dir}/${_staged_access_mode_source}" _access_mode_contents)
+    if(NOT _access_mode_contents MATCHES "stage_consan_text_rewrites")
         message(FATAL_ERROR
-            "${_access_mode_source} must compile access placement and control flow through the shared program compiler"
+            "${_staged_access_mode_source} must contribute access fragments to the whole-text transaction"
         )
     endif()
     _consan_assert_no_match(
-        "${_consan_dir}/${_access_mode_source}"
+        "${_consan_dir}/${_staged_access_mode_source}"
         "publish_lowering_commits|result[.]replacement|result[.]mark_modified|discard_candidate_modification"
         "mode-local access emission must publish bytes, proof, and lowering through the shared access transaction"
     )
     _consan_assert_no_match(
-        "${_consan_dir}/${_access_mode_source}"
-        "assemble_moi_appended_body|finalize_moi_access_body|MoiAccessPatchProgram[ \t]+program"
-        "mode-local access emission must not reconstruct shared program geometry"
+        "${_consan_dir}/${_staged_access_mode_source}"
+        "compile_moi_access_program|finalize_moi_access_body|MoiAccessPatchProgram[ \t]+program"
+        "whole-text mode emission must not reconstruct legacy program geometry"
     )
 endforeach()
 foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)

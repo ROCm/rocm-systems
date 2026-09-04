@@ -368,527 +368,61 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
     return;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
-                                         descriptor_requirements, scalar_requirements,
-                                         private_requirements, nullptr, nullptr, arch,
-                                         "ConSan MOI inline atomic patch", result.errors)) {
-    return;
-  }
-  std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
-  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
-                                                arch, kMoiLocalIndirectIslandWords);
-  struct MoiInlineAtomicAppendedIsland {
-    uint64_t text_offset = 0;
-    bool claimed = false;
-  };
-  std::vector<MoiInlineAtomicAppendedIsland> appended_indirect_islands;
-  const bool needs_appended_island_bank =
-      planned_candidates.size() > 1u &&
-      (old_text.size() > 64u * 1024u ||
-       std::ranges::any_of(planned_candidates, [&](const PlannedInlineAtomic &planned) {
-         return !compute_sopp_branch_simm16(planned.candidate.site.text_offset, old_text.size());
-       }));
-  if (needs_appended_island_bank) {
-    const uint64_t island_bytes =
-        static_cast<uint64_t>(kMoiLocalIndirectIslandWords) * sizeof(uint32_t);
-    const uint64_t bank_offset = placement_planner.appended_end();
-    const size_t island_count = planned_candidates.size();
-    const uint64_t bank_bytes = island_count * island_bytes;
-    std::string bank_error;
-    if (!placement_planner.reserve_appended_prefix(bank_bytes, &bank_error)) {
-      result.errors.emplace_back("ConSan MOI inline atomic island bank failed: " + bank_error);
-      return;
-    }
-    appended_indirect_islands.reserve(island_count);
-    for (size_t index = 0; index < island_count; ++index) {
-      appended_indirect_islands.push_back({bank_offset + index * island_bytes, false});
-      for (uint32_t word = 0; word < kMoiLocalIndirectIslandWords; ++word)
-        append_word_bytes(new_text, build_s_nop(0, arch));
-    }
-  }
-  const auto claim_appended_island = [&](uint64_t anchor_offset) -> std::optional<uint64_t> {
-    for (MoiInlineAtomicAppendedIsland &island : appended_indirect_islands) {
-      if (island.claimed || !compute_sopp_branch_simm16(anchor_offset, island.text_offset))
-        continue;
-      island.claimed = true;
-      return island.text_offset;
-    }
-    return std::nullopt;
-  };
-  std::vector<ConSanPatchInfo> patches;
-  std::vector<ConSanCommittedLowering> lowering_commits;
+  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
+  std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
+    if (!neutralize_atomic_scalar_clause(neutralized_text, planned.candidate, arch,
+                                         scalar_clause_patches, result.errors))
       return;
   }
-  std::vector<bool> routed_by_dense_relay(planned_candidates.size(), false);
 
-  // A large generated CDNA kernel can strand an early atomic beyond SOPP
-  // reach of both the pristine-end island bank and every appended body.  A
-  // liveness-proven relocated host supplies one shared in-kernel island.  Its
-  // scalar key identifies the normal host path or one of the atomic bodies.
-  if (target->supports_moi_far_dense_atomic_route) {
-    std::vector<consan_detail::MoiDenseRouteSite> route_sites;
-    for (size_t index = 0; index < planned_candidates.size(); ++index) {
-      const PlannedInlineAtomic &planned = planned_candidates[index];
-      const uint64_t anchor = planned.candidate.site.text_offset;
-      const bool appended_reachable = std::ranges::any_of(
-          appended_indirect_islands, [&](const MoiInlineAtomicAppendedIsland &island) {
-            return compute_sopp_branch_simm16(anchor, island.text_offset).has_value();
-          });
-      const bool stranded = !compute_sopp_branch_simm16(anchor, placement_planner.appended_end()) &&
-                            !appended_reachable && !indirect_allocator.has_reachable(anchor);
-      if (stranded && planned.relocated_guest_size >= 2u * sizeof(uint32_t)) {
-        const std::string_view encoded_owner = planned.candidate.container_name;
-        const bool in_kernel = encoded_owner.starts_with("kernel:");
-        route_sites.push_back({
-            .owner = {in_kernel ? ConSanProgramContainerKind::Kernel
-                                : ConSanProgramContainerKind::Function,
-                      std::string(encoded_owner.substr(in_kernel ? sizeof("kernel:") - 1u
-                                                                 : sizeof("function:") - 1u))},
-            .anchor = anchor,
-            .source_index = index,
-        });
-      }
-    }
-    const auto route_groups = consan_detail::partition_moi_dense_route_sites(route_sites, 31u);
-
-    std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
-    fixed_claims.reserve(result.patches.size() + planned_candidates.size());
-    for (const ConSanPatchLoweringProduct &patch : result.patches) {
-      if (patch.original_size != 0u)
-        fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
-    }
-    for (const PlannedInlineAtomic &planned : planned_candidates) {
-      fixed_claims.emplace_back(planned.candidate.site.text_offset,
-                                planned.candidate.site.text_offset + planned.relocated_guest_size);
-    }
-    const consan_detail::MoiOccupiedTextRanges occupied(std::move(fixed_claims));
-    std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
-    const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      return occupied.overlaps(begin, end) ||
-             std::ranges::any_of(claimed_hosts, [&](const auto &range) {
-               return range.first < end && begin < range.second;
-             });
-    };
-
-    for (const consan_detail::MoiDenseRouteIndexGroup &route_group : route_groups) {
-      const std::vector<size_t> &group = route_group.source_indices;
-      // Keep the route's resource choices and emitted-body descriptors from
-      // remaining live while the next independent group is planned.
-      {
-        std::vector<uint64_t> group_owners;
-        std::vector<uint64_t> anchors;
-        for (size_t index : group) {
-          const PlannedInlineAtomic &planned = planned_candidates[index];
-          group_owners.insert(group_owners.end(),
-                              planned.resources.owner_descriptor_file_offsets.begin(),
-                              planned.resources.owner_descriptor_file_offsets.end());
-          anchors.push_back(planned.candidate.site.text_offset);
-        }
-        std::ranges::sort(group_owners);
-        group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-        ConSanMoiOperatingPoint group_point = operating_point;
-        if (!apply_moi_transient_sgpr_assignment(options, group_point, result.moi_operating_point,
-                                                 group_owners)) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay owners have no common scalar assignment");
-          continue;
-        }
-        if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
-            !apply_moi_persistent_vgpr_assignment(group_point, result.moi_operating_point,
-                                                  group_owners)) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay owners have no common persistent VGPR "
-              "assignment");
-          continue;
-        }
-        const auto dense_router =
-            plan_moi_dense_router(options.moi_engine, moi_scalar_routing_state(group_point), arch);
-        if (!dense_router || dense_router->call_return_sgpr) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay has no explicit-key scalar ABI");
-          continue;
-        }
-        const uint16_t jump_pc_sgpr = dense_router->indirect_jump.pc_sgpr;
-        const uint16_t saved_scc_sgpr = dense_router->indirect_jump.scc_save_sgpr;
-        const uint16_t key_sgpr = dense_router->dispatch_key_sgpr;
-        const bool key_encodes_scc = key_sgpr == saved_scc_sgpr;
-
-        uint64_t owner_begin = 0u;
-        uint64_t owner_end = 0u;
-        const std::string_view owner_name = route_group.owner.name;
-        const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(owner_name);
-        if (kernel != nullptr) {
-          owner_begin = kernel->entry_text_offset;
-          owner_end = owner_begin + kernel->code_size;
-        } else {
-          const ConSanFunctionInfo *function =
-              result.program_inventory.find_function_by_name(owner_name);
-          if (function == nullptr)
-            continue;
-          owner_begin = function->entry_text_offset;
-          owner_end = owner_begin + function->code_size;
-        }
-        const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-            options, group_point, MoiRelocatableHostScalarState::AccessRouter, arch);
-        if (!moi_resource_owner_anchors_admit_sgpr_ranges(*resource_state, group_owners, anchors,
-                                                          bootstrap_ranges)) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay scalar ABI is live at a call anchor");
-          continue;
-        }
-
-        constexpr size_t kHostWords = kMoiLocalIndirectIslandWords + 1u;
-        auto dense_host = find_moi_dense_relay_host_for_owners(
-            *resource_state, old_text,
-            {
-                .owner_begin = owner_begin,
-                .owner_end = owner_end,
-                .host_word_count = kHostWords,
-                .anchors = anchors,
-                .preapplied_reserved_ranges = moi_resource_reserved_ranges(*resource_state),
-                .owner_descriptor_file_offsets = group_owners,
-                .bootstrap_ranges = bootstrap_ranges,
-                .claimed_host_ranges = {},
-            },
-            overlaps_existing);
-        if (!dense_host) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay found no liveness-safe relocatable host");
-          continue;
-        }
-        const uint64_t host_offset = dense_host->host_offset;
-        const uint64_t island_offset = host_offset + sizeof(uint32_t);
-        claimed_hosts.emplace_back(host_offset, host_offset + kHostWords * sizeof(uint32_t));
-
-        constexpr uint64_t kDispatcherWordsPerRoute = 20u;
-        const uint64_t dispatcher_offset = placement_planner.appended_end();
-        const uint64_t dispatcher_bytes =
-            (group.size() + 1u) * kDispatcherWordsPerRoute * sizeof(uint32_t);
-        std::string reservation_error;
-        if (!placement_planner.reserve_appended_prefix(dispatcher_bytes, &reservation_error)) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense dispatcher failed: " +
-                                     reservation_error);
-          return;
-        }
-        while (new_text.size() < placement_planner.appended_end())
-          append_word_bytes(new_text, build_s_nop(0, arch));
-
-        struct DenseBody {
-          size_t planned_index = 0u;
-          uint64_t offset = 0u;
-          std::vector<uint32_t> words;
-          uint32_t guest_instruction_offset = 0u;
-          MoiInlineAtomicEmissionPlan emission;
-        };
-        std::vector<DenseBody> bodies;
-        for (size_t index : group) {
-          const PlannedInlineAtomic &planned = planned_candidates[index];
-          const uint64_t cave_offset = placement_planner.appended_end();
-          ConSanMoiOperatingPoint candidate_point = group_point;
-          if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-            candidate_point.moi_dispatch_identity.set_sgpr(
-                candidate_point.moi_scalar_router->jump.pc_sgpr);
-          auto emission = plan_inline_atomic_emission(
-              active_bytes, planned.candidate, options, candidate_point, result.moi_operating_point,
-              semantics, planned.resources.base, planned.address_plan.scratch_vgpr_count,
-              planned.private_layout ? &*planned.private_layout : nullptr, target_facts, arch,
-              result.errors);
-          if (!emission) {
-            result.errors.emplace_back(
-                "ConSan MOI inline atomic dense body lost its exact emission plan");
-            return;
-          }
-          uint32_t guest_instruction_offset = 0u;
-          auto cave_words = build_inline_atomic_ordering_cave_words(
-              active_bytes, planned.candidate, planned.address_plan, *emission,
-              planned.spill ? &*planned.spill : nullptr,
-              planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, cave_offset,
-              planned.candidate.site.text_offset + planned.relocated_guest_size,
-              guest_instruction_offset, result.errors, planned.trailing_guest_words);
-          if (!cave_words)
-            return;
-          const auto placement = placement_planner.plan_indirect_appended(
-              planned.candidate.site.text_offset, planned.relocated_guest_size,
-              cave_words->size() * sizeof(uint32_t), &reservation_error);
-          if (!placement || placement->body_offset != cave_offset ||
-              new_text.size() != cave_offset) {
-            result.errors.emplace_back("ConSan MOI inline atomic dense body placement failed");
-            return;
-          }
-          append_words_bytes(new_text, *cave_words);
-          bodies.push_back({index, cave_offset, std::move(*cave_words), guest_instruction_offset,
-                            std::move(*emission)});
-        }
-
-        const uint64_t host_body_offset = placement_planner.appended_end();
-        std::vector<uint32_t> host_words = std::move(dense_host->displaced_words);
-        if (!append_moi_scc_preserving_indirect_jump(
-                host_words, host_body_offset, host_offset + kHostWords * sizeof(uint32_t),
-                jump_pc_sgpr, saved_scc_sgpr, /*capture_scc=*/true, arch) ||
-            !placement_planner.reserve_appended_prefix(host_words.size() * sizeof(uint32_t),
-                                                       &reservation_error) ||
-            new_text.size() != host_body_offset) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense host body failed");
-          return;
-        }
-        append_words_bytes(new_text, host_words);
-
-        std::vector<uint32_t> island_words;
-        if (key_encodes_scc)
-          island_words.push_back(build_s_nop(0, arch));
-        if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
-                                                     jump_pc_sgpr, saved_scc_sgpr,
-                                                     /*capture_scc=*/!key_encodes_scc, arch)) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense island failed");
-          return;
-        }
-        const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
-        if (!wait_pc) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense island wait failed");
-          return;
-        }
-        island_words.insert(island_words.end() - 1u, *wait_pc);
-        if (island_words.size() != kMoiLocalIndirectIslandWords) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense island has invalid size");
-          return;
-        }
-        std::memcpy(new_text.data() + island_offset, island_words.data(),
-                    island_words.size() * sizeof(uint32_t));
-        const std::optional<uint32_t> host_key =
-            key_encodes_scc
-                ? instrumentation::build_s_cselect_b32(key_sgpr, scalar_positive_inline_u32(1),
-                                                       scalar_positive_inline_u32(0), arch)
-                : std::optional<uint32_t>(
-                      build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch));
-        if (!host_key) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense host key failed");
-          return;
-        }
-        std::memcpy(new_text.data() + host_offset, &*host_key, sizeof(uint32_t));
-
-        std::vector<uint32_t> dispatcher_words;
-        if (key_encodes_scc) {
-          dispatcher_words.push_back(
-              build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
-        }
-        std::optional<uint32_t> restore_tagged_scc;
-        if (key_encodes_scc) {
-          std::vector<uint32_t> restore_words;
-          if (!consan_detail::append_restore_moi_scc_from_route_key(
-                  restore_words, {.encoded_sgpr = key_sgpr, .normalize_encoded_sgpr = false},
-                  *target) ||
-              restore_words.size() != 1u) {
-            result.errors.emplace_back(
-                "ConSan MOI inline atomic dense router could not restore tagged SCC");
-            return;
-          }
-          restore_tagged_scc = restore_words.front();
-        }
-        const auto append_target = [&](uint16_t route, uint64_t destination) {
-          const auto compare = instrumentation::build_s_cmp_eq_u32(
-              key_encodes_scc ? jump_pc_sgpr : key_sgpr, scalar_positive_inline_u32(route), arch);
-          if (!compare)
-            return false;
-          dispatcher_words.push_back(*compare);
-          std::vector<uint32_t> matched_words;
-          if (restore_tagged_scc)
-            matched_words.push_back(*restore_tagged_scc);
-          const uint64_t matched_offset =
-              dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-          const uint64_t branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
-          const auto direct = compute_sopp_branch_simm16(branch_offset, destination);
-          if (direct) {
-            matched_words.push_back(build_s_branch(*direct, arch));
-          } else if (!append_moi_scc_preserving_indirect_jump(
-                         matched_words, matched_offset, destination, jump_pc_sgpr, saved_scc_sgpr,
-                         /*capture_scc=*/false, arch)) {
-            return false;
-          } else if (restore_tagged_scc) {
-            matched_words[matched_words.size() - 2u] = *restore_tagged_scc;
-          }
-          const auto skip = instrumentation::build_s_cbranch_scc0(
-              static_cast<int16_t>(matched_words.size()), arch);
-          if (!skip)
-            return false;
-          dispatcher_words.push_back(*skip);
-          dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(),
-                                  matched_words.end());
-          return true;
-        };
-        if (!append_target(/*route=*/0u, host_body_offset)) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense host route failed");
-          return;
-        }
-        for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
-          if (!append_target(static_cast<uint16_t>(body_index + 1u), bodies[body_index].offset)) {
-            result.errors.emplace_back("ConSan MOI inline atomic dense body route failed");
-            return;
-          }
-        }
-        dispatcher_words.push_back(build_s_endpgm(arch));
-        if (dispatcher_words.size() * sizeof(uint32_t) > dispatcher_bytes) {
-          result.errors.emplace_back("ConSan MOI inline atomic dense dispatcher overflowed");
-          return;
-        }
-        std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
-                    dispatcher_words.size() * sizeof(uint32_t));
-
-        ConSanPatchInfo host_info;
-        host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-        host_info.anchor_offset = host_offset;
-        host_info.original_size = kHostWords * sizeof(uint32_t);
-        host_info.trampoline_offset = host_body_offset;
-        host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
-        host_info.owner_descriptor_file_offsets = group_owners;
-        patches.push_back(std::move(host_info));
-        ConSanPatchInfo dispatcher_info;
-        dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-        dispatcher_info.anchor_offset = anchors.front();
-        dispatcher_info.trampoline_offset = dispatcher_offset;
-        dispatcher_info.trampoline_size =
-            static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-        dispatcher_info.moi_dense_entry_island_offset = island_offset;
-        dispatcher_info.owner_descriptor_file_offsets = group_owners;
-        patches.push_back(std::move(dispatcher_info));
-
-        for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
-          const DenseBody &body = bodies[body_index];
-          const PlannedInlineAtomic &planned = planned_candidates[body.planned_index];
-          const uint16_t route = static_cast<uint16_t>(body_index + 1u);
-          const uint64_t branch_offset = planned.candidate.site.text_offset + sizeof(uint32_t);
-          const auto branch = compute_sopp_branch_simm16(branch_offset, island_offset);
-          const uint16_t tagged_route = static_cast<uint16_t>(2u * route);
-          const std::optional<uint32_t> route_key =
-              key_encodes_scc ? instrumentation::build_s_cselect_b32(
-                                    key_sgpr, scalar_positive_inline_u32(tagged_route + 1u),
-                                    scalar_positive_inline_u32(tagged_route), arch)
-                              : std::optional<uint32_t>(build_s_mov_b32(
-                                    key_sgpr, scalar_positive_inline_u32(route), arch));
-          if (!branch || !route_key) {
-            result.errors.emplace_back("ConSan MOI inline atomic dense anchor failed");
-            return;
-          }
-          std::vector<uint32_t> anchor_words(planned.relocated_guest_size / sizeof(uint32_t),
-                                             build_s_nop(0, arch));
-          anchor_words[0] = *route_key;
-          anchor_words[1] = build_s_branch(*branch, arch);
-          std::memcpy(new_text.data() + planned.candidate.site.text_offset, anchor_words.data(),
-                      planned.relocated_guest_size);
-
-          ConSanPatchInfo info;
-          info.kind = ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
-          info.anchor_offset = planned.candidate.site.text_offset;
-          info.trampoline_offset = body.offset;
-          info.original_size = planned.relocated_guest_size;
-          info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
-          info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
-          static_cast<ConSanPatchAbiEffects &>(info) = body.emission.patch_abi;
-          note_moi_probe_patch_info(info, planned);
-          if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
-                                               planned.candidate, info, "inline atomic patch",
-                                               lowering_commits))
-            return;
-          patches.push_back(std::move(info));
-          routed_by_dense_relay[body.planned_index] = true;
-        }
-      }
-    }
+  std::vector<ConSanTextFragment> fragments;
+  fragments.reserve(planned_candidates.size() + scalar_clause_patches.size());
+  for (ConSanPatchInfo &patch : scalar_clause_patches) {
+    fragments.push_back({
+        .id = 0u,
+        .kind = ConSanTextFragmentKind::Replacement,
+        .intent_ids = {},
+        .runtime_mapping = {},
+        .before_words = {},
+        .replacement_words = {build_s_nop(0u, arch)},
+        .after_words = {},
+        .branch_fixups = {},
+        .patch = std::move(patch),
+    });
   }
 
-  for (size_t planned_index = 0; planned_index < planned_candidates.size(); ++planned_index) {
-    if (routed_by_dense_relay[planned_index])
-      continue;
-    const PlannedInlineAtomic &planned = planned_candidates[planned_index];
+  for (const PlannedInlineAtomic &planned : planned_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
-
-    const uint64_t cave_text_offset = placement_planner.appended_end();
-    const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
-    uint32_t guest_instruction_offset = 0;
-    auto cave_words = build_inline_atomic_ordering_cave_words(
+    uint32_t guest_instruction_offset = 0u;
+    auto words = build_inline_atomic_ordering_cave_words(
         active_bytes, candidate, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
-        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, cave_text_offset,
-        return_text_offset, guest_instruction_offset, result.errors, planned.trailing_guest_words);
-    if (!cave_words)
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
+        /*cave_text_offset=*/0u, /*return_text_offset=*/0u, guest_instruction_offset, result.errors,
+        planned.trailing_guest_words, /*fallthrough=*/true);
+    if (!words)
       return;
 
-    const bool direct_entry =
-        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
-    std::optional<uint64_t> indirect_entry_island;
-    if (!direct_entry) {
-      indirect_entry_island = claim_appended_island(site.text_offset);
-      if (!indirect_entry_island)
-        indirect_entry_island = indirect_allocator.claim_reachable(site.text_offset);
-    }
-    if (!direct_entry && !indirect_entry_island) {
-      result.warnings.emplace_back(
-          "ConSan MOI inline atomic patch found no reachable indirect entry island in " +
-          candidate.container_name);
-      continue;
-    }
-    std::string placement_error;
-    const auto placement = placement_planner.plan_indirect_appended(
-        site.text_offset, planned.relocated_guest_size, cave_words->size() * sizeof(uint32_t),
-        &placement_error);
-    if (!placement) {
-      result.errors.emplace_back("ConSan MOI inline atomic placement failed: " + placement_error);
+    ConSanPatchInfo patch;
+    patch.kind = ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
+    patch.anchor_offset = site.text_offset;
+    patch.original_size = planned.relocated_guest_size;
+    static_cast<ConSanPatchAbiEffects &>(patch) = planned.emission.patch_abi;
+    note_moi_probe_patch_info(patch, planned);
+    auto fragment = make_consan_around_text_fragment(
+        std::move(*words), guest_instruction_offset, planned.relocated_guest_size,
+        candidate.intent_ids(), {}, std::move(patch), result.errors, "MOI inline atomic patch");
+    if (!fragment)
       return;
-    }
-    if (placement->body_offset != cave_text_offset || new_text.size() != placement->body_offset) {
-      result.errors.emplace_back("ConSan MOI inline atomic patch has a stale cave mapping");
-      return;
-    }
-
-    const uint64_t entry_target = indirect_entry_island.value_or(placement->body_offset);
-    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
-    if (!fwd) {
-      result.errors.emplace_back("ConSan MOI inline atomic forward branch is out of range");
-      return;
-    }
-    std::vector<uint32_t> anchor_words(planned.relocated_guest_size / sizeof(uint32_t),
-                                       build_s_nop(0, arch));
-    if (anchor_words.empty()) {
-      result.errors.emplace_back("ConSan MOI inline atomic patch empty anchor");
-      return;
-    }
-    anchor_words.front() = build_s_branch(*fwd, arch);
-    std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
-                anchor_words.size() * sizeof(uint32_t));
-    if (indirect_entry_island) {
-      if (!planned.emission.indirect_jump ||
-          !emit_moi_local_indirect_entry_island(
-              new_text, *indirect_entry_island, placement->body_offset, site.text_offset,
-              *planned.emission.indirect_jump, planned.resources.owner_descriptor_file_offsets,
-              arch, patches, result.errors, "ConSan MOI inline atomic patch")) {
-        return;
-      }
-    }
-    append_words_bytes(new_text, *cave_words);
-
-    ConSanPatchInfo info;
-    info.kind = ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
-    info.anchor_offset = site.text_offset;
-    info.trampoline_offset = cave_text_offset;
-    info.original_size = planned.relocated_guest_size;
-    info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-    info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
-    static_cast<ConSanPatchAbiEffects &>(info) = planned.emission.patch_abi;
-    note_moi_probe_patch_info(info, planned);
-    if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors, candidate, info,
-                                         "inline atomic patch", lowering_commits))
-      return;
-    patches.push_back(info);
+    fragments.push_back(std::move(*fragment));
   }
 
-  if (patches.empty()) {
-    result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
-    return;
-  }
-  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
-                               "MOI inline atomic patch", "inline atomic patch",
-                               std::move(lowering_commits), std::move(patches));
+  const MoiDescriptorLdsRequirements no_lds;
+  (void)stage_consan_text_rewrites(
+      code_object, arch,
+      {descriptor_requirements, scalar_requirements, private_requirements, no_lds},
+      moi_descriptor_mutation_policy(nullptr, arch), "MOI inline atomic patch",
+      std::move(fragments), result);
 }

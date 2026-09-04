@@ -366,10 +366,10 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
   EXPECT_NE(composite.observed_owner_mask &
                 ownership_mask(major_image_ownership::OwnerKind::CompactIndex),
             0u);
-  EXPECT_NE(composite.observed_owner_mask &
+  EXPECT_EQ(composite.observed_owner_mask &
                 ownership_mask(major_image_ownership::OwnerKind::ReplacementBytes),
             0u);
-  EXPECT_NE(composite.observed_owner_mask &
+  EXPECT_EQ(composite.observed_owner_mask &
                 ownership_mask(major_image_ownership::OwnerKind::TransactionImage),
             0u);
   const auto &validation = observed.phase(major_image_ownership::Phase::FinalValidation);
@@ -409,12 +409,16 @@ TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
            major_image_ownership::OwnerKind::Parser,
            major_image_ownership::OwnerKind::ResultImage,
            major_image_ownership::OwnerKind::PatcherImage,
-           major_image_ownership::OwnerKind::ReplacementBytes,
-           major_image_ownership::OwnerKind::TransactionImage,
        }) {
     EXPECT_NE(incremental.observed_owner_mask & ownership_mask(kind), 0u)
         << static_cast<unsigned>(kind);
   }
+  EXPECT_EQ(incremental.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::ReplacementBytes),
+            0u);
+  EXPECT_EQ(incremental.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::TransactionImage),
+            0u);
   EXPECT_EQ(observed.phase(major_image_ownership::Phase::CompositeIncrementalPatch).peak_bytes, 0u);
   RecordProperty("incremental_peak_bytes", incremental.peak_bytes);
   RecordProperty("input_image_bytes", bytes.size());
@@ -694,7 +698,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
-      << (result.errors.empty() ? "" : result.errors.front());
+      << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
@@ -734,7 +738,8 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   ASSERT_NE(original_tail, original.kernels().end());
   ASSERT_NE(patched_owner, patched.kernels().end());
   ASSERT_NE(patched_tail, patched.kernels().end());
-  EXPECT_EQ(patched_owner->code_size, original_owner->code_size);
+  EXPECT_GT(patched_owner->code_size, original_owner->code_size)
+      << "whole-object relocation must expand the owner symbol over its owned local cave";
 
   const auto mutation_target = std::ranges::find_if(result.patches, [](const auto &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
@@ -785,11 +790,10 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   AmdGpuCodeObject composed(corrupted.replacement.data(), corrupted.replacement.size());
   ASSERT_EQ(composed.text_sections().size(), 1u);
   const uint64_t text_file_offset = composed.text_sections().front()->sectionOffset();
-  ASSERT_GE(nested_instrumentation->trampoline_size, sizeof(uint32_t));
+  ASSERT_TRUE(nested_instrumentation->relocated_guest_instruction_offset);
   const uint32_t invalid_opcode = 0;
   std::memcpy(corrupted.replacement.data() + text_file_offset +
-                  nested_instrumentation->trampoline_offset +
-                  nested_instrumentation->trampoline_size - sizeof(uint32_t),
+                  *nested_instrumentation->relocated_guest_instruction_offset,
               &invalid_opcode, sizeof(invalid_opcode));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, corrupted).empty());
 }
@@ -877,30 +881,10 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
              patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite;
     });
     ASSERT_NE(mutation, result.patches.end());
-    if (engine == ConSanMoiEngine::RecordReplay) {
-      ASSERT_TRUE(result.text_relocation);
-      EXPECT_EQ(std::ranges::count(result.patches,
-                                   ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                                   &ConSanPatchInfo::kind),
-                0u);
-      continue;
-    }
-    const uint64_t continuation = mutation->anchor_offset + mutation->original_size;
-    size_t dense_host_count = 0u;
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.phase != ConSanPatchPhase::Instrumentation ||
-          patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
-          patch.original_size == 0u)
-        continue;
-      ++dense_host_count;
-      const uint64_t host_end = patch.anchor_offset + patch.original_size;
-      EXPECT_FALSE(patch.anchor_offset < mutation->anchor_offset + mutation->original_size &&
-                   mutation->anchor_offset < host_end);
-      EXPECT_FALSE(patch.anchor_offset < mutation->trampoline_offset + mutation->trampoline_size &&
-                   mutation->trampoline_offset < host_end);
-      EXPECT_FALSE(patch.anchor_offset < continuation && continuation < host_end);
-    }
-    EXPECT_GE(dense_host_count, 1u);
+    ASSERT_TRUE(result.text_relocation);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                                 &ConSanPatchInfo::kind),
+              0u);
   }
 }
 
@@ -969,10 +953,9 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("sampled barrier sync fell back from dense relay") != std::string::npos &&
-           warning.find("no liveness-safe relocatable host") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             kBarrierCount);

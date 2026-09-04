@@ -223,6 +223,8 @@ struct ConSanMutationOutcome {
 
 /// How one position-independent fragment composes at its source instruction.
 enum class ConSanTextFragmentKind : uint8_t {
+  /// Execute client words in the translator-owned hardware launch stub.
+  EntryPrefix,
   /// Execute client words before the translator-owned source instruction.
   Prefix,
   /// Wrap the source instruction or exclusive replacement with before/after words.

@@ -45,7 +45,7 @@ ConSanOptions conformance_options(const MoiEngineConformanceCase &test_case,
   return options;
 }
 
-TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
+TEST_P(MoiEngineConformanceTest, InstrumentsManyLargeAccessBodies) {
   constexpr uint32_t kAccessCount = 9;
   const MoiEngineConformanceCase &test_case = GetParam();
   std::vector<uint32_t> text_words;
@@ -66,12 +66,12 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
             kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            kAccessCount);
+            0u);
   ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), kAccessCount);
   for (const ConSanCommittedLowering &commit : result.coverage_ledger.lowering_commits()) {
     EXPECT_EQ(commit.outcome, ConSanLoweringOutcomeKind::Instrumented);
     EXPECT_EQ(commit.intent_ids.size(), 1u);
-    EXPECT_EQ(commit.locations.size(), 2u);
+    EXPECT_EQ(commit.locations.size(), 1u);
   }
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
@@ -261,7 +261,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
       std::ranges::find(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->anchor_offset, 28u);
-  EXPECT_EQ(patch->original_size, test_case.access_body_words * sizeof(uint32_t));
+  EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             0);
@@ -306,7 +306,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationR
   }
 }
 
-TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppendedEntries) {
+TEST_P(MoiEngineConformanceTest, Gfx1250RelocatesSparseAccessesAcrossLargeText) {
   constexpr uint32_t kAccessCount = 9;
   constexpr size_t kTextWords = 40000u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
@@ -351,7 +351,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
   }
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            2u); // One relocatable host plus one appended return-PC dispatcher.
+            0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(

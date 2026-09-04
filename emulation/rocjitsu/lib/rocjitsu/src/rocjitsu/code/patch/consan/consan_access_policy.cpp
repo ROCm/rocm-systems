@@ -634,6 +634,47 @@ bool ConSanCoverageLedger::publish_coalescing_instrumented_commits(
   return true;
 }
 
+bool ConSanCoverageLedger::publish_replacing_instrumented_commits(
+    std::vector<ConSanCommittedLowering> commits) {
+  ConSanCoverageLedger next = *this;
+  std::vector<ConSanProbeIntentId> replacement_intents;
+  for (const ConSanCommittedLowering &commit : commits) {
+    for (ConSanProbeIntentId id : commit.intent_ids) {
+      if (std::ranges::find(replacement_intents, id) == replacement_intents.end())
+        replacement_intents.push_back(id);
+    }
+  }
+
+  for (size_t index = 0; index < next.lowering_commits_.size();) {
+    const ConSanCommittedLowering &accepted = next.lowering_commits_[index];
+    const bool overlaps = std::ranges::any_of(accepted.intent_ids, [&](const auto &id) {
+      return std::ranges::find(replacement_intents, id) != replacement_intents.end();
+    });
+    if (!overlaps) {
+      ++index;
+      continue;
+    }
+    if (accepted.outcome != ConSanLoweringOutcomeKind::Instrumented ||
+        std::ranges::any_of(accepted.intent_ids, [&](const auto &id) {
+          return std::ranges::find(replacement_intents, id) == replacement_intents.end();
+        })) {
+      return false;
+    }
+    for (ConSanProbeIntentId id : accepted.intent_ids) {
+      ConSanIntentCoverageEntry &entry = next.intent_entries_[id.value];
+      entry.lowering = ConSanLoweringOutcomeKind::Pending;
+      entry.resource_rejection_reason.reset();
+      entry.detail.clear();
+    }
+    next.lowering_commits_.erase(next.lowering_commits_.begin() +
+                                 static_cast<std::ptrdiff_t>(index));
+  }
+  if (!next.publish_coalescing_instrumented_commits(std::move(commits)))
+    return false;
+  *this = std::move(next);
+  return true;
+}
+
 ConSanRuntimeStaticMapping ConSanCoverageLedger::runtime_static_mapping() const {
   ConSanRuntimeStaticMapping mapping;
   for (const ConSanCommittedLowering &commit : lowering_commits_) {

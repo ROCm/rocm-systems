@@ -323,11 +323,6 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     apply_moi_mode_patches(code_object_bytes, effective_options, effective_point, arch,
                            resource_planning_state, moi_candidates, object_facts,
                            mode_plan.semantics, result);
-  if (result.errors.empty() && !result.staged_text_fragments.empty() &&
-      !finalize_consan_text_rewrites(result.replacement, arch, effective_options,
-                                     "MOI probe programs", result)) {
-    result.discard_candidate_modification();
-  }
   if (result.errors.empty() && (!mode_plan.prologue_requires_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
                                          prologue_scratch_assignments, mode_plan.semantics,
@@ -340,6 +335,11 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
+  if (result.errors.empty() && !result.staged_text_fragments.empty() &&
+      !finalize_consan_text_rewrites(result.replacement, arch, effective_options,
+                                     "MOI text programs", result)) {
+    result.discard_candidate_modification();
+  }
   publish_pending_moi_lowering_rejections();
   std::vector<ConSanPatchKind> patch_kinds;
   patch_kinds.reserve(result.patches.size());

@@ -67,7 +67,8 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr,
-    std::span<const uint32_t> trailing_guest_words = {});
+    std::span<const uint32_t> trailing_guest_words = {}, bool fallthrough = false,
+    uint32_t *emitted_guest_size = nullptr);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
@@ -78,6 +79,7 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
     uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr,
     std::span<const uint32_t> trailing_guest_words = {}, bool preserve_guest_at_anchor = false,
-    std::span<const uint32_t> leading_guest_words = {});
+    std::span<const uint32_t> leading_guest_words = {}, bool fallthrough = false,
+    uint32_t *emitted_guest_size = nullptr);
 
 } // namespace rocjitsu::consan_moi_impl

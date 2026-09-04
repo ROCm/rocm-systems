@@ -2797,11 +2797,14 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
 }
 
 TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntries) {
-  std::vector<uint32_t> text_words(80u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
-  text_words[0] = 0xD8340000u;
-  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> text_words(80u, build_s_nop(0, kArch));
+  const auto store = build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u,
+                                              /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(store);
+  std::ranges::copy(*store, text_words.begin());
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1u);
@@ -2835,17 +2838,20 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
-  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
-  });
-  ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->dispatch_id_prologue);
-  ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 10u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 14u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_count, 4u);
-  EXPECT_GE(prologue->trampoline_size, 256u + 20u * sizeof(uint32_t));
+  std::vector<const ConSanPatchInfo *> prologues;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue)
+      prologues.push_back(&patch);
+  }
+  ASSERT_EQ(prologues.size(), 1u);
+  const ConSanPatchInfo &prologue = *prologues.front();
+  ASSERT_TRUE(prologue.dispatch_id_prologue);
+  ASSERT_TRUE(prologue.dispatch_id_prologue->capture.sgpr());
+  EXPECT_EQ(prologue.dispatch_id_prologue->preload.dispatch_id_sgpr, 10u);
+  EXPECT_EQ(prologue.dispatch_id_prologue->preload.original_user_sgpr_count, 14u);
+  EXPECT_EQ(prologue.dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
+  EXPECT_EQ(prologue.dispatch_id_prologue->preload.system_sgpr_count, 4u);
+  ASSERT_TRUE(result.text_relocation);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2862,35 +2868,33 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   const auto verify_entry = [&](uint64_t entry_offset) {
     const char *text = patched.text_sections().front()->data();
     uint64_t cursor = entry_offset;
-    EXPECT_FALSE(prologue->entry_scalar_backup);
+    EXPECT_FALSE(prologue.entry_scalar_backup);
+    const auto dependency_delay = instrumentation::build_salu_dependency_delay(kArch);
+    ASSERT_TRUE(dependency_delay);
     const auto expect_write = [&](uint32_t expected) {
       uint32_t word = 0;
       std::memcpy(&word, text + cursor, sizeof(word));
       EXPECT_EQ(word, expected);
       cursor += sizeof(word);
       std::memcpy(&word, text + cursor, sizeof(word));
-      EXPECT_EQ(word, build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
+      EXPECT_EQ(word, *dependency_delay);
       cursor += sizeof(word);
     };
-    const uint16_t persistent = *prologue->dispatch_id_prologue->capture.sgpr();
-    expect_write(build_s_mov_b32(persistent, 10u, ROCJITSU_CODE_ARCH_RDNA4));
-    expect_write(
-        build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, ROCJITSU_CODE_ARCH_RDNA4));
-    expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1),
-                                 ROCJITSU_CODE_ARCH_RDNA4));
+    const uint16_t persistent = *prologue.dispatch_id_prologue->capture.sgpr();
+    expect_write(build_s_mov_b32(persistent, 10u, kArch));
+    expect_write(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, kArch));
+    expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), kArch));
     expect_write(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
                                   static_cast<uint16_t>(persistent + 1u),
-                                  scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+                                  scalar_positive_inline_u32(0), kArch));
     for (uint16_t destination = 10u; destination < 18u; ++destination) {
-      expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u),
-                                   ROCJITSU_CODE_ARCH_RDNA4));
+      expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), kArch));
     }
   };
-  EXPECT_EQ(prologue->dispatch_id_primary_prologue_offset.has_value(),
-            prologue->dispatch_id_secondary_prologue_offset.has_value());
-  verify_entry(prologue->dispatch_id_primary_prologue_offset.value_or(prologue->trampoline_offset));
-  verify_entry(
-      prologue->dispatch_id_secondary_prologue_offset.value_or(prologue->trampoline_offset + 256u));
+  ASSERT_TRUE(prologue.dispatch_id_primary_prologue_offset);
+  ASSERT_TRUE(prologue.dispatch_id_secondary_prologue_offset);
+  verify_entry(*prologue.dispatch_id_primary_prologue_offset);
+  verify_entry(*prologue.dispatch_id_secondary_prologue_offset);
 }
 
 TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
@@ -3531,7 +3535,6 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
-  constexpr uint64_t kExpectedPrologueOffset = 256;
   const std::array<uint32_t, 2> text_words = {
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
@@ -3549,16 +3552,14 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
-  EXPECT_EQ(result.patches.front().trampoline_offset, kExpectedPrologueOffset);
   EXPECT_EQ(result.patches.front().original_size, 0u);
-  EXPECT_EQ(result.patches.front().trampoline_size, 3u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().trampoline_size, 2u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  EXPECT_EQ(patched.text_sections().front()->size(),
-            kExpectedPrologueOffset + 3u * sizeof(uint32_t));
+  EXPECT_GT(patched.text_sections().front()->size(), text_words.size() * sizeof(uint32_t));
 
   KD descriptor{};
   std::memcpy(&descriptor,
@@ -3568,11 +3569,10 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   ASSERT_NE(descriptor_vaddr, 0u);
   const int64_t descriptor_entry_vaddr =
       static_cast<int64_t>(descriptor_vaddr) + descriptor.kernel_code_entry_byte_offset;
-  const int64_t expected_entry_vaddr =
-      static_cast<int64_t>(patched.text_sections().front()->vaddr() + kExpectedPrologueOffset);
+  const int64_t expected_entry_vaddr = static_cast<int64_t>(
+      patched.text_sections().front()->vaddr() + result.patches.front().trampoline_offset);
   EXPECT_EQ(descriptor_entry_vaddr, expected_entry_vaddr);
 
-  ASSERT_EQ(kExpectedPrologueOffset % sizeof(uint32_t), 0u);
   const auto text_word_count = patched.text_sections().front()->size() / sizeof(uint32_t);
   std::vector<uint32_t> actual_words(text_word_count);
   std::memcpy(actual_words.data(), patched.text_sections().front()->data(),
@@ -3580,10 +3580,8 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
 
   ASSERT_GE(actual_words.size(), text_words.size());
   EXPECT_TRUE(std::equal(text_words.begin(), text_words.end(), actual_words.begin()));
-  const size_t prologue_word_offset = kExpectedPrologueOffset / sizeof(uint32_t);
-  ASSERT_GE(actual_words.size(), prologue_word_offset + 3u);
-  for (size_t i = text_words.size(); i < prologue_word_offset; ++i)
-    EXPECT_EQ(actual_words[i], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const size_t prologue_word_offset = result.patches.front().trampoline_offset / sizeof(uint32_t);
+  ASSERT_GE(actual_words.size(), prologue_word_offset + 2u);
 
   std::vector<uint32_t> expected_prologue_words;
   const auto owner_shift =
@@ -3592,11 +3590,6 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   expected_prologue_words.push_back(*owner_shift);
   expected_prologue_words.push_back(
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  const auto branch =
-      compute_sopp_branch_simm16(kExpectedPrologueOffset + 2u * sizeof(uint32_t), 0);
-  ASSERT_TRUE(branch);
-  expected_prologue_words.push_back(build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
-
   const std::span<const uint32_t> actual_prologue_words(actual_words.data() + prologue_word_offset,
                                                         expected_prologue_words.size());
   EXPECT_TRUE(std::equal(expected_prologue_words.begin(), expected_prologue_words.end(),
@@ -3639,7 +3632,7 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
                                                          result.patches.front().trampoline_offset));
 }
 
-TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
+TEST(ConSanMoi, OwnerEpochPrologueUsesWholeObjectContinuationBeyondSoppRange) {
   std::vector<uint32_t> text_words(33000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
@@ -3656,7 +3649,7 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
-  EXPECT_EQ(patch.trampoline_size, 8u * sizeof(uint32_t));
+  EXPECT_EQ(patch.trampoline_size, 2u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3670,17 +3663,11 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
   EXPECT_EQ(actual_words[0], *owner_init);
   EXPECT_EQ(actual_words[1],
             build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[2], pack_sop1(/*s_getpc_b64=*/0x47, kAmdGpuVccLo, 0));
-
-  std::vector<uint32_t> expected_builder;
-  const uint64_t pc_after_getpc = patch.trampoline_offset + 3u * sizeof(uint32_t);
-  ASSERT_TRUE(append_pc_delta_builder(expected_builder, ROCJITSU_CODE_ARCH_RDNA4, kAmdGpuVccLo,
-                                      -static_cast<int64_t>(pc_after_getpc)));
-  ASSERT_EQ(expected_builder.size(), 3u);
-  EXPECT_TRUE(
-      std::equal(expected_builder.begin(), expected_builder.end(), actual_words.begin() + 3));
-  EXPECT_EQ(actual_words[6], *build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[7], pack_sop1(/*s_setpc_b64=*/0x48, 0, kAmdGpuVccLo));
+  const std::vector<uint32_t> continuation = text_words_at_offset(
+      patched, patch.trampoline_offset + patch.trampoline_size, sizeof(uint32_t));
+  ASSERT_EQ(continuation.size(), 1u);
+  EXPECT_EQ(continuation.front() & 0xffff0000u,
+            build_s_branch(/*simm16=*/0, ROCJITSU_CODE_ARCH_RDNA4) & 0xffff0000u);
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueUsesWave32DescriptorForOwnerShift) {
@@ -3775,7 +3762,6 @@ TEST(ConSanMoi, OwnerEpochPrologueHwIdOwnerSourceRequiresOwnerSgpr) {
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
-  constexpr uint64_t kExpectedPrologueOffset = 256;
   const std::array<uint32_t, 2> text_words = {
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
@@ -3795,7 +3781,7 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
-  EXPECT_EQ(result.patches.front().trampoline_size, 6u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().trampoline_size, 5u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3826,17 +3812,11 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   expected_prologue_words.push_back(build_v_mov_b32_e32(11, /*src0=*/20, ROCJITSU_CODE_ARCH_RDNA4));
   expected_prologue_words.push_back(
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  const auto branch =
-      compute_sopp_branch_simm16(kExpectedPrologueOffset + 5u * sizeof(uint32_t), 0);
-  ASSERT_TRUE(branch);
-  expected_prologue_words.push_back(build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
-
-  ASSERT_EQ(kExpectedPrologueOffset % sizeof(uint32_t), 0u);
   const auto text_word_count = patched.text_sections().front()->size() / sizeof(uint32_t);
   std::vector<uint32_t> actual_words(text_word_count);
   std::memcpy(actual_words.data(), patched.text_sections().front()->data(),
               actual_words.size() * sizeof(uint32_t));
-  const size_t prologue_word_offset = kExpectedPrologueOffset / sizeof(uint32_t);
+  const size_t prologue_word_offset = result.patches.front().trampoline_offset / sizeof(uint32_t);
   ASSERT_GE(actual_words.size(), prologue_word_offset + expected_prologue_words.size());
   const std::span<const uint32_t> actual_prologue_words(actual_words.data() + prologue_word_offset,
                                                         expected_prologue_words.size());
@@ -3845,7 +3825,6 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
 }
 
 TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
-  constexpr uint64_t kExpectedPrologueOffset = 256;
   const std::array<uint32_t, 2> text_words = {
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA3),
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3),
@@ -3875,22 +3854,19 @@ TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
   const auto get_hw_id =
       instrumentation::build_s_getreg_b32(/*sdst=*/20, *hwreg, ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_TRUE(get_hw_id);
-  const std::array<uint32_t, 6> expected_prologue_words = {
+  const std::array<uint32_t, 5> expected_prologue_words = {
       *get_hw_id,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA3),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA3),
       build_v_mov_b32_e32(11, /*src0=*/20, ROCJITSU_CODE_ARCH_RDNA3),
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA3),
-      build_s_branch(
-          *compute_sopp_branch_simm16(kExpectedPrologueOffset + 5u * sizeof(uint32_t), 0),
-          ROCJITSU_CODE_ARCH_RDNA3),
   };
 
   const auto text_word_count = patched.text_sections().front()->size() / sizeof(uint32_t);
   std::vector<uint32_t> actual_words(text_word_count);
   std::memcpy(actual_words.data(), patched.text_sections().front()->data(),
               actual_words.size() * sizeof(uint32_t));
-  const size_t prologue_word_offset = kExpectedPrologueOffset / sizeof(uint32_t);
+  const size_t prologue_word_offset = result.patches.front().trampoline_offset / sizeof(uint32_t);
   ASSERT_GE(actual_words.size(), prologue_word_offset + expected_prologue_words.size());
   EXPECT_TRUE(std::equal(expected_prologue_words.begin(), expected_prologue_words.end(),
                          actual_words.begin() + static_cast<ptrdiff_t>(prologue_word_offset)));

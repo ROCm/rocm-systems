@@ -4914,6 +4914,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         }
         for (PendingTrace &trace : pending_traces)
           rebaser.rebase(trace.target_offset);
+        for (PendingClientTextMarker &marker : pending_client_markers)
+          rebaser.rebase(marker.target_offset);
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
         auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);

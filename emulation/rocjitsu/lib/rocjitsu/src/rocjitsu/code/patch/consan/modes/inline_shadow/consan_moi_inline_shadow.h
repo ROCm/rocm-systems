@@ -49,18 +49,17 @@ inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state);
 
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    const ConSanMoiOperatingPoint &operating_point,
-                                   rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                   rj_code_arch_t arch,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    const MoiObjectModeSemantics &semantics,
-                                   std::optional<MoiBarrierIslandReservation> &barrier_reservation,
                                    ConSanTransformArtifacts &result);
 
-void try_apply_inline_shadow_barrier_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
-    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state,
-    const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
-    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result);
+void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
+                                           const ConSanOptions &options,
+                                           const ConSanMoiOperatingPoint &operating_point,
+                                           rj_code_arch_t arch,
+                                           const MoiObjectModeSemantics &semantics,
+                                           ConSanTransformArtifacts &result);
 
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             const ConSanOptions &options,

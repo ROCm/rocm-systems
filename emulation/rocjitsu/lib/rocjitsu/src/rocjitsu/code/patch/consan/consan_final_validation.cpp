@@ -21,6 +21,7 @@
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"

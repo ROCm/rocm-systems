@@ -7,8 +7,8 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
-#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "util/bit.h"
 
@@ -612,9 +612,15 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
 }
 
 struct TextPlacementIndex {
+  struct OwnedTarget {
+    uint64_t offset = 0;
+    uint64_t owner_descriptor_file_offset = 0;
+  };
+
   std::unordered_map<uint64_t, uint64_t> target_by_source;
-  std::unordered_map<uint64_t, std::vector<uint64_t>> targets_by_source;
+  std::unordered_map<uint64_t, std::vector<OwnedTarget>> targets_by_source;
   std::unordered_set<uint64_t> conflicting_sources;
+  std::vector<TextOffsetRelocation> all;
 };
 
 /// @brief Build the one source-to-output placement policy used by every text reference.
@@ -631,12 +637,16 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
   placements.target_by_source.reserve(relocations.size());
   placements.targets_by_source.reserve(relocations.size());
   placements.conflicting_sources.reserve(relocations.size());
+  placements.all.reserve(relocations.size());
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
       return std::nullopt;
     auto [it, inserted] =
         placements.target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
-    placements.targets_by_source[relocation.source_offset].push_back(relocation.target_offset);
+    placements.targets_by_source[relocation.source_offset].push_back(
+        {.offset = relocation.target_offset,
+         .owner_descriptor_file_offset = relocation.owner_descriptor_file_offset});
+    placements.all.push_back(relocation);
     if (!inserted && it->second != relocation.target_offset)
       placements.conflicting_sources.insert(relocation.source_offset);
   }
@@ -836,30 +846,72 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       uint64_t relocated_symbol_start = relocated_start->second;
       if (const auto starts = placements.targets_by_source.find(source_text_offset);
           starts != placements.targets_by_source.end() && !starts->second.empty()) {
-        relocated_symbol_start = std::ranges::min(starts->second);
+        relocated_symbol_start =
+            std::ranges::min_element(starts->second, {}, &TextPlacementIndex::OwnedTarget::offset)
+                ->offset;
       }
+      bool relocated_exact_extent = false;
       if (old_size <= old_text_size - source_text_offset) {
         const auto starts = placements.targets_by_source.find(source_text_offset);
         const auto ends = placements.targets_by_source.find(source_text_offset + old_size);
         if (starts != placements.targets_by_source.end() &&
             ends != placements.targets_by_source.end()) {
           std::optional<std::pair<uint64_t, uint64_t>> best_extent;
-          for (uint64_t start : starts->second) {
-            for (uint64_t end : ends->second) {
-              if (end <= start)
+          for (const TextPlacementIndex::OwnedTarget &start : starts->second) {
+            for (const TextPlacementIndex::OwnedTarget &end : ends->second) {
+              if (end.owner_descriptor_file_offset != start.owner_descriptor_file_offset ||
+                  end.offset <= start.offset)
                 continue;
-              if (!best_extent || end - start < best_extent->second - best_extent->first)
-                best_extent = std::pair{start, end};
+              if (!best_extent ||
+                  end.offset - start.offset < best_extent->second - best_extent->first)
+                best_extent = std::pair{start.offset, end.offset};
             }
           }
           if (best_extent) {
             relocated_symbol_start = best_extent->first;
             symbol.st_size = best_extent->second - best_extent->first;
+            relocated_exact_extent = true;
           }
         }
       }
-      symbol.st_value = ehdr.e_type == ET_REL ? relocated_symbol_start
-                                              : text.sh_addr + relocated_symbol_start;
+      // Incremental append-only patching historically grew a terminal FUNC symbol to include its
+      // appended cave. A later whole-object DBT transaction can deliberately omit that now-dead
+      // cave, so the source endpoint no longer has an exact placement. Keeping the enlarged
+      // st_size would make an otherwise valid relocated symbol run past the new `.text` section.
+      // In that narrow case, derive the emitted extent from placements owned by the same kernel
+      // scope. Instruction starts and block ends are both present in this map, so the furthest
+      // owned placement inside the old symbol is the end of the body that was actually emitted.
+      if (!relocated_exact_extent &&
+          (relocated_symbol_start > text.sh_size ||
+           old_size > text.sh_size - relocated_symbol_start) &&
+          old_size <= old_text_size - source_text_offset) {
+        const auto starts = placements.targets_by_source.find(source_text_offset);
+        std::optional<std::pair<uint64_t, uint64_t>> best_extent;
+        if (starts != placements.targets_by_source.end()) {
+          const uint64_t source_end = source_text_offset + old_size;
+          for (const TextPlacementIndex::OwnedTarget &start : starts->second) {
+            uint64_t target_end = start.offset;
+            for (const TextOffsetRelocation &candidate : placements.all) {
+              if (candidate.owner_descriptor_file_offset != start.owner_descriptor_file_offset ||
+                  candidate.source_offset < source_text_offset ||
+                  candidate.source_offset > source_end || candidate.target_offset < start.offset)
+                continue;
+              target_end = std::max(target_end, candidate.target_offset);
+            }
+            if (target_end <= start.offset)
+              continue;
+            if (!best_extent ||
+                target_end - start.offset < best_extent->second - best_extent->first)
+              best_extent = std::pair{start.offset, target_end};
+          }
+        }
+        if (!best_extent)
+          return false;
+        relocated_symbol_start = best_extent->first;
+        symbol.st_size = best_extent->second - best_extent->first;
+      }
+      symbol.st_value =
+          ehdr.e_type == ET_REL ? relocated_symbol_start : text.sh_addr + relocated_symbol_start;
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
   }

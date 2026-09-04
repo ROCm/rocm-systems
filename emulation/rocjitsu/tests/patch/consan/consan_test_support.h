@@ -582,6 +582,20 @@ consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result
   return commit == commits.end() ? 0u : commit->original_semantic_sites.size();
 }
 
+[[nodiscard]] size_t
+consan_committed_semantic_site_count_for_source_offset(const ConSanTransformArtifacts &result,
+                                                       ConSanProbeIntentKind kind,
+                                                       uint64_t original_text_offset) {
+  const auto commits = result.coverage_ledger.lowering_commits();
+  const auto commit = std::ranges::find_if(commits, [&](const ConSanCommittedLowering &candidate) {
+    return consan_committed_lowering_has_intent_kind(result, candidate, kind) &&
+           std::ranges::any_of(candidate.original_semantic_sites, [&](const auto &site) {
+             return site.physical.original_text_offset == original_text_offset;
+           });
+  });
+  return commit == commits.end() ? 0u : commit->original_semantic_sites.size();
+}
+
 [[nodiscard]] ConSanRuntimeStaticMapping::Sampled
 consan_sampled_static_access_mappings(const ConSanTransformArtifacts &result) {
   ConSanRuntimeStaticMapping mapping = result.coverage_ledger.runtime_static_mapping();

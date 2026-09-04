@@ -1064,6 +1064,13 @@ public:
   [[nodiscard]] bool
   publish_coalescing_instrumented_commits(std::vector<ConSanCommittedLowering> commits);
 
+  /// Atomically replace already-published geometry for the intents covered by
+  /// a completed whole-text transaction. Every intent in an overlapping old
+  /// commit must be present in the replacement batch; this prevents a partial
+  /// relocation from silently discarding another semantic obligation.
+  [[nodiscard]] bool
+  publish_replacing_instrumented_commits(std::vector<ConSanCommittedLowering> commits);
+
   /// Return the authoritative lowering transactions in publication order.
   [[nodiscard]] std::span<const ConSanCommittedLowering> lowering_commits() const {
     return lowering_commits_;

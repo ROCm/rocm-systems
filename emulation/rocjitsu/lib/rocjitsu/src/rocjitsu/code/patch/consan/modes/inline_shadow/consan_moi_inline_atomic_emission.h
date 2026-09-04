@@ -20,6 +20,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {});
+    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {},
+    bool fallthrough = false);
 
 } // namespace rocjitsu::consan_moi_impl

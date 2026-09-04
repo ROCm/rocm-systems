@@ -45,8 +45,7 @@ struct MoiObjectModeSemantics {
   bool inline_access_present = false;
   bool automatic_banked_record_capture = false;
   ConSanMoiReportBufferLayout report_layout;
-  uint64_t reserved_barrier_island_count = 0;
-  uint32_t reserved_atomic_island_count = 0;
+  uint32_t reserved_atomic_patch_count = 0;
 
   bool operator==(const MoiObjectModeSemantics &) const = default;
 };

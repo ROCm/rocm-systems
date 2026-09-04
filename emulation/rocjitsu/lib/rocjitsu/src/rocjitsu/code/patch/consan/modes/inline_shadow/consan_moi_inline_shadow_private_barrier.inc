@@ -9,7 +9,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
     const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset, bool fallthrough) {
   const auto load_epoch =
       instrumentation::build_private_load_b32(plan.scratch_vgpr, plan.epoch_offset, arch);
   const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
@@ -36,6 +36,8 @@ build_inline_shadow_private_epoch_barrier_cave_words(
       saturate_epoch->size() + spill.restore_words.size() +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u) +
       3u + (control_selectable_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.push_back(original_barrier_word);
   // A guest load may intentionally remain outstanding across the barrier and
   // be consumed after a following waitcnt. Drain it before saving a
@@ -56,7 +58,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.push_back(*wait_store);
   if (!append_inline_shadow_barrier_epilogue(words, &spill, scalar_spill, selectable_vgpr_bank_mode,
                                              cave_text_offset, return_text_offset, call_return_sgpr,
-                                             plan.indirect_jump, arch)) {
+                                             plan.indirect_jump, arch, fallthrough)) {
     errors.emplace_back("ConSan MOI inline-shadow private epoch could not encode long return at " +
                         std::to_string(site.text_offset));
     return std::nullopt;

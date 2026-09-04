@@ -34,6 +34,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -225,13 +226,12 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const ConS
                                       const MoiObjectFacts &,
                                       const MoiObjectModeSemantics &semantics,
                                       ConSanTransformArtifacts &result) {
-  std::optional<MoiBarrierIslandReservation> barrier_reservation;
-  try_apply_inline_shadow_patch(bytes, options, operating_point, arch, resource_state, candidates,
-                                semantics, barrier_reservation, result);
+  (void)resource_state;
+  try_apply_inline_shadow_patch(bytes, options, operating_point, arch, candidates, semantics,
+                                result);
   if (!result.errors.empty())
     return;
-  try_apply_inline_shadow_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                        barrier_reservation, semantics, result);
+  try_apply_inline_shadow_barrier_patch(bytes, options, operating_point, arch, semantics, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(bytes, options, operating_point, arch, semantics,
                                            result);

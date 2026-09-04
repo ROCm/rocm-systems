@@ -491,7 +491,21 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
         decoder, std::span<const uint32_t>(words).first(std::min(words.size(), remaining / 4u)),
         begin + offset);
     if (!instruction) {
-      error = "decoder rejected instruction at text byte " + std::to_string(begin + offset);
+      error = "decoder rejected instruction at text byte " + std::to_string(begin + offset) +
+              " (encoding=0x" + consan_fixed_hex(words.front(), 8u) + ")";
+      const size_t context_begin =
+          offset > 4u * sizeof(uint32_t) ? offset - 4u * sizeof(uint32_t) : 0u;
+      const size_t context_end =
+          std::min(static_cast<size_t>(size), offset + 5u * sizeof(uint32_t));
+      error += " context=";
+      for (size_t context_offset = context_begin; context_offset < context_end;
+           context_offset += sizeof(uint32_t)) {
+        uint32_t encoding = 0u;
+        std::memcpy(&encoding, text.data() + begin + context_offset, sizeof(encoding));
+        if (context_offset != context_begin)
+          error += ",";
+        error += "0x" + consan_fixed_hex(encoding, 8u);
+      }
       return false;
     }
     const int instruction_size = instruction->size();
@@ -2196,18 +2210,6 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
       errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
       continue;
     }
-    const auto descriptor =
-        read_kernel_descriptor(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                                            environment.original.image_data()),
-                                                        environment.original.image_size()),
-                               owner->descriptor_file_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
-      continue;
-    }
-    const bool has_kernarg_preload =
-        AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
-
     std::vector<uint32_t> expected_save;
     std::vector<uint32_t> expected_restore;
     for (uint16_t index = 0; index < backup.sgpr_count; ++index) {
@@ -2235,7 +2237,7 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
 
     std::vector<uint64_t> body_offsets = {
         patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset)};
-    if (has_kernarg_preload) {
+    if (patch.dispatch_id_secondary_prologue_offset) {
       constexpr uint64_t kPairedEntryAlignment = 256u;
       body_offsets.push_back(patch.dispatch_id_secondary_prologue_offset.value_or(
           patch.trampoline_offset + kPairedEntryAlignment));
@@ -2358,7 +2360,9 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
         (patch_end - entry_offset) % sizeof(uint32_t) != 0) {
       errors.emplace_back(
           "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
-          std::string(kernel_name) + "'");
+          std::string(kernel_name) + "' (entry=" + std::to_string(entry_offset) + ", patch=" +
+          std::to_string(patch.trampoline_offset) + "+" + std::to_string(patch.trampoline_size) +
+          ", text=" + std::to_string(replacement_text.size()) + ")");
       return;
     }
     const auto entry_words = std::span<const uint32_t>(
@@ -2367,7 +2371,8 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     if (scalar_backup_prefix_words > entry_words.size()) {
       errors.emplace_back(
           "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
-          std::string(kernel_name) + "'");
+          std::string(kernel_name) + "' (entry words=" + std::to_string(entry_words.size()) +
+          ", scalar backup words=" + std::to_string(scalar_backup_prefix_words) + ")");
       return;
     }
     std::vector<uint32_t> restore_words;
@@ -2449,18 +2454,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
-    const auto descriptor =
-        read_kernel_descriptor(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                                            environment.original.image_data()),
-                                                        environment.original.image_size()),
-                               owner->descriptor_file_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan final validation could not read a dispatch-ID prologue owner");
-      continue;
-    }
-    const bool has_kernarg_preload =
-        AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
-    if (has_kernarg_preload) {
+    if (patch.dispatch_id_secondary_prologue_offset) {
       validate_entry(
           patch,
           patch.dispatch_id_secondary_prologue_offset.value_or(patch.trampoline_offset + 256u),

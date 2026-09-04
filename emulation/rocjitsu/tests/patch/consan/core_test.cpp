@@ -355,8 +355,7 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
       .inline_access_present = true,
       .automatic_banked_record_capture = true,
       .report_layout = {},
-      .reserved_barrier_island_count = 0u,
-      .reserved_atomic_island_count = 0u,
+      .reserved_atomic_patch_count = 0u,
   };
 
   EXPECT_EQ(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
@@ -405,8 +404,7 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
       .dense_barrier_router = false,
       .inline_access_present = true,
       .report_layout = {},
-      .reserved_barrier_island_count = 0u,
-      .reserved_atomic_island_count = 0u,
+      .reserved_atomic_patch_count = 0u,
   };
 
   const MoiResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,

@@ -164,8 +164,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsLegacyReportLayout) {
   EXPECT_EQ(
       sampled.semantics.report_layout,
       consan_moi_direct_sampled_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
-  EXPECT_EQ(sampled.semantics.reserved_barrier_island_count, 2u);
-  EXPECT_EQ(sampled.semantics.reserved_atomic_island_count, 2u);
+  EXPECT_EQ(sampled.semantics.reserved_atomic_patch_count, 2u);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   const auto inline_shadow =

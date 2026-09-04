@@ -34,6 +34,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access_emission.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
@@ -161,6 +162,16 @@ static std::optional<ConSanRuntimeStaticMapping> make_sampled_access_runtime_map
   });
 }
 
+[[nodiscard]] ConSanRuntimeStaticMapping
+sampled_runtime_mapping_including_staged(const ConSanTransformArtifacts &result) {
+  ConSanRuntimeStaticMapping mapping = result.coverage_ledger.runtime_static_mapping();
+  for (const ConSanTextFragment &fragment : result.staged_text_fragments) {
+    if (!mapping.append(fragment.runtime_mapping))
+      return {};
+  }
+  return mapping;
+}
+
 /// Returns the SCC snapshot that remains valid after a sampled access body.
 ///
 /// Fixed layouts return after the sampled body has overwritten the runtime
@@ -199,15 +210,11 @@ plan_sampled_object_mode(const ConSanRequest &request, const BoundRuntimeResourc
         "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
         "LDS access candidates");
   }
-  if (plan.track_barriers) {
-    plan.semantics.reserved_barrier_island_count =
-        std::min<uint64_t>(facts.admitted_barrier_count, policy.max_patches);
-  }
   if (plan.track_atomics) {
     const uint32_t patch_budget = policy.max_patches_is_expert_limit
                                       ? policy.max_patches
                                       : std::numeric_limits<uint32_t>::max();
-    plan.semantics.reserved_atomic_island_count = static_cast<uint32_t>(
+    plan.semantics.reserved_atomic_patch_count = static_cast<uint32_t>(
         std::min({static_cast<size_t>(patch_budget),
                   static_cast<size_t>(plan.semantics.report_layout.sampled_watchpoint_capacity),
                   facts.admitted_atomic_count}));
@@ -222,8 +229,8 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const ConSanOpti
                                 const MoiObjectFacts &,
                                 const MoiObjectModeSemantics &mode_semantics,
                                 ConSanTransformArtifacts &result) {
-  try_apply_direct_sampled_watchpoint_patch(bytes, options, operating_point, arch, resource_state,
-                                            candidates, mode_semantics, result);
+  try_apply_direct_sampled_watchpoint_patch(bytes, options, operating_point, arch, candidates,
+                                            mode_semantics, result);
   if (result.errors.empty())
     try_apply_sampled_atomic_sync_patch(bytes, options, operating_point, arch, resource_state,
                                         mode_semantics, result);
