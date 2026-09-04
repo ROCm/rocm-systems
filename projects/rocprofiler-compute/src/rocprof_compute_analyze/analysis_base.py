@@ -178,6 +178,7 @@ class OmniAnalyze_Base:
             sys_info=sys_info,
             profiling_config=profiling_config,
             arch=arch,
+            membw_analysis=getattr(self.get_args(), "membw_analysis", False),
         )
         self._arch_configs[arch] = ac
         return self._arch_configs

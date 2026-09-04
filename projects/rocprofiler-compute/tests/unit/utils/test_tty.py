@@ -307,7 +307,7 @@ def test_show_all_membw_analysis_panel_gate(
     monkeypatch: pytest.MonkeyPatch,
     membw_analysis: bool,
 ) -> None:
-    """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
+    """Panel 3000 is rendered only when present in arch_configs."""
     args = argparse.Namespace(
         decimal=2,
         filter_metrics=None,
@@ -328,15 +328,18 @@ def test_show_all_membw_analysis_panel_gate(
         "title": "EA Interface",
         "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
     }
-    arch_configs = SimpleNamespace(
-        panel_configs={
+    panel_configs = (
+        {
             3000: {
                 "id": 3000,
                 "title": "Memory Bandwidth Analysis",
                 "data source": [{"metric_table": table_config}],
             }
         }
+        if membw_analysis
+        else {}
     )
+    arch_configs = SimpleNamespace(panel_configs=panel_configs)
     runs = {
         "fixture": SimpleNamespace(
             dfs={3013: metric_dataframe},

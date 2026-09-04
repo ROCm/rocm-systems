@@ -53,6 +53,7 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
+    membw_analysis: bool = False,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
@@ -91,6 +92,9 @@ def build_dfs(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        if panel_id == 3000 and not membw_analysis:
+            continue
+
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
