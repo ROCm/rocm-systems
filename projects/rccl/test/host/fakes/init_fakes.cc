@@ -325,6 +325,7 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ResetRecorderFakes();
   ResetRcclWrapFakes();
+  ResetNcclStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();

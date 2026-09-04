@@ -27,7 +27,14 @@ struct ncclTopoGraph;
 bool g_rcclUseAinic = false;
 bool rcclUseAinic() { return g_rcclUseAinic; }
 
-void ResetTransportStubs() { g_rcclUseAinic = false; }
+// src/proxy.cc: comm teardown stops the proxy through this, so it needs a working default, not a fail-loud one.
+static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop = DefaultNcclProxyStop;
+
+void ResetTransportStubs() {
+  g_rcclUseAinic = false;
+  g_ncclProxyStop = DefaultNcclProxyStop;
+}
 
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
@@ -52,7 +59,7 @@ ncclResult_t ncclNvlsTuning(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProxyCreate(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclProxyStop(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProxyStop(struct ncclComm* comm) { return g_ncclProxyStop(comm); }
 int ncclPxnDisable(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }

@@ -4784,6 +4784,1159 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
   EXPECT_TRUE(LogHas(log, "ppodSize 8 cliqueId 5 clique size 4")) << "actual log:\n" << log;
 }
 
+// Comm teardown / lifecycle (init.cc:453-4100): commFree, setCommAbortFlags, destroy/finalize/revoke/abort.
+
+namespace {
+
+// commFree() ends in free(comm), so the comm must be malloc-backed exactly like production.
+void Teardown_MakeFreeableComm(ncclComm** comm, uint32_t* abortFlag, int* abortRefCount) {
+  InstallCommAllocSuccess();
+  *comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(*comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  (*comm)->abortFlag = abortFlag;
+  (*comm)->abortFlagRefCount = abortRefCount;
+}
+
+struct Teardown_DtorNode {
+  struct ncclDestructor base;
+  int id;
+  std::vector<int>* log;
+  ncclResult_t result;
+};
+
+ncclResult_t Teardown_LogDtor(struct ncclDestructor* me) {
+  auto* node = reinterpret_cast<Teardown_DtorNode*>(me);
+  node->log->push_back(node->id);
+  return node->result;
+}
+
+// The destructor chain runs after the task-queue drain, so it is where "were the queues emptied?" is observable.
+ncclResult_t Teardown_LogTaskQueueState(struct ncclDestructor* me) {
+  auto* node = reinterpret_cast<Teardown_DtorNode*>(me);
+  node->log->push_back(ncclIntruQueueEmpty(&me->comm->suspendTaskQueue) ? 1 : 0);
+  node->log->push_back(ncclIntruQueueEmpty(&me->comm->resumeTaskQueue) ? 1 : 0);
+  return ncclSuccess;
+}
+
+void Teardown_ChainDtors(Teardown_DtorNode* nodes, int n, std::vector<int>* log) {
+  for (int i = 0; i < n; ++i) {
+    nodes[i].base.fn = Teardown_LogDtor;
+    nodes[i].base.next = (i + 1 < n) ? &nodes[i + 1].base : nullptr;
+    nodes[i].log = log;
+    nodes[i].result = ncclSuccess;
+  }
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommFree_DestructorChain_RunsEveryNodeHeadToTail) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  std::vector<int> ran;
+  Teardown_DtorNode nodes[3]{};
+  Teardown_ChainDtors(nodes, 3, &ran);
+  nodes[0].id = 11;
+  nodes[1].id = 22;
+  nodes[2].id = 33;
+  comm->destructorHead = &nodes[0].base;
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<int>({11, 22, 33}), ran);
+}
+
+TEST_F(InitMicrotest, CommFree_DestructorFails_PropagatesErrorAndStopsWalk) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  std::vector<int> ran;
+  Teardown_DtorNode nodes[2]{};
+  Teardown_ChainDtors(nodes, 2, &ran);
+  nodes[0].id = 44;
+  nodes[0].result = ncclSystemError;
+  nodes[1].id = 55;
+  comm->destructorHead = &nodes[0].base;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(std::vector<int>({44}), ran);
+  free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_SharedAbortFlagReference_DecrementsRefCountByOne) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 3;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(2, abortRef);
+  EXPECT_EQ(0u, abortFlag);
+}
+
+TEST_F(InitMicrotest, CommFree_LastAbortFlagReference_ReleasesFlagStorage) {
+  ncclComm* comm = nullptr;
+  auto* abortFlag = static_cast<uint32_t*>(::calloc(1, sizeof(uint32_t)));
+  auto* abortRefCount = static_cast<int*>(::malloc(sizeof(int)));
+  *abortRefCount = 1;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, abortFlag, abortRefCount));
+  comm->abortFlagDev = static_cast<uint32_t*>(::calloc(1, sizeof(uint32_t)));
+
+  std::vector<void*> released;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) {
+      released.push_back(p);
+      ::free(p);
+    });
+    EXPECT_EQ(ncclSuccess, commFree(comm));
+  }
+  EXPECT_EQ(1, std::count(released.begin(), released.end(), static_cast<void*>(abortFlag)));
+  EXPECT_EQ(1, std::count(released.begin(), released.end(), static_cast<void*>(abortRefCount)));
+}
+
+TEST_F(InitMicrotest, CommFree_AbortFlagSet_ReportsAbortCompletion) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 1;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, commFree(comm)); });
+  EXPECT_TRUE(LogHas(log, "- Abort COMPLETE")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "- Destroy COMPLETE")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommFree_AbortFlagClear_ReportsDestroyCompletion) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, commFree(comm)); });
+  EXPECT_TRUE(LogHas(log, "- Destroy COMPLETE")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "- Abort COMPLETE")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommFree_PendingSuspendAndResumeTasks_DrainsBothQueues) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  const int kSuspendTasks = 3;
+  const int kResumeTasks = 2;
+  for (int i = 0; i < kSuspendTasks; ++i) {
+    ncclIntruQueueEnqueue(&comm->suspendTaskQueue,
+                          static_cast<ncclMemManagerTask*>(::calloc(1, sizeof(ncclMemManagerTask))));
+  }
+  for (int i = 0; i < kResumeTasks; ++i) {
+    ncclIntruQueueEnqueue(&comm->resumeTaskQueue,
+                          static_cast<ncclMemManagerTask*>(::calloc(1, sizeof(ncclMemManagerTask))));
+  }
+
+  std::vector<int> emptied;
+  Teardown_DtorNode probe{};
+  probe.base.fn = Teardown_LogTaskQueueState;
+  probe.base.comm = comm;
+  probe.log = &emptied;
+  comm->destructorHead = &probe.base;
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<int>({1, 1}), emptied);
+}
+
+TEST_F(InitMicrotest, CommFree_NodeRanksTable_FreesEveryNodeEntry) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+
+  const int kNodes = 3;
+  comm->nNodes = kNodes;
+  comm->nodeRanks = static_cast<ncclNodeRanks*>(::calloc(kNodes, sizeof(ncclNodeRanks)));
+  ncclNodeRanks* const table = comm->nodeRanks;
+  void* perNode[kNodes];
+  for (int n = 0; n < kNodes; ++n) {
+    table[n].localRankToRank = static_cast<int*>(::calloc(4, sizeof(int)));
+    perNode[n] = table[n].localRankToRank;
+  }
+
+  std::vector<void*> released;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) {
+      released.push_back(p);
+      ::free(p);
+    });
+    EXPECT_EQ(ncclSuccess, commFree(comm));
+  }
+  for (int n = 0; n < kNodes; ++n) {
+    EXPECT_EQ(1, std::count(released.begin(), released.end(), perNode[n])) << "node " << n;
+  }
+  EXPECT_EQ(1, std::count(released.begin(), released.end(), static_cast<void*>(table)));
+}
+
+// --- commDestroySync / commCleanup / commReclaim and the public entry points ---
+namespace {
+
+// Magic-valid heap comm for tests that stop before commFree; Teardown_MakeFreeableComm is the malloc-backed one.
+class Teardown_LifecycleComm {
+ public:
+  explicit Teardown_LifecycleComm(int cudaDev = 1, int rank = 0)
+      : comm_(new ncclComm{}), sharedRes_(new ncclSharedResources{}) {
+    comm_->startMagic = comm_->endMagic = NCCL_MAGIC;
+    comm_->abortFlag = &abortFlag_;
+    comm_->abortFlagDev = &abortFlagDev_;
+    comm_->childAbortFlag = &childAbortFlag_;
+    comm_->childAbortFlagDev = &childAbortFlagDev_;
+    comm_->cudaDev = cudaDev;
+    comm_->rank = rank;
+    comm_->nRanks = 2;
+    comm_->busId = 0x1000 + rank;
+    comm_->config.blocking = 1;
+    comm_->initState = ncclSuccess;
+    comm_->sharedRes = sharedRes_.get();
+  }
+  ncclComm* get() { return comm_.get(); }
+  uint32_t abortFlag() const { return abortFlag_; }
+  uint32_t abortFlagDev() const { return abortFlagDev_; }
+  uint32_t childAbortFlag() const { return childAbortFlag_; }
+  uint32_t childAbortFlagDev() const { return childAbortFlagDev_; }
+
+ private:
+  uint32_t abortFlag_ = 0;
+  uint32_t abortFlagDev_ = 0;
+  uint32_t childAbortFlag_ = 0;
+  uint32_t childAbortFlagDev_ = 0;
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sharedRes_;
+};
+
+// The callback drain exchanges the stream-capture mode; the hip fake fails that by default.
+void Teardown_AllowStreamCaptureExchange() { g_hipAsyncOpsResult = hipSuccess; }
+
+ncclResult_t Teardown_RunDestroySync(ncclComm* comm) {
+  ncclCommFinalizeAsyncJob job{};
+  job.comm = comm;
+  return commDestroySync(reinterpret_cast<ncclAsyncJob*>(&job));
+}
+
+ncclResult_t Teardown_RunReclaim(ncclComm* comm) {
+  ncclCommFinalizeAsyncJob job{};
+  job.comm = comm;
+  return commReclaim(reinterpret_cast<ncclAsyncJob*>(&job));
+}
+
+ncclResult_t Teardown_RunRevokeAsync(ncclComm* comm) {
+  ncclCommRevokeAsyncJob job{};
+  job.comm = comm;
+  return commRevokeAsync(reinterpret_cast<ncclAsyncJob*>(&job));
+}
+
+// Records the launched job instead of running it, so the entry point's own contract stays observable.
+using Teardown_JobFn = ncclResult_t (*)(ncclAsyncJob*);
+
+struct Teardown_LaunchRecord {
+  int calls = 0;
+  ncclAsyncJob* job = nullptr;
+  ncclResult_t (*func)(ncclAsyncJob*) = nullptr;
+  void (*destructor)(void*) = nullptr;
+  ncclComm* comm = nullptr;
+  ncclResult_t result = ncclSuccess;
+
+  void Release() {
+    if (job && destructor) destructor(job);
+    job = nullptr;
+  }
+};
+
+std::function<ncclResult_t(ncclAsyncJob*, ncclResult_t (*)(ncclAsyncJob*), void (*)(ncclAsyncJob*), void (*)(void*),
+                           ncclComm*)>
+Teardown_CaptureLaunch(Teardown_LaunchRecord* rec) {
+  return [rec](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*), void (*)(ncclAsyncJob*),
+               void (*destructor)(void*), ncclComm* comm) {
+    rec->calls++;
+    rec->job = job;
+    rec->func = func;
+    rec->destructor = destructor;
+    rec->comm = comm;
+    return rec->result;
+  };
+}
+
+struct Teardown_CommCallback {
+  struct ncclCommCallback base;
+  ncclComm* owner;
+  ncclResult_t result;
+};
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommDestroySync_InitStateSuccess_SetsDeviceStopsProxyAndDestroysCollTrace) {
+  Teardown_LifecycleComm c(/*cudaDev=*/3);
+  Teardown_AllowStreamCaptureExchange();
+  int setDev = -1;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    setDev = dev;
+    return hipSuccess;
+  });
+  ncclComm* tracedComm = nullptr;
+  ScopedHook collTrace(g_collTraceDestroy, [&](ncclComm* comm) {
+    tracedComm = comm;
+    return ncclSuccess;
+  });
+  ncclComm* stoppedComm = nullptr;
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm* comm) {
+    stoppedComm = comm;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(3, setDev);
+  EXPECT_EQ(c.get(), tracedComm);
+  EXPECT_EQ(c.get(), stoppedComm);
+  EXPECT_EQ(1, collTrace.calls);
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_SetDeviceFails_ReturnsErrorWithoutDestroyingCollTrace) {
+  Teardown_LifecycleComm c;
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_NE(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, collTrace.calls);
+  EXPECT_EQ(0, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_CollTraceDestroyFails_PropagatesAndSkipsProxyStop) {
+  Teardown_LifecycleComm c;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSystemError; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, collTrace.calls);
+  EXPECT_EQ(0, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_InitStateNotReady_SkipsStreamSyncButStillStopsProxy) {
+  Teardown_LifecycleComm c;
+  c.get()->initState = ncclInProgress;
+  c.get()->localPersistentRefs = 1;  // the poll loop is inside the skipped block; a hang means it ran
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, proxyStop.calls);
+  EXPECT_EQ(1, c.get()->localPersistentRefs);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_StreamSyncFails_WarnsAndStillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  g_ncclStrongStreamResult = ncclSystemError;
+
+  const std::string log = RcclUnitTesting::CaptureLog([&] { Teardown_RunDestroySync(c.get()); });
+  EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "sync hostStream error")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "sync deviceStream error")) << "actual log:\n" << log;
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclInternalError; });
+
+  ncclResult_t ret = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { ret = Teardown_RunDestroySync(c.get()); });
+  EXPECT_EQ(ncclInternalError, ret);
+  EXPECT_TRUE(LogHas(log, "ncclProxyStop: comm")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  // The first drain re-arms the counter and enqueues the second callback, so the waitSome poll cannot block.
+  static Teardown_CommCallback second;
+  static Teardown_CommCallback first;
+  second = {};
+  first = {};
+  second.owner = c.get();
+  second.base.fn = [](ncclComm* comm, ncclCommCallback*) {
+    comm->localPersistentRefs = 0;
+    return ncclSuccess;
+  };
+  first.owner = c.get();
+  first.base.fn = [](ncclComm* comm, ncclCommCallback*) {
+    comm->localPersistentRefs = 1;
+    ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &second.base);
+    return ncclSuccess;
+  };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &first.base);
+  c.get()->localPersistentRefs = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, c.get()->localPersistentRefs);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsRemainder) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  static int ran;
+  ran = 0;
+  Teardown_CommCallback cbs[2]{};
+  cbs[0].base.fn = [](ncclComm*, ncclCommCallback*) {
+    ran++;
+    return ncclSystemError;
+  };
+  cbs[1].base.fn = [](ncclComm*, ncclCommCallback*) {
+    ran++;
+    return ncclSuccess;
+  };
+  ncclIntruQueueEnqueue(&c.get()->legacyRegCleanupQueue, &cbs[0].base);
+  ncclIntruQueueEnqueue(&c.get()->legacyRegCleanupQueue, &cbs[1].base);
+
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
+  EXPECT_EQ(2, ran);
+  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
+  EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
+}
+
+// --- shared tuner probe for commCleanup-driven teardown (init.cc:3772) ---
+namespace {
+constexpr uint64_t Teardown_kTunerMagic = 0xC0FFEE01u;
+
+struct Teardown_TunerRecord {
+  uint64_t magic = Teardown_kTunerMagic;
+  int finalizeCalls = 0;
+};
+
+// Returning an error unless the magic survives is what makes "passed the wrong context" a failing test.
+ncclResult_t Teardown_TunerFinalize(void* context) {
+  auto* rec = static_cast<Teardown_TunerRecord*>(context);
+  if (rec == nullptr || rec->magic != Teardown_kTunerMagic) return ncclInternalError;
+  rec->finalizeCalls++;
+  return ncclSuccess;
+}
+
+void Teardown_AttachTuner(ncclComm* comm, ncclTuner_t* tuner, Teardown_TunerRecord* rec) {
+  *tuner = ncclTuner_t{};
+  tuner->finalize = Teardown_TunerFinalize;
+  comm->tuner = tuner;
+  comm->tunerContext = rec;
+}
+}  // namespace
+
+// --- commReclaim (init.cc:3833) ---
+namespace {
+// Carries a tuner probe so "commCleanup ran on this chain member" stays observable after the comm is freed.
+struct Teardown_ChainMember {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRefCount = 2;
+  ncclTuner_t tuner{};
+  Teardown_TunerRecord rec;
+};
+
+void Teardown_BuildChain(Teardown_ChainMember* members, int n) {
+  for (int i = 0; i < n; ++i) {
+    ASSERT_NO_FATAL_FAILURE(
+        Teardown_MakeFreeableComm(&members[i].comm, &members[i].abortFlag, &members[i].abortRefCount));
+    members[i].comm->rank = i;
+    members[i].comm->intraRanks = n;
+    members[i].comm->intraComm0 = members[0].comm;
+    Teardown_AttachTuner(members[i].comm, &members[i].tuner, &members[i].rec);
+  }
+  for (int i = 0; i < n; ++i) {
+    members[i].comm->intraNext = (i + 1 < n) ? members[i + 1].comm : nullptr;
+  }
+}
+}  // namespace
+
+TEST_F(InitMicrotest, CommReclaim_NoIntraComm0_ReturnsSuccessWithoutTouchingTheComm) {
+  Teardown_LifecycleComm c;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(c.get()));
+  EXPECT_EQ(0, proxyStop.calls);
+  EXPECT_EQ(0, c.get()->finalizeRankCnt);
+}
+
+TEST_F(InitMicrotest, CommReclaim_NotLastIntraRank_BumpsLeaderCounterAndDefersCleanup) {
+  const int kChainLength = 2;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm));
+  EXPECT_EQ(1, members[0].comm->finalizeRankCnt);
+  EXPECT_EQ(0, proxyStop.calls);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  EXPECT_EQ(0, members[1].rec.finalizeCalls);
+
+  for (int i = 0; i < kChainLength; ++i) {
+    members[i].comm->tuner = nullptr;
+    EXPECT_EQ(ncclSuccess, commFree(members[i].comm));
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChain) {
+  Teardown_AllowStreamCaptureExchange();
+  const int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, proxyStop.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_EQ(1, members[i].rec.finalizeCalls) << "chain member " << i << " was not cleaned up";
+    EXPECT_EQ(1, members[i].abortRefCount);
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) {
+  const int kChainLength = 2;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclInternalError; });
+
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
+  EXPECT_TRUE(LogHas(log, "commReclaim: comm")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "in commDestroySync, error")) << "actual log:\n" << log;
+  for (int i = 0; i < kChainLength; ++i) EXPECT_EQ(1, members[i].rec.finalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedComm_DrainsLegacyQueueInsteadOfDestroySync) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeCalled = true;
+  members[0].comm->revokedFlag = 1;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  static int drained;
+  drained = 0;
+  Teardown_CommCallback cb{};
+  cb.base.fn = [](ncclComm*, ncclCommCallback*) {
+    drained++;
+    return ncclSuccess;
+  };
+  ncclIntruQueueEnqueue(&members[0].comm->legacyRegCleanupQueue, &cb.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[0].comm));
+  EXPECT_EQ(1, drained);
+  EXPECT_EQ(0, proxyStop.calls);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommReclaim_FinalizedButNotRevoked_SkipsBothSyncAndDrain) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeCalled = true;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  static int drained;
+  drained = 0;
+  Teardown_CommCallback cb{};
+  cb.base.fn = [](ncclComm*, ncclCommCallback*) {
+    drained++;
+    return ncclSuccess;
+  };
+  ncclIntruQueueEnqueue(&members[0].comm->legacyRegCleanupQueue, &cb.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[0].comm));
+  EXPECT_EQ(0, drained);
+  EXPECT_EQ(0, proxyStop.calls);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+}
+
+// --- commRevokeAsync (init.cc:3972) ---
+TEST_F(InitMicrotest, CommRevokeAsync_ValidComm_StopsProxyAndLowersEveryAbortFlag) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  ncclComm* stoppedComm = nullptr;
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm* comm) {
+    stoppedComm = comm;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_EQ(c.get(), stoppedComm);
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(0u, c.abortFlagDev());
+  EXPECT_EQ(0u, c.childAbortFlag());
+  EXPECT_EQ(0u, c.childAbortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommRevokeAsync_StreamSyncFails_LeavesAbortFlagsRaisedAndRecordsAsyncError) {
+  Teardown_LifecycleComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  g_ncclStrongStreamResult = ncclSystemError;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_EQ(0, proxyStop.calls);
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.childAbortFlag());
+  EXPECT_EQ(ncclSystemError, c.get()->asyncResult);
+}
+
+TEST_F(InitMicrotest, CommRevokeAsync_NullComm_ReportsTheArgumentCheckAndStopsNoProxy) {
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ncclResult_t ret = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { ret = Teardown_RunRevokeAsync(nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, ret);
+  EXPECT_TRUE(LogHas(log, "CommRevokeAsync : comm argument is NULL")) << "actual log:\n" << log;
+  EXPECT_EQ(0, proxyStop.calls);
+}
+
+// --- ncclCommFinalize_impl (init.cc:3784) ---
+TEST_F(InitMicrotest, CommFinalize_NullComm_ReturnsSuccessWithoutLaunching) {
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  EXPECT_EQ(ncclSuccess, ncclCommFinalize_impl(nullptr));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommFinalize_FirstCall_MarksFinalizedAndLaunchesDestroySync) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclSuccess, ncclCommFinalize_impl(c.get()));
+  EXPECT_TRUE(c.get()->finalizeCalled);
+  EXPECT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(commDestroySync), rec.func);
+  EXPECT_EQ(c.get(), rec.comm);
+  EXPECT_EQ(c.get(), reinterpret_cast<ncclCommFinalizeAsyncJob*>(rec.job)->comm);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommFinalize_SecondCall_ReturnsInvalidArgumentAndLaunchesOnlyOnce) {
+  Teardown_LifecycleComm c;
+  c.get()->finalizeCalled = true;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommFinalize_impl(c.get()));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommFinalize_RevokedComm_WarnsAndReturnsInvalidUsage) {
+  Teardown_LifecycleComm c;
+  c.get()->revokedFlag = 1;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclResult_t ret = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { ret = ncclCommFinalize_impl(c.get()); });
+  EXPECT_EQ(ncclInvalidUsage, ret);
+  EXPECT_TRUE(LogHas(log, "has been revoked; use ncclCommDestroy instead")) << "actual log:\n" << log;
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_FALSE(c.get()->finalizeCalled);
+}
+
+TEST_F(InitMicrotest, CommFinalize_NonBlockingRevokedComm_PublishesTheErrorAsAsyncResult) {
+  Teardown_LifecycleComm c;
+  c.get()->revokedFlag = 1;
+  c.get()->config.blocking = 0;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { ret = ncclCommFinalize_impl(c.get()); });
+  EXPECT_EQ(ncclInvalidUsage, ret);
+  EXPECT_EQ(ncclInvalidUsage, c.get()->asyncResult);
+}
+
+// --- ncclCommDestroy_impl (init.cc:3905) ---
+TEST_F(InitMicrotest, CommDestroy_NullComm_ReturnsSuccessWithoutLaunching) {
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  EXPECT_EQ(ncclSuccess, ncclCommDestroy_impl(nullptr));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroy_ValidComm_SetsDestroyFlagAndLaunchesReclaim) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclSuccess, ncclCommDestroy_impl(c.get()));
+  EXPECT_EQ(1u, c.get()->destroyFlag);
+  EXPECT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(commReclaim), rec.func);
+  EXPECT_EQ(c.get(), rec.comm);
+  EXPECT_EQ(c.get(), reinterpret_cast<ncclCommFinalizeAsyncJob*>(rec.job)->comm);
+  EXPECT_EQ(0u, c.abortFlag());  // destroy must not raise the abort flags that abort does
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommDestroy_AlreadyDestroyedComm_WarnsAndReturnsInvalidArgument) {
+  Teardown_LifecycleComm c;
+  c.get()->rank = -1;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclResult_t ret = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { ret = ncclCommDestroy_impl(c.get()); });
+  EXPECT_EQ(ncclInvalidArgument, ret);
+  EXPECT_TRUE(LogHas(log, "has already been destroyed")) << "actual log:\n" << log;
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_EQ(0u, c.get()->destroyFlag);
+}
+
+TEST_F(InitMicrotest, CommDestroy_BusIdMarkedDestroyed_ReturnsInvalidArgument) {
+  Teardown_LifecycleComm c;
+  c.get()->busId = -1;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { ret = ncclCommDestroy_impl(c.get()); });
+  EXPECT_EQ(ncclInvalidArgument, ret);
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroy_LaunchFails_PropagatesTheLaunchError) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  rec.result = ncclSystemError;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclSystemError, ncclCommDestroy_impl(c.get()));
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+// --- ncclCommAbort_impl (init.cc:4060) ---
+TEST_F(InitMicrotest, CommAbort_NullComm_ReturnsSuccessWithoutLaunching) {
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  EXPECT_EQ(ncclSuccess, ncclCommAbort_impl(nullptr));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommAbort_ValidComm_RaisesEveryAbortFlagAndLaunchesReclaim) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclSuccess, ncclCommAbort_impl(c.get()));
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
+  EXPECT_EQ(1u, c.childAbortFlag());
+  EXPECT_EQ(1u, c.childAbortFlagDev());
+  EXPECT_EQ(1u, c.get()->destroyFlag);
+  EXPECT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(commReclaim), rec.func);
+  EXPECT_EQ(c.get(), reinterpret_cast<ncclCommFinalizeAsyncJob*>(rec.job)->comm);
+  rec.Release();
+}
+
+// --- ncclCommRevoke_impl (init.cc:4006) ---
+TEST_F(InitMicrotest, CommRevoke_UnsupportedFlags_ReturnsInvalidArgumentWithoutRevoking) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT + 1));
+  EXPECT_EQ(0u, c.get()->revokedFlag);
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommRevoke_NullComm_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ncclCommRevoke_impl(nullptr, NCCL_REVOKE_DEFAULT));
+}
+
+TEST_F(InitMicrotest, CommRevoke_DestroyInProgress_ReturnsInvalidArgument) {
+  Teardown_LifecycleComm c;
+  c.get()->destroyFlag = 1;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT));
+  EXPECT_EQ(0u, c.get()->revokedFlag);
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommRevoke_FinalizeInProgress_ReturnsInvalidArgument) {
+  Teardown_LifecycleComm c;
+  c.get()->finalizeCalled = true;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT));
+  EXPECT_EQ(0u, c.get()->revokedFlag);
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommRevoke_AlreadyRevoked_ReturnsInvalidArgument) {
+  Teardown_LifecycleComm c;
+  c.get()->revokedFlag = 1;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommRevoke_ValidComm_RaisesAbortFlagsMarksRevokedAndLaunchesRevokeAsync) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { ret = ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT); });
+  EXPECT_EQ(ncclSuccess, ret);
+  EXPECT_EQ(1u, c.get()->revokedFlag);
+  EXPECT_TRUE(c.get()->finalizeCalled);
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.childAbortFlag());
+  EXPECT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(commRevokeAsync), rec.func);
+  EXPECT_EQ(c.get(), reinterpret_cast<ncclCommRevokeAsyncJob*>(rec.job)->comm);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommRevoke_ValidComm_RunsRevokeAsyncWhichLowersTheAbortFlagsAgain) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { ret = ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT); });
+  EXPECT_EQ(ncclSuccess, ret);
+  EXPECT_EQ(1, proxyStop.calls);
+  EXPECT_EQ(1u, c.get()->revokedFlag);
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(0u, c.childAbortFlag());
+}
+
+// --- commFree's remaining conditional resources ---
+TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArrays) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->nNodes = 1;
+  int localSizes = 0;
+  int gatheredSizes = 0;
+  comm->localSizes = &localSizes;
+  comm->gatheredSizes = &gatheredSizes;
+
+  std::vector<void*> released;
+  ScopedHook memFree(g_ncclMemFree, [&](void* p) {
+    released.push_back(p);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+}
+
+TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->nNodes = 2;
+  int localSizes = 0;
+  comm->localSizes = &localSizes;
+  ScopedHook memFree(g_ncclMemFree, [](void*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(0, memFree.calls);
+}
+
+namespace {
+// ncclCudaFree only reaches hipFree when the pointer is untracked and is not its allocation's base address.
+class Teardown_DeviceFreeSpy {
+ public:
+  explicit Teardown_DeviceFreeSpy(ncclComm* comm)
+      : memRange_(g_hipMemGetAddressRange,
+                  [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t) {
+                    if (base) *base = reinterpret_cast<hipDeviceptr_t>(Dtor_kNotABaseAddress);
+                    if (size) *size = 0;
+                    return hipSuccess;
+                  }),
+        deviceFree_(g_hipFree,
+                    [this](void* p) {
+                      freed_.push_back(p);
+                      return hipSuccess;
+                    }),
+        hostFree_(g_microFree, [comm](void* p) {
+          if (p != comm) ::free(p);
+        }) {
+    Teardown_AllowStreamCaptureExchange();
+  }
+  Teardown_DeviceFreeSpy(const Teardown_DeviceFreeSpy&) = delete;
+  Teardown_DeviceFreeSpy& operator=(const Teardown_DeviceFreeSpy&) = delete;
+
+  const std::vector<void*>& freed() const { return freed_; }
+
+ private:
+  std::vector<void*> freed_;
+  ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)> memRange_;
+  ScopedHook<hipError_t(void*)> deviceFree_;
+  ScopedHook<void(void*)> hostFree_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CommFree_TempBuff_ReleasesItThroughTheCommsMemManager) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  int untracked = 0;
+  Dtor_ReleasedManager mgr(&untracked);
+  comm->memManager = mgr.get();
+  int buf = 0;
+  comm->tempBuff = &buf;
+
+  Teardown_DeviceFreeSpy spy(comm);
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(nullptr, comm->tempBuff);
+  ::free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_HierarchicalTempBuffer_ReleasesItAndClearsThePointer) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  int untracked = 0;
+  Dtor_ReleasedManager mgr(&untracked);
+  comm->memManager = mgr.get();
+  int buf = 0;
+  comm->hierarchicalTempBuffer = &buf;
+
+  Teardown_DeviceFreeSpy spy(comm);
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
+  ::free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_BothTempBuffers_ReleasesTempBuffBeforeTheHierarchicalOne) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  int untracked = 0;
+  Dtor_ReleasedManager mgr(&untracked);
+  comm->memManager = mgr.get();
+  int temp = 0;
+  int hierarchical = 0;
+  comm->tempBuff = &temp;
+  comm->hierarchicalTempBuffer = &hierarchical;
+
+  Teardown_DeviceFreeSpy spy(comm);
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<void*>({&temp, &hierarchical}), spy.freed());
+  EXPECT_EQ(nullptr, comm->tempBuff);
+  EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
+  ::free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_HierarchicalSubComms_DestroysIntraThenInter) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  comm->hierarchicalIntraComm = intra.get();
+  comm->hierarchicalInterComm = inter.get();
+
+  std::vector<ncclComm*> destroyed;
+  ScopedHook destroy(g_ncclCommDestroy, [&](ncclComm* c) {
+    destroyed.push_back(c);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(std::vector<ncclComm*>({intra.get(), inter.get()}), destroyed);
+}
+
+TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->symmetricSupport = true;
+  ncclComm* finalized = nullptr;
+  ScopedHook symk(g_ncclSymkFinalize, [&](ncclComm* c) {
+    finalized = c;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(comm, finalized);
+  EXPECT_EQ(1, symk.calls);
+}
+
+namespace {
+// The payload records that the join really happened, not merely that the pointer was non-null.
+struct Teardown_ProxyThreads {
+  std::unique_ptr<ncclProxyState> state{new ncclProxyState{}};
+  bool mainRan = false;
+  bool udsRan = false;
+
+  void Attach(ncclComm* comm) {
+    state->thread = std::thread([this] { mainRan = true; });
+    state->threadUDS = std::thread([this] { udsRan = true; });
+    comm->proxyState = state.get();
+    comm->proxyRefCountOld = 0;
+  }
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CommFree_ProxyThreadsRunning_JoinsBothBeforeReturning) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  Teardown_ProxyThreads proxy;
+  proxy.Attach(comm);
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_TRUE(proxy.mainRan);
+  EXPECT_TRUE(proxy.udsRan);
+  EXPECT_FALSE(proxy.state->thread.joinable());
+  EXPECT_FALSE(proxy.state->threadUDS.joinable());
+}
+
+TEST_F(InitMicrotest, CommRevokeAsync_ProxyThreadsRunning_JoinsBothAfterStoppingProxy) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  Teardown_ProxyThreads proxy;
+  proxy.Attach(c.get());
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_TRUE(proxy.mainRan);
+  EXPECT_TRUE(proxy.udsRan);
+  EXPECT_FALSE(proxy.state->thread.joinable());
+  EXPECT_FALSE(proxy.state->threadUDS.joinable());
+}
+
+// --- commReclaim's revoked-comm drain and its cleanup-failure report ---
+TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyClear) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->finalizeCalled = true;
+  comm->revokedFlag = 1;
+  comm->localPersistentRefs = 1;
+
+  static Teardown_CommCallback clearRefs;
+  clearRefs = {};
+  clearRefs.base.fn = [](ncclComm* c, ncclCommCallback*) {
+    c->localPersistentRefs = 0;
+    return ncclSuccess;
+  };
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &clearRefs.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedCommLegacyCallbackFails_WarnsAndKeepsDraining) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeCalled = true;
+  members[0].comm->revokedFlag = 1;
+
+  static int drained;
+  drained = 0;
+  Teardown_CommCallback cbs[2]{};
+  cbs[0].base.fn = [](ncclComm*, ncclCommCallback*) {
+    drained++;
+    return ncclSystemError;
+  };
+  cbs[1].base.fn = [](ncclComm*, ncclCommCallback*) {
+    drained++;
+    return ncclSuccess;
+  };
+  ncclIntruQueueEnqueue(&members[0].comm->legacyRegCleanupQueue, &cbs[0].base);
+  ncclIntruQueueEnqueue(&members[0].comm->legacyRegCleanupQueue, &cbs[1].base);
+
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[0].comm)); });
+  EXPECT_EQ(2, drained);
+  EXPECT_TRUE(LogHas(log, "commReclaim: legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfTheChain) {
+  Teardown_AllowStreamCaptureExchange();
+  const int kChainLength = 2;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+  ncclComm* firstComm = members[0].comm;
+  ScopedHook unload(g_ncclTunerPluginUnload,
+                    [firstComm](ncclComm* c) { return c == firstComm ? ncclSystemError : ncclSuccess; });
+
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
+  EXPECT_TRUE(LogHas(log, "commReclaim: cleanup comm")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "failed in destroy/abort, error")) << "actual log:\n" << log;
+  EXPECT_EQ(1, members[1].rec.finalizeCalls);
+  members[0].comm->tuner = nullptr;
+  EXPECT_EQ(ncclSuccess, commFree(members[0].comm));
+}
+
+// --- the non-blocking failure paths of revoke and abort ---
+TEST_F(InitMicrotest, CommRevoke_JobAllocationFails_PropagatesAndPublishesTheAsyncError) {
+  Teardown_LifecycleComm c;
+  c.get()->config.blocking = 0;
+  g_callocFailAt = g_callocCallIndex;  // the job calloc is the next one the UUT reaches
+
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { ret = ncclCommRevoke_impl(c.get(), NCCL_REVOKE_DEFAULT); });
+  EXPECT_EQ(ncclSystemError, ret);
+  EXPECT_EQ(ncclSystemError, c.get()->asyncResult);
+  EXPECT_EQ(1u, c.get()->revokedFlag);
+}
+
+TEST_F(InitMicrotest, CommAbort_LaunchFails_PropagatesTheLaunchError) {
+  Teardown_LifecycleComm c;
+  Teardown_LaunchRecord rec;
+  rec.result = ncclSystemError;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  EXPECT_EQ(ncclSystemError, ncclCommAbort_impl(c.get()));
+  EXPECT_EQ(1, rec.calls);
+  EXPECT_EQ(1u, c.abortFlag());
+  rec.Release();
+}
+
 // envConfigOverride (init.cc:2963): the NCCL_* env and ncclConfig_t validation ladders.
 
 namespace {
