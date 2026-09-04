@@ -519,9 +519,13 @@ __device__ void BroadcastLLImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 //
 // sdmaThresholdOverride lets the Broadcast-specific env var
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST tune this LSA<->GIN cutover
-// independently; TEST_SDMA_THRESHOLD_UNSET falls back to the shared backend
-// value (rsCtx->sdmaThreshold from NCCL_GIN_ANVIL_SDMA_THRESHOLD). The LL tier is
-// on by default up to BROADCAST_LL_DEFAULT_MAX_BYTES (disable with
+// independently. The host always resolves it to a concrete value before launch
+// (testResolveSdmaThreshold falls back to NCCL_GIN_ANVIL_SDMA_THRESHOLD and then
+// to kBroadcastSdmaThresholdDefault), so the TEST_SDMA_THRESHOLD_UNSET arm below
+// is unreachable from this caller; it is kept only so the kernel stays callable
+// with the sentinel, matching AllGather.
+//
+// The LL tier is on by default up to BROADCAST_LL_DEFAULT_MAX_BYTES (disable with
 // NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=0, which leaves llHandle.nSlots==0).
 template <typename T>
 __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle, size_t llMaxBytes) {
