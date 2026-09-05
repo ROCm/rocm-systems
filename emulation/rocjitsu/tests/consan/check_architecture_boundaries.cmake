@@ -3999,6 +3999,13 @@ if(_fault_composition_body MATCHES
         "ConSan composition must translate owners through stable inventory identities"
     )
 endif()
+if(_fault_composition_body MATCHES "ProgramInventory pristine_program_inventory" OR
+   NOT _fault_composition_body MATCHES
+       "ConSanTransformArtifacts fault_result = std::move[(]pristine_mutation_plan[)]")
+    message(FATAL_ERROR
+        "ConSan composition must move the fault transaction and retain its arena by identity, not copy either artifact"
+    )
+endif()
 
 # Perturbation owns synchronization policy and semantic validation, but stages
 # its edit through the shared text transaction.  Local cave discovery, branch
