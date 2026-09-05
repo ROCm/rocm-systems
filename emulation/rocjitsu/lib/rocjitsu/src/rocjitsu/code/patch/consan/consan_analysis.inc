@@ -1463,12 +1463,13 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
-void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                         rj_code_arch_t arch, ConSanProgramContainer &kernel,
-                         ConSanProgramSiteArena &sites, std::vector<std::string> &warnings,
-                         const FlatPointerTracker *entry_tracker = nullptr,
-                         const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
-                         std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
+void decode_container_stats(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
+                            rj_code_arch_t arch, ConSanProgramContainer &kernel,
+                            ConSanProgramSiteArena &sites, std::vector<std::string> &warnings,
+                            const FlatPointerTracker *entry_tracker = nullptr,
+                            const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
+                            std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
+  const size_t first_access_site = sites.access_sites().size();
   if (!kernel.has_text_range) {
     warnings.emplace_back("ConSan cannot decode kernel '" + kernel.name +
                           "': function text range is unavailable");
@@ -1617,58 +1618,35 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     offset += previous_size;
   }
   kernel.decoded = true;
-}
+  if (kernel.is_kernel())
+    return;
 
-void decode_function_stats(
-    std::span<const uint8_t> code_object_bytes, Decoder &decoder, rj_code_arch_t arch,
-    ConSanProgramContainer &function, ConSanProgramSiteArena &sites,
-    std::vector<std::string> &warnings, const FlatPointerTracker *entry_tracker = nullptr,
-    const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
-    std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
-  function.kind = ConSanProgramContainerKind::Function;
-  ConSanProgramContainer range;
-  range.kind = ConSanProgramContainerKind::Function;
-  range.name = function.name;
-  range.entry_text_offset = function.entry_text_offset;
-  range.text_file_offset = function.text_file_offset;
-  range.code_size = function.code_size;
-  range.has_text_range = true;
-
-  ConSanProgramSiteArena range_sites;
-  decode_kernel_stats(code_object_bytes, decoder, arch, range, range_sites, warnings, entry_tracker,
-                      call_targets, call_states);
-
-  function.decoded = range.decoded;
-  function.uses_cluster_workgroup_id = range.uses_cluster_workgroup_id;
-  function.stats = range.stats;
-  const bool lds_load_api = function.name.find("lds_load_at") != std::string::npos;
-  const bool lds_store_api = function.name.find("lds_store_at") != std::string::npos;
+  const bool lds_load_api = kernel.name.find("lds_load_at") != std::string::npos;
+  const bool lds_store_api = kernel.name.find("lds_store_at") != std::string::npos;
   if (lds_load_api || lds_store_api) {
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
-        range_sites.access_sites().rbegin(), range_sites.access_sites().rend(),
+        sites.access_sites().rbegin(), sites.access_sites().rend(),
         [&](const auto &site) {
-          return site.origin == ConSanAccessOrigin::Flat && site.kind == expected_kind;
+          return site.container.id == kernel.id && site.origin == ConSanAccessOrigin::Flat &&
+                 site.kind == expected_kind;
         });
-    if (terminal != range_sites.access_sites().rend() &&
+    const auto first = sites.access_sites().begin() + first_access_site;
+    if (terminal.base() > first &&
         (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
          terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
       if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
-        --function.stats.flat_unknown_hint_count;
+        --kernel.stats.flat_unknown_hint_count;
       else
-        --function.stats.flat_maybe_private_hint_count;
+        --kernel.stats.flat_maybe_private_hint_count;
       // Symbolized hip-moi helpers carry an explicit API contract: their
       // terminal load/store is the source-level `*ptr` LDS access. Treat only
       // that dereference as likely-group; strict provenance still excludes it.
       terminal->flat_address_space_hint = ConSanFlatAddressSpaceHint::MaybeGroup;
-      ++function.stats.flat_maybe_group_hint_count;
+      ++kernel.stats.flat_maybe_group_hint_count;
     }
   }
-  const ConSanProgramContainerRef container = consan_program_container_ref(function);
-  for (ConSanProgramSite &site : range_sites.sites())
-    site.container = container;
-  sites.append(std::move(range_sites));
 }
 
 // Assembly kernels commonly leave STT_FUNC sizes at zero. The code-object
@@ -1809,8 +1787,8 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
       decoded.code_size = kernel.code_size;
       decoded.has_text_range = kernel.has_text_range;
       try {
-        decode_kernel_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_sites,
-                            pass_warnings, nullptr, &call_targets, &call_states);
+        decode_container_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_sites,
+                               pass_warnings, nullptr, &call_targets, &call_states);
       } catch (...) {
         std::ranges::copy(original_functions, functions.begin());
         sites = original_sites;
@@ -1825,9 +1803,10 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
       decoded.entry_text_offset = function.entry_text_offset;
       decoded.text_file_offset = function.text_file_offset;
       decoded.code_size = function.code_size;
+      decoded.has_text_range = true;
       const auto entry = entry_trackers.find(function.entry_text_offset);
       try {
-        decode_function_stats(
+        decode_container_stats(
             code_object_bytes, *relay_decoder, arch, decoded, pass_sites, pass_warnings,
             entry == entry_trackers.end() ? nullptr : &entry->second, &call_targets, &call_states);
       } catch (...) {

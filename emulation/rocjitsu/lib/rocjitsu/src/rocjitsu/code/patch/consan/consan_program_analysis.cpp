@@ -69,8 +69,8 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
     ConSanProgramSiteArena decoded_sites;
-    decode_kernel_stats(code_object_bytes, decoder, arch, decoded_range, decoded_sites,
-                        result.warnings);
+    decode_container_stats(code_object_bytes, decoder, arch, decoded_range, decoded_sites,
+                           result.warnings);
     inventory.reattribute_access_range(range.text_offset, range.size, *kernel,
                                        decoded_sites.access_sites(), code_object_bytes);
     for (ConSanProgramSite &site : decoded_sites.sites()) {
@@ -169,6 +169,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     info.text_file_offset = function.text_file_offset;
     info.code_size = function.code_size;
     info.code_size_inferred_from_zero = function.code_size_inferred_from_zero;
+    info.has_text_range = true;
     inventory_builder.add_function(std::move(info));
   }
 
@@ -203,11 +204,12 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
 
   ConSanProgramSiteArena kernel_sites;
   for (ConSanProgramContainer &kernel : inventory_builder.kernels())
-    decode_kernel_stats(code_object_bytes, *decoder, arch, kernel, kernel_sites, result.warnings);
+    decode_container_stats(code_object_bytes, *decoder, arch, kernel, kernel_sites,
+                           result.warnings);
   ConSanProgramSiteArena function_sites;
   for (ConSanProgramContainer &function : inventory_builder.functions())
-    decode_function_stats(code_object_bytes, *decoder, arch, function, function_sites,
-                          result.warnings);
+    decode_container_stats(code_object_bytes, *decoder, arch, function, function_sites,
+                           result.warnings);
   const auto publish_decoded_sites = [&] {
     inventory_builder.add_sites(std::move(kernel_sites));
     inventory_builder.add_sites(std::move(function_sites));
