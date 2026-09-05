@@ -287,7 +287,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
          communication->kind != ConSanSyncEventKind::OrdinaryMemory) ||
         communication->container_name != fence_event->container_name ||
         communication->in_kernel != fence_event->in_kernel ||
-        communication->execution_owners.empty()) {
+        graph.execution_owners(*communication).empty()) {
       errors.emplace_back("ConSan MOI admitted fence record lost its communication sequence");
       return {};
     }
@@ -309,7 +309,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plan.patch_size = fence_source->size;
     auto container = resolve_moi_evidence_container(inventory, fence_event->in_kernel,
                                                     fence_event->container_name,
-                                                    communication->execution_owners);
+                                                    graph.execution_owners(*communication));
     if (!container || !decision.communication_lowering_form) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
@@ -480,8 +480,8 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     plan.is_rmw = event->kind == ConSanSyncEventKind::Atomic;
     plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
     plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-    auto container = resolve_moi_evidence_container(inventory, event->in_kernel,
-                                                    event->container_name, event->execution_owners);
+    auto container = resolve_moi_evidence_container(
+        inventory, event->in_kernel, event->container_name, graph.execution_owners(*event));
     if (!container || !decision.lowering_form) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};

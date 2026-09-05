@@ -161,7 +161,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
                           });
     std::vector<uint64_t> owner_descriptors;
     for (const ConSanSyncEvent *alias : aliases) {
-      for (const ConSanExecutionOwner &owner : alias->execution_owners) {
+      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*alias)) {
         if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
             owner_descriptors.end()) {
           owner_descriptors.push_back(owner.descriptor_file_offset);

@@ -167,7 +167,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         cache_source->cache_operation != ConSanCacheOperation::Acquire ||
         !cache_source->ordinary_acquire_mutation_supported ||
         cache->container_name != load->container_name || cache->in_kernel != load->in_kernel ||
-        !same_execution_owners(cache->execution_owners, load->execution_owners) ||
+        !same_execution_owners(sync.execution_owners(*cache), sync.execution_owners(*load)) ||
         cache_source->size == 0u || cache_source->size % sizeof(uint32_t) != 0u)
       return std::nullopt;
     return OrdinaryAcquireMutationTarget{&site, load, cache, sequence};

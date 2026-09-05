@@ -116,7 +116,10 @@ struct ConSanProgramSite {
   std::string mnemonic;
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   ConSanAccessOperandFacts operands;
-  std::vector<uint64_t> execution_owner_descriptor_file_offsets;
+  /// CFG-derived kernels that can execute this physical instruction. This is
+  /// the authoritative owner proof for access and synchronization consumers;
+  /// derived events retain only `source_site` rather than copying it.
+  std::vector<ConSanExecutionOwner> execution_owners;
   std::vector<ConSanAccessRange> ranges;
   std::vector<ConSanInventoryExclusion> exclusions;
   Payload payload;
@@ -325,6 +328,13 @@ struct SynchronizationInventoryView {
     return decoded == nullptr ? nullptr : decoded->get_if<Site>();
   }
 
+  [[nodiscard]] std::span<const ConSanExecutionOwner>
+  execution_owners(const ConSanSyncEvent &event) const {
+    const ConSanProgramSite *decoded = source(event);
+    return decoded == nullptr ? std::span<const ConSanExecutionOwner>{}
+                              : std::span<const ConSanExecutionOwner>(decoded->execution_owners);
+  }
+
   /// Resolve one typed event identity to its sole authoritative record. An
   /// absent identity returns null; physical aliases have already been
   /// canonicalized before this immutable view is published.
@@ -477,7 +487,7 @@ struct SynchronizationInventoryView {
 /// view must not escape analysis; published consumers receive only
 /// `SynchronizationInventoryView`.
 struct SynchronizationInventoryBuildView {
-  const std::vector<ConSanProgramSite> &program_sites;
+  std::vector<ConSanProgramSite> &program_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
@@ -619,7 +629,10 @@ public:
   /// complete returned set.
   [[nodiscard]] std::vector<uint64_t>
   execution_owner_descriptors(const ConSanProgramSite &site) const {
-    std::vector<uint64_t> owners = site.execution_owner_descriptor_file_offsets;
+    std::vector<uint64_t> owners;
+    owners.reserve(site.execution_owners.size() + 1u);
+    for (const ConSanExecutionOwner &owner : site.execution_owners)
+      owners.push_back(owner.descriptor_file_offset);
     if (const ConSanProgramContainer *record = container(site.container.id);
         record != nullptr && record->is_kernel())
       owners.push_back(record->descriptor_file_offset);
@@ -894,7 +907,7 @@ private:
         .original_text_offset = site.physical_id.original_text_offset,
     };
     result.container = container;
-    result.execution_owner_descriptor_file_offsets.clear();
+    result.execution_owners.clear();
     result.ranges.clear();
     result.exclusions.clear();
     if (site.origin == ConSanAccessOrigin::Flat) {

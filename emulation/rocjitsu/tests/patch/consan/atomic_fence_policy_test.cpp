@@ -140,7 +140,6 @@ ConSanSyncEvent make_atomic_event(
   event.in_kernel = true;
   event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
                                                                      : ConSanMemoryScope::Agent;
-  event.execution_owners.push_back({});
   return event;
 }
 
@@ -188,7 +187,7 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   sequence.member_semantic_ids.push_back(member);
   sequence.scope = event.scope;
-  sequence.execution_owners = event.execution_owners;
+  sequence.execution_owners.push_back({});
   return sequence;
 }
 
@@ -210,7 +209,8 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
                                         std::vector<ConSanAtomicSite> atomic_sites,
                                         std::vector<ConSanOrdinaryMemorySite> ordinary_sites = {},
                                         std::vector<ConSanMoiFenceCandidate> fences = {},
-                                        const AtomicPolicyTarget &target = {}) {
+                                        const AtomicPolicyTarget &target = {},
+                                        std::vector<uint64_t> unowned_offsets = {}) {
   ProgramInventoryBuilder builder(atomic_policy_bytes());
   builder.set_code_object_facts(true, 0, target.arch, target.target);
   ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
@@ -259,6 +259,10 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     }
     if (match)
       event.source_site = *match;
+  }
+  for (ConSanProgramSite &site : builder.program_sites()) {
+    if (std::ranges::find(unowned_offsets, site.text_offset()) == unowned_offsets.end())
+      site.execution_owners.push_back({});
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
@@ -550,8 +554,7 @@ TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceC
 TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTypedReason) {
   using Mutation = std::function<void(ConSanSyncEvent &, ConSanSyncSequence &)>;
   const std::vector<std::tuple<std::string_view, Mutation, ConSanAtomicPolicyReason>> cases = {
-      {"owner", [](auto &event, auto &) { event.execution_owners.clear(); },
-       ConSanAtomicPolicyReason::MissingExecutionOwner},
+      {"owner", [](auto &, auto &) {}, ConSanAtomicPolicyReason::MissingExecutionOwner},
       {"confidence",
        [](auto &, auto &sequence) { sequence.confidence = ConSanSemanticConfidence::Unsupported; },
        ConSanAtomicPolicyReason::UnqualifiedSyncSequence},
@@ -577,8 +580,9 @@ TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTyped
     std::vector sequences{make_atomic_sequence(events.front())};
     mutate(events.front(), sequences.front());
     const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-        build_atomic_inventory(std::move(events), std::move(sequences),
-                               {make_global_atomic_site()}),
+        build_atomic_inventory(
+            std::move(events), std::move(sequences), {make_global_atomic_site()}, {}, {}, {},
+            name == "owner" ? std::vector<uint64_t>{32u} : std::vector<uint64_t>{}),
         atomic_request(ConSanCapabilityEngine::RecordReplay));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
@@ -795,13 +799,12 @@ TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) 
             ConSanFencePolicyReason::ContainerFilterExcluded);
 
   std::vector owner_events{make_ordinary_store_event(), make_fence_event()};
-  owner_events.back().execution_owners.clear();
   std::vector owner_sequences{make_atomic_sequence(owner_events.front())};
   std::vector owner_fences{
       make_fence_candidate(owner_events[0], owner_events[1], owner_sequences[0])};
   const ConSanAtomicFencePolicyResult missing_owner = plan_consan_atomic_fence_observation(
       build_atomic_inventory(std::move(owner_events), std::move(owner_sequences), {},
-                             {make_global_store_site({})}, std::move(owner_fences)),
+                             {make_global_store_site({})}, std::move(owner_fences), {}, {48u}),
       atomic_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(missing_owner.valid());
   EXPECT_EQ(missing_owner.plan.fence_site_decisions.front().kind,

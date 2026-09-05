@@ -10,12 +10,18 @@
 namespace rocjitsu {
 namespace {
 
+[[nodiscard]] const ConSanProgramSite *source(std::span<const ConSanProgramSite> program_sites,
+                                              const ConSanSyncEvent &event) {
+  return event.source_site.valid() && event.source_site.ordinal < program_sites.size()
+             ? &program_sites[event.source_site.ordinal]
+             : nullptr;
+}
+
 template <typename Site>
 [[nodiscard]] const Site *source_as(std::span<const ConSanProgramSite> program_sites,
                                     const ConSanSyncEvent &event) {
-  return event.source_site.valid() && event.source_site.ordinal < program_sites.size()
-             ? program_sites[event.source_site.ordinal].get_if<Site>()
-             : nullptr;
+  const ConSanProgramSite *decoded = source(program_sites, event);
+  return decoded == nullptr ? nullptr : decoded->get_if<Site>();
 }
 
 [[nodiscard]] bool same_execution_owners(std::span<const ConSanExecutionOwner> lhs,
@@ -47,14 +53,19 @@ bool is_acquire_cache_event(std::span<const ConSanProgramSite> program_sites,
   return fence != nullptr && fence->cache_operation == ConSanCacheOperation::Acquire;
 }
 
-bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
-    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence, ConSanOrdinaryAcquireMetadataPolicy policy) {
+bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSite> program_sites,
+                                                 const ConSanSyncEvent &load,
+                                                 const ConSanSyncSequence &load_sequence,
+                                                 const ConSanSyncEvent &cache,
+                                                 const ConSanSyncSequence &cache_sequence,
+                                                 ConSanOrdinaryAcquireMetadataPolicy policy) {
   const ConSanOrdinaryMemorySite *load_source =
       source_as<ConSanOrdinaryMemorySite>(program_sites, load);
   const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(program_sites, cache);
-  if (load_source == nullptr || cache_source == nullptr)
+  const ConSanProgramSite *load_decoded = source(program_sites, load);
+  const ConSanProgramSite *cache_decoded = source(program_sites, cache);
+  if (load_source == nullptr || cache_source == nullptr || load_decoded == nullptr ||
+      cache_decoded == nullptr)
     return false;
   const bool require_same_block =
       policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence ||
@@ -84,29 +95,33 @@ bool consan_ordinary_acquire_metadata_compatible(
          load_sequence.basic_block_index && cache_sequence.basic_block_index &&
          (!require_same_block ||
           load_sequence.basic_block_index == cache_sequence.basic_block_index) &&
-         same_execution_owners(load.execution_owners, cache.execution_owners) &&
+         same_execution_owners(load_decoded->execution_owners, cache_decoded->execution_owners) &&
          same_execution_owners(load_sequence.execution_owners, cache_sequence.execution_owners) &&
-         same_execution_owners(load.execution_owners, load_sequence.execution_owners);
+         same_execution_owners(load_decoded->execution_owners, load_sequence.execution_owners);
 }
 
-bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
-    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence) {
+bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSite> program_sites,
+                                                 const ConSanSyncEvent &load,
+                                                 const ConSanSyncSequence &load_sequence,
+                                                 const ConSanSyncEvent &cache,
+                                                 const ConSanSyncSequence &cache_sequence) {
   return consan_ordinary_acquire_metadata_compatible(
       program_sites, load, load_sequence, cache, cache_sequence,
       ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence);
 }
 
-bool consan_ordinary_release_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
-    const ConSanSyncSequence &store_sequence) {
+bool consan_ordinary_release_metadata_compatible(std::span<const ConSanProgramSite> program_sites,
+                                                 const ConSanSyncEvent &cache,
+                                                 const ConSanSyncSequence &cache_sequence,
+                                                 const ConSanSyncEvent &store,
+                                                 const ConSanSyncSequence &store_sequence) {
   const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(program_sites, cache);
   const ConSanOrdinaryMemorySite *store_source =
       source_as<ConSanOrdinaryMemorySite>(program_sites, store);
-  return cache_source != nullptr && store_source != nullptr &&
-         cache.kind == ConSanSyncEventKind::Fence &&
+  const ConSanProgramSite *cache_decoded = source(program_sites, cache);
+  const ConSanProgramSite *store_decoded = source(program_sites, store);
+  return cache_source != nullptr && store_source != nullptr && cache_decoded != nullptr &&
+         store_decoded != nullptr && cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
          cache_source->cache_operation == ConSanCacheOperation::Release &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
@@ -123,9 +138,9 @@ bool consan_ordinary_release_metadata_compatible(
          store_sequence.operation == ConSanSyncOperation::OrdinaryStore &&
          cache_sequence.basic_block_index &&
          cache_sequence.basic_block_index == store_sequence.basic_block_index &&
-         same_execution_owners(cache.execution_owners, store.execution_owners) &&
+         same_execution_owners(cache_decoded->execution_owners, store_decoded->execution_owners) &&
          same_execution_owners(cache_sequence.execution_owners, store_sequence.execution_owners) &&
-         same_execution_owners(store.execution_owners, store_sequence.execution_owners);
+         same_execution_owners(store_decoded->execution_owners, store_sequence.execution_owners);
 }
 
 } // namespace rocjitsu

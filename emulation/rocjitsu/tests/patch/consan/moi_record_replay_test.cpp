@@ -368,8 +368,7 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_owner_0");
-  EXPECT_NE(test_admitted_accesses(result).front().execution_owner_descriptor_file_offsets.size(),
-            1u);
+  EXPECT_NE(test_admitted_accesses(result).front().execution_owners.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
@@ -12108,7 +12107,9 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
     const auto event = std::ranges::find(sync_events, *candidate.communication_event,
                                          &ConSanSyncEvent::semantic_id);
     ASSERT_NE(event, sync_events.end());
-    event->execution_owners.clear();
+    auto &program_sites = unowned_inventory.synchronization().program_sites;
+    ASSERT_LT(event->source_site.ordinal, program_sites.size());
+    program_sites[event->source_site.ordinal].execution_owners.clear();
   }
   inventory.program_inventory = unowned_inventory.view();
 

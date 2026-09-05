@@ -492,8 +492,8 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
         return site.container.kind == ConSanProgramContainerKind::Function;
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
-  ASSERT_EQ(access->execution_owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_EQ(access->execution_owner_descriptor_file_offsets.front(),
+  ASSERT_EQ(access->execution_owners.size(), 1u);
+  EXPECT_EQ(access->execution_owners.front().descriptor_file_offset,
             result.program_inventory.kernels().front().descriptor_file_offset);
 }
 
@@ -524,8 +524,8 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
         return site.container.kind == ConSanProgramContainerKind::Function;
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
-  ASSERT_EQ(access->execution_owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_EQ(access->execution_owner_descriptor_file_offsets.front(),
+  ASSERT_EQ(access->execution_owners.size(), 1u);
+  EXPECT_EQ(access->execution_owners.front().descriptor_file_offset,
             result.program_inventory.kernels().front().descriptor_file_offset);
 }
 
@@ -3803,7 +3803,7 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
   EXPECT_EQ(store_source->width_bits, 32u);
   ASSERT_TRUE(store_event->scope);
   EXPECT_EQ(*store_event->scope, ConSanMemoryScope::Agent);
-  EXPECT_FALSE(store_event->execution_owners.empty());
+  EXPECT_FALSE(result.program_inventory.sync().execution_owners(*store_event).empty());
   const auto release =
       std::ranges::find(result.program_inventory.sync().sync_sequences,
                         ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);

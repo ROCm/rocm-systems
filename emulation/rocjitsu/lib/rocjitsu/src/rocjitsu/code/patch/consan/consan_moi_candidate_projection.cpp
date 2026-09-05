@@ -14,9 +14,9 @@ namespace {
   ConSanMoiCandidate candidate;
   static_cast<ConSanProgramSite &>(candidate) = access;
   candidate.intent_ids.push_back(intent_id);
-  if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
+  if (access.execution_owners.size() == 1u) {
     candidate.kernel_descriptor_file_offset =
-        access.execution_owner_descriptor_file_offsets.front();
+        access.execution_owners.front().descriptor_file_offset;
   }
   return candidate;
 }

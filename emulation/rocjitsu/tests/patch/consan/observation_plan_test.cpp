@@ -223,7 +223,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   event.identity = "barrier";
   event.container_name = "kernel";
   event.source_site = {0};
-  event.execution_owners.push_back({});
   ConSanBarrierSite source;
   source.operation = ConSanBarrierSite::Operation::Full;
   source.text_offset = 8;
@@ -234,6 +233,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   source.scope = ConSanBarrierSite::Scope::Workgroup;
   source.mnemonic = "s_barrier";
   builder.program_sites().push_back(make_consan_program_site({}, std::move(source)));
+  builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncSequenceKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;

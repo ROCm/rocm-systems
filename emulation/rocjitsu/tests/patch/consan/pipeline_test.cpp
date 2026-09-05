@@ -356,7 +356,8 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   kernel_c.has_text_range = true;
   inventory_builder.add_kernel(kernel_c);
   inventory_builder.publish_decoded_accesses(bytes);
-  inventory_builder.access_sites().front().execution_owner_descriptor_file_offsets = {64u, 128u};
+  inventory_builder.access_sites().front().execution_owners = {{.descriptor_file_offset = 64u},
+                                                               {.descriptor_file_offset = 128u}};
   ConSanSyncEvent barrier;
   barrier.semantic_id = {
       .physical = {.code_object = inventory_builder.view().code_object_id(),
@@ -367,7 +368,12 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   barrier.operation = ConSanSyncOperation::BarrierFull;
   barrier.container_name = "kernel_c";
   barrier.in_kernel = true;
-  barrier.execution_owners.push_back({.descriptor_file_offset = 192u});
+  ConSanProgramSite barrier_source;
+  barrier_source.physical_id = barrier.semantic_id.physical;
+  barrier_source.container = consan_program_container_ref(inventory_builder.kernels().back());
+  barrier_source.execution_owners.push_back({.descriptor_file_offset = 192u});
+  barrier.source_site = {static_cast<uint32_t>(inventory_builder.program_sites().size())};
+  inventory_builder.add_semantic_site(std::move(barrier_source));
   inventory_builder.synchronization().sync_events.push_back(barrier);
   const ProgramInventory inventory = inventory_builder.view();
   ASSERT_EQ(inventory.access_sites().size(), 1u);

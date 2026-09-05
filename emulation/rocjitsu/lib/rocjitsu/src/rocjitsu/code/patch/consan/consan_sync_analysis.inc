@@ -1997,9 +1997,9 @@ void associate_ordinary_release_sync_sequences(
     if (store_source == nullptr || store_source->width_bits != 32u || !store->scope ||
         !consan_memory_scope_is_agent_or_system(*store->scope) ||
         store->confidence != ConSanSemanticConfidence::Conservative ||
-        store->execution_owners.empty() ||
+        store_decoded->execution_owners.empty() ||
         !std::ranges::equal(
-            store->execution_owners, sequence.execution_owners,
+            store_decoded->execution_owners, sequence.execution_owners,
             [](const ConSanExecutionOwner &left, const ConSanExecutionOwner &right) {
               return left.descriptor_file_offset == right.descriptor_file_offset &&
                      left.proof == right.proof;
@@ -2198,12 +2198,12 @@ void associate_ordinary_acquire_sync_sequences(
         sequence.memory_role != ConSanSyncMemoryRole::Unknown || sequence.inside_scalar_clause)
       continue;
     const ConSanSyncEvent *load = first_sequence_event(events, sequence);
+    const ConSanProgramSite *load_decoded =
+        load == nullptr ? nullptr : program_inventory.program_site(load->source_site);
     const ConSanOrdinaryMemorySite *load_source =
-        load == nullptr
-            ? nullptr
-            : program_inventory.program_site<ConSanOrdinaryMemorySite>(load->source_site);
+        load_decoded == nullptr ? nullptr : load_decoded->get_if<ConSanOrdinaryMemorySite>();
     if (load_source == nullptr || load_source->width_bits != 32u ||
-        load->execution_owners.empty() ||
+        load_decoded->execution_owners.empty() ||
         !is_workgroup_flat_communication(program_inventory, *load))
       continue;
     if (!exact_workgroup_flat_acquire_encoding(program_inventory, *load))
@@ -2412,7 +2412,6 @@ intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                rj_code_arch_t arch,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
-                               std::span<ConSanProgramSite> access_sites,
                                SynchronizationInventoryBuildView inventory,
                                ConSanProgramAnalysisResult &result) {
   const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
@@ -2459,21 +2458,13 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   for (ConSanFaultSite &site : result.fault_sites)
     site.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
-  for (ConSanSyncEvent &event : inventory.sync_events)
-    event.execution_owners =
-        execution_owners_for_offset(owners_by_block, block_index, event.text_offset());
   for (ConSanBarrierMoveDestination &destination : result.barrier_move_destinations) {
     destination.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, destination.text_offset);
   }
-  for (ConSanProgramSite &site : access_sites) {
-    const auto owners = execution_owners_for_offset(owners_by_block, block_index,
-                                                    site.physical_id.original_text_offset);
-    site.execution_owner_descriptor_file_offsets.clear();
-    site.execution_owner_descriptor_file_offsets.reserve(owners.size());
-    for (const ConSanExecutionOwner &owner : owners)
-      site.execution_owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
-  }
+  for (ConSanProgramSite &site : inventory.program_sites)
+    site.execution_owners = execution_owners_for_offset(owners_by_block, block_index,
+                                                        site.physical_id.original_text_offset);
 
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan
@@ -2490,11 +2481,13 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
         break;
       }
       if (first) {
-        sequence.execution_owners = event->execution_owners;
+        sequence.execution_owners =
+            inventory.program_sites[event->source_site.ordinal].execution_owners;
         first = false;
       } else {
-        sequence.execution_owners =
-            intersect_execution_owners(sequence.execution_owners, event->execution_owners);
+        sequence.execution_owners = intersect_execution_owners(
+            sequence.execution_owners,
+            inventory.program_sites[event->source_site.ordinal].execution_owners);
       }
     }
   }
@@ -2521,8 +2514,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
       // SuperCollider's ordinary clean transform does not consume
       // synchronization semantics. Shared-function sites still need kernel
       // ownership, while kernel-local sites carry their descriptor directly.
-      annotate_execution_owners(code_object, decoder, arch, nullptr,
-                                inventory_builder.access_sites(), synchronization_inventory,
+      annotate_execution_owners(code_object, decoder, arch, nullptr, synchronization_inventory,
                                 result);
     }
     result.program_inventory = inventory_builder.view();
@@ -2556,8 +2548,8 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
     build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
                                              synchronization_inventory.sync_sequences, result);
   }
-  annotate_execution_owners(code_object, decoder, arch, &sync_blocks,
-                            inventory_builder.access_sites(), synchronization_inventory, result);
+  annotate_execution_owners(code_object, decoder, arch, &sync_blocks, synchronization_inventory,
+                            result);
   associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
                                             synchronization_inventory);
   associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,

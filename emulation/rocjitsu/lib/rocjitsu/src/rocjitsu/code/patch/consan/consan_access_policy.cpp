@@ -744,9 +744,10 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     const bool enabled = flat ? request.group_flat_enabled : request.native_lds_enabled;
     std::vector<uint64_t> owner_descriptors;
     for (const ConSanProgramSite *alias : aliases) {
-      for (uint64_t owner : alias->execution_owner_descriptor_file_offsets) {
-        if (std::ranges::find(owner_descriptors, owner) == owner_descriptors.end())
-          owner_descriptors.push_back(owner);
+      for (const ConSanExecutionOwner &owner : alias->execution_owners) {
+        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
+            owner_descriptors.end())
+          owner_descriptors.push_back(owner.descriptor_file_offset);
       }
     }
 

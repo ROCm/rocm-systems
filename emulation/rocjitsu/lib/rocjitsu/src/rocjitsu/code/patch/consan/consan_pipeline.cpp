@@ -142,16 +142,10 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
   };
   const auto note_physical_site = [&](const PhysicalSiteId &physical, const auto &apply) {
     bool attributed = false;
-    for (const ConSanProgramSite &site : inventory.access_sites()) {
+    for (const ConSanProgramSite &site : inventory.program_sites()) {
       if (site.physical_id != physical)
         continue;
-      for (uint64_t owner : site.execution_owner_descriptor_file_offsets)
-        attributed |= note_descriptor(owner, apply);
-    }
-    for (const ConSanSyncEvent &event : inventory.sync().sync_events) {
-      if (event.semantic_id.physical != physical)
-        continue;
-      for (const ConSanExecutionOwner &owner : event.execution_owners)
+      for (const ConSanExecutionOwner &owner : site.execution_owners)
         attributed |= note_descriptor(owner.descriptor_file_offset, apply);
     }
     if (attributed)

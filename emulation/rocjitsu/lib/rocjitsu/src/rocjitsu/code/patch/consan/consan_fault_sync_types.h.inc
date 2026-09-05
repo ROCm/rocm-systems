@@ -257,8 +257,6 @@ struct ConSanSyncEvent {
   std::string container_name;
   bool in_kernel = true;
   std::optional<ConSanMemoryScope> scope;
-  std::vector<ConSanExecutionOwner> execution_owners;
-
   /// Original text position is part of the event's canonical physical
   /// identity. Keeping a second mutable copy allowed the two identities to
   /// disagree after an event was assembled or copied.

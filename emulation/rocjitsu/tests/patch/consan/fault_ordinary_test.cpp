@@ -76,11 +76,11 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
     EXPECT_EQ(event->operation, i % 2u == 0u ? ConSanSyncOperation::OrdinaryLoad
                                              : ConSanSyncOperation::OrdinaryStore);
     EXPECT_EQ(event->rmw_outcome, ConSanSyncRmwOutcome::NotApplicable);
-    ASSERT_EQ(event->execution_owners.size(), first_sites[i]->execution_owners.size());
-    EXPECT_EQ(event->execution_owners.front().descriptor_file_offset,
+    const auto event_owners = first.program_inventory.sync().execution_owners(*event);
+    ASSERT_EQ(event_owners.size(), first_sites[i]->execution_owners.size());
+    EXPECT_EQ(event_owners.front().descriptor_file_offset,
               first_sites[i]->execution_owners.front().descriptor_file_offset);
-    EXPECT_EQ(event->execution_owners.front().proof,
-              first_sites[i]->execution_owners.front().proof);
+    EXPECT_EQ(event_owners.front().proof, first_sites[i]->execution_owners.front().proof);
   }
 
   EXPECT_EQ(first_sites[0]->mnemonic, "global_load_b32");
@@ -404,8 +404,6 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   load.container_name = "kernel";
   load.source_site = {0};
   load.scope = ConSanMemoryScope::Agent;
-  load.execution_owners.push_back(
-      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
   ConSanSyncEvent cache = load;
   cache.kind = ConSanSyncEventKind::Fence;
   cache.operation = ConSanSyncOperation::Fence;
@@ -414,20 +412,23 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   ConSanOrdinaryMemorySite load_source;
   load_source.width_bits = 32u;
   program_sites[0].payload = std::move(load_source);
+  program_sites[0].execution_owners.push_back(
+      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
   ConSanFenceSite cache_source;
   cache_source.cache_operation = ConSanCacheOperation::Acquire;
   cache_source.mnemonic = "global_inv";
   program_sites[1].payload = std::move(cache_source);
+  program_sites[1].execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence load_sequence;
   load_sequence.kind = ConSanSyncSequenceKind::OrdinaryMemory;
   load_sequence.operation = ConSanSyncOperation::OrdinaryLoad;
   load_sequence.basic_block_index = 3u;
-  load_sequence.execution_owners = load.execution_owners;
+  load_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence cache_sequence;
   cache_sequence.kind = ConSanSyncSequenceKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
-  cache_sequence.execution_owners = cache.execution_owners;
+  cache_sequence.execution_owners = program_sites[1].execution_owners;
 
   EXPECT_TRUE(consan_ordinary_acquire_metadata_compatible(program_sites, load, load_sequence, cache,
                                                           cache_sequence));
@@ -435,10 +436,10 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   EXPECT_FALSE(consan_ordinary_acquire_metadata_compatible(program_sites, load, load_sequence,
                                                            cache, cache_sequence));
   cache.semantic_id.physical.code_object = load.semantic_id.physical.code_object;
-  cache.execution_owners.front().descriptor_file_offset = 128u;
+  program_sites[1].execution_owners.front().descriptor_file_offset = 128u;
   EXPECT_FALSE(consan_ordinary_acquire_metadata_compatible(program_sites, load, load_sequence,
                                                            cache, cache_sequence));
-  cache.execution_owners = load.execution_owners;
+  program_sites[1].execution_owners = program_sites[0].execution_owners;
   cache_sequence.basic_block_index = 4u;
   EXPECT_FALSE(consan_ordinary_acquire_metadata_compatible(program_sites, load, load_sequence,
                                                            cache, cache_sequence));
@@ -609,8 +610,6 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   cache.confidence = ConSanSemanticConfidence::Conservative;
   cache.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
   cache.container_name = "kernel";
-  cache.execution_owners.push_back(
-      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
   ConSanSyncEvent store = cache;
   store.kind = ConSanSyncEventKind::OrdinaryMemory;
   store.operation = ConSanSyncOperation::OrdinaryStore;
@@ -621,21 +620,24 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   cache_source.cache_operation = ConSanCacheOperation::Release;
   cache_source.mnemonic = "global_wb";
   program_sites[0].payload = std::move(cache_source);
+  program_sites[0].execution_owners.push_back(
+      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
   ConSanOrdinaryMemorySite store_source;
   store_source.operation = ConSanOrdinaryMemoryOperation::Store;
   store_source.width_bits = 32u;
   store_source.mnemonic = "global_store_b32";
   program_sites[1].payload = std::move(store_source);
+  program_sites[1].execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence cache_sequence;
   cache_sequence.kind = ConSanSyncSequenceKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
-  cache_sequence.execution_owners = cache.execution_owners;
+  cache_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence store_sequence;
   store_sequence.kind = ConSanSyncSequenceKind::OrdinaryMemory;
   store_sequence.operation = ConSanSyncOperation::OrdinaryStore;
   store_sequence.basic_block_index = 3u;
-  store_sequence.execution_owners = store.execution_owners;
+  store_sequence.execution_owners = program_sites[1].execution_owners;
 
   EXPECT_TRUE(consan_ordinary_release_metadata_compatible(program_sites, cache, cache_sequence,
                                                           store, store_sequence));
@@ -653,10 +655,10 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   EXPECT_FALSE(consan_ordinary_release_metadata_compatible(program_sites, cache, cache_sequence,
                                                            store, store_sequence));
   program_sites[0].get_if<ConSanFenceSite>()->cache_operation = ConSanCacheOperation::Release;
-  store.execution_owners.front().descriptor_file_offset = 128u;
+  program_sites[1].execution_owners.front().descriptor_file_offset = 128u;
   EXPECT_FALSE(consan_ordinary_release_metadata_compatible(program_sites, cache, cache_sequence,
                                                            store, store_sequence));
-  store.execution_owners = cache.execution_owners;
+  program_sites[1].execution_owners = program_sites[0].execution_owners;
   store_sequence.basic_block_index = 4u;
   EXPECT_FALSE(consan_ordinary_release_metadata_compatible(program_sites, cache, cache_sequence,
                                                            store, store_sequence));

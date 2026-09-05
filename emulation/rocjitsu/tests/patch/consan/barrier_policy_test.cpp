@@ -39,7 +39,6 @@ ConSanSyncEvent make_barrier_event(
   event.identity = container + "|barrier=" + std::to_string(offset);
   event.container_name = std::move(container);
   event.in_kernel = true;
-  event.execution_owners.push_back({});
   return event;
 }
 
@@ -107,6 +106,7 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     site.mnemonic = "s_barrier";
     event.source_site = {static_cast<uint32_t>(builder.program_sites().size())};
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
+    builder.program_sites().back().execution_owners.push_back({});
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);

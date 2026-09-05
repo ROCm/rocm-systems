@@ -35,7 +35,7 @@ namespace {
                   lhs.confidence, lhs.memory_role_confidence, lhs.scope) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                       rhs.confidence, rhs.memory_role_confidence, rhs.scope) &&
-         owner_semantics_equal(lhs.execution_owners, rhs.execution_owners);
+         owner_semantics_equal(inventory.execution_owners(lhs), inventory.execution_owners(rhs));
 }
 
 [[nodiscard]] bool fence_policy_semantics_equal(const ConSanMoiFenceCandidate &lhs,
@@ -241,8 +241,7 @@ struct AtomicEncodingDecision {
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
-classify_atomic_semantics(const ConSanSyncEvent &event,
-                          const SyncSequenceMembership &membership) {
+classify_atomic_semantics(const ConSanSyncEvent &event, const SyncSequenceMembership &membership) {
   if (membership.ambiguous)
     return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
   const ConSanSyncSequence *sequence = membership.sequence;
@@ -361,7 +360,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
              : ConSanCapabilityDisposition::OutOfContract;
     std::vector<uint64_t> owner_descriptors;
     for (const ConSanSyncEvent *alias : aliases) {
-      for (const ConSanExecutionOwner &owner : alias->execution_owners) {
+      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*alias)) {
         if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
             owner_descriptors.end()) {
           owner_descriptors.push_back(owner.descriptor_file_offset);
@@ -380,7 +379,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
                                                      request.kernel_name_allowlist)) {
       reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
-    } else if (event.execution_owners.empty()) {
+    } else if (synchronization.execution_owners(event).empty()) {
       reason = ConSanAtomicPolicyReason::MissingExecutionOwner;
     } else if (request.engine == ConSanCapabilityEngine::Sampled &&
                !request.sampled_access_window_available) {
@@ -489,7 +488,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       decision.association = ConSanSynchronizationAssociationId{fence.sequence_identity};
     std::vector<uint64_t> owner_descriptors;
     for (const ConSanSyncEvent *event : fence_events) {
-      for (const ConSanExecutionOwner &owner : event->execution_owners) {
+      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*event)) {
         if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
             owner_descriptors.end()) {
           owner_descriptors.push_back(owner.descriptor_file_offset);
@@ -531,7 +530,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                              candidate.association == decision.association;
                     });
       if (fence_event != nullptr && communication != nullptr &&
-          (fence_event->execution_owners.empty() || communication->execution_owners.empty())) {
+          (synchronization.execution_owners(*fence_event).empty() ||
+           synchronization.execution_owners(*communication).empty())) {
         decision.reason = ConSanFencePolicyReason::MissingExecutionOwner;
       } else if (fence_event == nullptr || communication == nullptr ||
                  atomic_decision == result.plan.atomic_site_decisions.end()) {

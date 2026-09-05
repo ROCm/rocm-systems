@@ -299,7 +299,9 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
 
   ConSanProgramSite owned;
   owned.container = consan_program_container_ref(inventory.kernels()[0]);
-  owned.execution_owner_descriptor_file_offsets = {768, 512, 768};
+  owned.execution_owners = {{.descriptor_file_offset = 768},
+                            {.descriptor_file_offset = 512},
+                            {.descriptor_file_offset = 768}};
   EXPECT_EQ(inventory.execution_owner_descriptors(owned), (std::vector<uint64_t>{512, 768}));
 
   // A pre-insertion synthetic reference may be rebound by kind and name only
@@ -686,7 +688,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.operands.address_vgpr, 3u);
   EXPECT_EQ(byte.operands.data_vgpr, 7u);
   EXPECT_EQ(byte.operands.second_data_vgpr, 8u);
-  EXPECT_TRUE(byte.execution_owner_descriptor_file_offsets.empty());
+  EXPECT_TRUE(byte.execution_owners.empty());
   ASSERT_EQ(byte.ranges.size(), 1u);
   EXPECT_EQ(byte.ranges[0].byte_width, 1u);
   EXPECT_EQ(byte.ranges[0].static_byte_offset, 0);
@@ -1054,9 +1056,9 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
     EXPECT_NE(site.kind, ConSanLdsAccessKind::Other);
     EXPECT_FALSE(site.mnemonic.empty());
     EXPECT_TRUE(site.operands.address_vgpr);
-    EXPECT_EQ(
-        site.execution_owner_descriptor_file_offsets,
-        (std::vector<uint64_t>{result.program_inventory.kernels().front().descriptor_file_offset}));
+    ASSERT_EQ(site.execution_owners.size(), 1u);
+    EXPECT_EQ(site.execution_owners.front().descriptor_file_offset,
+              result.program_inventory.kernels().front().descriptor_file_offset);
   }
 }
 

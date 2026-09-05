@@ -720,7 +720,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
         return candidate.physical_id.original_text_offset == 24u;
       });
   ASSERT_NE(post_return_candidate, candidates.end());
-  EXPECT_EQ(post_return_candidate->execution_owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(post_return_candidate->execution_owners.size(), 1u);
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
