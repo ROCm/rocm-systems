@@ -1,19 +1,5 @@
 namespace {
 
-/// Owns the independently validated fault-corruption image while the ordinary
-/// instrumentation pass analyzes and lowers against that image. This stage is
-/// intentionally fault-only: perturbation is planned against the pristine
-/// image and applied by the subsequent instrumentation pass, so carrying a
-/// complete `ConSanMutationOutcome` here would give this stage false ownership
-/// of perturbation facts and permit it to erase the later pass's outcome.
-struct ConSanFaultTransformStage {
-  std::vector<uint8_t> image;
-  std::vector<ConSanPatchInfo> patches;
-  std::vector<std::string> warnings;
-  ConSanMutationTally fault;
-  std::optional<std::string> logical_identity;
-};
-
 using ConSanDescriptorNameIndex = std::unordered_map<std::string, uint64_t>;
 using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
 
@@ -64,18 +50,6 @@ initialize_consan_lowering_observation(const ConSanOptions &options,
   return valid;
 }
 
-[[nodiscard]] ConSanFaultTransformStage take_modified_stage(ConSanTransformArtifacts &result) {
-  return {std::move(result.replacement), std::move(result.patches), std::move(result.warnings),
-          result.mutation.fault, std::move(result.mutation.applied_fault_logical_identity)};
-}
-
-void prepend_stage_diagnostics(ConSanTransformArtifacts &result, ConSanFaultTransformStage &stage) {
-  result.warnings.insert(result.warnings.begin(), std::make_move_iterator(stage.warnings.begin()),
-                         std::make_move_iterator(stage.warnings.end()));
-  result.mutation.fault = stage.fault;
-  result.mutation.applied_fault_logical_identity = std::move(stage.logical_identity);
-}
-
 [[nodiscard]] bool ranges_overlap(uint64_t first_offset, uint32_t first_size,
                                   uint64_t second_offset, uint32_t second_size) {
   return first_offset < second_offset + second_size && second_offset < first_offset + first_size;
@@ -84,7 +58,7 @@ void prepend_stage_diagnostics(ConSanTransformArtifacts &result, ConSanFaultTran
 [[nodiscard]] std::optional<std::vector<CarriedPerturbationPlan>>
 carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_inventory,
                                          const ConSanPerturbationPlanningState &planning,
-                                         const ConSanFaultTransformStage &mutation_stage,
+                                         const ConSanTransformArtifacts &mutation_stage,
                                          std::string *error) {
   std::vector<CarriedPerturbationPlan> carried;
   carried.reserve(planning.plans.size());
@@ -299,9 +273,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                         options.moi_report_dispatch_id);
   if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
     return fault_result;
-  ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
   const major_image_ownership::ScopedOwner mutation_image_owner(
-      major_image_ownership::OwnerKind::CompositeImage, mutation_stage.image);
+      major_image_ownership::OwnerKind::CompositeImage, fault_result.replacement);
   const major_image_ownership::ScopedPhase composite_phase(
       major_image_ownership::Phase::CompositeIncrementalPatch);
 
@@ -312,7 +285,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   // instrumentation-only pass has no mutation of its own to count.
   instrument_options.fault_require_exactly_one = false;
   instrument_options.abort_unmatched_barrier_wait = false;
-  for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
+  for (const ConSanPatchMutationProduct &patch : fault_result.patches) {
     if (patch.original_size != 0) {
       instrument_preapplied.reserved_ranges.push_back(
           {.text_offset = patch.anchor_offset, .size = patch.original_size});
@@ -342,9 +315,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   std::vector<CarriedPerturbationPlan> staged_carried;
   if (has_perturbation) {
     std::string carry_error;
-    auto carried = carry_perturbation_plans_across_mutation(
-        pristine_mutation_plan.program_inventory, pristine_perturbation, mutation_stage,
-        &carry_error);
+    auto carried =
+        carry_perturbation_plans_across_mutation(pristine_mutation_plan.program_inventory,
+                                                 pristine_perturbation, fault_result, &carry_error);
     if (!carried)
       return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
     instrument_options.sc_perturb_identity.clear();
@@ -353,7 +326,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   }
   const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
   ConSanTransformArtifacts instrument_result = lower_consan_stage(
-      mutation_stage.image, instrument_options, initial_operating_point, instrument_carried,
+      fault_result.replacement, instrument_options, initial_operating_point, instrument_carried,
       &perturbation, instrument_preapplied, false, false, ConSanLoweringExtent::Complete, nullptr);
   if (!instrument_result.errors.empty())
     instrument_result.outcome = ConSanTransformOutcome::Invalid;
@@ -382,7 +355,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       major_image_ownership::OwnerKind::CompactIndex, &pristine_owner_offsets,
       measure_descriptor_owner_index);
   {
-    AmdGpuCodeObject staged_code_object(mutation_stage.image.data(), mutation_stage.image.size());
+    AmdGpuCodeObject staged_code_object(fault_result.replacement.data(),
+                                        fault_result.replacement.size());
     for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
       const auto pristine = pristine_descriptor_offsets.find(staged_kernel.name);
       if (pristine != pristine_descriptor_offsets.end()) {
@@ -402,7 +376,12 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     normalize_owner_offsets(plan.owner_descriptor_file_offsets);
   for (ConSanPatchAbiEffects &patch : instrument_result.patches)
     normalize_owner_offsets(patch.owner_descriptor_file_offsets);
-  prepend_stage_diagnostics(instrument_result, mutation_stage);
+  instrument_result.warnings.insert(instrument_result.warnings.begin(),
+                                    std::make_move_iterator(fault_result.warnings.begin()),
+                                    std::make_move_iterator(fault_result.warnings.end()));
+  instrument_result.mutation.fault = fault_result.mutation.fault;
+  instrument_result.mutation.applied_fault_logical_identity =
+      std::move(fault_result.mutation.applied_fault_logical_identity);
   switch (instrument_result.outcome) {
   case ConSanTransformOutcome::ModifiedValid:
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid) {
@@ -428,8 +407,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
           pristine_mutation_plan.mutation.perturbation.planned;
     }
     instrument_result.patches.insert(instrument_result.patches.begin(),
-                                     std::make_move_iterator(mutation_stage.patches.begin()),
-                                     std::make_move_iterator(mutation_stage.patches.end()));
+                                     std::make_move_iterator(fault_result.patches.begin()),
+                                     std::make_move_iterator(fault_result.patches.end()));
     return instrument_result;
   case ConSanTransformOutcome::Unchanged:
     // A no-target instrumentation stage must not discard an otherwise valid
@@ -438,8 +417,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       instrument_result.mutation.fault.planned = retained_planned_faults;
       instrument_result.fault_plans = retained_fault_plans;
     }
-    instrument_result.replacement = std::move(mutation_stage.image);
-    instrument_result.patches = std::move(mutation_stage.patches);
+    instrument_result.replacement = std::move(fault_result.replacement);
+    instrument_result.patches = std::move(fault_result.patches);
     instrument_result.mark_modified();
     return instrument_result;
   case ConSanTransformOutcome::Unsupported:
@@ -456,8 +435,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         instrument_result.mutation.fault.planned = retained_planned_faults;
         instrument_result.fault_plans = retained_fault_plans;
       }
-      instrument_result.replacement = std::move(mutation_stage.image);
-      instrument_result.patches = std::move(mutation_stage.patches);
+      instrument_result.replacement = std::move(fault_result.replacement);
+      instrument_result.patches = std::move(fault_result.patches);
       instrument_result.mark_modified();
       return instrument_result;
     }
