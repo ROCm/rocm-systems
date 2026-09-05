@@ -1052,96 +1052,81 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
 
   if (static_byte_offset != 0u) {
-    if (!sequence.emit(instrumentation::build_v_add_u32_literal(
-            mask_vgpr, provenance_vgpr, static_byte_offset & (shadow_granule_bytes - 1u),
-            base_offset_vgpr, arch)))
-      return false;
+    sequence.append(instrumentation::build_v_add_u32_literal(
+        mask_vgpr, provenance_vgpr, static_byte_offset & (shadow_granule_bytes - 1u),
+        base_offset_vgpr, arch));
   } else {
     words.push_back(build_v_mov_b32_e32(mask_vgpr, vector_source_vgpr(base_offset_vgpr), arch));
   }
-  if (!sequence.emit_all(instrumentation::build_v_and_b32_literal(
-                             mask_vgpr, shadow_granule_bytes - 1u, mask_vgpr, arch),
-                         instrumentation::build_v_add_u32_literal(high_vgpr, temporary_vgpr,
-                                                                  byte_count, mask_vgpr, arch)))
-    return false;
+  sequence.append(instrumentation::build_v_and_b32_literal(mask_vgpr, shadow_granule_bytes - 1u,
+                                                           mask_vgpr, arch),
+                  instrumentation::build_v_add_u32_literal(high_vgpr, temporary_vgpr, byte_count,
+                                                           mask_vgpr, arch));
 
   if (relative_cell_index_vgpr) {
-    if (!sequence.emit(instrumentation::build_v_mul_lo_u32_literal(
-            temporary_vgpr, provenance_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr,
-            arch)))
-      return false;
+    sequence.append(instrumentation::build_v_mul_lo_u32_literal(
+        temporary_vgpr, provenance_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr, arch));
     // The loop bound covers the worst runtime alignment. Clamp an iteration's
     // cell start to the access end before subtraction so favorable alignments
     // produce an empty mask instead of wrapping to a phantom full cell.
-    if (!sequence.emit_all(instrumentation::build_v_min_u32(
-                               temporary_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch),
-                           instrumentation::build_v_mul_lo_u32_literal(
-                               temporary_vgpr, provenance_vgpr,
-                               std::numeric_limits<uint32_t>::max(), temporary_vgpr, arch)))
-      return false;
-    if (!sequence.emit_all(
-            instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
-                                             high_vgpr, arch),
-            instrumentation::build_v_min_u32_literal(temporary_vgpr, 1u, *relative_cell_index_vgpr,
-                                                     arch),
-            instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(1u),
-                                                 temporary_vgpr, arch),
-            instrumentation::build_v_lshrrev_b32(temporary_vgpr, vector_source_vgpr(temporary_vgpr),
-                                                 mask_vgpr, arch)))
-      return false;
+    sequence.append(instrumentation::build_v_min_u32(temporary_vgpr, vector_source_vgpr(high_vgpr),
+                                                     temporary_vgpr, arch),
+                    instrumentation::build_v_mul_lo_u32_literal(
+                        temporary_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(),
+                        temporary_vgpr, arch),
+                    instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                     high_vgpr, arch),
+                    instrumentation::build_v_min_u32_literal(temporary_vgpr, 1u,
+                                                             *relative_cell_index_vgpr, arch),
+                    instrumentation::build_v_lshlrev_b32(
+                        temporary_vgpr, scalar_positive_inline_u32(1u), temporary_vgpr, arch),
+                    instrumentation::build_v_lshrrev_b32(
+                        temporary_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch));
   } else if (relative_cell_index != 0u) {
     if (relative_cell_index > std::numeric_limits<uint32_t>::max() / shadow_granule_bytes) {
       return false;
     }
-    if (!sequence.emit_all(
-            instrumentation::build_v_mov_b32_literal(
-                temporary_vgpr, relative_cell_index * shadow_granule_bytes, arch),
-            instrumentation::build_v_min_u32(temporary_vgpr, vector_source_vgpr(high_vgpr),
-                                             temporary_vgpr, arch),
-            instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, provenance_vgpr,
-                                                        std::numeric_limits<uint32_t>::max(),
-                                                        temporary_vgpr, arch),
-            instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
-                                             high_vgpr, arch),
-            build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch)))
-      return false;
+    sequence.append(instrumentation::build_v_mov_b32_literal(
+                        temporary_vgpr, relative_cell_index * shadow_granule_bytes, arch),
+                    instrumentation::build_v_min_u32(temporary_vgpr, vector_source_vgpr(high_vgpr),
+                                                     temporary_vgpr, arch),
+                    instrumentation::build_v_mul_lo_u32_literal(
+                        temporary_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(),
+                        temporary_vgpr, arch),
+                    instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                     high_vgpr, arch),
+                    build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch));
   } else {
     words.push_back(build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(mask_vgpr), arch));
   }
 
-  if (!sequence.emit_all(
-          instrumentation::build_v_min_u32_literal(high_vgpr, shadow_granule_bytes, high_vgpr,
-                                                   arch),
-          instrumentation::build_v_mov_b32_literal(provenance_vgpr, 1u, arch),
-          instrumentation::build_v_lshlrev_b32(provenance_vgpr, vector_source_vgpr(high_vgpr),
-                                               provenance_vgpr, arch),
-          instrumentation::build_v_add_u32_literal(provenance_vgpr, mask_vgpr,
-                                                   std::numeric_limits<uint32_t>::max(),
-                                                   provenance_vgpr, arch),
-          instrumentation::build_v_mov_b32_literal(mask_vgpr, (1u << shadow_granule_bytes) - 1u,
-                                                   arch),
-          instrumentation::build_v_lshlrev_b32(mask_vgpr, vector_source_vgpr(temporary_vgpr),
-                                               mask_vgpr, arch),
-          instrumentation::build_v_and_b32(mask_vgpr, vector_source_vgpr(provenance_vgpr),
-                                           mask_vgpr, arch)))
-    return false;
+  sequence.append(
+      instrumentation::build_v_min_u32_literal(high_vgpr, shadow_granule_bytes, high_vgpr, arch),
+      instrumentation::build_v_mov_b32_literal(provenance_vgpr, 1u, arch),
+      instrumentation::build_v_lshlrev_b32(provenance_vgpr, vector_source_vgpr(high_vgpr),
+                                           provenance_vgpr, arch),
+      instrumentation::build_v_add_u32_literal(
+          provenance_vgpr, mask_vgpr, std::numeric_limits<uint32_t>::max(), provenance_vgpr, arch),
+      instrumentation::build_v_mov_b32_literal(mask_vgpr, (1u << shadow_granule_bytes) - 1u, arch),
+      instrumentation::build_v_lshlrev_b32(mask_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr,
+                                           arch),
+      instrumentation::build_v_and_b32(mask_vgpr, vector_source_vgpr(provenance_vgpr), mask_vgpr,
+                                       arch));
 
-  if (!sequence.emit_all(
-          instrumentation::build_v_add_u32_literal(
-              high_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), high_vgpr, arch),
-          instrumentation::build_v_lshlrev_b32(
-              high_vgpr,
-              scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_end_minus_one_shift),
-              high_vgpr, arch),
-          instrumentation::build_v_lshlrev_b32(
-              temporary_vgpr,
-              scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_offset_shift),
-              temporary_vgpr, arch),
-          instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(high_vgpr),
-                                           temporary_vgpr, arch),
-          instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(mask_vgpr),
-                                           provenance_vgpr, arch)))
-    return false;
+  sequence.append(
+      instrumentation::build_v_add_u32_literal(
+          high_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), high_vgpr, arch),
+      instrumentation::build_v_lshlrev_b32(
+          high_vgpr,
+          scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_end_minus_one_shift),
+          high_vgpr, arch),
+      instrumentation::build_v_lshlrev_b32(
+          temporary_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_offset_shift),
+          temporary_vgpr, arch),
+      instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(high_vgpr),
+                                       temporary_vgpr, arch),
+      instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(mask_vgpr),
+                                       provenance_vgpr, arch));
 
   // A byte-granular external slot represents only one byte of a potentially
   // wider access. Retain the original width and this slot's relative byte
@@ -1152,29 +1137,26 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         relative_cell_index > consan_moi_exact_byte_cell::maximum_relative_cell_index) {
       return false;
     }
-    if (!sequence.emit(instrumentation::build_v_add_u32_literal(
-            provenance_vgpr, temporary_vgpr,
-            (byte_count - 1u) << consan_moi_exact_byte_cell::access_byte_count_minus_one_shift,
-            provenance_vgpr, arch)))
-      return false;
+    sequence.append(instrumentation::build_v_add_u32_literal(
+        provenance_vgpr, temporary_vgpr,
+        (byte_count - 1u) << consan_moi_exact_byte_cell::access_byte_count_minus_one_shift,
+        provenance_vgpr, arch));
     if (relative_cell_index_vgpr) {
-      if (!sequence.emit_all(
-              instrumentation::build_v_lshlrev_b32(
-                  temporary_vgpr,
-                  scalar_positive_inline_u32(consan_moi_exact_byte_cell::relative_cell_index_shift),
-                  *relative_cell_index_vgpr, arch),
-              instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(temporary_vgpr),
-                                               provenance_vgpr, arch)))
-        return false;
+      sequence.append(
+          instrumentation::build_v_lshlrev_b32(
+              temporary_vgpr,
+              scalar_positive_inline_u32(consan_moi_exact_byte_cell::relative_cell_index_shift),
+              *relative_cell_index_vgpr, arch),
+          instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(temporary_vgpr),
+                                           provenance_vgpr, arch));
     } else if (relative_cell_index != 0u) {
-      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
-              provenance_vgpr, temporary_vgpr,
-              relative_cell_index << consan_moi_exact_byte_cell::relative_cell_index_shift,
-              provenance_vgpr, arch)))
-        return false;
+      sequence.append(instrumentation::build_v_add_u32_literal(
+          provenance_vgpr, temporary_vgpr,
+          relative_cell_index << consan_moi_exact_byte_cell::relative_cell_index_shift,
+          provenance_vgpr, arch));
     }
   }
-  return true;
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_exact_byte_representative_lane(std::vector<uint32_t> &words,
