@@ -61,13 +61,14 @@ plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
                                                                 rj_code_arch_t arch) {
   InstructionSequence sequence(words);
   if (selected_residue <= 64u) {
-    return sequence.emit(instrumentation::build_s_cmp_eq_u32(
+    sequence.append(instrumentation::build_s_cmp_eq_u32(
         residue_sgpr, scalar_positive_inline_u32(selected_residue), arch));
+  } else {
+    constexpr uint16_t kScalarLiteralSource = 255u;
+    sequence.append(build_s_mov_b32(temporary_sgpr, kScalarLiteralSource, arch), selected_residue,
+                    instrumentation::build_s_cmp_eq_u32(residue_sgpr, temporary_sgpr, arch));
   }
-  constexpr uint16_t kScalarLiteralSource = 255u;
-  return sequence.emit_all(build_s_mov_b32(temporary_sgpr, kScalarLiteralSource, arch),
-                           selected_residue,
-                           instrumentation::build_s_cmp_eq_u32(residue_sgpr, temporary_sgpr, arch));
+  return sequence.finish();
 }
 
 uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
@@ -106,26 +107,23 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   if (source.scalar_src) {
     coordinate = *source.scalar_src;
   } else if (source.vector_src) {
-    if (!sequence.emit_all(
-            instrumentation::build_v_readfirstlane_b32(quotient, *source.vector_src, arch),
-            instrumentation::build_valu_to_salu_dependency_wait(arch)))
-      return false;
+    sequence.append(instrumentation::build_v_readfirstlane_b32(quotient, *source.vector_src, arch),
+                    instrumentation::build_valu_to_salu_dependency_wait(arch));
     coordinate = quotient;
   } else {
     return false;
   }
 
   if (source.mask_low_16) {
-    (void)sequence.emit_all(
-        build_s_lshl_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch),
-        build_s_lshr_b32(quotient, quotient, scalar_positive_inline_u32(16), arch));
+    sequence.append(build_s_lshl_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch),
+                    build_s_lshr_b32(quotient, quotient, scalar_positive_inline_u32(16), arch));
     coordinate = quotient;
   } else if (source.shift_right_16) {
-    (void)sequence.emit(
-        build_s_lshr_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch));
+    sequence.append(build_s_lshr_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch));
     coordinate = quotient;
   }
-  return sequence.emit(instrumentation::build_s_sub_u32(residue, residue, coordinate, arch));
+  sequence.append(instrumentation::build_s_sub_u32(residue, residue, coordinate, arch));
+  return sequence.finish();
 }
 
 /// Emit the selection predicate shared by the inline-island and direct-call
@@ -138,51 +136,53 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   if (plan.sample_stride <= 1u)
     return false;
   InstructionSequence sequence(words);
-  if (!sequence.emit(instrumentation::build_s_cselect_b32(saved_scc, scalar_positive_inline_u32(1),
-                                                          scalar_positive_inline_u32(0), arch)))
-    return false;
+  sequence.append(instrumentation::build_s_cselect_b32(saved_scc, scalar_positive_inline_u32(1),
+                                                       scalar_positive_inline_u32(0), arch));
   if (plan.cached_selection) {
     uint16_t selected_source = 0u;
     if (plan.cached_selection->scalar_src) {
       selected_source = *plan.cached_selection->scalar_src;
     } else if (plan.cached_selection->vector_src) {
-      if (!sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
-                                 quotient, *plan.cached_selection->vector_src, arch),
-                             instrumentation::build_valu_to_salu_dependency_wait(arch)))
-        return false;
+      sequence.append(instrumentation::build_v_readfirstlane_b32(
+                          quotient, *plan.cached_selection->vector_src, arch),
+                      instrumentation::build_valu_to_salu_dependency_wait(arch));
       selected_source = quotient;
     } else {
       return false;
     }
-    return sequence.emit(
+    sequence.append(
         instrumentation::build_s_cmp_lg_u32(selected_source, scalar_positive_inline_u32(0u), arch));
+    return sequence.finish();
   }
 
   if (plan.flavor == MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay) {
     // Record/Replay samples stable workgroup coordinates. Dispatch identity
     // remains in every record's attribution but does not rotate the selected
     // workgroup or make offset zero omit workgroup zero.
-    (void)sequence.emit(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
+    sequence.append(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
   } else {
     const uint16_t dispatch_mix = plan.dispatch_id_sgpr.value_or(
         scalar_positive_inline_u32(static_cast<uint32_t>(plan.literal_dispatch_id) & 63u));
-    if (!sequence.emit(instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0),
-                                                        dispatch_mix, arch)))
-      return false;
+    sequence.append(instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0),
+                                                     dispatch_mix, arch));
   }
-  if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
-                                        residue, arch))
-    return false;
+  sequence
+      .require(
+          append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch))
+      .require(
+          append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch))
+      .require(
+          append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch))
+      .require(append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id,
+                                                quotient, residue, arch));
   const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(plan.sample_stride));
-  if (!sequence.emit_all(build_s_lshr_b32(quotient, residue, shift, arch),
-                         build_s_lshl_b32(quotient, quotient, shift, arch),
-                         instrumentation::build_s_sub_u32(residue, residue, quotient, arch)))
-    return false;
-  return append_moi_runtime_workgroup_residue_compare(
-      words, residue, quotient, plan.sample_offset & (plan.sample_stride - 1u), arch);
+  sequence
+      .append(build_s_lshr_b32(quotient, residue, shift, arch),
+              build_s_lshl_b32(quotient, quotient, shift, arch),
+              instrumentation::build_s_sub_u32(residue, residue, quotient, arch))
+      .require(append_moi_runtime_workgroup_residue_compare(
+          words, residue, quotient, plan.sample_offset & (plan.sample_stride - 1u), arch));
+  return sequence.finish();
 }
 
 std::optional<MoiRuntimeWorkgroupGatePrefix>
@@ -200,16 +200,13 @@ build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
     return std::nullopt;
   InstructionSequence sequence(result.words);
   const InstructionSequence::Label selected = sequence.make_label();
-  if (!sequence.emit_branch(selected, InstructionSequence::BranchKind::SccNonzero) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)))
-    return std::nullopt;
+  sequence.branch(selected, InstructionSequence::BranchKind::SccNonzero)
+      .append(instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch));
   result.bypass_branch_word = static_cast<uint32_t>(result.words.size());
   result.words.push_back(0u);
-  if (!sequence.bind(selected) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)) ||
-      !sequence.resolve_branches(arch))
+  sequence.bind_label(selected).append(
+      instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch));
+  if (!sequence.finish(arch))
     return std::nullopt;
   return result;
 }
