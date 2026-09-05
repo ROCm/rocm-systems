@@ -266,7 +266,6 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   ProgramInventory empty;
   EXPECT_EQ(empty.find_kernel_by_descriptor(512), nullptr);
   EXPECT_EQ(empty.find_kernel_by_name("kernel"), nullptr);
-  EXPECT_EQ(empty.find_function_by_name("helper"), nullptr);
 
   ProgramInventoryBuilder invalid_order;
   invalid_order.add_function();
@@ -302,8 +301,6 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.find_kernel_by_descriptor(1024), nullptr);
   EXPECT_EQ(inventory.find_kernel_by_name("kernel"), &inventory.kernels()[0]);
   EXPECT_EQ(inventory.find_kernel_by_name("missing"), nullptr);
-  EXPECT_EQ(inventory.find_function_by_name("helper"), &inventory.functions()[0]);
-  EXPECT_EQ(inventory.find_function_by_name("missing"), nullptr);
   EXPECT_EQ(inventory.kernel({.kernel = inventory.kernels()[1].id}), &inventory.kernels()[1]);
   EXPECT_EQ(inventory.kernel({.kernel = inventory.functions()[0].id}), nullptr);
   EXPECT_EQ(inventory.kernel({}), nullptr);

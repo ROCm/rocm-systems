@@ -855,13 +855,6 @@ public:
   [[nodiscard]] std::span<const ConSanProgramContainer> functions() const {
     return containers().subspan(storage_ ? storage_->kernel_count : 0);
   }
-  /// Resolve the first published non-dispatchable function with an exact
-  /// symbol name, preserving code-object order for malformed duplicate names.
-  [[nodiscard]] const ConSanProgramContainer *find_function_by_name(std::string_view name) const {
-    const std::span<const ConSanProgramContainer> records = functions();
-    const auto function = std::ranges::find(records, name, &ConSanProgramContainer::name);
-    return function == records.end() ? nullptr : &*function;
-  }
   [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
     return storage_ ? storage_->program_sites.access_sites() : std::span<const ConSanProgramSite>{};
   }

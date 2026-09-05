@@ -1115,27 +1115,5 @@ struct MoiIndexedAddressRequest {
                                               const MoiIndexedAddressRequest &request,
                                               const ConSanTargetProfile &target);
 
-/// Return the nearest emitted trampoline body strictly after `offset` across
-/// both already committed and current-pass patch inventories. Empty bodies do
-/// not reserve bytes. Incremental lowering must use both inventories when it
-/// grows a shared dispatcher, or it can overwrite a body emitted earlier in
-/// the current pass.
-template <typename CommittedPatches, typename CurrentPatches>
-[[nodiscard]] std::optional<uint64_t>
-next_moi_trampoline_boundary(uint64_t offset, const CommittedPatches &committed,
-                             const CurrentPatches &current_pass) {
-  uint64_t boundary = std::numeric_limits<uint64_t>::max();
-  const auto inspect = [&](const auto &patches) {
-    for (const ConSanCommittedPatchGeometry &patch : patches) {
-      if (patch.trampoline_size != 0u && patch.trampoline_offset > offset)
-        boundary = std::min(boundary, patch.trampoline_offset);
-    }
-  };
-  inspect(committed);
-  inspect(current_pass);
-  return boundary == std::numeric_limits<uint64_t>::max() ? std::nullopt
-                                                          : std::optional<uint64_t>(boundary);
-}
-
 } // namespace consan_detail
 } // namespace rocjitsu
