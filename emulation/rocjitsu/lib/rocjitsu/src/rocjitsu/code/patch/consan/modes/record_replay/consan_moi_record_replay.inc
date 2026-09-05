@@ -128,16 +128,17 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
         probe->spill && !options.moi_dynamic_access_records &&
         reject_candidate_scratch_range_overlap(candidate, scratch->base, scratch->count,
                                                result.warnings);
-    if (candidate.ranges.empty())
+    if (candidate.site().ranges.empty())
       continue;
     const uint64_t candidate_record_count =
-        static_cast<uint64_t>(candidate.ranges.size()) *
+        static_cast<uint64_t>(candidate.site().ranges.size()) *
         (options.moi_dynamic_access_records
              ? 1u
              : static_cast<uint64_t>(layout.record_replay_access_dispatch_bank_count) *
                    layout.record_replay_access_owner_bank_count);
     if (candidate_record_count > std::numeric_limits<uint32_t>::max() ||
-        candidate.ranges.size() > std::numeric_limits<uint32_t>::max() - logical_range_count ||
+        candidate.site().ranges.size() >
+            std::numeric_limits<uint32_t>::max() - logical_range_count ||
         (!options.moi_dynamic_access_records &&
          (record_count > layout.access_record_capacity ||
           candidate_record_count > layout.access_record_capacity - record_count))) {
@@ -179,7 +180,7 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
     entry.wrap_embedded_guest_bank = wrap_guest_bank;
     planned.push_back(std::move(entry));
     record_count += static_cast<uint32_t>(candidate_record_count);
-    logical_range_count += static_cast<uint32_t>(candidate.ranges.size());
+    logical_range_count += static_cast<uint32_t>(candidate.site().ranges.size());
     if (planned.size() == selected_limit)
       break;
   }
@@ -220,7 +221,7 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
                                       options, layout.record_replay_dispatch_token_capacity)
                                       ? 10u
                                       : 6u;
-      body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
+      body_options.high_bank_address_source = candidate.site().lowering.form->address_vgpr;
       body_options.high_bank_address_destination =
           static_cast<uint16_t>(entry.resources.base + base_count);
     }

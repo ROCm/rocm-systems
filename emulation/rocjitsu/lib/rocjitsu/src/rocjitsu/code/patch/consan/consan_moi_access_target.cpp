@@ -72,11 +72,11 @@ MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatin
 [[nodiscard]] std::optional<uint16_t>
 candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors) {
-  if (!candidate.lowering.form) {
+  if (!candidate.site().lowering.form) {
     errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
     return std::nullopt;
   }
-  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  const ConSanAccessLoweringForm &form = *candidate.site().lowering.form;
   // Direct-to-LDS candidates materialize their lane or explicit target
   // address into dedicated scratch before this placeholder is consumed.
   if (form.kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed ||
@@ -95,9 +95,9 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                                             uint16_t result_vgpr,
                                                             uint16_t exec_save_sgpr,
                                                             rj_code_arch_t arch) {
-  if (!candidate.is_direct_to_lds() || !candidate.lowering.form)
+  if (!candidate.is_direct_to_lds() || !candidate.site().lowering.form)
     return false;
-  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  const ConSanAccessLoweringForm &form = *candidate.site().lowering.form;
 
   if (form.kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress) {
     if (!form.address_vgpr || *form.address_vgpr >= 256u || result_vgpr >= 256u)
@@ -141,17 +141,19 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 }
 
 [[nodiscard]] bool candidate_uses_scalar_vector_flat_address(const ConSanMoiCandidate &candidate) {
-  return candidate.lowering.form &&
-         candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress;
+  return candidate.site().lowering.form &&
+         candidate.site().lowering.form->kind ==
+             ConSanAccessLoweringFormKind::FlatScalarVectorAddress;
 }
 
 [[nodiscard]] bool
 candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candidate) {
-  return candidate.lowering.form &&
-         (candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
-          candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress) &&
+  return candidate.site().lowering.form &&
+         (candidate.site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+          candidate.site().lowering.form->kind ==
+              ConSanAccessLoweringFormKind::FlatScalarVectorAddress) &&
          (candidate_uses_scalar_vector_flat_address(candidate) ||
-          candidate.lowering.form->immediate_byte_offset.value_or(0) != 0);
+          candidate.site().lowering.form->immediate_byte_offset.value_or(0) != 0);
 }
 
 [[nodiscard]] uint16_t flat_access_address_scratch_count(const ConSanMoiCandidate &candidate) {
@@ -174,7 +176,7 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
                                                           uint16_t input_vgpr, uint16_t result_vgpr,
                                                           rj_code_arch_t arch) {
   const ConSanAccessLoweringForm *form =
-      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+      candidate.site().lowering.form ? &*candidate.site().lowering.form : nullptr;
   const uint16_t scratch_count = flat_access_address_scratch_count(candidate);
   if (form == nullptr || scratch_count == 0u || !form->address_vgpr || input_vgpr >= 255u ||
       result_vgpr >= 255u || static_cast<uint32_t>(result_vgpr) + scratch_count > 256u)
@@ -220,12 +222,12 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
 }
 
 [[nodiscard]] uint16_t candidate_payload_vgpr_count(const ConSanMoiCandidate &candidate) {
-  return candidate.lowering.form ? candidate.lowering.form->data_register_count : 0u;
+  return candidate.site().lowering.form ? candidate.site().lowering.form->data_register_count : 0u;
 }
 
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
   const ConSanAccessLoweringForm *form =
-      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+      candidate.site().lowering.form ? &*candidate.site().lowering.form : nullptr;
   if (form == nullptr || !form->address_vgpr || !form->destination_vgpr)
     return false;
   return range_overlaps(*form->address_vgpr, form->address_vgpr_count, *form->destination_vgpr,
@@ -241,7 +243,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   // SRC0 bank must be copied while that bank is still selected. The appended
   // probe subsequently selects bank zero for its own scratch registers.
   const ConSanAccessLoweringForm *form =
-      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+      candidate.site().lowering.form ? &*candidate.site().lowering.form : nullptr;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   return target && target->has_selectable_vgpr_bank && form != nullptr &&
          form->kind != ConSanAccessLoweringFormKind::FlatVectorAddress &&
@@ -253,11 +255,11 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
                                                           uint16_t scratch_vgpr,
                                                           uint16_t scratch_count,
                                                           std::vector<std::string> &errors) {
-  if (!candidate.lowering.form) {
+  if (!candidate.site().lowering.form) {
     errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
     return true;
   }
-  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  const ConSanAccessLoweringForm &form = *candidate.site().lowering.form;
   if (form.address_vgpr && form.address_vgpr_count != 0u &&
       range_overlaps(*form.address_vgpr, form.address_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the LDS address VGPRs");

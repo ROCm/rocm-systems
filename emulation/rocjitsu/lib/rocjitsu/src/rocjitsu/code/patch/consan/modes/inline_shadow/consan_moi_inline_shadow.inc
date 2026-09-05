@@ -45,7 +45,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   const bool requires_wave_partitioned_exact_shadow =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
-        return std::ranges::any_of(candidate->ranges, [](const ConSanAccessRange &range) {
+        return std::ranges::any_of(candidate->site().ranges, [](const ConSanAccessRange &range) {
           return range.byte_width < consan_moi_shadow_cell::granule_bytes;
         });
       });
@@ -360,7 +360,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    spill ? &*spill : nullptr, candidate_errors,
                                    &guest_instruction_word_count)) {
       for (std::string &error : candidate_errors) {
-        error += " for " + std::string(candidate.mnemonic_view()) + " at text offset " +
+        error += " for " + std::string(candidate.site().mnemonic_view()) + " at text offset " +
                  std::to_string(candidate.anchor()) + " with scratch v" +
                  std::to_string(resources->base) + ":v" +
                  std::to_string(resources->base + resources->count - 1u);
@@ -418,8 +418,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       return;
     }
 
-    const bool defer_guest =
-        candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write;
+    const bool defer_guest = candidate.site().kind == ConSanLdsAccessKind::Read ||
+                             candidate.site().kind == ConSanLdsAccessKind::Write;
     MoiAppendedBodyOptions body_options(arch);
     body_options.trailing_guest_word_count = defer_guest ? guest_words : 0u;
     body_options.scalar_save_words = entry.scalar_spill
@@ -438,7 +438,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     body_options.wrap_embedded_guest_vgpr_bank =
         !defer_guest && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
     if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
-      body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
+      body_options.high_bank_address_source = candidate.site().lowering.form->address_vgpr;
       body_options.high_bank_address_destination = static_cast<uint16_t>(
           consan_detail::inline_shadow_loop_counter_vgpr(
               entry.resources.base, entry.emission.scalar_state.exec_save_sgpr.has_value(),

@@ -209,14 +209,15 @@ TEST(ConSanMoiModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeMode
   point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
   point.moi_dynamic_stack_spill = true;
 
-  ConSanMoiCandidate candidate;
-  candidate.lowering.form.emplace();
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeTwoRange;
-  candidate.lowering.form->encoded_offset_scale_bytes = 16u;
-  candidate.lowering.form->address_vgpr = 4u;
-  candidate.lowering.form->address_vgpr_count = 1u;
-  candidate.lowering.form->destination_vgpr = 4u;
-  candidate.lowering.form->destination_register_count = 1u;
+  ConSanProgramSite candidate_site;
+  candidate_site.lowering.form.emplace();
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::NativeTwoRange;
+  candidate_site.lowering.form->encoded_offset_scale_bytes = 16u;
+  candidate_site.lowering.form->address_vgpr = 4u;
+  candidate_site.lowering.form->address_vgpr_count = 1u;
+  candidate_site.lowering.form->destination_vgpr = 4u;
+  candidate_site.lowering.form->destination_register_count = 1u;
+  ConSanMoiCandidate candidate(candidate_site);
   candidate.incoming_vgpr_bank_mode = 1u;
 
   const auto gfx1250 =
@@ -242,8 +243,8 @@ TEST(ConSanMoiModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeMode
   EXPECT_FALSE(gfx1201.supports_clobbered_address_spill_reload);
   EXPECT_FALSE(gfx1201.guest_replay_requires_disjoint_address_scratch);
 
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
-  candidate.lowering.form->encoded_offset_scale_bytes = 0u;
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
+  candidate_site.lowering.form->encoded_offset_scale_bytes = 0u;
   candidate.incoming_vgpr_bank_mode.reset();
   const auto gfx950 = resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(gfx950.two_address_replay_vgpr_count, 0u);
@@ -260,24 +261,25 @@ TEST(ConSanMoiModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeMode
 }
 
 TEST(ConSanMoiModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm) {
-  ConSanMoiCandidate candidate;
-  candidate.lowering.form.emplace();
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress;
-  candidate.lowering.form->address_vgpr = 7u;
+  ConSanProgramSite candidate_site;
+  candidate_site.lowering.form.emplace();
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress;
+  candidate_site.lowering.form->address_vgpr = 7u;
+  ConSanMoiCandidate candidate(candidate_site);
   std::vector<uint32_t> words;
   EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
                                                        ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(words.empty());
 
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
-  candidate.lowering.form->address_vgpr.reset();
-  candidate.lowering.form->element_width_bits = 32u;
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  candidate_site.lowering.form->address_vgpr.reset();
+  candidate_site.lowering.form->element_width_bits = 32u;
   words.clear();
   EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
                                                        ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(words.empty());
 
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
   EXPECT_FALSE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
                                                         ROCJITSU_CODE_ARCH_CDNA4));
 }
@@ -285,7 +287,8 @@ TEST(ConSanMoiModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm)
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {
   ConSanRequest request;
   const ConSanMoiOperatingPoint point;
-  const ConSanMoiCandidate candidate;
+  const ConSanProgramSite candidate_site;
+  const ConSanMoiCandidate candidate(candidate_site);
   const auto plan = [&](ConSanResourceSiteKind kind, rj_code_arch_t arch, bool disjoint,
                         const ConSanMoiCandidate *access) {
     auto resource_facts = resolve_moi_access_resource_facts(point, candidate, arch);

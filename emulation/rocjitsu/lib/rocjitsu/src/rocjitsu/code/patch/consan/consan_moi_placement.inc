@@ -1705,7 +1705,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     }
   };
   if (access_candidate != nullptr) {
-    add_execution_owners(access_candidate->execution_owners);
+    add_execution_owners(access_candidate->site().execution_owners);
   } else if (owner_site) {
     const ConSanProgramSite *site = state.inventory.program_site(*owner_site);
     if (site != nullptr)
@@ -1809,7 +1809,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   // a liveness-dead window rather than rejecting the chosen window later.
   if (access_candidate != nullptr) {
     const ConSanAccessLoweringForm *form =
-        access_candidate->lowering.form ? &*access_candidate->lowering.form : nullptr;
+        access_candidate->site().lowering.form ? &*access_candidate->site().lowering.form : nullptr;
     if (form != nullptr) {
       if (form->address_vgpr && form->address_vgpr_count != 0u) {
         request.forbidden.expand(

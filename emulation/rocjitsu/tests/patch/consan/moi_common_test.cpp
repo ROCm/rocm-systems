@@ -1652,18 +1652,17 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   const ConSanProgramSite &site = result.program_inventory.access_sites().front();
-  ConSanMoiCandidate candidate;
-  static_cast<ConSanProgramSite &>(candidate) = test_admitted_accesses(result).front();
+  ConSanMoiCandidate candidate(site);
   ASSERT_EQ(site.ranges.size(), 2u);
-  EXPECT_EQ(candidate.ranges, site.ranges);
+  EXPECT_EQ(candidate.site().ranges, site.ranges);
   for (size_t range_index = 0; range_index < site.ranges.size(); ++range_index) {
     SCOPED_TRACE(range_index);
     ASSERT_TRUE(site.ranges[range_index].static_byte_offset);
-    EXPECT_EQ(candidate.lowering_offset(candidate.ranges[range_index]),
+    EXPECT_EQ(candidate.lowering_offset(candidate.site().ranges[range_index]),
               *site.ranges[range_index].static_byte_offset);
   }
-  EXPECT_EQ(candidate.lowering_offset(candidate.ranges[0]), 3u * 256u);
-  EXPECT_EQ(candidate.lowering_offset(candidate.ranges[1]), 5u * 256u);
+  EXPECT_EQ(candidate.lowering_offset(candidate.site().ranges[0]), 3u * 256u);
+  EXPECT_EQ(candidate.lowering_offset(candidate.site().ranges[1]), 5u * 256u);
 
   const ConSanTargetProfile *gfx1250 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(gfx1250, nullptr);
@@ -2085,15 +2084,16 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
 }
 
 TEST(ConSanMoi, LoweringOffsetsPreserveNativeRangesAndDoNotReapplyFlatImmediate) {
-  ConSanMoiCandidate candidate;
+  ConSanProgramSite candidate_site;
   ConSanAccessRange range{.id = {}, .static_byte_offset = -8, .byte_width = 4u};
-  candidate.origin = ConSanAccessOrigin::Flat;
-  candidate.lowering.form.emplace();
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::FlatVectorAddress;
+  candidate_site.origin = ConSanAccessOrigin::Flat;
+  candidate_site.lowering.form.emplace();
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::FlatVectorAddress;
+  ConSanMoiCandidate candidate(candidate_site);
   EXPECT_EQ(candidate.lowering_offset(range), 0u);
 
-  candidate.origin = ConSanAccessOrigin::NativeLds;
-  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
+  candidate_site.origin = ConSanAccessOrigin::NativeLds;
+  candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
   range.static_byte_offset = 3u * 256u;
   EXPECT_EQ(candidate.lowering_offset(range), 3u * 256u);
 }

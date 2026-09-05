@@ -9,7 +9,7 @@ namespace rocjitsu::consan_moi_impl {
 
 bool sampled_access_can_emit_spill_over_guest_operands(const MoiAccessResourceFacts &resource_facts,
                                                        const ConSanMoiCandidate &candidate) {
-  return candidate.lowering.form && !candidate.lowering.form->destination_vgpr &&
+  return candidate.site().lowering.form && !candidate.site().lowering.form->destination_vgpr &&
          !candidate.is_direct_to_lds() && resource_facts.has_persistent_owner_vgpr &&
          !resource_facts.uses_private_epoch && !resource_facts.has_complete_persistent_sgprs &&
          !candidate_requires_flat_address_materialization(candidate);
@@ -20,7 +20,7 @@ bool sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &requ
                                                        const ConSanMoiCandidate &candidate) {
   if (sampled_access_can_emit_spill_over_guest_operands(resource_facts, candidate))
     return true;
-  if (!candidate.lowering.form || candidate.lowering.form->destination_vgpr ||
+  if (!candidate.site().lowering.form || candidate.site().lowering.form->destination_vgpr ||
       candidate.is_direct_to_lds() || resource_facts.uses_private_epoch ||
       resource_facts.has_complete_persistent_sgprs ||
       candidate_requires_flat_address_materialization(candidate)) {

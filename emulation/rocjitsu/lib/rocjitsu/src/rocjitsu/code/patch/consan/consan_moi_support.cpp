@@ -122,9 +122,9 @@ bool consan_detail::has_recent_saveexec(std::span<const uint8_t> bytes,
   constexpr uint64_t kLookbackDwords = 3u;
   for (uint64_t dword = 1u; dword <= kLookbackDwords; ++dword) {
     const uint64_t byte_distance = dword * sizeof(uint32_t);
-    if (candidate.decoded_file_offset() < byte_distance)
+    if (candidate.site().decoded_file_offset() < byte_distance)
       break;
-    const uint64_t offset = candidate.decoded_file_offset() - byte_distance;
+    const uint64_t offset = candidate.site().decoded_file_offset() - byte_distance;
     if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
       continue;
     uint32_t word = 0u;
@@ -181,13 +181,13 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
   const ConSanTargetProfile &target = *request.target;
   const auto copy_original = [&]() -> std::optional<std::vector<uint32_t>> {
     if (candidate.size() == 0u || candidate.size() % sizeof(uint32_t) != 0u ||
-        candidate.decoded_file_offset() > request.image.size() ||
-        candidate.size() > request.image.size() - candidate.decoded_file_offset()) {
+        candidate.site().decoded_file_offset() > request.image.size() ||
+        candidate.size() > request.image.size() - candidate.site().decoded_file_offset()) {
       errors.emplace_back("ConSan MOI relocated guest access exceeds the code object");
       return std::nullopt;
     }
     std::vector<uint32_t> words(candidate.size() / sizeof(uint32_t));
-    std::memcpy(words.data(), request.image.data() + candidate.decoded_file_offset(),
+    std::memcpy(words.data(), request.image.data() + candidate.site().decoded_file_offset(),
                 candidate.size());
     return words;
   };
@@ -195,23 +195,23 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
   if (!target.requires_split_two_address_lds_relocation || !candidate.is_native_two_range())
     return copy_original();
 
-  const auto &ranges = candidate.ranges;
+  const auto &ranges = candidate.site().ranges;
   const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits() / 32u);
   if (ranges.size() != 2u ||
-      (candidate.kind != ConSanLdsAccessKind::Read &&
-       candidate.kind != ConSanLdsAccessKind::Write) ||
+      (candidate.site().kind != ConSanLdsAccessKind::Read &&
+       candidate.site().kind != ConSanLdsAccessKind::Write) ||
       (element_dwords != 1u && element_dwords != 2u) || request.replay_address_vgpr > 255u) {
     errors.emplace_back("ConSan MOI could not normalize a split two-address guest access");
     return std::nullopt;
   }
 
-  const bool load = candidate.kind == ConSanLdsAccessKind::Read;
+  const bool load = candidate.site().kind == ConSanLdsAccessKind::Read;
   const std::optional<uint16_t> first_data_vgpr =
-      load ? candidate.operands.destination_vgpr : candidate.operands.data_vgpr;
+      load ? candidate.site().operands.destination_vgpr : candidate.site().operands.data_vgpr;
   const std::optional<uint16_t> second_data_vgpr =
       load && first_data_vgpr
           ? std::optional<uint16_t>(static_cast<uint16_t>(*first_data_vgpr + element_dwords))
-          : candidate.operands.second_data_vgpr;
+          : candidate.site().operands.second_data_vgpr;
   if (!first_data_vgpr || !second_data_vgpr || *first_data_vgpr > 255u ||
       *second_data_vgpr > 255u ||
       (element_dwords == 2u && (*first_data_vgpr > 254u || *second_data_vgpr > 254u))) {

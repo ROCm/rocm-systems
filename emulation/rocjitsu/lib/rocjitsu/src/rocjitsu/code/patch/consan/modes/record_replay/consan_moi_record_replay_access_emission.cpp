@@ -144,7 +144,7 @@ namespace consan_moi_impl {
                                               scratch_count, workgroup_names[index], errors))
       return std::nullopt;
   }
-  const auto &access_ranges = candidate.ranges;
+  const auto &access_ranges = candidate.site().ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
@@ -220,14 +220,14 @@ namespace consan_moi_impl {
   } else if (materialize_flat_address && request.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
-    words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
-                                        vector_source_vgpr(*candidate.lowering.form->address_vgpr),
-                                        arch));
+    words.push_back(build_v_mov_b32_e32(
+        materialized_address_vgpr,
+        vector_source_vgpr(*candidate.site().lowering.form->address_vgpr), arch));
     if (!candidate_uses_scalar_vector_flat_address(candidate)) {
-      words.push_back(build_v_mov_b32_e32(
-          static_cast<uint16_t>(materialized_address_vgpr + 1u),
-          vector_source_vgpr(static_cast<uint16_t>(*candidate.lowering.form->address_vgpr + 1u)),
-          arch));
+      words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(materialized_address_vgpr + 1u),
+                                          vector_source_vgpr(static_cast<uint16_t>(
+                                              *candidate.site().lowering.form->address_vgpr + 1u)),
+                                          arch));
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
   } else if (save_clobbered_address) {
@@ -244,8 +244,9 @@ namespace consan_moi_impl {
   const auto append_guest_access = [&] {
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-    const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
+    const uint16_t guest_address_vgpr = capture_high_bank_address
+                                            ? *candidate.site().lowering.form->address_vgpr
+                                            : *lds_byte_offset_vgpr;
     return append_moi_relocated_guest_access(
         words, bytes, candidate, target, guest_address_vgpr,
         reserve_two_address_replay_scratch
@@ -264,7 +265,7 @@ namespace consan_moi_impl {
   const uint32_t access_record_capacity = layout.access_record_capacity;
   const uint32_t access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count;
   const uint32_t access_owner_bank_count = layout.record_replay_access_owner_bank_count;
-  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
+  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.site().kind);
   auto append_effective_range_offset = [&](const ConSanAccessRange &range,
                                            uint16_t value_vgpr) -> std::optional<uint16_t> {
     if (candidate.lowering_offset(range) == 0)

@@ -353,7 +353,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
         "ConSan MOI sampled probe needs seven aligned VCC/EXEC/SCC-save SGPRs in 0..104");
     return std::nullopt;
   }
-  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
+  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.site().kind);
   const uint32_t generation =
       plan.report_generation & consan_moi_sampled_watchpoint::max_generation;
   const uint64_t generation_field = static_cast<uint64_t>(generation)
@@ -439,8 +439,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     // Metadata consumes the low-bank captured address, while the guest still
     // names its original encoded SRC0 under the restored application mode.
-    const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
+    const uint16_t guest_address_vgpr = capture_high_bank_address
+                                            ? *candidate.site().lowering.form->address_vgpr
+                                            : *lds_byte_offset_vgpr;
     if (!append_moi_relocated_guest_access(
             words, bytes, candidate, target, guest_address_vgpr,
             reserve_two_address_replay_scratch
@@ -840,7 +841,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     uint64_t owner_descriptor_file_offset, const MoiSampledAccessEmissionPlan &plan,
     const VgprSpillSequence *spill, rj_code_arch_t arch, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset, uint32_t *guest_instruction_word_count) {
-  const auto &access_ranges = candidate.ranges;
+  const auto &access_ranges = candidate.site().ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;
@@ -887,8 +888,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     const bool spilled_address =
         range_overlaps(*lds_byte_offset_vgpr, 1u, spill->vgpr_base, spill->vgpr_count);
-    if (candidate.lowering.form->destination_vgpr &&
-        range_overlaps(*candidate.lowering.form->destination_vgpr,
+    if (candidate.site().lowering.form->destination_vgpr &&
+        range_overlaps(*candidate.site().lowering.form->destination_vgpr,
                        candidate_payload_vgpr_count(candidate), spill->vgpr_base,
                        spill->vgpr_count)) {
       errors.emplace_back(
@@ -908,7 +909,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     const uint16_t replay_address_vgpr =
-        preserved_lds_byte_offset_vgpr.value_or(*candidate.lowering.form->address_vgpr);
+        preserved_lds_byte_offset_vgpr.value_or(*candidate.site().lowering.form->address_vgpr);
     if (!append_moi_relocated_guest_access(
             words, bytes, candidate, target, replay_address_vgpr,
             reserve_two_address_replay_scratch

@@ -467,7 +467,8 @@ void try_apply_sampled_barrier_sync_patch(
   std::unordered_set<uint64_t> admitted_offsets;
   admitted_offsets.reserve(admitted.size());
   for (const ConSanMoiCandidate &candidate : admitted) {
-    if (candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write)
+    if (candidate.site().kind == ConSanLdsAccessKind::Read ||
+        candidate.site().kind == ConSanLdsAccessKind::Write)
       admitted_offsets.insert(candidate.anchor());
   }
   bool has_multi_range_window = false;

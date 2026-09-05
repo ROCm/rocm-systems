@@ -288,9 +288,9 @@ sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   policy.supported = sampled_access_can_plan_spill_over_guest_operands(
                          context.request, context.resource_facts, candidate) ||
                      spill_backed_recovery;
-  if (spill_backed_recovery && candidate.lowering.form &&
-      candidate.lowering.form->destination_vgpr) {
-    policy.protected_vgpr = candidate.lowering.form->destination_vgpr;
+  if (spill_backed_recovery && candidate.site().lowering.form &&
+      candidate.site().lowering.form->destination_vgpr) {
+    policy.protected_vgpr = candidate.site().lowering.form->destination_vgpr;
     policy.protected_vgpr_count = static_cast<uint8_t>(candidate_payload_vgpr_count(candidate));
   }
   return policy;

@@ -27,13 +27,13 @@ make_moi_access_attribution(const ConSanObservationPlan &observation,
     return std::nullopt;
   ConSanStaticAccessAttribution access{
       .intent_ids = candidate.intent_ids,
-      .original_site = candidate.physical_id,
+      .original_site = candidate.site().physical_id,
       .original_semantic_sites = {},
       .execution_owner_kernel_ids = {},
-      .owner_provenance_complete = !candidate.execution_owners.empty(),
+      .owner_provenance_complete = !candidate.site().execution_owners.empty(),
   };
-  access.execution_owner_kernel_ids.reserve(candidate.execution_owners.size());
-  for (const ConSanExecutionOwner &owner : candidate.execution_owners)
+  access.execution_owner_kernel_ids.reserve(candidate.site().execution_owners.size());
+  for (const ConSanExecutionOwner &owner : candidate.site().execution_owners)
     access.execution_owner_kernel_ids.push_back(owner.kernel);
   std::ranges::sort(access.execution_owner_kernel_ids);
   access.execution_owner_kernel_ids.erase(

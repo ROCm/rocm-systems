@@ -381,7 +381,8 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   resources.moi_report_buffer_address = 0x2000u;
   ProgramInventory inventory;
   ConSanObservationPlan observation_plan;
-  const std::array<ConSanMoiCandidate, 1> candidates{};
+  const ConSanProgramSite site;
+  const std::array<ConSanMoiCandidate, 1> candidates{ConSanMoiCandidate(site)};
   const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
       .inline_access_present = true,
       .report_layout = {},

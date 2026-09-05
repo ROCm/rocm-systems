@@ -1,60 +1,65 @@
 /// Temporary lowering state for one access admitted by semantic policy.
 ///
-/// Its `ConSanProgramSite` base is the exact normalized record selected
-/// by the observation plan. Lowering reads that snapshot without re-decoding
-/// or reclassifying it. The remaining members are facts created only after
-/// admission: coalesced policy intents and target execution state. Extending
-/// the inventory value keeps its established field vocabulary without
-/// maintaining an independent access identity, operand, owner, or decode
-/// schema.
-struct ConSanMoiCandidate : ConSanProgramSite {
+/// The referenced `ConSanProgramSite` is the exact immutable arena record
+/// selected by the observation plan. The candidate owns only facts created
+/// after admission: coalesced policy intents and target execution state.
+/// Retaining the arena record by identity prevents lowering from creating a
+/// second access representation that can drift from program inventory.
+struct ConSanMoiCandidate {
+  explicit ConSanMoiCandidate(const ConSanProgramSite &site) : site_(&site) {}
+
+  [[nodiscard]] const ConSanProgramSite &site() const { return *site_; }
+
   /// Every observation intent coalesced onto this physical access.
   std::vector<ConSanProbeIntentId> intent_ids;
   /// Return the original-text instruction offset used as this lowering
   /// operation's physical insertion anchor.
-  [[nodiscard]] uint64_t anchor() const { return physical_id.original_text_offset; }
+  [[nodiscard]] uint64_t anchor() const { return site().physical_id.original_text_offset; }
   /// Return the pristine guest instruction size in bytes. Lowering may reserve
   /// a larger replacement body, but that does not change this displaced span.
-  [[nodiscard]] uint32_t size() const { return ConSanProgramSite::size(); }
+  [[nodiscard]] uint32_t size() const { return site().size(); }
   /// Return the normalized width in bits of each semantic access range.
   [[nodiscard]] uint32_t width_bits() const {
-    return lowering.form ? lowering.form->element_width_bits : 0u;
+    return site().lowering.form ? site().lowering.form->element_width_bits : 0u;
   }
   /// Return whether the classifier normalized this as a two-range native
   /// operation. Lowering must not recover this fact from the mnemonic.
   [[nodiscard]] bool is_native_two_range() const {
-    return lowering.form && lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
+    return site().lowering.form &&
+           site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
   }
   /// Return whether the classifier normalized this as any native LDS form.
   [[nodiscard]] bool is_native_lds() const {
-    return lowering.form &&
-           (lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange ||
-            lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange);
+    return site().lowering.form &&
+           (site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange ||
+            site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange);
   }
   /// Return whether the classifier normalized this as any FLAT address form.
   [[nodiscard]] bool is_flat() const {
-    return lowering.form &&
-           (lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
-            lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress);
+    return site().lowering.form &&
+           (site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+            site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress);
   }
   /// Return whether the classifier normalized this as any direct-to-LDS form.
   [[nodiscard]] bool is_direct_to_lds() const {
-    return lowering.form &&
-           (lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress ||
-            lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
+    return site().lowering.form &&
+           (site().lowering.form->kind ==
+                ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress ||
+            site().lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
   }
   /// Return the classifier-owned encoded offset scale.
   [[nodiscard]] uint32_t encoded_offset_scale_bytes() const {
-    return lowering.form ? lowering.form->encoded_offset_scale_bytes : 0u;
+    return site().lowering.form ? site().lowering.form->encoded_offset_scale_bytes : 0u;
   }
   /// Return the nonnegative displacement consumed by native emission. FLAT
   /// lowering first materializes its complete effective address, so its
   /// inventory displacement must not be applied a second time. Admitted
   /// native sites always carry a representable decoded displacement.
   [[nodiscard]] uint32_t lowering_offset(const ConSanAccessRange &range) const {
-    return lowering.form &&
-                   (lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
-                    lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress)
+    return site().lowering.form &&
+                   (site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+                    site().lowering.form->kind ==
+                        ConSanAccessLoweringFormKind::FlatScalarVectorAddress)
                ? 0u
                : static_cast<uint32_t>(range.static_byte_offset.value());
   }
@@ -64,6 +69,9 @@ struct ConSanMoiCandidate : ConSanProgramSite {
   /// banks leave this absent; a present zero value records the ordinary low
   /// bank explicitly.
   std::optional<uint16_t> incoming_vgpr_bank_mode;
+
+private:
+  const ConSanProgramSite *site_ = nullptr;
 };
 
 /// Stable policy reason crossing from perturbation admission into planning

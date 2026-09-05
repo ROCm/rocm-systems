@@ -60,7 +60,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   for (uint32_t i = 0; i < candidates.size(); ++i) {
     if (i % options.moi_sample_stride == options.moi_sample_offset) {
       ++sampled_filter_candidate_count;
-      const auto &ranges = candidates[i]->ranges;
+      const auto &ranges = candidates[i]->site().ranges;
       if (ranges.size() <= std::numeric_limits<uint32_t>::max() - sampled_filter_range_count)
         sampled_filter_range_count += static_cast<uint32_t>(ranges.size());
     }
@@ -105,7 +105,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
 
     const ConSanMoiCandidate &candidate = *candidate_ptr;
-    const auto &access_ranges = candidate.ranges;
+    const auto &access_ranges = candidate.site().ranges;
     if (access_ranges.empty())
       continue;
     const uint32_t range_count = static_cast<uint32_t>(access_ranges.size());
@@ -397,7 +397,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     body_options.body_guest_instruction_offset = &body_guest_offset;
     body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
     if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
-      body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
+      body_options.high_bank_address_source = candidate.site().lowering.form->address_vgpr;
       body_options.high_bank_address_destination = static_cast<uint16_t>(
           planned_patch.emission.scratch_vgpr + planned_patch.emission.base_scratch_vgpr_count);
     }
@@ -423,7 +423,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       return;
     }
     auto mapping = make_sampled_access_runtime_mapping(
-        std::move(*access), candidate.kind, planned_patch.emission.first_record_index,
+        std::move(*access), candidate.site().kind, planned_patch.emission.first_record_index,
         planned_patch.access_range_count, window_bank_count, patch);
     if (!mapping) {
       result.errors.emplace_back("ConSan MOI sampled probe lost its runtime attribution");

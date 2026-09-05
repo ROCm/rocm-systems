@@ -206,6 +206,7 @@ endif()
 # their immutable presentation facet directly.
 file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
 file(READ "${_consan_dir}/consan_result.h.inc" _consan_result_contract)
+file(READ "${_consan_dir}/consan_moi_candidate_projection.cpp" _moi_candidate_projection)
 file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
 file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
 string(REGEX MATCH "struct ConSanExecutionOwner [{][^}]*[}];" _execution_owner_contract
@@ -225,10 +226,12 @@ endif()
 math(EXPR _moi_candidate_length "${_moi_candidate_end} - ${_moi_candidate_begin}")
 string(SUBSTRING "${_consan_result_contract}" ${_moi_candidate_begin}
        ${_moi_candidate_length} _moi_candidate_contract)
-if(NOT _moi_candidate_contract MATCHES "ConSanMoiCandidate : ConSanProgramSite" OR
-   _moi_candidate_contract MATCHES "kernel_descriptor_file_offset")
+if(NOT _moi_candidate_contract MATCHES "const ConSanProgramSite [*]site_" OR
+   _moi_candidate_contract MATCHES "ConSanMoiCandidate : ConSanProgramSite" OR
+   _moi_candidate_contract MATCHES "kernel_descriptor_file_offset" OR
+   _moi_candidate_projection MATCHES "static_cast<ConSanProgramSite [&]>[(]candidate[)] =")
     message(FATAL_ERROR
-        "ConSan MOI access candidates must inherit stable semantic owners, not cache a physical descriptor"
+        "ConSan MOI access candidates must view stable arena sites, not copy semantic or physical identity"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_internal.h" _moi_evidence_contract)

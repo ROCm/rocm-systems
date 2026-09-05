@@ -11,8 +11,7 @@ namespace {
 
 [[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanProgramSite &access,
                                                     ConSanProbeIntentId intent_id) {
-  ConSanMoiCandidate candidate;
-  static_cast<ConSanProgramSite &>(candidate) = access;
+  ConSanMoiCandidate candidate(access);
   candidate.intent_ids.push_back(intent_id);
   return candidate;
 }
@@ -47,7 +46,7 @@ std::vector<ConSanMoiCandidate> build_moi_candidates(const ProgramInventory &inv
       candidates.push_back(make_moi_candidate(*access, intent.id));
     } else {
       ConSanMoiCandidate &candidate = candidates[position->second];
-      if (candidate.physical_id != access->physical_id) {
+      if (candidate.site().physical_id != access->physical_id) {
         errors.emplace_back("ConSan MOI coalesced distinct physical access identities");
         return {};
       }

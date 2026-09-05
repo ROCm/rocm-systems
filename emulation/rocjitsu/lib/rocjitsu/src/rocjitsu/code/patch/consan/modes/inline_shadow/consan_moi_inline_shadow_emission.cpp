@@ -166,7 +166,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // owner-before-epoch ordering for the remaining lanes: most repeated
   // accesses by one workitem are ordered, while a same-site access from a
   // different physical lane still represents a distinct participant.
-  const auto current_kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
+  const auto current_kind = consan_moi_shadow_kind_from_access_kind(candidate.site().kind);
   if (current_kind != ConSanMoiShadowAccessKind::Write) {
     sequence.append(
         instrumentation::build_v_and_b32_literal(
@@ -1671,7 +1671,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     return std::nullopt;
   }
 
-  const auto &access_ranges = candidate.ranges;
+  const auto &access_ranges = candidate.site().ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires a supported LDS access range");
     return std::nullopt;
@@ -1729,7 +1729,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
         inline_shadow_loop_scratch_count(candidate));
   }
 
-  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
+  const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.site().kind);
   const uint32_t low_literal = static_cast<uint32_t>(kind);
   const uint32_t high_literal =
       static_cast<uint32_t>((candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
@@ -1825,7 +1825,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   }
   if (materialize_flat_address) {
     if (!append_materialize_flat_access_address(words, candidate,
-                                                *candidate.lowering.form->address_vgpr,
+                                                *candidate.site().lowering.form->address_vgpr,
                                                 *lds_byte_offset_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT address");
       return std::nullopt;
@@ -1897,8 +1897,8 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     words.insert(words.end(), accounting_words.begin(), accounting_words.end());
     words.push_back(*restore_valid_exec);
   }
-  if (candidate.container.is_kernel() && candidate.is_flat() &&
-      candidate.flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
+  if (candidate.site().container.is_kernel() && candidate.is_flat() &&
+      candidate.site().flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
     // Likely provenance deliberately admits flat sites whose static dataflow
     // cannot prove one aperture. Resolve that uncertainty with the same high
     // address comparison used by hardware: a 32-bit SHARED_BASE source is the
@@ -1907,7 +1907,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     uint16_t address_hi_source =
         materialize_flat_address
             ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
-            : static_cast<uint16_t>(*candidate.lowering.form->address_vgpr + 1u);
+            : static_cast<uint16_t>(*candidate.site().lowering.form->address_vgpr + 1u);
     if (!materialize_flat_address && source_is_spilled(address_hi_source)) {
       const uint16_t recovered_address_hi = static_cast<uint16_t>(scratch_vgpr + 1u);
       const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
@@ -2293,8 +2293,9 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   }
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
-  const uint16_t guest_address_vgpr =
-      capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
+  const uint16_t guest_address_vgpr = capture_high_bank_address
+                                          ? *candidate.site().lowering.form->address_vgpr
+                                          : *lds_byte_offset_vgpr;
   if (!append_moi_relocated_guest_access(
           words, bytes, candidate, target, guest_address_vgpr,
           reserve_two_address_replay_scratch
