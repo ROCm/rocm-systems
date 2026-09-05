@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
+#include <cstdint>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
@@ -35,6 +36,8 @@ THE SOFTWARE.
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -51,10 +54,13 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
+// -1 = unset: fall back to the per-arch default (see rcclCeAllReduceEnabled).
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", -1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
-RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
+RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_MAX_MSG_BYTES", -1);     // -1 = use ceArMax (2-shot)
+RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
 
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
@@ -64,14 +70,33 @@ RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 // Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
 // enable flag (or its threshold) to 0 disables that tier and falls through to
 // the next, so each protocol can be A/B'd in isolation at runtime.
+//
+// The three thresholds default to kDdaThresholdUnset (-1) rather than to their
+// sizes: 0 is a meaningful setting (disable the tier), so "unset" needs a value
+// of its own for the arch tables to be able to supply a default. Read them
+// through rcclDda{LL,LL128,Vmm}Threshold(), which resolve unset against this
+// comm's arch table and yield 0 (no DDA) for arches that have none.
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
-RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
+// When set, bypass the per-arch tuning table entirely and use base-commit
+// env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
+// isolating arch-table effects without rebuilding.
+RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
+// Returns true when the user has restricted the algorithm set via NCCL_ALGO.
+// When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
+// Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
+bool rcclNcclAlgoEnvIsSet() {
+  static int cached = -1;
+  if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;
+  return cached == 1;
+}
+
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -143,7 +168,8 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
         info->protocol = NCCL_PROTO_SIMPLE;
       }
     }
-  } else if (!userProtocolInput && comm->nNodes >= 2 &&
+  } else if (!userProtocolInput &&
+             (comm->nNodes >= 2 || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
               info->func == ncclFuncAllReduce || info->func == ncclFuncBroadcast || info->func == ncclFuncReduce)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
@@ -212,6 +238,10 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
+    INFO(NCCL_TUNING, "RCCL Channel Tuning not applied for gfx1250 (pending sweep data, AICOMRCCL-1756)");
+    return ncclSuccess;
+  }
   if (comm->nNodes < 2 || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
     return ncclSuccess;
@@ -461,6 +491,15 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
+  // AlltoAll has no tuned ring/tree kernel: taskAppend() splits it into per-peer
+  // Send/Recv over the p2p channels, so report that shape. The backend-aware
+  // answer (DDA / CE / pivot for these operands) comes from rcclGetCollImplInfo().
+  if (coll == ncclFuncAlltoAll) {
+    *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
+    *protocol = NCCL_PROTO_SIMPLE;
+    *maxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
   struct ncclTaskColl task = {};
   task.func = coll;
   task.count = count;
@@ -483,11 +522,11 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
 
-  // AllReduce and AllGather are wired to the unified decision. They return the
-  // actual backend (CE / DDA / symmetric / kernel) for these operands so
-  // rccl-tests can label numbers with the implementation that ran. graphCapturing
-  // lets the caller declare graph mode, which the (out-of-capture) query cannot
-  // detect on its own -- see the header comment.
+  // AllReduce, AllGather, ReduceScatter, and AlltoAll are wired to the unified
+  // decision. They return the actual backend (CE / DDA / symmetric / kernel) for
+  // these operands so rccl-tests can label numbers with the implementation that
+  // ran. graphCapturing lets the caller declare graph mode, which the
+  // (out-of-capture) query cannot detect on its own -- see the header comment.
   if (coll == ncclFuncAllReduce) {
     struct rcclCollDecision decision;
     NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*stream=*/nullptr,
@@ -500,8 +539,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncAllGather) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true,
-                                  /*graphCapturingHint=*/graphCapturing != 0, &decision));
+    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                  /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -512,6 +551,16 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     struct rcclCollDecision decision;
     NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
                                       &decision));
+    *algo = decision.algo;
+    *protocol = decision.protocol;
+    *maxChannels = decision.nMaxChannels;
+    return ncclSuccess;
+  }
+
+  if (coll == ncclFuncAlltoAll) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                 /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -599,6 +648,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DIRECT_REDUCESCATTER:
       *algoName = "Direct";
       break;
+    case rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL:
+      *algoName = "Direct";
+      break;
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
       *algoName = "Hier";
       break;
@@ -616,6 +668,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_CE_REGISTERED:
       *algoName = "CE";
       break;
+    case rcclAddonAlgos_t::RCCL_CE_SCRATCH:
+      *algoName = "CE-Scratch";
+      break;
     // Fabric variants all report "DDA"; the protocol column distinguishes
     // LL / LL128 / Simple, so the name needn't repeat it.
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL:
@@ -625,6 +680,15 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       break;
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_PIVOT:
+      *algoName = "A2A-Pivot";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_GDA:
+      *algoName = "A2A-GDA";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
+      *algoName = "A2A-GIN";
       break;
     default:
       WARN("Invalid algorithm value: %d", algo);
@@ -645,21 +709,264 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
+namespace {
+// This comm's arch table, or NULL when the arch has no DDA tuning at all.
+// comm->archThresholds is populated at init; the lookup covers comms assembled
+// by hand (unit tests) so they resolve exactly like production ones.
+inline const rcclArchThresholds* ddaArchTable(const ncclComm* comm) {
+  if (comm == nullptr) return nullptr;
+  if (rcclParamIgnoreArchTable()) return nullptr;
+  return comm->archThresholds != nullptr ? comm->archThresholds : rcclGetArchThresholds(comm->archName);
+}
+
+// kDdaThresholdUnset means the user left the env var alone; anything else is
+// their choice and wins, including 0 to disable that tier.
+inline bool ddaThresholdFromEnv(int64_t param, size_t* threshold) {
+  if (param == kDdaThresholdUnset) return false;
+  *threshold = param > 0 ? (size_t)param : 0;
+  return true;
+}
+
+// Table entry for `func`. Collectives past AlltoAll have no slot and stay 0.
+inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
+  return (unsigned)func < RCCL_DDA_FUNC_COUNT ? caps[func] : 0;
+}
+
+// R2 symmetric-kernel size cap. Graph capture uses symMaxR2Graph; eager uses
+// symMaxR2. 0 means do not suppress symk (CE cannot win under capture).
+inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
+  return ddaThresholdFromTable(caps, func);
+}
+} // namespace
+
+size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
+  if (param >= 0) return (size_t)param;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
+}
+
+size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
+}
+
+size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+  const int64_t param = rcclParamCeArMaxMsgBytes();
+  if (param >= 0) return (size_t)param;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  // Null table (unknown arch or RCCL_IGNORE_ARCH_TABLE): restore the pre-table
+  // 256 MiB 2-shot window, which matches the default staging allocation. A
+  // present table with 0 means 2-shot is tuned off (gfx1250).
+  if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
+  return table->ceNonRegMax[ncclFuncAllReduce];
+}
+
+// CE AllReduce is only tuned on gfx1250, so it is default-on there and stays off
+// everywhere else. Without this gate the arch tables for gfx942/gfx950 (which set
+// ceNonRegMax[AR] = 256 MiB) would let unregistered 2-shot, and -- via force --
+// registered CE, service AllReduce on arches that were never measured for it.
+static bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
+  return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
+}
+
+bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+  const int64_t param = rcclParamCeAllReduce();
+  if (param >= 0) return param != 0;
+  return rcclCeAllReduceArchDefault(comm);
+}
+
+bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+  const int64_t param = rcclParamForceCeAllReduce();
+  if (param >= 0) return param != 0;
+  return rcclCeAllReduceArchDefault(comm);
+}
+
+size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
+}
+
+bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
+                                     bool graphMode) {
+  // CE-registered copies through the user's symmetric windows, so recv must be registered.
+  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
+  if (!recvRegistered) return false;
+  // symMaxR2[AG] is the symk/CE crossover: at or below it the symmetric kernel keeps
+  // the message. 0 means never withdraw symk, same convention as AllReduce.
+  const size_t symMax = rcclSymMaxR2Cap(comm, ncclFuncAllGather, graphMode);
+  if (symMax == 0 || totalBytes <= symMax) return false;
+  const size_t regMax = rcclCeRegMax(comm, ncclFuncAllGather);
+  return regMax == 0 || totalBytes <= regMax;
+}
+
+// Keep old name as a shim for callers that have not been updated yet.
+size_t rcclCeArRegisteredMax(const ncclComm* comm) {
+  return rcclCeRegMax(comm, ncclFuncAllReduce);
+}
+
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return kDdaLLBaseDefault;
+  return ddaThresholdFromTable(table->ddaLLMax, func);
+}
+
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return kDdaLL128BaseDefault;
+  return ddaThresholdFromTable(table->ddaLL128Max, func);
+}
+
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return kDdaVmmBaseDefault;
+  return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+
+// Widest window any enabled DDA tier can serve for this collective. The entry
+// gate only decides whether the per-tier checks run, so a tier tuned off (0)
+// must not hide the tiers that are still on: gfx1250 ReduceScatter has
+// ddaVmmMax = 0 with non-zero LL/LL128 caps, and ddaLL128Max[AllReduce]
+// (32 MiB) sits above ddaVmmMax[AllReduce] (16 MiB). RCCL_DDA_LL /
+// RCCL_DDA_LL128 = 0 drop their tier so disabling one cannot widen the gate.
+// Each tier still applies its own cap at the call site, including the VMM/IPC
+// branch, which checks rcclDdaVmmThreshold() there.
+size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t cap = rcclDdaVmmThreshold(comm, func);
+  if (rcclParamDdaLL()) cap = std::max(cap, rcclDdaLLThreshold(comm, func));
+  if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128Threshold(comm, func));
+  return cap;
+}
+
+size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
+  size_t cap = 0;
+  auto bump = [&](size_t v) {
+    if (v > cap) cap = v;
+  };
+  auto scaleRs = [&](size_t v, int func) -> size_t {
+    if (v == 0) return 0;
+    if (func != (int)ncclFuncReduceScatter) return v;
+    const size_t nRanks = (comm != nullptr && comm->nRanks > 0) ? (size_t)comm->nRanks : 1;
+    if (nRanks > 1 && v > SIZE_MAX / nRanks) return SIZE_MAX;
+    return v * nRanks;
+  };
+
+  size_t env = 0;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &env)) bump(env);
+  if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &env)) bump(env);
+  if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &env)) bump(env);
+
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) {
+    // Same pre-table defaults rcclDda{LL,LL128,Vmm}Threshold return when the
+    // table is ignored, so fabric scratch covers any DDA path the selector
+    // can still pick. Env, when set (including 0 to disable a tier), already
+    // won above and is not replaced.
+    size_t unused;
+    if (!ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused)) bump(kDdaLLBaseDefault);
+    if (!ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &unused)) bump(kDdaLL128BaseDefault);
+    if (!ddaThresholdFromEnv(rcclParamDdaThreshold(), &unused)) bump(kDdaVmmBaseDefault);
+    return cap;
+  }
+
+  for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
+    bump(scaleRs(table->ddaLLMax[i], i));
+    bump(scaleRs(table->ddaLL128Max[i], i));
+    bump(scaleRs(table->ddaVmmMax[i], i));
+    bump(scaleRs(table->ddaVmmMaxR2[i], i));
+    // Graph VMM is included even for eager-only processes: one buffer must
+    // fit a later capture (gfx1250 AR graph cap is 256 MiB).
+    bump(scaleRs(table->ddaVmmMaxGraph[i], i));
+    // AG CE-Scratch (and any other non-AR CE-scratch) copies the receive into
+    // ddaScratch, so that window must fit. AR 2-shot uses ceARTmpBuf.
+    if (i != (int)ncclFuncAllReduce) bump(scaleRs(table->ceNonRegMax[i], i));
+  }
+  return cap;
+}
+
+// Context-aware VMM threshold resolver.  Callers pass the full winRegType so
+// the function can apply the correct override without the caller having to
+// interpret registration semantics.  Policy: only recv registration shifts the
+// DDA VMM cap (send-only registration does not change DDA/CE dispatch).
+// When the recv buffer is registered (ncclSymSendNonregRecvReg or
+// ncclSymSendRegRecvReg) and the arch table has a non-zero R2 override for
+// this collective, that cap wins over the default ddaVmmMax.
+// When inside a graph capture (graphMode=true) and the table has a non-zero
+// graph-mode override, that cap wins.  Graph-mode is checked first.
+// Env var (RCCL_DDA_THRESHOLD) always wins over all context variants.
+size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
+                               ncclSymRegType_t winRegType, bool graphMode) {
+  // Env var wins unconditionally -- same as rcclDdaVmmThreshold().
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return kDdaVmmBaseDefault;
+  // Graph-mode override: CE AR is blocked during captures; let DDA extend further.
+  if (graphMode) {
+    size_t graphCap = ddaThresholdFromTable(table->ddaVmmMaxGraph, func);
+    if (graphCap != 0) return graphCap;
+  }
+  // R2 override: recv buffer registered; only recv registration shifts the cap.
+  const bool recvReg = (winRegType == ncclSymSendNonregRecvReg ||
+                         winRegType == ncclSymSendRegRecvReg);
+  if (recvReg) {
+    size_t r2Cap = ddaThresholdFromTable(table->ddaVmmMaxR2, func);
+    if (r2Cap != 0) return r2Cap;
+  }
+  return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+
+// Apply the per-size unroll factor from the arch table for `func` and `msgBytes`.
+// Sets comm->unroll to the matching breakpoint entry.  No-op when:
+//  - the arch table is absent (unknown arch),
+//  - the map pointer for this collective is null (not yet tuned),
+//  - or the user set RCCL_UNROLL_FACTOR explicitly (env override takes priority).
+// Call this at the start of each *_impl() function before the DDA/CE dispatch
+// so that later branches that return early (DDA) still pick up the right unroll.
+void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
+  // Env override (RCCL_UNROLL_FACTOR != -1) wins -- leave comm->unroll alone.
+  if (rcclParamUnrollFactor() != -1) return;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return;
+  const rcclArchThresholds::rcclUnrollEntry* map = nullptr;
+  switch (func) {
+    case ncclFuncAllReduce:      map = table->unrollMapAR;  break;
+    case ncclFuncAllGather:      map = table->unrollMapAG;  break;
+    case ncclFuncReduceScatter:  map = table->unrollMapRS;  break;
+    case ncclFuncAlltoAll:       map = table->unrollMapA2A; break;
+    default: break;
+  }
+  if (map == nullptr) return;
+  // Walk the breakpoint table; first entry with maxBytes >= msgBytes wins.
+  for (int i = 0; ; ++i) {
+    if (msgBytes <= map[i].maxBytes) {
+      comm->unroll = map[i].unrollIdx;
+      return;
+    }
+    if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
+  }
+}
+
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
-  size_t threshold;
   if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
+    // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
     if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
-    }
   } else {
     return false;
   }
@@ -763,15 +1070,16 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc) {
-  static int enabled = rcclParamCeAllReduce();
-  static int force = rcclParamForceCeAllReduce();
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        const void* acc) {
+  const bool enabled = rcclCeAllReduceEnabled(comm);
+  const bool force = rcclForceCeAllReduceEnabled(comm);
   if (!enabled) {
     // Log once per process, not on every eligibility check (called per AllReduce).
     static bool warnedDisabled = false;
     if (!warnedDisabled) {
       warnedDisabled = true;
-      INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+      INFO(NCCL_INIT, "CE AllReduce not enabled on %s. Set RCCL_CE_ALLREDUCE=1 to enable.", comm->archName);
     }
     return false;
   }
@@ -796,19 +1104,13 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
     return false;
   }
 
-  // Total message must fit within the pre-allocated staging buffer.
+  // 2-shot selector cap (table/env). 0 means 2-shot is tuned off; registered CE
+  // still uses the default ceARTmpBuf. Does not override the allocated buffer:
+  // ncclCeInit grows ceArMaxBytes when this cap is larger than the default.
+  const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+  if (twoShotMax == 0) return false;
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (force) {
-    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
-           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
-      return false;
-    }
-  }
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
-    return false;
-  }
+  if (msgBytes > twoShotMax) return false;
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
@@ -870,13 +1172,47 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->nMaxChannels = 0;
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAllReduce;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = count;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncAllReduce, count, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
 
-  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
-  // as the pre-refactor collectives.cc path did.
-  const bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum,
-                                                                         datatype, count, sendbuff, recvbuff);
+  // Symmetric-window lookup hoisted ahead of the symk signals: winRegType is needed
+  // for the symMaxR2 gate below, and the lookup is unconditional regardless, so
+  // pulling it up eliminates the redundant ncclDevrFindWindow inside
+  // isSymmetricKernelRequested when symk turns out to be requested.
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  const bool hasSysmemSegment =
+    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
 
-  // (2) CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
+  // CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
+  // Probed before the symMaxR2 gate so graph mode can pick symMaxR2Graph.
   //  - Live dispatch (query=false): probe the real stream and tick the graph
   //    latch, exactly as the inline code did.
   //  - Reporting (query=true): the query runs outside capture, so the stream
@@ -898,62 +1234,84 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->ceCapturing = ceCapturing;
   decision->ceArGraphAllowed = ceArGraphAllowed;
 
-  // Symmetric-window lookup, hoisted so CE 2-shot / DDA / CE-registered all share
-  // it. sendWin/recvWin drive winRegType and the sysmem-segment guard below.
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-  ncclSymRegType_t winRegType;
-  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
+  // symkRequested is the raw "symk would run for these operands" signal and keeps
+  // gating the CE 2-shot and DDA branches below, so registered buffers still reach
+  // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
+  // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
+  // choice once recv is registered and the message exceeds the CE/symk crossover
+  // size, letting CE-registered win instead.  0 means no suppression.
+  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
+                                winRegType == ncclSymSendNonregRecvReg);
+  const size_t symMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllReduce, ceCapturing);
+  const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
+  const bool symkRequested =
+    (op == ncclSum) &&
+    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+  const bool symEligible = symkRequested && !symSuppressedBySize;
+  INFO(NCCL_COLL,
+       "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedBySize=%d symEligible=%d symMaxR2=%zu",
+       (int)ceCapturing, (int)symkRequested, (int)symSuppressedBySize, (int)symEligible, symMaxR2);
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
-  const bool force = rcclParamForceCeAllReduce() != 0;
+  const bool force = rcclForceCeAllReduceEnabled(comm);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
                                   rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
 
-  // (3) Eager CE 2-shot (staging buffer). Requires !symEligible and an
+  // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
-  if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+  // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
+  // through the user windows via CE-registered, so they must not be diverted into
+  // the staging buffer just because symMaxR2 withdrew symk.
+  if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 
-  // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
-  // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
-  // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  // (4) DDA fast paths. Shared gate: !symkRequested on every arch, and either
+  // gfx1250 (fabric may run even if CE is also eligible) or CE is not going to
+  // service this call (!ceAllReduceAllowed), subject to rcclDdaEnabled -- all
+  // folded into the helper. Passes the raw symk signal for the same reason as
+  // (3): symMaxR2 chooses between symk and CE-registered, it does not hand
+  // registered operands to DDA.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  const size_t arDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symkRequested, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
+      const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+      const size_t arDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
+          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && msgBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && msgBytes <= arDdaLL128Max &&
           ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
         return ncclSuccess;
       }
-      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+          ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
         return ncclSuccess;
       }
     } else {
-      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+          ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_IPC;
         decision->nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
         return ncclSuccess;
@@ -963,19 +1321,23 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (5) Enqueue-bound backends: CE registered (Branch B) vs symmetric vs kernel.
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
-  // NOTE: CE registered wins over the symmetric kernel when both are eligible,
-  // matching taskAppend (its CE branch is not gated on symEligible; symmetric
-  // extraction only sees tasks that fall through to collTaskAppend).
-  //
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
   // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
   bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
+  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) ||
+      !rcclCeAllReduceEnabled(comm)) {
     ceAvailable = false;
   }
-  if (ceAvailable && !hasSysmemSegment && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  // Tuning cap only: registered CE has no staging allocation, so this does not
+  // size a buffer. 0 (or unset table) means no upper bound. Independent of the
+  // 2-shot selector (table/env cap, 0 = off). Independent of the allocated
+  // ceARTmpBuf size used by registered CE.
+  const size_t ceArRegMax = rcclCeRegMax(comm, ncclFuncAllReduce);
+  const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
+  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
+      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
@@ -984,7 +1346,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (symEligible) {
     decision->algo = RCCL_SYMMETRIC;
     // Reporting only: fill the symk protocol/channels that will actually run.
-    // Skipped on the live path (taskAppend recomputes and dispatches symk).
+    // Live path: collTaskAppend tags the task (symkExtract=1) so
+    // ncclMakeSymmetricTaskList honors this choice instead of re-deriving it.
     if (query) {
       int a, p, ch;
       if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
@@ -1029,7 +1392,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 // ncclAllGather_impl() (DDA) and rcclSelectAllGatherAlgo() (hierarchical / direct
 // / ring); the outcome for any given operands is identical.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
-                                 ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                 ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
@@ -1040,6 +1403,32 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
   size_t msgSize = totalBytes;
 
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAllGather;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = sendcount;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
+
   // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool symEligible =
@@ -1048,28 +1437,34 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  const size_t agDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllGather);
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
+      const size_t agDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllGather);
+      const size_t agDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllGather);
+      if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && msgSize <= agDdaLL128Max &&
           ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllGatherDdaFabricLL128Blocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
+          ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllGatherDdaFabricBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+    } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
+               ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
       decision->algo = RCCL_DDA_IPC;
       decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
       return ncclSuccess;
@@ -1120,11 +1515,22 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (3) CE AllGather. Mirrors taskAppend()'s live gates and outranks Direct, as
-  // taskAppend checks CE before the useDirect branch. Reporting only here; the
-  // live path re-decides and dispatches CE in taskAppend().
+  // CE is graph-unsafe. Probe only on the enqueue-bound path (after NCCL_ALGO /
+  // DDA / hierarchical returns). Live probes the stream; reporting uses
+  // graphCapturingHint. The CE AllReduce graph latch is not ticked here.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+  decision->ceCapturing = ceCapturing;
+
+  // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
+  // order. Live and query share these gates; taskAppend honors the decision.
   {
-    const bool ceCapturing = query ? graphCapturingHint : false;
     struct ncclDevrWindow* sendWin = nullptr;
     struct ncclDevrWindow* recvWin = nullptr;
     ncclDevrFindWindow(comm, sendbuff, &sendWin);
@@ -1132,38 +1538,45 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-    // Branch #2: FORCE_CE via DDA scratch (unregistered windows).
+    // Branch #2: CE via DDA scratch (unregistered windows).
+    // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
+    // [ceNonRegMin, ceNonRegMax] window from the arch table.  The scratch buffer
+    // must be large enough to hold the receive (ddaScratchBytes >= totalBytes).
     const bool ceScratch =
       !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (rcclParamForceCe() && ceScratch && winRegType != ncclSymSendRegRecvReg &&
-        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-        totalBytes <= (size_t)comm->ddaScratchBytes) {
-      decision->algo = RCCL_CE_REGISTERED;
+    const size_t agCeNonRegMax = rcclCeNonRegMax(comm, ncclFuncAllGather);
+    const size_t agCeNonRegMin = rcclCeNonRegMin(comm, ncclFuncAllGather);
+    const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
+                                   totalBytes >= agCeNonRegMin &&
+                                   totalBytes <= agCeNonRegMax;
+    if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
+        winRegType != ncclSymSendRegRecvReg &&
+        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment &&
+        comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
+      decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows.
+    // Branch #3: CE via registered symmetric windows. Taken either when the size
+    // falls in the (symMaxR2, ceRegMax] window from the arch table, or when
+    // CTAPolicy=ZERO forces CE for every size.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (ceAvailable && !hasSysmemSegment) {
+    if (ceAvailable && !hasSysmemSegment &&
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
+         rcclAllGatherCeRegisteredWindow(comm, totalBytes, winRegType, ceCapturing))) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+    // Hierarchical CE (multi-node). Same CTAPolicy=ZERO funnel as taskAppend.
+    if (!ceCapturing && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !hasSysmemSegment &&
+        ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
   }
 
-  // (3.5) Symmetric-window kernel. Reported only after CE-registered so it loses
-  // to CE exactly as dispatch does; on the live path taskAppend recomputes and
-  // the symmetric extraction downstream dispatches symk. Mirrors rcclSelectAllReduce.
-  if (query && symEligible) {
-    int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-      decision->algo = a;
-      decision->protocol = p;
-      decision->nMaxChannels = ch;
-      return ncclSuccess;
-    }
-  }
-
-  // (4) Direct AllGather (per-peer Send/Recv).
+  // (4) Direct AllGather (per-peer Send/Recv). Beats symmetric extraction: live
+  // dispatch posts P2P tasks and never reaches ncclMakeSymmetricTaskList.
   if (rcclUseAllGatherDirect(comm, msgSize)) {
     decision->algo = RCCL_DIRECT_ALLGATHER;
     decision->protocol = NCCL_PROTO_SIMPLE;
@@ -1171,7 +1584,22 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (5) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
+  // (5) Symmetric-window kernel. After CE and Direct so those keep their
+  // previous live priority. Live must return RCCL_SYMMETRIC (not only query)
+  // so collTaskAppend can set symkExtract=1 once decisionValid is true.
+  if (symEligible) {
+    decision->algo = RCCL_SYMMETRIC;
+    if (query) {
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+    }
+    return ncclSuccess;
+  }
+
+  // (6) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
   // path recomputes these in taskAppend(), so only the query needs them.
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
@@ -1215,34 +1643,68 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
   const size_t rsShardBytes = recvcount * typeSize;
 
-  // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA IPC / Direct here.
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncReduceScatter;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = recvcount;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncReduceScatter, recvcount, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
+
+  // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
   const bool symEligible =
     (op == ncclSum || op == ncclAvg) &&
     isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                datatype, recvcount, sendbuff, recvbuff);
 
-  // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
-  // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
+  // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
+  // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  const size_t rsDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncReduceScatter);
+  if (!symEligible &&
+      rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
-      if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
+      const size_t rsDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
+      const size_t rsDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncReduceScatter);
+      if (rcclParamDdaLL() && rsShardBytes <= rsDdaLLMax &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && rsShardBytes <= rsDdaLL128Max &&
           ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         return ncclSuccess;
       }
-      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      // ddaVmmMax[RS] = 0 on gfx1250 keeps this tier off while LL/LL128 run.
+      if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
+          ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         return ncclSuccess;
       }
-    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+    } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
+               ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
       decision->algo = RCCL_DDA_IPC;
       return ncclSuccess;
     }
@@ -1313,6 +1775,170 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     decision->algo = task.algorithm;
 #endif
   }
+  return ncclSuccess;
+}
+
+// Single source of truth for AlltoAll implementation selection. Runs the full
+// priority chain (Pivot -> GDA -> DDA LL/LL128/VMM/IPC -> CE registered ->
+// HierCE -> CE scratch -> Direct p2p) and returns the decision.
+//   query=false : live dispatch path (ncclAlltoAll_impl). ceCapturing is probed
+//                 from `stream`; graphCapturingHint is ignored.
+//   query=true  : side-effect-free reporting for rcclGetCollImplInfo. The stream
+//                 is not probed; graphCapturingHint supplies capture so CE is
+//                 reported as skipped.
+ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
+                                struct rcclCollDecision* decision) {
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  const size_t typeSize = ncclTypeSize(datatype);
+  const size_t rankOffset = count * typeSize;           // bytes per peer
+  const size_t totalBytes = comm->nRanks * rankOffset;  // total message bytes
+
+  // (1) Pivot: large, cache-line-aligned messages on pivot-enabled comms.
+  const size_t rankAlign = rankOffset & ((~rankOffset) + 1);
+  if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
+      rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
+    decision->algo = RCCL_A2A_PIVOT;
+    // Pivot is a ring kernel over the collective channels, not p2p Send/Recv, so
+    // ask the tuner the way the live path does: taskAppend() rewrites the task to
+    // a per-peer byte count on ncclInt8 before getAlgoInfo() sees it. The kernel
+    // is only specialized for RING/SIMPLE, so the protocol default stands.
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAlltoAllPivot;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = rankOffset;
+      task.datatype = ncclInt8;
+      NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1));
+      decision->nMaxChannels = rcclKernelPackedChannels(comm, ncclFuncAlltoAllPivot, rankOffset, ncclInt8,
+                                                        decision->protocol, task.nMaxChannels);
+    }
+    return ncclSuccess;
+  }
+
+  // (2) GDA (RocSHMEM) path.
+#ifdef ENABLE_ROCSHMEM
+  {
+    size_t msgSize = totalBytes;
+    if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
+      decision->algo = RCCL_A2A_GDA;
+      decision->nMaxChannels = 1;  // getAlgoInfo() pins the GDA kernels to one channel
+      return ncclSuccess;
+    }
+  }
+#endif
+
+  // GIN LSA/SDMA is checked before DDA so an eligible call takes this path even
+  // below the DDA threshold (parity or better on small sizes).
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    decision->algo = RCCL_A2A_GIN_SDMA;
+    return ncclSuccess;
+  }
+#endif
+
+  // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
+  const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
+  if (rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll))) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      const size_t llThresh   = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
+      const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
+      if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
+          ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        decision->nMaxChannels = ncclAllToAllDdaFabricLLBlocks(comm, count, datatype);
+        return ncclSuccess;
+      }
+      if (rcclParamDdaLL128() && ll128Thresh > 0 && totalBytes <= ll128Thresh &&
+          ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL128;
+        decision->protocol = NCCL_PROTO_LL128;
+        decision->nMaxChannels = ncclAllToAllDdaFabricLL128Blocks(comm, count, datatype);
+        return ncclSuccess;
+      }
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
+          ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_VMM;
+        decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);
+        return ncclSuccess;
+      }
+    } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
+               ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      decision->algo = RCCL_DDA_IPC;
+      decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
+      return ncclSuccess;
+    }
+  }
+
+  // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
+  // taskAppend honors this decision, so capture must be recorded here rather than
+  // re-probed at enqueue.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+  decision->ceCapturing = ceCapturing;
+
+  // (4) CE registered: single-node, symmetric-registered buffers, CTA_POLICY_ZERO.
+  // Live returns RCCL_CE_REGISTERED / RCCL_CE_SCRATCH and enqueues; taskAppend
+  // dispatches from that algo (mirroring rcclSelectAllGather).
+  if (!ceCapturing) {
+    // Probe real window registration on both paths so the reported decision and
+    // the dispatched one cannot disagree. The lookups are null-safe, so the
+    // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclSymRegType_t winRegType;
+    ncclDevrFindWindow(comm, sendbuff, &sendWin);
+    ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+
+    // (5) Hierarchical CE: multi-node, non-LSA-spanning.
+    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
+      decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
+      if (query) {
+        int a, p, ch;
+        NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+      return ncclSuccess;
+    }
+
+    // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
+    if (rcclParamForceCe() && comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, ncclSymSendNonregRecvNonreg)) {
+      decision->algo = RCCL_CE_SCRATCH;
+      return ncclSuccess;
+    }
+  }
+
+  // (7) Direct (p2p) fallback. AllToAll has no collective kernel: taskAppend()
+  // decomposes it into one Send and one Recv task per peer, which run Simple
+  // over the p2p channels -- the same shape rcclSelectAllGather reports as
+  // Direct, so it is named that way rather than Ring. The ring/tree tuning model
+  // has no AllToAll entry, so querying it would only invent an algorithm this
+  // collective never runs.
+  decision->algo = RCCL_DIRECT_ALLTOALL;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = comm->p2pnChannels;
   return ncclSuccess;
 }
 

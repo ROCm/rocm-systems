@@ -247,6 +247,12 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  // 0 = no selector opinion (extractor uses windows + ncclSymkAvailable).
+  // 1 = rcclSelect* chose RCCL_SYMMETRIC; extractor may take this task.
+  // -1 = selector chose a non-symk backend (ring/tree, Direct, ...). Do not
+  // extract: otherwise AllReduce above symMaxR2 still becomes symk when
+  // CE-registered does not fire. ncclMemoryPoolAlloc does not zero this.
+  int8_t symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
@@ -768,6 +774,10 @@ struct ncclComm {
   uint64_t minMaxChannelThresholds
     [RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES]
     [3]; // for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
+
+  // Per-arch DDA/CE dispatch thresholds â populated at comm init from rcclGetArchThresholds().
+  // NULL on architectures without a dedicated threshold table (falls back to env-var params).
+  const struct rcclArchThresholds* archThresholds;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */

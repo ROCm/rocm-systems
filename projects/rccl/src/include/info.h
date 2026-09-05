@@ -44,10 +44,12 @@ struct ncclInfo {
   unsigned int flags;
   int nDesc;
   ncclWaitSignalDesc_t* signalDescs;
-  // Implementation decision precomputed by ncclAllReduce_impl() via
-  // rcclSelectAllReduce() and consumed by taskAppend() to avoid recomputing the
-  // CE-vs-kernel choice and graph-capture state. Valid only when decisionValid
-  // is true (false for non-AllReduce collectives and the WithBias path).
+  // Implementation decision precomputed by ncclAllReduce_impl() /
+  // ncclAllGather_impl() / ncclReduceScatter_impl() / ncclAlltoAll_impl() via
+  // the matching rcclSelect*() and consumed by taskAppend() so it does not
+  // recompute CE-vs-kernel, graph-capture, or symmetric-vs-ring. Valid only
+  // when decisionValid is true (false for collectives that have not been wired
+  // yet, and the AllReduce WithBias path).
   struct rcclCollDecision decision;
   bool decisionValid;
 };

@@ -34,6 +34,10 @@ NCCL_PARAM(ElasticBufferRegister, "ELASTIC_BUFFER_REGISTER", 1);
 NCCL_PARAM(SymReuseSysmemHandles, "SYM_REUSE_SYSMEM_HANDLES", 0);
 NCCL_PARAM(RMADisable, "RMA_DISABLE", 0);
 
+// Defined in init.cc, where comm->symmetricSupport is derived from it. Window
+// registration honors the same opt-out (see ncclCommWindowRegister_impl).
+extern int64_t ncclParamWinEnable();
+
 // Elastic buffers back a symmetric window with CPU memory. Upstream uses the
 // host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
 // it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
@@ -1836,6 +1840,16 @@ ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, s
   if (userPtr == nullptr || userSize == 0) {
     WARN("%s: invalid pointer %p / size %zu", __func__, userPtr, userSize);
     return ncclInvalidArgument;
+  }
+
+  // RCCL: NCCL_WIN_ENABLE=0 opts out of window-backed paths, and the non-sym
+  // fallback taken when symmetricSupport is off cannot back cuMem/VMM buffers
+  // (cudaIpcGetMemHandle rejects them). Decline the registration instead of
+  // failing callers that register symmetric buffers unconditionally; their
+  // collectives then run on unregistered buffers.
+  if (!ncclParamWinEnable()) {
+    INFO(NCCL_INIT, "%s: NCCL_WIN_ENABLE=0, skipping registration of %p (%zu bytes)", __func__, userPtr, userSize);
+    return ncclSuccess;
   }
 
   if (!comm->symmetricSupport && !comm->hostRmaSupport) {

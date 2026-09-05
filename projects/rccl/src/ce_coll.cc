@@ -37,7 +37,6 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
-RCCL_PARAM_DECLARE(CeAllReduce);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -106,7 +105,14 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* arWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  // Staging capacity is independent of the 2-shot table cap. Always allocate
+  // the default so registered CE has a workspace; grow only when 2-shot asks
+  // for more than the default (table or RCCL_CE_AR_MAX_MSG_BYTES).
+  const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+  size_t stagingBytes = NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
+  if (twoShotMax > stagingBytes) stagingBytes = twoShotMax;
+  comm->ceColl.ceArMaxBytes = stagingBytes;
+  size_t maxChunkBytes = comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks;
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
@@ -170,7 +176,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // CE AllReduce staging buffer (double-buffered scatter staging, no scratch):
   //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
-  if (rcclParamCeAllReduce()) {
+  // Always allocated when CE AllReduce is enabled: registered CE pipelines
+  // through this buffer even when 2-shot is table-disabled (twoShotMax == 0).
+  if (rcclCeAllReduceEnabled(comm)) {
     NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                   ret, fail_ar);
@@ -1741,7 +1749,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   const size_t shardElems = count / comm->nRanks;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
@@ -2008,7 +2016,8 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
     break;
   case ncclFuncAllReduce:
       // CE init runs (in ncclCommGroupRegisterSymmetric) before doLaunches, so
-      // ceARTmpBuf is guaranteed non-NULL by the time we get here.
+      // ceARTmpBuf is allocated whenever RCCL_CE_ALLREDUCE is on -- including
+      // when 2-shot is table-disabled, because registered CE still stages here.
     if (comm->ceColl.ceARTmpBuf == NULL) {
       WARN("CE AllReduce invoked before CE init; this should not happen");
       ret = ncclInvalidUsage;

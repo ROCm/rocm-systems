@@ -1003,9 +1003,106 @@ static struct tuningModel tuning_model_9{
   },
 };
 
+
+// tuning_model_10: gfx1250 fabric (MNNVL topology).
+// Tuned from 8_29_runs_develop (Helios) AllReduce/AllGather/ReduceScatter sweep (AICOMRCCL-1756).
+static struct tuningModel tuning_model_10{
+  .hwLat =
+    {
+      /* NVLINK */
+      {/* Tree (LL/LL128/Simple)*/ {0.9, 0.9, 2.3}, /* Ring (LL/LL128/Simple)*/ {0.8, 0.8, 2.1},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 0.9}, /* CollNetChain (Simple)*/ {0.0, 0.0, 0.0}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* PCI */
+      {/* Tree (LL/LL128/Simple)*/ {2.2, 2.2, 5.7}, /* Ring (LL/LL128/Simple)*/ {2.2, 2.2, 5.7},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 5.7}, /* CollNetChain (Simple)*/ {0.0, 0.0, 5.7}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 5.7}},
+      /* NET */
+      {/* Tree (LL/LL128/Simple)*/ {10.5, 10.5, 25.0}, /* Ring (LL/LL128/Simple)*/ {9.5, 9.5, 320.0},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 10.5}, /* CollNetChain (Simple)*/ {0.0, 0.0, 0.0}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 320.0}},
+    },
+  .bwRatio =
+    {
+      /* 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.06, 0.06, 0.11}, /* Ring (LL/LL128/Simple)*/ {0.08, 0.08, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* more than 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.06, 0.06, 0.59}, /* Ring (LL/LL128/Simple)*/ {0.08, 0.08, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 1.00}},
+    },
+  // Correction factors derived from 8_29 (Helios) AllReduce sweep, R=0 G=0.
+  // Index i = log2(nBytes/64): [0..3]=<1KB [4]=1KB [8]=16KB [11]=128KB [13]=512KB
+  // [14]=1MB [15]=2MB [16]=4MB [17]=8MB [21]=128MB [22]=256MB [26]=4GB+
+  // LL:   Tree wins 0-512KB (idx 0-13), Ring wins 1MB-4MB (idx 14-16)
+  // LL128: Tree wins 1MB-2MB (idx 14-15), Ring wins 4MB-128MB (idx 16-21)
+  // Simple: Ring wins 256MB+ (idx 22-26)
+  // Values >1.0 boost, <1.0 suppress. 2.0=clear winner, 0.5=loser.
+  .treeCorrectionFactor =
+    {
+      {2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,},
+    },
+  .ringCorrectionFactor =
+    {
+      {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,},
+    },
+  .llProtoRanges =
+    {
+      // sizePerRank = totalBytes / nRanks (4 ranks default on gfx1250).
+      // Breakpoints from 8_29 (Helios) sweep data.
+      /*ReduceScatter*/
+      // RS ≤4MB total handled by DDA; Ring kicks in above. For Ring proto selection:
+      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 64MB/rank (=256MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 2097152, 1, 64}},
+      /*AllGather*/
+      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 32MB/rank (=128MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 33554432, 1, 64}},
+      /*AllReduce*/
+      // LL  wins 0 – 128KB/rank (=512KB total); LL128 wins 128KB – 32MB/rank (=128MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {131072, 33554432, 3145728, 0}},
+      /*Reduce*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {16383, 16777216, 1, 0}},
+      /*Broadcast*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 2048, 1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {2048, 16777216, 1, 0}},
+    },
+  .channelThresholds = {
+    /*ReduceScatter*/ {{512, 1024, 2},
+                       {1024, 2048, 4},
+                       {2048, 4096, 8},
+                       {4096, 65536, 16},
+                       {65536, 262144, 32},
+                       {262144, 524288, 40},
+                       {524288, 1048576, 48},
+                       {1048576, 2097152, 56},
+                       {2097152, 268435457, 64}},
+    /*AllGather*/
+    {{2048, 4096, 2},
+     {4096, 8192, 4},
+     {8192, 16384, 8},
+     {16384, 262144, 16},
+     {262144, 524288, 32},
+     {524288, 1048576, 40},
+     {1, 1, 48},
+     {1048576, 4194304, 56},
+     {4194304, 268435457, 64}},
+    /*AllReduce*/ {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+  },
+};
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
   tuning_model_5, tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9,
+  tuning_model_10,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1631,17 +1728,230 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   return ncclSuccess;
 }
 
+// Per-arch DDA/CE dispatch threshold tables.
+// DDA arrays: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4,
+//              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
+// AR/AG/A2A compare total message bytes; RS compares rsShardBytes (per-rank recv).
+
+// ---- gfx1250 per-size unroll breakpoints (AICOMRCCL-1756 placeholders) -------
+// Format: {maxBytes, unrollIdx}. First entry where maxBytes >= msgBytes wins.
+// NCCL_UNROLL_1=0, NCCL_UNROLL_2=1, NCCL_UNROLL_4=2, NCCL_UNROLL_8=3,
+// NCCL_UNROLL_16=4, NCCL_UNROLL_32=5. Terminal entry uses SIZE_MAX.
+// Default unroll on gfx1250 is UNROLL_32 (set by commSetUnrollFactor).
+static const rcclArchThresholds::rcclUnrollEntry kUnrollAR_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, latency-bound)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring/CE, bandwidth-bound)
+};
+static const rcclArchThresholds::rcclUnrollEntry kUnrollAG_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (CE/Ring)
+};
+static const rcclArchThresholds::rcclUnrollEntry kUnrollRS_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, per-rank shard)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring)
+};
+
+// gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
+// Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
+static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
+  // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
+  .ddaLLMax = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
+    4ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
+    16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    64ULL*1024,         // [8] AlltoAll        -- 2MiB KiB total 
+  },
+  // ddaLL128Max: DDA LL128 tier ceiling per collective.
+  // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
+  .ddaLL128Max = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    512ULL*1024,         // [2] AllGather       -- 512 KiB (kernel hard cap kDdaLL128AgMaxPerRankBytes)
+    512ULL*1024,            // [3] ReduceScatter   -- 512 KiB per-rank (kernel hard cap kDdaLL128RsMaxBytes; DDA/LL covers above)
+    32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    1ULL*1024*1024,      // [8] AlltoAll        -- 128 MiB total 
+  },
+  // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
+  // Messages above this fall to Ring/CE (or sym kernel for R2).
+  .ddaVmmMax = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (DDA wins <=1M; Ring LL128 wins 4M-32M, Ring Simple 64M-128M)
+    0,                   // [3] ReduceScatter   -- 0 = disabled; Ring/LL128 wins 8M-128M, Ring/Simple above
+    16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
+  },
+  // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
+  // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
+  // gfx1250 fabric; R2 sum/avg never takes DDA. A non-zero entry only shortens
+  // DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
+  .ddaVmmMaxR2 = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
+    0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
+    1ULL*1024*1024,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- no R2-specific override (use 4 MiB)
+  },
+  // ddaVmmMaxGraph: DDA VMM cap during graph capture (graphCapturingHint=true).
+  // CE AllReduce is blocked by graphModeSeen latch during graph captures.
+  // Extending DDA VMM for AR lets DDA fill the window CE would otherwise absorb.
+  // 0 means use ddaVmmMax (no graph-specific override for that collective).
+  .ddaVmmMaxGraph = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- no graph-specific override (placeholder)
+    0,                   // [3] ReduceScatter   -- no graph-specific override (placeholder)
+    256ULL*1024*1024,    // [4] AllReduce       -- extend to 256 MiB in graph mode (CE blocked)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- no graph-specific override
+  },
+  // ceNonRegMin: lower bound for CE-Scratch window per collective.
+  // AG: CE-Scratch wins 8-32 MiB; Ring/LL is faster below 8 MiB.
+  // AR: no lower bound today -- rcclUseCeAllReduce() only enforces the upper cap,
+  // so 2-shot covers everything up to ceNonRegMax[AR] once CE AllReduce is enabled.
+  .ceNonRegMin = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    8ULL*1024*1024,       // [2] AllGather       -- CE-Scratch fires above 8 MiB (Ring/LL wins below)
+    0,                    // [3] ReduceScatter   -- not used
+    0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAllReduce, not this gate
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // ceNonRegMax: upper bound for CE-Scratch window per collective.
+  // AG: CE-Scratch exits at 32 MiB; Ring/LL128 wins above.
+  // AR: 2-shot selector cap only (0 = 2-shot off). ceARTmpBuf stays at the
+  // default 256 MiB unless this entry is larger.
+  .ceNonRegMax = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    32ULL*1024*1024,      // [2] AllGather       -- CE-Scratch upper bound 32 MiB
+    0,                    // [3] ReduceScatter   -- not used
+    0,                    // [4] AllReduce       -- 2-shot off (staging stays at default 256 MiB)
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // ceRegMax: registered CE upper bound per collective.
+  // AG: 8 GiB cap for registered CE; the lower edge is symMaxR2[AG] (0 = no upper bound).
+  // AR: 8 GiB cap for registered CE (copies through user symmetric windows).
+  .ceRegMax = {
+    0,                             // [0] Broadcast      -- not used
+    0,                             // [1] Reduce          -- not used
+    8ULL*1024*1024*1024,           // [2] AllGather       -- 8 GiB registered CE cap (R=2)
+    0,                             // [3] ReduceScatter   -- not used
+    8ULL*1024*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
+    0,                             // [5] SendRecv        -- not used
+    0,                             // [6] Send            -- not used
+    0,                             // [7] Recv            -- not used
+    0,                             // [8] AlltoAll        -- not used
+  },
+  // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
+  // msg > threshold.
+  // AR set to 256 KiB and AG to 4 MiB -- CE outperforms symk above these on gfx1250
+  // (tune from perf data). All other collectives: 0 (no suppression).
+  .symMaxR2 = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    4ULL*1024*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
+    0,                    // [3] ReduceScatter   -- no suppression (placeholder)
+    4ULL*1024*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // Graph capture: CE is blocked, so do not withdraw symk (0 = no suppression).
+  .symMaxR2Graph = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather       -- keep symk in graph mode
+    0,                    // [3] ReduceScatter   -- keep symk in graph mode
+    0,                    // [4] AllReduce       -- keep symk in graph mode (CE blocked)
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+
+  // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
+  .unrollMapAR  = kUnrollAR_gfx1250,
+  .unrollMapAG  = kUnrollAG_gfx1250,
+  .unrollMapRS  = kUnrollRS_gfx1250,
+  .unrollMapA2A = nullptr,               // AlltoAll unroll not yet tuned
+};
+
+// gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+static const rcclArchThresholds rcclArchThresholds_gfx950 = {
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
+  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+
+};
+
+// gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+static const rcclArchThresholds rcclArchThresholds_gfx942 = {
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
+  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+
+};
+
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
+  if (gcn == nullptr) return nullptr;
+  if (IsArchMatch(gcn, "gfx1250")) return &rcclArchThresholds_gfx1250;
+  if (IsArchMatch(gcn, "gfx950")) return &rcclArchThresholds_gfx950;
+  if (IsArchMatch(gcn, "gfx942")) return &rcclArchThresholds_gfx942;
+  return nullptr;
+}
+
 /**
  * takes gfx arch name as C-style string and returns a tuning index to
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1030", 0},
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 10}, {"gfx1030", 0},
     {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},  {"gfx1250", 10},
     {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 

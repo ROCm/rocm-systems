@@ -116,12 +116,12 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SmallMessageSingleChunk)
     // ncclCeAllReduce() only ever sees counts the eligibility gate accepted: an
     // exact multiple of nRanks, and no larger than the staging buffer.
     ASSERT_EQ(count % static_cast<size_t>(nRanks), 0u);
-    ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+    ASSERT_LE(count * sizeof(float), kCeArMaxMsgBytesDefault);
 
     const size_t shardElems = count / nRanks;
     const size_t shardBytes = shardElems * sizeof(float);
     const size_t slotChunkBytes =
-        ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+        ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
 
     // A shard this small fits one slot, so ncclCeAllReduce() sends it as a single
     // chunk and never enters the pipelined path.
@@ -132,7 +132,7 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SmallMessageSingleChunk)
 // The host scatter addresses staging slots in bytes (rank * slotChunkBytes) while
 // the reduce kernel addresses them in elements (rank * slotChunkElems). If those
 // two strides disagree by even one byte, every rank but rank 0 reduces shifted
-// data. NCCL_CE_AR_MAX_MSG_BYTES / nRanks only divides evenly for power-of-2 rank
+// data. kCeArMaxMsgBytesDefault / nRanks only divides evenly for power-of-2 rank
 // counts, so those were the only ones that used to work.
 TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
 {
@@ -142,13 +142,13 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
     for(int nRanks : rankCounts)
     {
         const size_t slotChunkBytes =
-            ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+            ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
         SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
 
         // Rank boundaries stay aligned for the kernel's 16B vector loads, and the
         // slots stay inside the buffer ncclCeInit() sized from the raw capacity.
         EXPECT_EQ(slotChunkBytes % 16, 0u);
-        EXPECT_LE(slotChunkBytes, ncclCeAllReduceMaxChunkBytes(nRanks));
+        EXPECT_LE(slotChunkBytes, ceAllReduceMaxChunkBytes(nRanks));
 
         for(size_t eltSize : elementSizes)
         {
@@ -162,18 +162,18 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SlotStridesAgreeForAnyRankCount)
 
 TEST_F(CeAllReduceEligibilityTest, ChunkLayout_LargeMessagePipelined)
 {
-    // A shard only spills past one slot when NCCL_CE_AR_MAX_MSG_BYTES / nRanks is
+    // A shard only spills past one slot when kCeArMaxMsgBytesDefault / nRanks is
     // not 16B-aligned, i.e. for a non-power-of-2 rank count at the message cap.
     constexpr int nRanks     = 6;
-    const size_t  shardElems = ncclCeAllReduceMaxChunkBytes(nRanks) / sizeof(float);
+    const size_t  shardElems = ceAllReduceMaxChunkBytes(nRanks) / sizeof(float);
     const size_t  count      = shardElems * nRanks;  // divisible by nRanks by construction
 
     // The gate would still accept this count, so the layout below is reachable.
-    ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+    ASSERT_LE(count * sizeof(float), kCeArMaxMsgBytesDefault);
 
     const size_t shardBytes = shardElems * sizeof(float);
     const size_t slotChunkBytes =
-        ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(nRanks));
+        ncclCeAllReduceSlotChunkBytes(ceAllReduceMaxChunkBytes(nRanks));
     ASSERT_GT(shardBytes, slotChunkBytes);
 
     // Same bookkeeping ncclCeAllReduce() does once it has picked a chunk size.
@@ -201,8 +201,8 @@ TEST_F(CeAllReduceEligibilityTest, MaxStagingBytesPerRank)
     for(int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24})
     {
         SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
-        EXPECT_LE(ncclCeAllReduceMaxChunkBytes(nRanks) * static_cast<size_t>(nRanks),
-                  static_cast<size_t>(NCCL_CE_AR_MAX_MSG_BYTES));
+        EXPECT_LE(ceAllReduceMaxChunkBytes(nRanks) * static_cast<size_t>(nRanks),
+                  kCeArMaxMsgBytesDefault);
     }
 }
 
@@ -241,7 +241,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
         {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (NCCL_CE_AR_MAX_MSG_BYTES / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
+         (kCeArMaxMsgBytesDefault / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
     };
 
     for(const auto& tc : cases)

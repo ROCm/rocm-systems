@@ -2668,4 +2668,114 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
     });
 }
 
+// Per-tier DDA caps: the arch table is the default, RCCL_DDA_* is the override.
+// Isolated because the env lookups behind these accessors are cached per process.
+TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx1250_NoEnv_UsesArchTable",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm.archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm.archThresholds, nullptr);
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce),
+                      comm.archThresholds->ddaLLMax[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce),
+                      comm.archThresholds->ddaLL128Max[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce),
+                      comm.archThresholds->ddaVmmMax[ncclFuncAllReduce]);
+        },
+        {});
+}
+
+TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx1250_EnvOverridesArchTable",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm.archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm.archThresholds, nullptr);
+
+            constexpr size_t llEnv    = 16384;
+            constexpr size_t ll128Env = 1048576;
+            constexpr size_t vmmEnv   = 4194304;
+            // Values differ from the table, so equality below can only come from the env.
+            ASSERT_NE(comm.archThresholds->ddaLLMax[ncclFuncAllReduce], llEnv);
+            ASSERT_NE(comm.archThresholds->ddaLL128Max[ncclFuncAllReduce], ll128Env);
+            ASSERT_NE(comm.archThresholds->ddaVmmMax[ncclFuncAllReduce], vmmEnv);
+
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), llEnv);
+            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), ll128Env);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), vmmEnv);
+        },
+        {{"RCCL_DDA_LL_THRESHOLD", "16384"},
+         {"RCCL_DDA_LL128_THRESHOLD", "1048576"},
+         {"RCCL_DDA_THRESHOLD", "4194304"}});
+}
+
+// An arch with no threshold table gets no DDA: nothing is invented for arches
+// DDA was never tuned for.
+TEST(RcclDdaTierThresholds, UntunedArch_NoEnv_NoThresholds)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "UntunedArch_NoEnv_NoThresholds",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
+            ASSERT_EQ(rcclGetArchThresholds(comm.archName), nullptr);
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), 0ul);
+            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), 0ul);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), 0ul);
+            EXPECT_FALSE(rcclDdaEnabled(&comm, 1024, rcclDdaVmmThreshold(&comm, ncclFuncAllReduce)));
+        },
+        {});
+}
+
+// A comm assembled without archThresholds (unit tests) still resolves through
+// its arch's table, including AlltoAll which has its own table slot.
+TEST(RcclDdaTierThresholds, NoAttachedTable_ResolvesViaArchName)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "NoAttachedTable_ResolvesViaArchName",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+            ASSERT_EQ(comm.archThresholds, nullptr);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
+
+            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            const rcclArchThresholds* table = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(table, nullptr);
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAlltoAll), table->ddaLLMax[ncclFuncAlltoAll]);
+            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAlltoAll), table->ddaLL128Max[ncclFuncAlltoAll]);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]);
+        },
+        {});
+}
+
+// A tier the env disables must stay disabled even though the table sets it.
+TEST(RcclDdaTierThresholds, Gfx1250_EnvZeroDisablesLlTier)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx1250_EnvZeroDisablesLlTier",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm.archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm.archThresholds, nullptr);
+            ASSERT_GT(comm.archThresholds->ddaLLMax[ncclFuncAllReduce], 0ul);
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), 0ul);
+        },
+        {{"RCCL_DDA_LL_THRESHOLD", "0"}});
+}
+
 } // namespace RcclUnitTesting

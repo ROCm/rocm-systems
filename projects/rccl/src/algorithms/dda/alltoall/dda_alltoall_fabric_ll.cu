@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace {
 
@@ -50,6 +51,14 @@ static inline int ddaLLA2ABlocksPerPeer(size_t perChunkBytes) {
   return (int)bpp;
 }
 
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
+// per-peer packet split; 256 threads/block.
+static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
+  const unsigned threads = 256;
+  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const void* sendbuff, void* recvbuff,
@@ -58,10 +67,10 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const int nRanks = comm->nRanks;
   const size_t perChunkBytes = count * sizeof(T);
 
-  const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
-  dim3 block(threads);
-  dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
+  auto gridBlock = ddaAllToAllFabricLLGeom(comm, perChunkBytes);
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
+  const int blocksPerPeer = (int)grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -129,6 +138,11 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   }
 
   return true;
+}
+
+uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllToAllFabricLLGeom(comm, count * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllToAllDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

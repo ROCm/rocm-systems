@@ -18,10 +18,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace {
 
 using nccl_dda_detail::DdaFabricBarrierState;
+
+// Single source of the launch geometry: grid/block for a byte payload. The
+// kernel is instantiated for int8_t, so `bytes` is the per-block element count.
+static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t bytes) {
+  return meta::comms::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
+}
 
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
@@ -39,9 +46,9 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     return ncclInvalidArgument;
   }
 
-  // Use the block cap chosen at init (barrier flag buffer is sized for it).
-  const int nBlocksMax = comm->ddaFabricMaxBlocks;
-  auto gridBlock = dda::common::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  // Use the block cap chosen at init (barrier flag buffer is sized for it);
+  // count is already the byte count (kernel instantiated for int8_t).
+  auto gridBlock = ddaAllToAllFabricGeom(comm, count);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -118,6 +125,11 @@ bool ncclAllToAllDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* r
   }
 
   return true;
+}
+
+uint32_t ncclAllToAllDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllToAllFabricGeom(comm, count * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

@@ -31,8 +31,14 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
+// Per-shard staging slot capacity and hard per-shard cap (enforced in the
+// eligibility check). Fixes the slot stride at compile time so the
+// double-buffered layout is identical on every rank and call.
+// Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
+// expansion; 16 MiB at 1 MiB/rank * 4 ranks * 2 banks * 2 (LL overhead),
+// within the 10 GiB DDA fabric scratch on gfx1250.
+constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
+constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).

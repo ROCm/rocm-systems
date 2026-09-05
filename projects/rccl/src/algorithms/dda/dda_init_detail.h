@@ -41,15 +41,18 @@ constexpr size_t kDdaLL128SlotStrideLines =
 // An explicit buffer-size override takes precedence over derived sizing.
 //
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
-// - simpleCap: DDA_THRESHOLD (default 128 MiB)
+// - simpleCap: rcclDdaScratchPayloadCap() (max DDA/CE-scratch table/env cap,
+//   including graph VMM even when the comm never captures, or the pre-table
+//   DDA defaults when the arch table is ignored)
 // - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
 // - ll128Floor: 2 banks * nRanks * kDdaLL128SlotStrideLines * 128B (when LL128 enabled)
 //
-// Collectives that need more scratch (e.g., LL128 AR with large messages) are
-// bounded by the eligibility check (scratchNeeded > ddaScratchBytes), which
-// causes them to fall through to Simple path.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
-                                     int64_t llEnabled, int64_t ll128Enabled) {
+// simpleCap is the 1:1 payload footprint (VMM Simple, AG CE-Scratch). LL/LL128
+// slot arrays can still exceed that at high rank counts, which is why the
+// floors remain. Kernel-internal slot caps (kDdaLLArMaxBytes, etc.) may still
+// refuse a message even when scratch is large enough.
+inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled,
+                                     int64_t ddaThreshold, int64_t llEnabled, int64_t ll128Enabled) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }

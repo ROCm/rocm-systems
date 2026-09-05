@@ -212,7 +212,6 @@ RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -2755,6 +2754,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
+  comm->archThresholds = rcclGetArchThresholds(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 

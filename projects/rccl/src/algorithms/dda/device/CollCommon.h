@@ -116,8 +116,8 @@ static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
     // pattern = 1 performs reduce-scatter (two-shot)
-    size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
-    size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
+    size_t srcIdx = (pattern == 2) ? idx : (idx + static_cast<size_t>(selfRank) * idxEnd);
+    size_t destIdx = (pattern == 1) ? (idx + static_cast<size_t>(selfRank) * idxEnd) : idx;
 
     uint4 sum{0, 0, 0, 0};
     if constexpr (hasAcc) {
@@ -150,12 +150,12 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
 #pragma unroll kUnroll
     for (int r = 0; r < nRanks; ++r) {
       int srcRank = (selfRank + r) % nRanks;
-      int destIdx = idx + srcRank * idxEnd;
-      int srcIdx;
+      size_t destIdx = idx + static_cast<size_t>(srcRank) * idxEnd;
+      size_t srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
       } else {
-        srcIdx = static_cast<int>(idx);
+        srcIdx = idx;
       }
       *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }

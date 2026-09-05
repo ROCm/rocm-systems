@@ -58,10 +58,17 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   const int nRanks = comm->nRanks;
   const int64_t llEnabled = rcclParamDdaLL();
-  const int64_t llThresh = rcclParamDdaLLThreshold();
   const int64_t ll128Enabled = rcclParamDdaLL128();
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  const int64_t simpleThresh = rcclParamDdaThreshold();
+  // Size scratch to the largest DDA/CE-scratch table cap (all collectives,
+  // including graph VMM), not AllReduce VMM alone. Otherwise AG CE-Scratch
+  // or AR LL128 can win the selector and then fail the ddaScratchBytes check.
+  // ddaVmmMaxGraph is in that max even if this comm never captures: scratch
+  // is allocated once and exported across the clique, so a later graph AR
+  // must still fit. On gfx1250 that is a silent 256 MiB tax vs eager VMM.
+  // RCCL_DDA_FABRIC_BUFFER_SIZE overrides.
+  const int64_t llThresh = (int64_t)rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+  const int64_t ll128Thresh = (int64_t)rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  const int64_t simpleThresh = (int64_t)rcclDdaScratchPayloadCap(comm);
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
@@ -80,6 +87,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
     return ncclSuccess;
   }
+
+  const size_t eagerVmmAr = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: allocating %zu-byte scratch; payload cap %lld includes graph VMM "
+       "(ddaVmmMaxGraph) even for eager-only comms; AR eager VMM=%zu. "
+       "Override with RCCL_DDA_FABRIC_BUFFER_SIZE.",
+       bytes, (long long)simpleThresh, eagerVmmAr);
 
   // Owned resources: handed to comm on success, freed at `fail` otherwise.
   // All declared before any goto so the cleanup label is reachable without
@@ -159,12 +173,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaFabricMaxBlocks = nBlocksMax;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
-  INFO(NCCL_INIT,
-       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
-       "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
-       "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
-       nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
-       (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
+  INFO(
+    NCCL_INIT,
+    "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
+    "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
+    "LL128 enabled=%lld threshold=%lld, scratchPayloadCap=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
+    nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
+    (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
   return ncclSuccess;
 
 fail:
