@@ -25,9 +25,8 @@
 #include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
+#include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/hsa_tool_lifetime.h"
-#include "util/arena_alloc.h"
-#include "util/intrusive_list.h"
 
 #include <algorithm>
 #include <array>
@@ -47,7 +46,6 @@
 #include <mutex>
 #include <new>
 #include <optional>
-#include <shared_mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1027,102 +1025,13 @@ void dump_code_object_bytes(const HookConfig &config, uint64_t dump_id, uint64_t
               bytes.size(), path.data());
 }
 
-/// @brief Process-local map from HSA code-object reader handles to ELF bytes.
-///
-/// @details `hsa_executable_load_agent_code_object()` receives only an opaque
-/// reader handle. The create wrapper records memory-backed reader bytes here so
-/// the load wrapper can later hand those bytes to the DBI patcher. Session 2
-/// only logs and passes through, but this registry is the Session 3 handoff.
-class CodeObjectReaderRegistry {
-public:
-  static CodeObjectReaderRegistry &instance() {
-    static CodeObjectReaderRegistry registry;
-    return registry;
-  }
+using rocjitsu::hooks::HsaCodeObjectReaderRegistry;
 
-  struct ReaderBytes {
-    const uint8_t *bytes = nullptr;
-    size_t size = 0;
-    std::shared_ptr<const std::vector<uint8_t>> owned;
-
-    [[nodiscard]] explicit operator bool() const { return bytes != nullptr; }
-  };
-
-  [[nodiscard]] bool store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
-                           std::shared_ptr<const std::vector<uint8_t>> owned = {}) {
-    std::unique_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        entry->bytes = bytes;
-        entry->size = size;
-        entry->owned = std::move(owned);
-        return true;
-      }
-    }
-
-    void *storage = entry_pool_.try_allocate(sizeof(Entry));
-    if (storage == nullptr)
-      return false;
-    auto *entry = new (storage) Entry(reader.handle, bytes, size, std::move(owned));
-    entries_.push_front(*entry);
-    return true;
-  }
-
-  ReaderBytes lookup(hsa_code_object_reader_t reader) {
-    std::shared_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        return ReaderBytes{entry->bytes, entry->size, entry->owned};
-      }
-    }
-    return {};
-  }
-
-  void remove(hsa_code_object_reader_t reader) {
-    std::unique_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end();) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        it = entries_.erase(it);
-        destroy_entry(entry);
-        return;
-      }
-      ++it;
-    }
-  }
-
-  void clear() {
-    std::unique_lock lock(mutex_);
-    while (!entries_.empty()) {
-      auto it = entries_.begin();
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      entries_.erase(it);
-      destroy_entry(entry);
-    }
-  }
-
-private:
-  struct Entry : util::IListNode<Entry> {
-    Entry(uint64_t h, const uint8_t *b, size_t s, std::shared_ptr<const std::vector<uint8_t>> o)
-        : handle(h), bytes(b), size(s), owned(std::move(o)) {}
-
-    uint64_t handle = 0;
-    const uint8_t *bytes = nullptr;
-    size_t size = 0;
-    std::shared_ptr<const std::vector<uint8_t>> owned;
-  };
-
-  void destroy_entry(Entry *entry) {
-    entry->~Entry();
-    entry_pool_.deallocate(entry);
-  }
-
-  mutable std::shared_mutex mutex_;
-  util::ArenaAlloc<sizeof(Entry), 256, alignof(Entry)> entry_pool_;
-  util::IntrusiveList<Entry> entries_;
-};
+/// ConSan owns its reader namespace independently from any co-loaded HSA tool.
+HsaCodeObjectReaderRegistry &code_object_reader_registry() {
+  static HsaCodeObjectReaderRegistry registry;
+  return registry;
+}
 
 /// Admits conservative major image working-set bounds for concurrent transforms.
 ///
@@ -2324,7 +2233,7 @@ public:
         take_process_fault_application_snapshot();
     const std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector =
         fault_load_selector_;
-    CodeObjectReaderRegistry::instance().clear();
+    code_object_reader_registry().clear();
     KernelPrivateDispatchRegistry::instance().clear();
     if (fault_application_snapshot &&
         (fault_require_exactly_one || fault_application_snapshot->exactly_one_requested)) {
@@ -2953,8 +2862,8 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
 
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
-    if (!CodeObjectReaderRegistry::instance().store(
-            *code_object_reader, static_cast<const uint8_t *>(code_object), size)) {
+    if (!code_object_reader_registry().store(code_object_reader->handle,
+                                             static_cast<const uint8_t *>(code_object), size)) {
       if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
         (void)original_destroy(*code_object_reader);
       *code_object_reader = {};
@@ -3019,8 +2928,8 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
     if (!bytes) {
       log_message(kLogInfo, "could not snapshot file-backed reader=%llu",
                   static_cast<unsigned long long>(code_object_reader->handle));
-    } else if (!CodeObjectReaderRegistry::instance().store(*code_object_reader, bytes->data(),
-                                                           bytes->size(), bytes)) {
+    } else if (!code_object_reader_registry().store(code_object_reader->handle, bytes->data(),
+                                                    bytes->size(), bytes)) {
       if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
         (void)original_destroy(*code_object_reader);
       *code_object_reader = {};
@@ -3048,8 +2957,8 @@ hsa_status_t HSA_API rj_dbi_loader_code_object_reader_create_from_file_with_offs
   if (!bytes) {
     log_message(kLogInfo, "could not snapshot ranged file-backed reader=%llu offset=%zu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader->handle), offset, size);
-  } else if (!CodeObjectReaderRegistry::instance().store(*code_object_reader, bytes->data(),
-                                                         bytes->size(), bytes)) {
+  } else if (!code_object_reader_registry().store(code_object_reader->handle, bytes->data(),
+                                                  bytes->size(), bytes)) {
     if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
       (void)original_destroy(*code_object_reader);
     *code_object_reader = {};
@@ -3065,7 +2974,7 @@ hsa_status_t HSA_API rj_dbi_loader_code_object_reader_create_from_file_with_offs
 
 hsa_status_t HSA_API
 rj_dbi_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader) {
-  CodeObjectReaderRegistry::instance().remove(code_object_reader);
+  code_object_reader_registry().remove(code_object_reader.handle);
 
   auto *original = layer().destroy();
   if (original == nullptr)
@@ -3558,8 +3467,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     static_coverage_storage.reset();
   };
 
-  const CodeObjectReaderRegistry::ReaderBytes reader_bytes =
-      CodeObjectReaderRegistry::instance().lookup(code_object_reader);
+  const HsaCodeObjectReaderRegistry::ReaderBytes reader_bytes =
+      code_object_reader_registry().lookup(code_object_reader.handle);
   if (reader_bytes) {
     const uint8_t *bytes = reader_bytes.bytes;
     const size_t size = reader_bytes.size;
@@ -4440,33 +4349,70 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::string reason = sequence.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       std::string members;
-      for (const std::string &identity : sequence.member_event_identities) {
+      const rocjitsu::ConSanProgramSite *presentation_source = nullptr;
+      size_t source_count = 0;
+      size_t addressed_source_count = 0;
+      for (const rocjitsu::SemanticSiteId &member_id : sequence.member_semantic_ids) {
+        const rocjitsu::ConSanSyncEvent *event = sync.find_sequence_member(member_id);
+        if (event == nullptr)
+          continue;
         if (!members.empty())
           members += ',';
-        members += identity;
+        members += event->identity;
+        const rocjitsu::ConSanProgramSite *source = sync.source(*event);
+        if (source == nullptr)
+          continue;
+        ++source_count;
+        const bool addressed_source =
+            source->get_if<rocjitsu::ConSanOrdinaryMemorySite>() != nullptr ||
+            source->get_if<rocjitsu::ConSanAtomicSite>() != nullptr;
+        if (addressed_source) {
+          ++addressed_source_count;
+          presentation_source = source;
+        } else if (presentation_source == nullptr) {
+          presentation_source = source;
+        }
       }
+      if (addressed_source_count > 1u || (addressed_source_count == 0u && source_count != 1u))
+        presentation_source = nullptr;
+      const rocjitsu::ConSanOrdinaryMemorySite *ordinary =
+          presentation_source == nullptr
+              ? nullptr
+              : presentation_source->get_if<rocjitsu::ConSanOrdinaryMemorySite>();
+      const rocjitsu::ConSanAtomicSite *atomic =
+          presentation_source == nullptr
+              ? nullptr
+              : presentation_source->get_if<rocjitsu::ConSanAtomicSite>();
+      const rocjitsu::ConSanDecodedMemorySite *memory = ordinary;
+      if (memory == nullptr)
+        memory = atomic;
+      const rocjitsu::ConSanBarrierSite *barrier =
+          presentation_source == nullptr
+              ? nullptr
+              : presentation_source->get_if<rocjitsu::ConSanBarrierSite>();
       const std::string block =
           sequence.basic_block_index ? std::to_string(*sequence.basic_block_index) : "-";
       const std::string static_offset =
-          sequence.static_byte_offset ? std::to_string(*sequence.static_byte_offset) : "-";
-      const std::string raw_scope = sequence.raw_scope ? std::to_string(*sequence.raw_scope) : "-";
+          memory != nullptr && memory->raw_ioffset ? std::to_string(*memory->raw_ioffset) : "-";
+      const std::string raw_scope =
+          memory != nullptr && memory->raw_scope ? std::to_string(*memory->raw_scope) : "-";
       const std::string participant_count =
           sequence.participant_count ? std::to_string(*sequence.participant_count) : "-";
       const std::string participant_mask =
           sequence.participant_mask ? std::to_string(*sequence.participant_mask) : "-";
       const std::string barrier_id =
           sequence.barrier_id ? std::to_string(*sequence.barrier_id) : "-";
-      const std::string barrier_raw_selector =
-          sequence.barrier_raw_operand_selector
-              ? std::to_string(*sequence.barrier_raw_operand_selector)
-              : "-";
-      const std::string barrier_literal_width =
-          sequence.barrier_literal_width_bits ? std::to_string(*sequence.barrier_literal_width_bits)
-                                              : "-";
-      const std::string barrier_literal_value =
-          sequence.barrier_literal_value ? std::to_string(*sequence.barrier_literal_value) : "-";
+      const std::string barrier_raw_selector = barrier != nullptr && barrier->raw_operand_selector
+                                                   ? std::to_string(*barrier->raw_operand_selector)
+                                                   : "-";
+      const std::string barrier_literal_width = barrier != nullptr && barrier->literal_width_bits
+                                                    ? std::to_string(*barrier->literal_width_bits)
+                                                    : "-";
+      const std::string barrier_literal_value = barrier != nullptr && barrier->literal_value
+                                                    ? std::to_string(*barrier->literal_value)
+                                                    : "-";
       const std::string barrier_raw_simm16 =
-          sequence.barrier_raw_simm16 ? std::to_string(*sequence.barrier_raw_simm16) : "-";
+          barrier != nullptr && barrier->raw_simm16 ? std::to_string(*barrier->raw_simm16) : "-";
       std::array<char, 32> release_wait_offset{};
       if (sequence.release_wait_text_offset) {
         std::snprintf(release_wait_offset.data(), release_wait_offset.size(), "0x%llx",
@@ -4496,8 +4442,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           reason.c_str(), sequence.container_name.c_str(),
           sequence.in_kernel ? "kernel" : "function", block.c_str(),
           static_cast<unsigned long long>(sequence.begin_text_offset),
-          static_cast<unsigned long long>(sequence.end_text_offset), sequence.width_bits,
-          static_offset.c_str(), raw_scope.c_str(), barrier_id.c_str(),
+          static_cast<unsigned long long>(sequence.end_text_offset),
+          memory != nullptr ? memory->width_bits : 0u, static_offset.c_str(), raw_scope.c_str(),
+          barrier_id.c_str(),
           rocjitsu::consan_barrier_operand_source_name(sequence.barrier_operand_source),
           barrier_raw_selector.c_str(), barrier_literal_width.c_str(),
           barrier_literal_value.c_str(), barrier_raw_simm16.c_str(),

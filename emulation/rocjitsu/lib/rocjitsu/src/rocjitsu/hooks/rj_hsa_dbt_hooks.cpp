@@ -27,12 +27,11 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/rj_hsa_dbt_test_seams.h"
 #include "rocjitsu/hooks/sidecar_registry.h"
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
-#include "util/arena_alloc.h"
-#include "util/intrusive_list.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -57,7 +56,6 @@
 #include <new>
 #include <optional>
 #include <set>
-#include <shared_mutex>
 #include <signal.h>
 #include <span>
 #include <string>
@@ -171,8 +169,8 @@ enum HookLogLevel : int {
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<bool> g_signal_backtrace_enabled{false};
 std::atomic<bool> g_signal_backtrace_installed{false};
-struct sigaction g_previous_sigsegv {};
-struct sigaction g_previous_sigabrt {};
+struct sigaction g_previous_sigsegv{};
+struct sigaction g_previous_sigabrt{};
 
 /// @brief Parsed ISA target used by DBT and HSA agent matching.
 struct TargetInfo {
@@ -337,13 +335,13 @@ void maybe_install_signal_backtrace(bool enabled) {
 
   prewarm_signal_backtrace();
 
-  struct sigaction action {};
+  struct sigaction action{};
   action.sa_sigaction = signal_backtrace_handler;
   sigemptyset(&action.sa_mask);
   action.sa_flags = SA_SIGINFO;
 
-  struct sigaction previous_sigsegv {};
-  struct sigaction previous_sigabrt {};
+  struct sigaction previous_sigsegv{};
+  struct sigaction previous_sigabrt{};
   if (::sigaction(SIGSEGV, &action, &previous_sigsegv) != 0)
     return;
   if (::sigaction(SIGABRT, &action, &previous_sigabrt) != 0) {
@@ -631,124 +629,14 @@ struct DetectedElfTarget {
   return DetectedElfTarget{arch_for_elf_mach(mach), mach};
 }
 
-/// @brief Process-local map from HSA code-object reader handles to ELF bytes.
-///
-/// @details `hsa_executable_load_agent_code_object()` receives only an opaque
-/// reader handle. The create wrapper records memory-backed reader bytes here so
-/// the load wrapper can translate the original ELF. The registry uses rocjitsu's
-/// intrusive list and fixed-block arena so this C ABI path can report registry
-/// exhaustion as an HSA status instead of depending on throwing STL allocation.
-/// Entries for application readers are non-owning and rely on the application's
-/// reader lifetime. Entries for hidden translated readers own a vector so ROCR's
-/// memory-reader pointer remains valid while the translated load is in progress.
-class CodeObjectReaderRegistry {
-public:
-  /// @brief Return the singleton registry used by all hook wrappers.
-  static CodeObjectReaderRegistry &instance() {
-    static CodeObjectReaderRegistry registry;
-    return registry;
-  }
+using rocjitsu::hooks::HsaCodeObjectReaderRegistry;
 
-  /// @brief Stable byte snapshot returned by lookup().
-  ///
-  /// @details Application-created memory readers are non-owning because ROCR's
-  /// public API requires the caller to keep those bytes valid for the reader
-  /// lifetime. Translated readers carry shared ownership so a concurrent destroy
-  /// cannot free rocjitsu-owned ELF storage while a load is in progress.
-  struct ReaderBytes {
-    const uint8_t *bytes = nullptr;
-    size_t size = 0;
-    std::shared_ptr<const std::vector<uint8_t>> owned;
-
-    [[nodiscard]] explicit operator bool() const { return bytes != nullptr; }
-  };
-
-  /// @brief Record bytes backing a code-object reader.
-  /// @param reader HSA reader handle used as the lookup key.
-  /// @param bytes Start of the ELF image.
-  /// @param size Size of the ELF image in bytes.
-  /// @param owned Optional owned storage for translated ELF bytes.
-  [[nodiscard]] bool store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
-                           std::shared_ptr<const std::vector<uint8_t>> owned) {
-    std::unique_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        entry->bytes = bytes;
-        entry->size = size;
-        entry->owned = std::move(owned);
-        return true;
-      }
-    }
-
-    void *storage = entry_pool_.try_allocate(sizeof(Entry));
-    if (storage == nullptr)
-      return false;
-    auto *entry = new (storage) Entry(reader.handle, bytes, size, owned);
-    entries_.push_front(*entry);
-    return true;
-  }
-
-  /// @brief Find bytes previously recorded for @p reader.
-  /// @returns Snapshot with bytes populated when the reader is known.
-  ReaderBytes lookup(hsa_code_object_reader_t reader) {
-    std::shared_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        return ReaderBytes{entry->bytes, entry->size, entry->owned};
-      }
-    }
-    return {};
-  }
-
-  /// @brief Remove one reader entry and release owned translated bytes if any.
-  void remove(hsa_code_object_reader_t reader) {
-    std::unique_lock lock(mutex_);
-    for (auto it = entries_.begin(); it != entries_.end();) {
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      if (entry->handle == reader.handle) {
-        it = entries_.erase(it);
-        destroy_entry(entry);
-        return;
-      }
-      ++it;
-    }
-  }
-
-  /// @brief Clear all reader entries during tool unload.
-  void clear() {
-    std::unique_lock lock(mutex_);
-    while (!entries_.empty()) {
-      auto it = entries_.begin();
-      auto *entry = static_cast<Entry *>(it.node_pointer());
-      entries_.erase(it);
-      destroy_entry(entry);
-    }
-  }
-
-private:
-  /// @brief One code-object reader entry tracked by reader handle.
-  struct Entry : util::IListNode<Entry> {
-    Entry(uint64_t h, const uint8_t *b, size_t s, std::shared_ptr<const std::vector<uint8_t>> o)
-        : handle(h), bytes(b), size(s), owned(std::move(o)) {}
-
-    uint64_t handle = 0;
-    const uint8_t *bytes = nullptr;
-    size_t size = 0;
-    std::shared_ptr<const std::vector<uint8_t>> owned;
-  };
-
-  /// @brief Destroy one reader entry and release optional owned ELF storage.
-  void destroy_entry(Entry *entry) {
-    entry->~Entry();
-    entry_pool_.deallocate(entry);
-  }
-
-  mutable std::shared_mutex mutex_;
-  util::ArenaAlloc<sizeof(Entry), 256, alignof(Entry)> entry_pool_;
-  util::IntrusiveList<Entry> entries_;
-};
+/// Each HSA tool owns an independent reader namespace even when both hooks are
+/// loaded into one process.
+HsaCodeObjectReaderRegistry &code_object_reader_registry() {
+  static HsaCodeObjectReaderRegistry registry;
+  return registry;
+}
 
 /// @brief Tracks executable guest-agent loads that must resolve symbols on the host agent.
 class ExecutableAgentRegistry {
@@ -1257,7 +1145,7 @@ public:
       active_ = false;
     }
 
-    CodeObjectReaderRegistry::instance().clear();
+    code_object_reader_registry().clear();
     ExecutableAgentRegistry::instance().clear();
     clear_agent_mapper();
     VirtualLdsRuntimeRegistry::instance().clear();
@@ -2194,8 +2082,8 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
-    if (!CodeObjectReaderRegistry::instance().store(
-            *code_object_reader, static_cast<const uint8_t *>(code_object), size, {})) {
+    if (!code_object_reader_registry().store(code_object_reader->handle,
+                                             static_cast<const uint8_t *>(code_object), size, {})) {
       if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
         (void)original_destroy(*code_object_reader);
       *code_object_reader = {};
@@ -2220,7 +2108,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
     // not the original file descriptor. Copy the file bytes while we still have
     // the descriptor so HIP extension modules that use file-backed readers take
     // the same DBT path as memory-backed framework code objects.
-    struct stat statbuf {};
+    struct stat statbuf{};
     if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
       std::shared_ptr<std::vector<uint8_t>> owned;
       try {
@@ -2239,8 +2127,8 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
           done += static_cast<size_t>(read);
         }
         if (done == owned->size() &&
-            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
-                                                       owned->size(), owned)) {
+            code_object_reader_registry().store(code_object_reader->handle, owned->data(),
+                                                owned->size(), owned)) {
           log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
                       static_cast<unsigned long long>(code_object_reader->handle), owned->size());
           return status;
@@ -2258,7 +2146,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
 hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   log_message(kLogVerbose, "reader_destroy reader=%llu",
               static_cast<unsigned long long>(code_object_reader.handle));
-  CodeObjectReaderRegistry::instance().remove(code_object_reader);
+  code_object_reader_registry().remove(code_object_reader.handle);
 
   auto *original = layer().destroy();
   if (original == nullptr)
@@ -4161,8 +4049,8 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  if (!CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
-                                                  owned)) {
+  if (!code_object_reader_registry().store(translated_reader->handle, owned->data(), owned->size(),
+                                           owned)) {
     if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
       (void)original_destroy(*translated_reader);
     *translated_reader = {};
@@ -4214,8 +4102,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (load_agent.handle == 0)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  CodeObjectReaderRegistry::ReaderBytes reader_bytes =
-      CodeObjectReaderRegistry::instance().lookup(code_object_reader);
+  HsaCodeObjectReaderRegistry::ReaderBytes reader_bytes =
+      code_object_reader_registry().lookup(code_object_reader.handle);
   if (!reader_bytes) {
     // A guest load with no registered memory bytes cannot be translated (the DBT
     // path needs the source image); fail rather than load an untranslated guest
@@ -4378,7 +4266,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   status = original_load(executable, load_agent, translated_reader, options, loaded_code_object);
   log_message(kLogVerbose, "load_agent_code_object translated load_agent=%llu status=%d",
               static_cast<unsigned long long>(load_agent.handle), static_cast<int>(status));
-  CodeObjectReaderRegistry::instance().remove(translated_reader);
+  code_object_reader_registry().remove(translated_reader.handle);
   if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
     (void)original_destroy(translated_reader);
 

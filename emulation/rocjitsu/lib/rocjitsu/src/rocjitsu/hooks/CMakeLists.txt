@@ -12,6 +12,23 @@ target_include_directories(
 )
 target_link_libraries(rocjitsu_hsa_tool_lifetime PUBLIC ${CMAKE_DL_LIBS})
 
+add_library(
+    rocjitsu_hsa_code_object_reader_registry
+    STATIC hsa_code_object_reader_registry.cpp
+)
+set_target_properties(
+    rocjitsu_hsa_code_object_reader_registry
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_hsa_code_object_reader_registry
+    PUBLIC ${ROCJITSU_SRC_DIR}
+)
+target_link_libraries(
+    rocjitsu_hsa_code_object_reader_registry
+    PRIVATE util Threads::Threads
+)
+
 # The hook sources are compiled once into an object library and linked into two
 # shared libraries: the production rocjitsu_hooks, which exports only the HSA
 # tool entry points, and the test-only rocjitsu_hooks_testing, which adds the
@@ -33,6 +50,7 @@ set(RJ_HOOKS_LINK_LIBS
     flatbuffers
     simdojo
     rocjitsu_hsa_tool_lifetime
+    rocjitsu_hsa_code_object_reader_registry
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
@@ -100,11 +118,19 @@ endif()
 
 if(MSVC)
     target_compile_options(rocjitsu_hsa_tool_lifetime PRIVATE /W4 /WX)
+    target_compile_options(
+        rocjitsu_hsa_code_object_reader_registry
+        PRIVATE /W4 /WX
+    )
     target_compile_options(rocjitsu_hooks_objects PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_waitcheck_hooks PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(
         rocjitsu_hsa_tool_lifetime
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
+    target_compile_options(
+        rocjitsu_hsa_code_object_reader_registry
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
     target_compile_options(

@@ -1518,6 +1518,7 @@ endif()
 
 add_executable(
     hsa_hooks_unit_test
+    dbt/hsa_code_object_reader_registry_test.cpp
     dbt/hsa_hooks_unit_test.cpp
     dbt/sidecar_registry_test.cpp
     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/hooks/sidecar_registry.cpp
@@ -1549,6 +1550,7 @@ target_link_libraries(
         # Test-only hook variant: same objects as rocjitsu_hooks plus the
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
+        rocjitsu_hsa_code_object_reader_registry
         rocjitsu_consan_report_analyzer
         rocjitsu_consan_report_decoder
         rocjitsu_consan_report_renderer

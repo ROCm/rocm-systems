@@ -106,6 +106,7 @@ target_link_libraries(
     rocjitsu_dbi_hooks
     PRIVATE
         rocjitsu_hsa_tool_lifetime
+        rocjitsu_hsa_code_object_reader_registry
         rocjitsu_consan_report_analyzer
         rocjitsu_consan_report_decoder
         rocjitsu_consan_report_renderer
