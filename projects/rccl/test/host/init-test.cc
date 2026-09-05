@@ -19,6 +19,7 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,10 +69,10 @@ static ncclResult_t g_tunerFinalizeResult = ncclSuccess;
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
-std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
+static std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
 static void MicroFree(void* p) { g_microFree(p); }
 
-std::function<int(unsigned, unsigned*, unsigned*, unsigned*, unsigned*)> g_microCpuid =
+static std::function<int(unsigned, unsigned*, unsigned*, unsigned*, unsigned*)> g_microCpuid =
     [](unsigned leaf, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
       return __get_cpuid(leaf, a, b, c, d);
     };
@@ -79,7 +80,7 @@ static int MicroCpuid(unsigned leaf, unsigned* a, unsigned* b, unsigned* c, unsi
   return g_microCpuid(leaf, a, b, c, d);
 }
 
-std::function<ncclResult_t(const char*, const char*, char*, int)> g_microTopoGetStrFromSys =
+static std::function<ncclResult_t(const char*, const char*, char*, int)> g_microTopoGetStrFromSys =
     [](const char* path, const char* file, char* out, int maxLen) {
       return ncclOsTopoGetStrFromSys(path, file, out, maxLen);
     };
@@ -87,7 +88,7 @@ static ncclResult_t MicroTopoGetStrFromSys(const char* path, const char* file, c
   return g_microTopoGetStrFromSys(path, file, out, maxLen);
 }
 
-std::function<bool(const char*)> g_microIommuPassthroughOk = [](const char* c) {
+static std::function<bool(const char*)> g_microIommuPassthroughOk = [](const char* c) {
   return ncclIommuPassthroughOk(c);
 };
 static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPassthroughOk(cmdline); }
@@ -126,6 +127,46 @@ extern "C" const char* __asan_default_options() {
   return "allocator_may_return_null=1:handle_sigfpe=0";
 }
 
+// Must stay below #undef malloc/#undef free, or these bodies are rewritten into the UUT's seams.
+static const void* g_deleteWatchPtr = nullptr;
+static int g_deleteWatchHits = 0;
+
+static void MicroOperatorDelete(void* p) noexcept {
+  if (p != nullptr && p == g_deleteWatchPtr) ++g_deleteWatchHits;
+  std::free(p);
+}
+// Replaced as a matched pair and in every form: `delete p` emits the SIZED overload, so void* alone counts nothing.
+void* operator new(std::size_t n) {
+  void* p = std::malloc(n != 0 ? n : 1);
+  if (p == nullptr) throw std::bad_alloc();
+  return p;
+}
+void* operator new[](std::size_t n) { return ::operator new(n); }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
+void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
+void operator delete(void* p) noexcept { MicroOperatorDelete(p); }
+void operator delete[](void* p) noexcept { MicroOperatorDelete(p); }
+void operator delete(void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
+void operator delete[](void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
+
+class DeleteWatch {
+ public:
+  explicit DeleteWatch(const void* p) {
+    g_deleteWatchPtr = p;
+    g_deleteWatchHits = 0;
+  }
+  ~DeleteWatch() { g_deleteWatchPtr = nullptr; }
+  DeleteWatch(const DeleteWatch&) = delete;
+  DeleteWatch& operator=(const DeleteWatch&) = delete;
+  void Arm(const void* p) {
+    g_deleteWatchPtr = p;
+    g_deleteWatchHits = 0;
+  }
+  int hits() const { return g_deleteWatchHits; }
+};
+
 // ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
 #if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
 #define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
@@ -150,6 +191,8 @@ class InitMicrotest : public ::testing::Test {
     g_callocCallIndex = 0;
     g_callocFailAt = -1;
     g_mallocFailSize = 0;
+    g_deleteWatchPtr = nullptr;
+    g_deleteWatchHits = 0;
     g_tunerFinalizeCalls = 0;
     g_tunerFinalizeLastContext = nullptr;
     g_tunerFinalizeResult = ncclSuccess;
@@ -2069,7 +2112,7 @@ TEST_F(InitMicrotest, CommCleanup_TunerFinalizeFails_SkipsUnloadAndFree) {
 TEST_F(InitMicrotest, CommCleanup_TunerUnloadFails_SkipsFree) {
   CleanupComm c;
   ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
-  g_ncclTunerPluginUnloadResult = ncclSystemError;
+  ScopedHook unload(g_ncclTunerPluginUnload, [](ncclComm*) { return ncclSystemError; });
 
   EXPECT_EQ(ncclSystemError, commCleanup(c.comm));
 
@@ -3776,52 +3819,35 @@ const gdr_t Dtor_kGdrPoison = (gdr_t)0xBADF00DUL;
 const gdr_t Dtor_kGdrSupportedHandle = (gdr_t)0x12345678L;
 constexpr uintptr_t Dtor_kNotABaseAddress = 0x1000;
 
-// glibc's tcache hands the just-freed block back to the next same-size new; ASan's quarantine does not.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-constexpr bool Dtor_kHeapSlotRecycles = false;
-#else
-constexpr bool Dtor_kHeapSlotRecycles = true;
-#endif
+// The two push functions differ only in the destructor they stamp, so one body covers both.
+void Dtor_ExpectPushChainsNewestFirst(void (*push)(struct ncclComm*, void*),
+                                      ncclResult_t (*fn)(struct ncclDestructor*)) {
+  Dtor_PushComm c;
+  int first = 0;
+  double second = 0;
+  push(c.get(), &first);
+  push(c.get(), &second);
+
+  struct ncclDestructor* head = c.get()->destructorHead;
+  ASSERT_NE(nullptr, head);
+  EXPECT_EQ(&second, head->obj);
+  EXPECT_EQ(c.get(), head->comm);
+  EXPECT_EQ(fn, head->fn);
+  ASSERT_NE(nullptr, head->next);
+  EXPECT_NE(head, head->next);
+  EXPECT_EQ(&first, head->next->obj);
+  EXPECT_EQ(c.get(), head->next->comm);
+  EXPECT_EQ(fn, head->next->fn);
+  EXPECT_EQ(nullptr, head->next->next);
+}
 }  // namespace
 
 TEST_F(InitMicrotest, CommPushFree_TwoPushes_ChainsNewestFirstWithFreeDestructor) {
-  Dtor_PushComm c;
-  int first = 0;
-  double second = 0;
-  ncclCommPushFree(c.get(), &first);
-  ncclCommPushFree(c.get(), &second);
-
-  struct ncclDestructor* head = c.get()->destructorHead;
-  ASSERT_NE(nullptr, head);
-  EXPECT_EQ(&second, head->obj);
-  EXPECT_EQ(c.get(), head->comm);
-  EXPECT_EQ(&ncclDestructorFnFree, head->fn);
-  ASSERT_NE(nullptr, head->next);
-  EXPECT_NE(head, head->next);
-  EXPECT_EQ(&first, head->next->obj);
-  EXPECT_EQ(c.get(), head->next->comm);
-  EXPECT_EQ(&ncclDestructorFnFree, head->next->fn);
-  EXPECT_EQ(nullptr, head->next->next);
+  Dtor_ExpectPushChainsNewestFirst(ncclCommPushFree, &ncclDestructorFnFree);
 }
 
 TEST_F(InitMicrotest, CommPushCudaGdrFree_TwoPushes_ChainsNewestFirstWithGdrDestructor) {
-  Dtor_PushComm c;
-  int first = 0;
-  double second = 0;
-  ncclCommPushCudaGdrFree(c.get(), &first);
-  ncclCommPushCudaGdrFree(c.get(), &second);
-
-  struct ncclDestructor* head = c.get()->destructorHead;
-  ASSERT_NE(nullptr, head);
-  EXPECT_EQ(&second, head->obj);
-  EXPECT_EQ(c.get(), head->comm);
-  EXPECT_EQ(&ncclDestructorFnCudaGdrFree, head->fn);
-  ASSERT_NE(nullptr, head->next);
-  EXPECT_NE(head, head->next);
-  EXPECT_EQ(&first, head->next->obj);
-  EXPECT_EQ(c.get(), head->next->comm);
-  EXPECT_EQ(&ncclDestructorFnCudaGdrFree, head->next->fn);
-  EXPECT_EQ(nullptr, head->next->next);
+  Dtor_ExpectPushChainsNewestFirst(ncclCommPushCudaGdrFree, &ncclDestructorFnCudaGdrFree);
 }
 
 TEST_F(InitMicrotest, CommPushFreeThenGdrFree_ShareOneList_KeepingEachEntrysOwnDestructor) {
@@ -3906,7 +3932,7 @@ TEST_F(InitMicrotest, DestructorFnCudaHostFree_PassesTheObjectPointerToTheHostFr
   EXPECT_EQ(&obj, freed);
 }
 
-TEST_F(InitMicrotest, DestructorFnCudaGdrFree_ReleasesTheMappedDeviceMemThenTheDescriptor) {
+TEST_F(InitMicrotest, DestructorFnCudaGdrFree_DevMemAlreadyReleased_SkipsTheDeviceFreeButFreesTheDescriptor) {
   Dtor_PushComm c;
   int devMem = 0;
   gdr_mem_desc_t* md = static_cast<gdr_mem_desc_t*>(std::malloc(sizeof(gdr_mem_desc_t)));
@@ -3966,6 +3992,11 @@ TEST_F(InitMicrotest, InitGdrCopy_EnabledOnSupportedArch_PublishesTheGdrHandle) 
   g_loadParam = [](const char* env, int64_t deft) {
     return std::strcmp(env, "GDRCOPY_ENABLE") == 0 ? int64_t(1) : deft;
   };
+  g_hipGetDeviceProperties = [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942:sramecc+:xnack-");
+    return hipSuccess;
+  };
   EXPECT_EQ(ncclSuccess, initGdrCopy());
   EXPECT_EQ(Dtor_kGdrSupportedHandle, ncclGdrCopy);
 }
@@ -4012,19 +4043,23 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
     aborted = j;
     return ncclSuccess;
   });
+  g_recorderLabels.clear();
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
   EXPECT_EQ(gj.get(), rc.get()->groupJob);
-  EXPECT_EQ(ncclSystemError, rc.get()->asyncResult);
+  // asyncResult is only ever read out (init.cc:4497), so it holds on both arms; the label is the discriminator.
+  EXPECT_EQ(0, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }
 
 TEST_F(InitMicrotest, CommEnsureReady_NotAborting_ReportsTheCommsAsyncError) {
   ReadyComm rc;
   rc.get()->asyncResult = ncclSystemError;
   ScopedHook abort(g_ncclGroupJobAbort, [](struct ncclGroupJob*) { return ncclSuccess; });
+  g_recorderLabels.clear();
   EXPECT_EQ(ncclSystemError, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(0, abort.calls);
+  EXPECT_EQ(1, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }
 
 namespace {
@@ -4062,14 +4097,9 @@ TEST_F(InitMicrotest, GetAsyncError_GinWithoutProgressThread_IgnoresTheGinAsyncR
 
 TEST_F(InitMicrotest, CommFinalizeAsyncJobFree_ReturnsTheJobToTheHeap) {
   auto* job = new ncclCommFinalizeAsyncJob{};
-  void* addr = job;
+  DeleteWatch watch(job);
   ncclCommFinalizeAsyncJobFree(job);
-  auto* reused = new ncclCommFinalizeAsyncJob{};
-  const bool recycled = (static_cast<void*>(reused) == addr);
-  delete reused;
-  if (Dtor_kHeapSlotRecycles) {
-    EXPECT_TRUE(recycled) << "the job was not deleted: its heap slot was not reused";
-  }
+  EXPECT_EQ(1, watch.hits()) << "the job was not deleted";
 }
 
 TEST_F(InitMicrotest, CommInitJobFree_FreesTheCommIdThenReturnsTheJobToTheHeap) {
@@ -4077,23 +4107,19 @@ TEST_F(InitMicrotest, CommInitJobFree_FreesTheCommIdThenReturnsTheJobToTheHeap) 
   job->commId = static_cast<ncclUniqueId*>(std::malloc(sizeof(ncclUniqueId)));
   ASSERT_NE(nullptr, job->commId);
   void* commId = job->commId;
-  void* addr = job;
 
   void* freed = nullptr;
+  DeleteWatch watch(job);
+  int hits = 0;
   {
     ScopedHook microFree(g_microFree, [&](void* p) { freed = p; });
     ncclCommInitJobFree(job);
+    hits = watch.hits();
     EXPECT_EQ(1, microFree.calls);
   }
   EXPECT_EQ(commId, freed);
   std::free(commId);
-
-  auto* reused = new ncclCommInitRankAsyncJob{};
-  const bool recycled = (static_cast<void*>(reused) == addr);
-  delete reused;
-  if (Dtor_kHeapSlotRecycles) {
-    EXPECT_TRUE(recycled) << "the job was not deleted: its heap slot was not reused";
-  }
+  EXPECT_EQ(1, hits) << "the job was not deleted";
 }
 
 TEST_F(InitMicrotest, ChildCommCleanupJob_ExcludeListPresent_FreesExactlyThatList) {
@@ -4101,31 +4127,29 @@ TEST_F(InitMicrotest, ChildCommCleanupJob_ExcludeListPresent_FreesExactlyThatLis
   job->excludeRanksList = static_cast<int*>(std::malloc(4 * sizeof(int)));
   ASSERT_NE(nullptr, job->excludeRanksList);
   void* list = job->excludeRanksList;
-  void* addr = job;
 
   void* freed = nullptr;
+  DeleteWatch watch(job);
+  int hits = 0;
   {
     ScopedHook microFree(g_microFree, [&](void* p) { freed = p; });
     childCommCleanupJob(job);
+    hits = watch.hits();
     EXPECT_EQ(1, microFree.calls);
   }
   EXPECT_EQ(list, freed);
   std::free(list);
-
-  auto* reused = new ncclCommInitRankAsyncJob{};
-  const bool recycled = (static_cast<void*>(reused) == addr);
-  delete reused;
-  if (Dtor_kHeapSlotRecycles) {
-    EXPECT_TRUE(recycled) << "the job was not deleted: its heap slot was not reused";
-  }
+  EXPECT_EQ(1, hits) << "the job was not deleted";
 }
 
 TEST_F(InitMicrotest, ChildCommCleanupJob_NoExcludeList_FreesNothing) {
   auto* job = new ncclCommInitRankAsyncJob{};
   job->excludeRanksList = nullptr;
+  DeleteWatch watch(job);
   ScopedHook microFree(g_microFree, [](void*) {});
   childCommCleanupJob(job);
   EXPECT_EQ(0, microFree.calls);
+  EXPECT_EQ(1, watch.hits()) << "the job was not deleted";
 }
 
 TEST_F(InitMicrotest, GetLastError_ReturnsTheGlobalErrorBuffer_AndRecordsTheCall) {
@@ -4144,9 +4168,13 @@ TEST_F(InitMicrotest, GetLastError_ReturnsTheGlobalErrorBuffer_AndRecordsTheCall
 TEST_F(InitMicrotest, GetLastError_CommArgumentIsIgnored_SameBufferForAnyComm) {
   Dtor_LastErrorGuard guard;
   ReadyComm rc;
-  std::snprintf(ncclLastError, 1024, "%s", "shared buffer");
-  EXPECT_EQ(ncclGetLastError_impl(nullptr), ncclGetLastError_impl(rc.get()));
-  EXPECT_STREQ("shared buffer", ncclGetLastError_impl(rc.get()));
+  std::snprintf(ncclLastError, 1024, "%s", "first message");
+  const char* viaNull = ncclGetLastError_impl(nullptr);
+  EXPECT_STREQ("first message", viaNull);
+  // Comparing the two return values would be p == p; only a write between the calls shows the comm selects nothing.
+  std::snprintf(ncclLastError, 1024, "%s", "second message");
+  EXPECT_STREQ("second message", viaNull);
+  EXPECT_STREQ("second message", ncclGetLastError_impl(rc.get()));
 }
 
 TEST_F(InitMicrotest, EnvInitOnceFunc_StoresThePluginResultInTheLatchedResult) {
@@ -4224,6 +4252,8 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
         ASSERT_TRUE(LogHas(log, "Kernel version: 6.8.0-microtest")) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kNumaBalancingWarning)) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kIommuWarning)) << "actual log:\n" << log;
+        // Anchors the iommu leg: the probe sits inside the non-cray block (init.cc:310-336), the INFO above does not.
+        ASSERT_EQ(1, iommu.calls);
       });
 }
 
@@ -4414,11 +4444,9 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_DropsNetNameBeforeDefaulti
   s.config().version = NCCL_VERSION(2, 17, 0) - 1;
   s.config().netName = ParseCfg_kNetName;
   s.config().blocking = 0;
-  ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
-  EXPECT_EQ(ncclSuccess, res);
-  EXPECT_FALSE(LogHas(log, "Comm config Net name set to")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "Comm config Blocking set to 0")) << "actual log:\n" << log;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(nullptr, s.result_config().netName);
+  EXPECT_EQ(0, s.result_config().blocking);
 }
 TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsCgaClusterSizeAndCtaBounds) {
   ParseCfg_Scene s;
@@ -4435,10 +4463,8 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsNetName) {
   ParseCfg_Scene s;
   s.config().version = NCCL_VERSION(2, 17, 0);
   s.config().netName = ParseCfg_kNetName;
-  ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
-  EXPECT_EQ(ncclSuccess, res);
-  EXPECT_TRUE(LogHas(log, "Comm config Net name set to microfake-net")) << "actual log:\n" << log;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_STREQ(ParseCfg_kNetName, s.result_config().netName);
 }
 
 TEST_F(InitMicrotest, ParseCommConfig_VersionBelow225_ResetsTrafficClassToUndefined) {
@@ -4616,9 +4642,9 @@ TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneA
 // --- computeBuffSizes: the multi-node, chunk-clamp and shared-resource arms (init.cc:1299-1315) ---
 
 namespace {
-class ParseCfg_BuffScene {
+class BuffSizes_Scene {
  public:
-  ParseCfg_BuffScene() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}) {
+  BuffSizes_Scene() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}) {
     comm_->sharedRes = sr_.get();
     sr_->owner = comm_.get();
   }
@@ -4632,21 +4658,21 @@ class ParseCfg_BuffScene {
 }  // namespace
 
 TEST_F(InitMicrotest, ComputeBuffSizes_MultiNode_UsesNetChunkSizeNotTheNvlinkOne) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 2;
   s.comm()->isAllNvlink = true;  // would yield the 512 kB NVL size if the node count were misread
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = true;
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 16}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
@@ -4655,7 +4681,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep)
   EXPECT_EQ((1 << 16) / NCCL_STEPS, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 22}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
@@ -4663,7 +4689,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   auto other = std::make_unique<ncclComm>();
   s.shared()->owner = other.get();
   s.shared()->tpP2pChunkSize = 4096;
@@ -4675,7 +4701,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSiz
   EXPECT_EQ(4096, s.shared()->tpP2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsItsOwnChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   auto other = std::make_unique<ncclComm>();
   s.shared()->owner = other.get();
   s.shared()->tpP2pChunkSize = 1 << 20;
@@ -4690,9 +4716,9 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
 // --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---
 
 namespace {
-constexpr uint32_t ParseCfg_kFabricDeviceIndex = 3;
+constexpr uint32_t FillInfo_kFabricDeviceIndex = 3;
 
-void ParseCfg_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
+void FillInfo_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   info->fabricSupported = true;
   info->acceleratorId = 11;
   info->bandwidth = 400000;
@@ -4703,6 +4729,11 @@ void ParseCfg_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   for (std::size_t i = 0; i < sizeof(info->clusterUuid); ++i) {
     info->clusterUuid[i] = static_cast<uint8_t>(i + 1);
   }
+}
+
+std::string FillInfo_RunCapturingInfo(FillInfoComm* c, ncclPeerInfo* info, ncclResult_t* result) {
+  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  return RcclUnitTesting::CaptureLog([&] { *result = fillInfo(c->get(), info, 0); });
 }
 }  // namespace
 
@@ -4736,7 +4767,7 @@ TEST_F(InitMicrotest, FillInfo_FabricDeviceWithoutFabricSupport_ClearsTheFlagAnd
   info.fabricInfo.fabricSupported = true;
   uint32_t handedIndex = 0;
   ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
-    *out = ParseCfg_kFabricDeviceIndex;
+    *out = FillInfo_kFabricDeviceIndex;
     return ncclSuccess;
   });
   ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
@@ -4745,13 +4776,10 @@ TEST_F(InitMicrotest, FillInfo_FabricDeviceWithoutFabricSupport_ClearsTheFlagAnd
                       return ncclSuccess;
                     });
   ncclResult_t res = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    res = fillInfo(c.get(), &info, 0);
-  });
+  const std::string log = FillInfo_RunCapturingInfo(&c, &info, &res);
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, fabric.calls);
-  EXPECT_EQ(ParseCfg_kFabricDeviceIndex, handedIndex);
+  EXPECT_EQ(FillInfo_kFabricDeviceIndex, handedIndex);
   EXPECT_FALSE(info.fabricInfo.fabricSupported);
   EXPECT_FALSE(LogHas(log, "UALoE-enabled")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "MLOPart: physical device")) << "actual log:\n" << log;
@@ -4762,19 +4790,16 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
   c.get()->busId = kPhysGpuBusId;
   ncclPeerInfo info{};
   ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
-    *out = ParseCfg_kFabricDeviceIndex;
+    *out = FillInfo_kFabricDeviceIndex;
     return ncclSuccess;
   });
   ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
                     [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
-                      ParseCfg_FillFabricInfo(out);
+                      FillInfo_FillFabricInfo(out);
                       return ncclSuccess;
                     });
   ncclResult_t res = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    res = fillInfo(c.get(), &info, 0);
-  });
+  const std::string log = FillInfo_RunCapturingInfo(&c, &info, &res);
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_TRUE(info.fabricInfo.fabricSupported);
   EXPECT_EQ(11u, info.fabricInfo.acceleratorId);
@@ -5635,17 +5660,59 @@ TEST_F(InitMicrotest, CommRevoke_ValidComm_RunsRevokeAsyncWhichLowersTheAbortFla
   EXPECT_EQ(0u, c.childAbortFlag());
 }
 
+namespace {
+// ncclCudaFree only reaches hipFree when the pointer is untracked and is not its allocation's base address.
+class Teardown_DeviceFreeSpy {
+ public:
+  explicit Teardown_DeviceFreeSpy(ncclComm* comm)
+      : memRange_(g_hipMemGetAddressRange,
+                  [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t) {
+                    if (base) {
+                      *base = reinterpret_cast<hipDeviceptr_t>(Dtor_kNotABaseAddress);
+                    }
+                    if (size) {
+                      *size = 0;
+                    }
+                    return hipSuccess;
+                  }),
+        deviceFree_(g_hipFree,
+                    [this](void* p) {
+                      freed_.push_back(p);
+                      return hipSuccess;
+                    }),
+        hostFree_(g_microFree, [comm](void* p) {
+          if (p != comm) {
+            ::free(p);
+          }
+        }) {
+    Teardown_AllowStreamCaptureExchange();
+  }
+  Teardown_DeviceFreeSpy(const Teardown_DeviceFreeSpy&) = delete;
+  Teardown_DeviceFreeSpy& operator=(const Teardown_DeviceFreeSpy&) = delete;
+
+  const std::vector<void*>& freed() const { return freed_; }
+
+ private:
+  std::vector<void*> freed_;
+  ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)> memRange_;
+  ScopedHook<hipError_t(void*)> deviceFree_;
+  ScopedHook<void(void*)> hostFree_;
+};
+}  // namespace
+
 // --- commFree's remaining conditional resources ---
-TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArrays) {
+TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArraysAndNullsThePointers) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->nNodes = 1;
+  // Distinct addresses: equal poisons would let a mutant storing one pointer into the other field pass both checks.
   int localSizes = 0;
-  int gatheredSizes = 0;
+  long gatheredSizes = 0;
   comm->localSizes = &localSizes;
   comm->gatheredSizes = &gatheredSizes;
+  ASSERT_NE(comm->localSizes, comm->gatheredSizes);
 
   std::vector<void*> released;
   ScopedHook memFree(g_ncclMemFree, [&](void* p) {
@@ -5653,8 +5720,12 @@ TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArrays) {
     return ncclSuccess;
   });
 
+  Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+  EXPECT_EQ(nullptr, comm->localSizes);
+  EXPECT_EQ(nullptr, comm->gatheredSizes);
+  ::free(comm);
 }
 
 TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
@@ -5671,39 +5742,6 @@ TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
   EXPECT_EQ(0, memFree.calls);
 }
 
-namespace {
-// ncclCudaFree only reaches hipFree when the pointer is untracked and is not its allocation's base address.
-class Teardown_DeviceFreeSpy {
- public:
-  explicit Teardown_DeviceFreeSpy(ncclComm* comm)
-      : memRange_(g_hipMemGetAddressRange,
-                  [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t) {
-                    if (base) *base = reinterpret_cast<hipDeviceptr_t>(Dtor_kNotABaseAddress);
-                    if (size) *size = 0;
-                    return hipSuccess;
-                  }),
-        deviceFree_(g_hipFree,
-                    [this](void* p) {
-                      freed_.push_back(p);
-                      return hipSuccess;
-                    }),
-        hostFree_(g_microFree, [comm](void* p) {
-          if (p != comm) ::free(p);
-        }) {
-    Teardown_AllowStreamCaptureExchange();
-  }
-  Teardown_DeviceFreeSpy(const Teardown_DeviceFreeSpy&) = delete;
-  Teardown_DeviceFreeSpy& operator=(const Teardown_DeviceFreeSpy&) = delete;
-
-  const std::vector<void*>& freed() const { return freed_; }
-
- private:
-  std::vector<void*> freed_;
-  ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)> memRange_;
-  ScopedHook<hipError_t(void*)> deviceFree_;
-  ScopedHook<void(void*)> hostFree_;
-};
-}  // namespace
 
 TEST_F(InitMicrotest, CommFree_TempBuff_ReleasesItThroughTheCommsMemManager) {
   ncclComm* comm = nullptr;
@@ -5799,12 +5837,55 @@ TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   EXPECT_EQ(1, symk.calls);
 }
 
+TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->symmetricSupport = false;
+  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(0, symk.calls);
+}
+
+TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->symmetricSupport = true;
+  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclInternalError, commFree(comm));
+  EXPECT_EQ(1, symk.calls);
+  EXPECT_EQ(2, abortRef) << "commFree bailed before the abort-flag refcount drop";
+  ::free(comm);
+}
+
 namespace {
 // The payload records that the join really happened, not merely that the pointer was non-null.
 struct Teardown_ProxyThreads {
   std::unique_ptr<ncclProxyState> state{new ncclProxyState{}};
   bool mainRan = false;
   bool udsRan = false;
+
+  Teardown_ProxyThreads() = default;
+  Teardown_ProxyThreads(const Teardown_ProxyThreads&) = delete;
+  Teardown_ProxyThreads& operator=(const Teardown_ProxyThreads&) = delete;
+
+  // ncclProxyState holds both threads by value with no destructor, so an unjoined one terminates the binary.
+  ~Teardown_ProxyThreads() {
+    if (state == nullptr) {
+      return;
+    }
+    if (state->thread.joinable()) {
+      state->thread.join();
+    }
+    if (state->threadUDS.joinable()) {
+      state->threadUDS.join();
+    }
+  }
 
   void Attach(ncclComm* comm) {
     state->thread = std::thread([this] { mainRan = true; });
@@ -5980,7 +6061,9 @@ class Env_ConfigComm {
 
   std::string RunCapturingLog(const Env_ParamMap& params) {
     ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    return RcclUnitTesting::CaptureLog([&] { Run(params); });
+    std::string log = RcclUnitTesting::CaptureLog([&] { Run(params); });
+    EXPECT_EQ(ncclSuccess, result_) << "actual log:\n" << log;
+    return log;
   }
 
  private:
@@ -6655,6 +6738,47 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBa
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().maxCTAs);
   EXPECT_TRUE(LogHas(log, "minCTAs 7 is larger than maxCTAs -2147483648, set both to -2147483648"))
       << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NoCheckEnv_ResetsCheckModeToDefault) {
+  Env_ConfigComm c;
+  c.comm()->checkMode = ncclCheckModeDebugGlobal;
+  c.RunCapturingLog({});
+  EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_DeprecatedCheckPointers_SelectsDebugLocal) {
+  Env_ConfigComm c;
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckPointersNotOne_LeavesCheckModeDefault) {
+  Env_ConfigComm c;
+  c.RunCapturingLog({{"CHECK_POINTERS", 2}});
+  EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugGlobal_SelectsDebugGlobalCaseInsensitively) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "debug_global");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(ncclCheckModeDebugGlobal, c.comm()->checkMode);
+  EXPECT_TRUE(LogHas(log, "NCCL_CHECK_MODE set by environment to debug_global")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugLocalOverridesCheckPointers_SelectsDebugLocal) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_LOCAL");
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeUnrecognised_KeepsTheCheckPointersChoice) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_GLOBALLY");
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
 }
 
 // --- ncclCommInitRankFunc (init.cc:2631) and the entry points that funnel into it ---

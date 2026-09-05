@@ -13,6 +13,7 @@
 void ResetEnqueueFakes() {
   ResetHipFakes();
   ResetNcclFakes();
+  ResetNcclStubs();
   ResetCeFakes();
   ResetCommFakes();
   ResetDevRuntimeFakes();

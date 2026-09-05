@@ -35,7 +35,7 @@
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
 
-#include "fakes/nccl_stubs.h"
+#include "nccl_stubs.h"
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -151,21 +151,17 @@ static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSucce
 std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
-// Controllable (was fail-loud). Two seams: the g_ncclTunerPluginUnloadResult knob, and the functor for
-// per-comm answers. Recording the comm it was handed matters because commCleanup forwards its own argument,
-// and without it passing anything else (or nullptr) would be invisible.
+// Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
 // TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
 // std::function's dynamic initializer, which --gc-sections cannot drop, so an init-only extern referenced
 // from it becomes an undefined symbol in every other micro binary that links this file.
-extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 static ncclResult_t DefaultNcclTunerPluginUnload(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
 ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("tunerUnload");
   g_ncclTunerPluginUnloadLastComm = comm;
-  const ncclResult_t hooked = g_ncclTunerPluginUnload(comm);
-  return hooked != ncclSuccess ? hooked : g_ncclTunerPluginUnloadResult;
+  return g_ncclTunerPluginUnload(comm);
 }
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
