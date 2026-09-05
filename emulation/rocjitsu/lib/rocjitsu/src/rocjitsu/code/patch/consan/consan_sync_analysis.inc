@@ -279,37 +279,34 @@ void classify_atomic_sync_confidence(const ConSanAtomicSite &site, ConSanSyncEve
   }
 }
 
-template <typename Container>
-void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
-                                      const Container &container, bool in_kernel,
-                                      rj_code_arch_t arch,
-                                      std::span<const ConSanDecodedProgramSite> decoded_sites,
-                                      std::vector<ConSanSyncEvent> &events) {
-  const size_t container_begin = events.size();
+void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t arch,
+                       std::span<const ConSanDecodedProgramSite> decoded_sites,
+                       std::vector<ConSanSyncEvent> &events) {
   const std::string_view fingerprint = code_object_id.fingerprint;
-  const std::string container_kind = in_kernel ? "kernel" : "function";
-  const ConSanProgramContainerRef container_ref = consan_program_container_ref(container);
   const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind, uint32_t occurrence,
                                 ConSanProgramSiteId source_site) {
     const ConSanDecodedProgramSite &source = decoded_sites[source_site.ordinal];
+    const bool in_kernel = source.container.kind == ConSanProgramContainerKind::Kernel;
+    const std::string_view container_kind = in_kernel ? "kernel" : "function";
     event.semantic_id.physical.code_object = code_object_id;
     event.semantic_id.physical.original_text_offset = source.text_offset();
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.source_site = source_site;
-    event.source_containers = {container.name};
-    event.container_name = container.name;
+    event.source_containers = {source.container.name};
+    event.container_name = source.container.name;
     event.in_kernel = in_kernel;
     event.identity =
-        std::string(fingerprint) + "|" + container_kind + "=" + container.name +
+        std::string(fingerprint) + "|" + std::string(container_kind) + "=" + source.container.name +
         "|event=" + std::string(kind) + "|pc=0x" + consan_fixed_hex(event.text_offset(), 16) +
         "|mnemonic=" + std::string(source.mnemonic()) + "|occurrence=" + std::to_string(occurrence);
     events.push_back(std::move(event));
   };
 
-  std::array<uint32_t, 4> occurrences{};
+  std::map<std::tuple<ConSanProgramContainerKind, std::string_view, size_t>, uint32_t> occurrences;
   for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
     const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
-    if (decoded.container != container_ref)
+    if (decoded.container.kind == ConSanProgramContainerKind::Kernel &&
+        is_rocclr_runtime_kernel_name(decoded.container.name))
       continue;
 
     ConSanSyncEvent event;
@@ -442,14 +439,10 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     } else {
       continue;
     }
-    finish_event(event, event_kind, occurrences[occurrence_kind]++,
-                 {static_cast<uint32_t>(decoded_index)});
+    auto &occurrence =
+        occurrences[{decoded.container.kind, decoded.container.name, occurrence_kind}];
+    finish_event(event, event_kind, occurrence++, {static_cast<uint32_t>(decoded_index)});
   }
-
-  std::stable_sort(events.begin() + static_cast<std::ptrdiff_t>(container_begin), events.end(),
-                   [](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
-                     return lhs.text_offset() < rhs.text_offset();
-                   });
 }
 
 void build_sync_event_inventory(std::span<const uint8_t> bytes,
@@ -457,14 +450,19 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 const ProgramInventory &program_inventory, rj_code_arch_t arch) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
-  for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
-    if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_sync_events_for_container(code_object_id, kernel, true, arch,
-                                       program_inventory.decoded_sites(), inventory.sync_events);
-  }
+  build_sync_events(code_object_id, arch, program_inventory.decoded_sites(), inventory.sync_events);
+
+  std::map<std::pair<bool, std::string_view>, size_t> container_order;
+  for (const ConSanKernelInfo &kernel : program_inventory.kernels())
+    container_order.emplace(std::pair{true, std::string_view{kernel.name}}, container_order.size());
   for (const ConSanFunctionInfo &function : program_inventory.functions())
-    append_sync_events_for_container(code_object_id, function, false, arch,
-                                     program_inventory.decoded_sites(), inventory.sync_events);
+    container_order.emplace(std::pair{false, std::string_view{function.name}},
+                            container_order.size());
+  std::ranges::stable_sort(inventory.sync_events, [&](const ConSanSyncEvent &lhs,
+                                                      const ConSanSyncEvent &rhs) {
+    return std::pair{container_order.at({lhs.in_kernel, lhs.container_name}), lhs.text_offset()} <
+           std::pair{container_order.at({rhs.in_kernel, rhs.container_name}), rhs.text_offset()};
+  });
 }
 
 [[nodiscard]] const ConSanDecodedProgramSite *
