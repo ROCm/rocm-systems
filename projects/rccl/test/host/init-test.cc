@@ -10052,8 +10052,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsMoreChannels_KeepsTheS
   EXPECT_EQ(kLocalNc, g_ncclTopoPostsetNc);  // a min(), not a max()
 }
 
-// One shared buffer would let init.cc:992 read channels[0] for every c and still make four calls, so each
-// channel gets its own source and its own destination.
+// One shared buffer would let init.cc:992 read channels[0] and still make four calls, so each channel owns both ends.
 TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesEachChannelsOwnRanks) {
   const int kNRanks = 8;
   const int kChannelsWithRanks = 2;
