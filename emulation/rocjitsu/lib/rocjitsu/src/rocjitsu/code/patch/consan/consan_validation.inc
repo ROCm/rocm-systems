@@ -479,6 +479,7 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
 
 void validate_mutation_semantics(const FinalValidationEnvironment &environment,
                                  const ConSanFinalValidationInput &result,
+                                 const ConSanPristineValidationInventory *pristine_inventory,
                                  std::vector<std::string> &errors) {
   // Instrumentation-only transforms have no mutation semantics to rederive.
   // Avoid rebuilding the entire pristine synchronization/CFG inventory here:
@@ -498,12 +499,11 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     return;
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
-  const auto original_image =
-      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(environment.original.image_data()),
-                               environment.original.image_size());
-  const ConSanMutationValidationInventory pristine_inventory =
-      rederive_consan_mutation_validation_inventory(original_image);
-  const ConSanFaultSelectionView pristine_faults = pristine_inventory.fault_selection();
+  if (pristine_inventory == nullptr) {
+    errors.emplace_back("ConSan mutation proof found no pristine validation inventory");
+    return;
+  }
+  const ConSanFaultSelectionView pristine_faults = pristine_inventory->fault_selection();
   std::vector<const ConSanPatchInfo *> markerless_sources;
   const ConSanPatchInfo *markerless_target = nullptr;
   std::vector<ConSanBarrierSite> barrier_id_scope_originals;
@@ -1410,9 +1410,9 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
   return;
 }
 
-void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
-                                        const FinalValidationEnvironment &environment,
+void validate_sc_perturbation_semantics(const FinalValidationEnvironment &environment,
                                         const ConSanFinalValidationInput &result,
+                                        const ConSanPristineValidationInventory *pristine,
                                         std::vector<std::string> &errors) {
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
@@ -1438,9 +1438,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     return;
   }
 
-  const ConSanPerturbationValidationInventory pristine =
-      rederive_consan_perturbation_validation_inventory(original_image);
-  if (!pristine.analysis_succeeded) {
+  if (pristine == nullptr || !pristine->analysis_succeeded) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
     return;
@@ -1451,7 +1449,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
-  const SynchronizationInventoryView pristine_events = pristine.program_inventory.sync();
+  const SynchronizationInventoryView pristine_events = pristine->program_inventory.sync();
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -1496,8 +1494,9 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       continue;
     }
 
-    const ProgramInventory &semantic_inventory = pristine.program_inventory;
-    const std::span<const ConSanPerturbationCandidate> semantic_candidates = pristine.candidates;
+    const ProgramInventory &semantic_inventory = pristine->program_inventory;
+    const std::span<const ConSanPerturbationCandidate> semantic_candidates =
+        pristine->perturbation_candidates;
     const auto candidate_matches = [&](const ConSanPerturbationCandidate &candidate) {
       const ConSanSyncSequence *sequence = pristine_events.find_sequence(candidate.sequence);
       return candidate.eligible && sequence != nullptr &&
@@ -1548,7 +1547,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     const ConSanProgramSite *anchor_source =
         anchor_event == nullptr
             ? nullptr
-            : pristine.program_inventory.program_site(anchor_event->source_site);
+            : pristine->program_inventory.program_site(anchor_event->source_site);
     if (candidate->anchor_event != sequence->member_event_ids[outer_member_index] ||
         anchor_event == nullptr ||
         anchor_source == nullptr ||
@@ -3055,10 +3054,23 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes,
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
   FinalValidationEnvironment environment(original, replacement);
+  const bool validates_mutation =
+      has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
+  const bool validates_perturbation = std::ranges::any_of(
+      result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+      });
+  std::optional<ConSanPristineValidationInventory> pristine_inventory;
+  if (validates_mutation || validates_perturbation) {
+    pristine_inventory.emplace(
+        rederive_consan_pristine_validation_inventory(original_bytes, validates_mutation));
+  }
   validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
-  validate_mutation_semantics(environment, result, errors);
-  validate_sc_perturbation_semantics(original_bytes, environment, result, errors);
+  validate_mutation_semantics(environment, result,
+                              pristine_inventory ? &*pristine_inventory : nullptr, errors);
+  validate_sc_perturbation_semantics(environment, result,
+                                     pristine_inventory ? &*pristine_inventory : nullptr, errors);
   validate_resource_and_metadata_deltas(environment, result, errors);
   validate_entry_scalar_backup_semantics(environment, result, errors);
   validate_dispatch_id_prologue_semantics(environment, result, errors);

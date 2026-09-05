@@ -27,32 +27,19 @@ rederive_pristine_program_inventory(std::span<const uint8_t> original_image,
 
 } // namespace
 
-ConSanMutationValidationInventory
-rederive_consan_mutation_validation_inventory(std::span<const uint8_t> original_image) {
+ConSanPristineValidationInventory rederive_consan_pristine_validation_inventory(
+    std::span<const uint8_t> original_image, bool require_mutation_semantics) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_drop_barrier = true;
-  options.fault_dry_run = true;
-  ConSanPerturbationPlanningState unused_perturbation;
-  ConSanProgramAnalysisResult analysis =
-      rederive_pristine_program_inventory(original_image, options, unused_perturbation);
-  return {
-      .program_inventory = std::move(analysis.program_inventory),
-      .fault_sites = std::move(analysis.fault_sites),
-  };
-}
-
-ConSanPerturbationValidationInventory
-rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> original_image) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_drop_barrier = require_mutation_semantics;
   options.fault_dry_run = true;
   ConSanPerturbationPlanningState perturbation;
   ConSanProgramAnalysisResult analysis =
       rederive_pristine_program_inventory(original_image, options, perturbation);
   return {
       .program_inventory = std::move(analysis.program_inventory),
-      .candidates = std::move(perturbation.candidates),
+      .fault_sites = std::move(analysis.fault_sites),
+      .perturbation_candidates = std::move(perturbation.candidates),
       .analysis_succeeded = analysis.errors.empty(),
   };
 }
