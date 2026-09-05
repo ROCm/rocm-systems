@@ -51,6 +51,10 @@ public:
     sequence_.require(success);
   }
 
+  template <typename... Values> void append(std::string_view message, const Values &...values) {
+    operator()(sequence_.emit_all(values...), message);
+  }
+
 private:
   InstructionSequence &sequence_;
   std::vector<std::string> &errors_;

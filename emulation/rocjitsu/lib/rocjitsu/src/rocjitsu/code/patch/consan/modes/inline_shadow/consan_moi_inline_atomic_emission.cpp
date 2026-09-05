@@ -968,9 +968,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       // instructions in this cave to resolve the dependency.
     }
     if (widen_consumer_segment)
-      require_emission(sequence.emit(instrumentation::build_s_mov_b64(
-                           static_cast<uint16_t>(exec_base + 16u), kAmdGpuExecLo, arch)),
-                       "ConSan MOI inline acquire could not save its validated lanes");
+      require_emission.append("ConSan MOI inline acquire could not save its validated lanes",
+                              instrumentation::build_s_mov_b64(
+                                  static_cast<uint16_t>(exec_base + 16u), kAmdGpuExecLo, arch));
     const InstructionSequence::Label consumer_segment_done = sequence.make_label();
     require_emission(
         sequence.emit_branch(consumer_segment_done, InstructionSequence::BranchKind::ExecZero) &&
@@ -1822,8 +1822,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const auto load_workgroup = instrumentation::build_private_load_b32(
         materialized_workgroup_key, private_state.workgroup_key_offset, arch);
     const auto wait_private = instrumentation::build_s_wait_private_load0(arch);
-    require_emission(sequence.emit_all(load_epoch, load_workgroup, wait_private),
-                     "ConSan MOI inline atomic patch could not load private epoch/workgroup state");
+    require_emission.append(
+        "ConSan MOI inline atomic patch could not load private epoch/workgroup state", load_epoch,
+        load_workgroup, wait_private);
     if (private_state.workitem_owner) {
       const ConSanTargetProfile *target = consan_target_profile(arch);
       require_emission(
@@ -1835,9 +1836,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     } else if (private_state.resident_wave_owner) {
       const uint16_t owner_sgpr = private_state.resident_wave_owner->destination_sgpr;
       if (private_state.resident_wave_owner_is_borrowed) {
-        require_emission(sequence.emit(instrumentation::build_v_writelane_b32(
-                             private_temporary, owner_sgpr, 0u, arch)),
-                         "ConSan MOI inline atomic patch could not save borrowed owner state");
+        require_emission.append(
+            "ConSan MOI inline atomic patch could not save borrowed owner state",
+            instrumentation::build_v_writelane_b32(private_temporary, owner_sgpr, 0u, arch));
       }
       const ConSanTargetProfile *target = consan_target_profile(arch);
       require_emission(target != nullptr && consan_detail::append_moi_resident_wave_owner(
@@ -1848,8 +1849,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         const auto restore_owner =
             instrumentation::build_v_readlane_b32(owner_sgpr, private_temporary, 0u, arch);
         const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
-        require_emission(sequence.emit_all(restore_owner, wait_owner),
-                         "ConSan MOI inline atomic patch could not restore borrowed owner state");
+        require_emission.append(
+            "ConSan MOI inline atomic patch could not restore borrowed owner state", restore_owner,
+            wait_owner);
       }
     } else {
       errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
@@ -1868,9 +1870,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       const auto read_dispatch_high = instrumentation::build_v_readfirstlane_b32(
           static_cast<uint16_t>(dispatch_id_sgpr + 1u), materialized_workgroup_key, arch);
       const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
-      require_emission(sequence.emit_all(load_dispatch_low, load_dispatch_high, wait_dispatch,
-                                         read_dispatch_low, read_dispatch_high, wait_scalar),
-                       "ConSan MOI inline atomic patch could not reload private dispatch ID");
+      require_emission.append("ConSan MOI inline atomic patch could not reload private dispatch ID",
+                              load_dispatch_low, load_dispatch_high, wait_dispatch,
+                              read_dispatch_low, read_dispatch_high, wait_scalar);
       sequence.append(load_workgroup, wait_private);
     }
   }
@@ -1977,11 +1979,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const InstructionSequence::Label version_retry_begin = sequence.mark_label();
     require_emission(append_atomic_load_u32(words, scratch_vgpr, version_before, arch),
                      "ConSan MOI inline acquire could not load its release version");
-    require_emission(sequence.emit_all(instrumentation::build_v_and_b32_literal(
-                                           temporary_vgpr, 1u, version_before, arch),
-                                       instrumentation::build_v_cmp_eq_u32_vcc(
-                                           scalar_positive_inline_u32(0), temporary_vgpr, arch)),
-                     "ConSan MOI inline acquire could not encode its version retry");
+    require_emission.append(
+        "ConSan MOI inline acquire could not encode its version retry",
+        instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, version_before, arch),
+        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), temporary_vgpr,
+                                                arch));
     const InstructionSequence::Label version_retry_exit = sequence.make_label();
     sequence.branch(version_retry_exit, InstructionSequence::BranchKind::VccNonzero)
         .append(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch),
@@ -2054,9 +2056,10 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     return finish_words();
   }
 
-  require_emission(sequence.emit(instrumentation::build_s_mov_b64(
-                       kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch)),
-                   "ConSan MOI inline atomic patch could not restore original EXEC");
+  require_emission.append(
+      "ConSan MOI inline atomic patch could not restore original EXEC",
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo,
+                                       static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch));
   require_emission(append_restore_moi_special_state(words, plan.special_state, arch),
                    "ConSan MOI inline atomic patch could not restore VCC/SCC");
   return finish_words();

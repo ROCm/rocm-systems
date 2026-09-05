@@ -297,18 +297,17 @@ namespace consan_moi_impl {
               words, base + offsetof(ConSanMoiReportHeader, access_record_count),
               access_record_capacity, slot_vgpr, value_vgpr, scratch_vgpr, arch),
           "ConSan MOI dynamic access-record probe could not reserve a bounded record slot");
-      require_emission(sequence.emit(instrumentation::build_s_and_saveexec_b64(
-                           *point.moi_exec_save_sgpr, kAmdGpuVccLo, arch)),
-                       "ConSan MOI dynamic access-record probe could not apply its capacity guard");
+      require_emission.append(
+          "ConSan MOI dynamic access-record probe could not apply its capacity guard",
+          instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch));
 
       DynamicRecordEmitter record(words, kAccessRecordLayout, dynamic_record_base, slot_vgpr,
                                   scratch_vgpr, arch);
       if (private_epoch_offset) {
-        require_emission(
-            sequence.emit_all(
-                instrumentation::build_private_load_b32(value_vgpr, *private_epoch_offset, arch),
-                instrumentation::build_s_wait_private_load0(arch)),
-            "ConSan MOI dynamic access-record probe could not load private epoch state");
+        require_emission.append(
+            "ConSan MOI dynamic access-record probe could not load private epoch state",
+            instrumentation::build_private_load_b32(value_vgpr, *private_epoch_offset, arch),
+            instrumentation::build_s_wait_private_load0(arch));
         record.vgpr(offsetof(ConSanMoiAccessRecord, epoch), value_vgpr);
       } else if (point.moi_persistent_sgprs.epoch()) {
         words.push_back(build_v_mov_b32_e32(value_vgpr, *point.moi_persistent_sgprs.epoch(), arch));
@@ -347,11 +346,11 @@ namespace consan_moi_impl {
       }
       record.vgpr(offsetof(ConSanMoiAccessRecord, lds_byte_offset),
                   *effective_lds_byte_offset_vgpr);
-      require_emission(
-          sequence.emit(instrumentation::build_v_lshrrev_b32(
-              value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
-              *effective_lds_byte_offset_vgpr, arch)),
-          "ConSan MOI dynamic access-record probe could not encode start cell");
+      require_emission.append("ConSan MOI dynamic access-record probe could not encode start cell",
+                              instrumentation::build_v_lshrrev_b32(
+                                  value_vgpr,
+                                  scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
+                                  *effective_lds_byte_offset_vgpr, arch));
       const ConSanMoiLdsCellRange static_range =
           consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
       record.vgpr(offsetof(ConSanMoiAccessRecord, start_cell), value_vgpr)
@@ -359,11 +358,10 @@ namespace consan_moi_impl {
           .literal(offsetof(ConSanMoiAccessRecord, cell_count), static_range.cell_count);
       require_emission(record.finish(),
                        "ConSan MOI dynamic access-record probe could not encode record stores");
-      require_emission(
-          sequence.emit_all(
-              instrumentation::build_s_wait_global_store0(arch),
-              instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch)),
-          "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC");
+      require_emission.append(
+          "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC",
+          instrumentation::build_s_wait_global_store0(arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch));
       // A terminal guest access can return directly to s_endpgm. Drain the
       // injected report publication while the scratch values and narrowed
       // EXEC are still intact, so wave termination cannot race those stores.
@@ -511,9 +509,9 @@ namespace consan_moi_impl {
   }
   std::optional<InstructionSequence::Label> address_group_loop;
   if (automatic_banked_capture) {
-    require_emission(
-        sequence.emit(instrumentation::build_s_mov_b64(original_exec_sgpr, kAmdGpuExecLo, arch)),
-        "ConSan MOI first-light probe could not retain its incoming EXEC");
+    require_emission.append(
+        "ConSan MOI first-light probe could not retain its incoming EXEC",
+        instrumentation::build_s_mov_b64(original_exec_sgpr, kAmdGpuExecLo, arch));
 
     // Saturation is a monotonic report-wide latch. Read it once before the
     // distinct-address loop; a group that saturates during this probe still
@@ -521,14 +519,13 @@ namespace consan_moi_impl {
     require_emission(record.materialize_address(base) &&
                          record.load(offsetof(ConSanMoiReportHeader, flags), record_value_vgpr),
                      "ConSan MOI first-light probe could not read report saturation");
-    require_emission(
-        sequence.emit_all(instrumentation::build_s_wait_global_load0(arch),
-                          instrumentation::build_v_and_b32_literal(
-                              record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated,
-                              record_value_vgpr, arch),
-                          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
-                                                                  record_compare_vgpr, arch)),
-        "ConSan MOI first-light probe could not test report saturation");
+    require_emission.append("ConSan MOI first-light probe could not test report saturation",
+                            instrumentation::build_s_wait_global_load0(arch),
+                            instrumentation::build_v_and_b32_literal(
+                                record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated,
+                                record_value_vgpr, arch),
+                            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                    record_compare_vgpr, arch));
     require_emission(
         sequence.emit_branch(restore_exec_label, InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not branch around a saturated report");
@@ -578,9 +575,9 @@ namespace consan_moi_impl {
     require_emission(
         append_claim_token(record_value_vgpr, record_value_high_vgpr, record_compare_vgpr),
         "ConSan MOI first-light probe could not form its dispatch claim");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         scalar_positive_inline_u32(0), record_value_vgpr, arch)),
-                     "ConSan MOI first-light probe could not hash its dispatch claim");
+    require_emission.append("ConSan MOI first-light probe could not hash its dispatch claim",
+                            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                    record_value_vgpr, arch));
     require_emission(sequence.emit_branch(dispatch_token_ready_label,
                                           InstructionSequence::BranchKind::VccNonzero),
                      "ConSan MOI first-light probe could not validate its dispatch token");
@@ -592,16 +589,14 @@ namespace consan_moi_impl {
                                               InstructionSequence::BranchKind::Unconditional) &&
                          sequence.bind(dispatch_token_ready_label),
                      "ConSan MOI first-light dispatch-token path is invalid");
-    require_emission(
-        sequence.emit_all(
-            instrumentation::build_v_xor_b32(dispatch_bank_vgpr,
-                                             vector_source_vgpr(record_value_vgpr),
-                                             record_value_high_vgpr, arch),
-            instrumentation::build_v_and_b32_literal(
-                dispatch_bank_vgpr, layout.record_replay_dispatch_token_capacity - 1u,
-                dispatch_bank_vgpr, arch),
-            build_v_mov_b32_e32(bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch)),
-        "ConSan MOI first-light probe could not hash its dispatch claim");
+    require_emission.append(
+        "ConSan MOI first-light probe could not hash its dispatch claim",
+        instrumentation::build_v_xor_b32(dispatch_bank_vgpr, vector_source_vgpr(record_value_vgpr),
+                                         record_value_high_vgpr, arch),
+        instrumentation::build_v_and_b32_literal(dispatch_bank_vgpr,
+                                                 layout.record_replay_dispatch_token_capacity - 1u,
+                                                 dispatch_bank_vgpr, arch),
+        build_v_mov_b32_e32(bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch));
 
     require_emission(sequence.bind(dispatch_probe_label) &&
                          consan_detail::append_moi_indexed_address(
@@ -612,19 +607,18 @@ namespace consan_moi_impl {
                               .index_vgpr = dispatch_bank_vgpr},
                              *target),
                      "ConSan MOI first-light probe could not address its dispatch table");
-    require_emission(
-        sequence.emit_all(
-            build_v_mov_b32_e32(record_compare_vgpr, scalar_positive_inline_u32(0), arch),
-            build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch),
-            instrumentation::build_flat_atomic_cmpswap_b64(
-                record_address_vgpr, record_value_vgpr, record_value_vgpr,
-                /*return_old_value=*/true, kAmdGpuScopeDevice, arch)),
-        "ConSan MOI first-light probe could not claim a dispatch slot");
+    require_emission.append(
+        "ConSan MOI first-light probe could not claim a dispatch slot",
+        build_v_mov_b32_e32(record_compare_vgpr, scalar_positive_inline_u32(0), arch),
+        build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch),
+        instrumentation::build_flat_atomic_cmpswap_b64(
+            record_address_vgpr, record_value_vgpr, record_value_vgpr,
+            /*return_old_value=*/true, kAmdGpuScopeDevice, arch));
     require_emission(append_moi_global_atomic_wait(words, arch),
                      "ConSan MOI first-light probe could not wait for a dispatch slot claim");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         scalar_positive_inline_u32(0), record_value_vgpr, arch)),
-                     "ConSan MOI first-light probe could not inspect a dispatch slot");
+    require_emission.append("ConSan MOI first-light probe could not inspect a dispatch slot",
+                            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                    record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(dispatch_occupied_label, InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not inspect its dispatch claim");
@@ -651,9 +645,9 @@ namespace consan_moi_impl {
             append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
                                                /*high_word=*/false, arch),
         "ConSan MOI first-light probe could not compare a dispatch slot");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch)),
-                     "ConSan MOI first-light probe could not compare a dispatch low word");
+    require_emission.append("ConSan MOI first-light probe could not compare a dispatch low word",
+                            instrumentation::build_v_cmp_ne_u32_vcc(
+                                vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(dispatch_retry_label, InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not branch to its dispatch retry");
@@ -669,9 +663,10 @@ namespace consan_moi_impl {
             append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
                                                /*high_word=*/true, arch),
         "ConSan MOI first-light probe could not compare a dispatch slot");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr, arch)),
-                     "ConSan MOI first-light probe could not compare a dispatch high word");
+    require_emission.append(
+        "ConSan MOI first-light probe could not compare a dispatch high word",
+        instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                record_value_high_vgpr, arch));
     require_emission(
         sequence.emit_branch(dispatch_retry_label, InstructionSequence::BranchKind::VccNonzero) &&
             sequence.emit_branch(dispatch_bank_ready_label,
@@ -681,18 +676,17 @@ namespace consan_moi_impl {
 
     // Mirror consan_moi_record_replay_advance_probe(): the incremented probe
     // count produces a triangular walk through the power-of-two directory.
-    require_emission(
-        sequence.emit_all(
-            instrumentation::build_v_add_u32_literal(bank_probe_count_vgpr, record_compare_vgpr, 1u,
-                                                     bank_probe_count_vgpr, arch),
-            instrumentation::build_v_mov_b32_literal(
-                record_compare_vgpr,
-                std::min(layout.record_replay_dispatch_token_capacity,
-                         kConSanMoiRecordReplayProbeLimit),
-                arch),
-            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(record_compare_vgpr),
-                                                    bank_probe_count_vgpr, arch)),
-        "ConSan MOI first-light probe could not advance its dispatch probe");
+    require_emission.append(
+        "ConSan MOI first-light probe could not advance its dispatch probe",
+        instrumentation::build_v_add_u32_literal(bank_probe_count_vgpr, record_compare_vgpr, 1u,
+                                                 bank_probe_count_vgpr, arch),
+        instrumentation::build_v_mov_b32_literal(
+            record_compare_vgpr,
+            std::min(layout.record_replay_dispatch_token_capacity,
+                     kConSanMoiRecordReplayProbeLimit),
+            arch),
+        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                bank_probe_count_vgpr, arch));
     require_emission(
         sequence.emit_branch(dispatch_saturated_label, InstructionSequence::BranchKind::VccZero),
         "ConSan MOI first-light probe could not bound its dispatch retry");
@@ -805,9 +799,9 @@ namespace consan_moi_impl {
                               : append_claim_token(record_value_vgpr, record_value_high_vgpr,
                                                    record_compare_vgpr)),
                      "ConSan MOI first-light probe could not materialize its bank claim");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         scalar_positive_inline_u32(0), record_value_vgpr, arch)),
-                     "ConSan MOI first-light probe could not validate its bank claim");
+    require_emission.append("ConSan MOI first-light probe could not validate its bank claim",
+                            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                    record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(token_ready_label, InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not validate its access token");
@@ -822,15 +816,15 @@ namespace consan_moi_impl {
     words.push_back(build_v_mov_b32_e32(record_compare_vgpr, scalar_positive_inline_u32(0), arch));
     words.push_back(
         build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch));
-    require_emission(sequence.emit(instrumentation::build_flat_atomic_cmpswap_b64(
-                         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-                         /*return_old_value=*/true, kAmdGpuScopeDevice, arch)),
-                     "ConSan MOI first-light probe could not encode its publication claim");
+    require_emission.append("ConSan MOI first-light probe could not encode its publication claim",
+                            instrumentation::build_flat_atomic_cmpswap_b64(
+                                record_address_vgpr, record_value_vgpr, record_value_vgpr,
+                                /*return_old_value=*/true, kAmdGpuScopeDevice, arch));
     require_emission(append_moi_global_atomic_wait(words, arch),
                      "ConSan MOI first-light probe could not wait for its publication claim");
-    require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                         scalar_positive_inline_u32(0), record_value_vgpr, arch)),
-                     "ConSan MOI first-light probe could not test its publication claim");
+    require_emission.append("ConSan MOI first-light probe could not test its publication claim",
+                            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                    record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(occupied_label, InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not inspect its access claim low word");
@@ -894,10 +888,10 @@ namespace consan_moi_impl {
           "ConSan MOI first-light probe could not encode derived owner");
     }
     if (private_epoch_offset) {
-      require_emission(sequence.emit_all(instrumentation::build_private_load_b32(
-                                             record_value_vgpr, *private_epoch_offset, arch),
-                                         instrumentation::build_s_wait_private_load0(arch)),
-                       "ConSan MOI first-light probe could not load private epoch state");
+      require_emission.append(
+          "ConSan MOI first-light probe could not load private epoch state",
+          instrumentation::build_private_load_b32(record_value_vgpr, *private_epoch_offset, arch),
+          instrumentation::build_s_wait_private_load0(arch));
       require_emission(record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), record_value_vgpr),
                        "ConSan MOI first-light probe could not store private epoch state");
     } else if (point.moi_persistent_sgprs.epoch()) {
@@ -918,11 +912,11 @@ namespace consan_moi_impl {
     require_emission(record.store_vgpr(offsetof(ConSanMoiAccessRecord, lds_byte_offset),
                                        *effective_lds_byte_offset_vgpr),
                      "ConSan MOI first-light probe could not encode range offset");
-    require_emission(
-        sequence.emit(instrumentation::build_v_lshrrev_b32(
-            record_value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
-            *effective_lds_byte_offset_vgpr, arch)),
-        "ConSan MOI first-light probe could not encode start cell");
+    require_emission.append("ConSan MOI first-light probe could not encode start cell",
+                            instrumentation::build_v_lshrrev_b32(
+                                record_value_vgpr,
+                                scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
+                                *effective_lds_byte_offset_vgpr, arch));
     require_emission(
         record.store_vgpr(offsetof(ConSanMoiAccessRecord, start_cell), record_value_vgpr) &&
             record.store_literal(offsetof(ConSanMoiAccessRecord, lds_byte_count),
@@ -930,28 +924,27 @@ namespace consan_moi_impl {
             record.store_literal(offsetof(ConSanMoiAccessRecord, cell_count),
                                  static_range.cell_count),
         "ConSan MOI first-light probe could not encode range fields");
-    require_emission(sequence.emit_all(instrumentation::build_s_wait_global_store0(arch),
-                                       instrumentation::build_v_add_u64_signed_i24(
-                                           record_address_vgpr,
-                                           offsetof(ConSanMoiAccessRecord, access_kind), arch)),
-                     "ConSan MOI first-light probe could not drain record stores");
-    require_emission(
-        sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                              record_value_vgpr, static_cast<uint32_t>(kind), arch),
-                          instrumentation::build_v_mov_b32_literal(
-                              record_value_high_vgpr,
-                              static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty), arch),
-                          instrumentation::build_flat_atomic_cmpswap_b32(
-                              record_address_vgpr, record_value_vgpr, record_value_vgpr,
-                              /*return_old_value=*/true, kAmdGpuScopeDevice, arch)),
-        "ConSan MOI first-light probe could not commit its publication");
+    require_emission.append(
+        "ConSan MOI first-light probe could not drain record stores",
+        instrumentation::build_s_wait_global_store0(arch),
+        instrumentation::build_v_add_u64_signed_i24(
+            record_address_vgpr, offsetof(ConSanMoiAccessRecord, access_kind), arch));
+    require_emission.append(
+        "ConSan MOI first-light probe could not commit its publication",
+        instrumentation::build_v_mov_b32_literal(record_value_vgpr, static_cast<uint32_t>(kind),
+                                                 arch),
+        instrumentation::build_v_mov_b32_literal(
+            record_value_high_vgpr, static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty), arch),
+        instrumentation::build_flat_atomic_cmpswap_b32(
+            record_address_vgpr, record_value_vgpr, record_value_vgpr,
+            /*return_old_value=*/true, kAmdGpuScopeDevice, arch));
     require_emission(append_moi_global_atomic_wait(words, arch),
                      "ConSan MOI first-light probe could not wait for its publication commit");
-    require_emission(
-        sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
+    require_emission.append(
+        "ConSan MOI first-light probe could not validate its publication commit",
+        instrumentation::build_v_cmp_ne_u32_vcc(
             scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty)),
-            record_value_vgpr, arch)),
-        "ConSan MOI first-light probe could not validate its publication commit");
+            record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(saturation_label, InstructionSequence::BranchKind::VccNonzero) &&
             sequence.emit_branch(publication_done_label,
@@ -970,9 +963,10 @@ namespace consan_moi_impl {
       require_emission(append_access_claim_token(record_compare_vgpr, record_compare_high_vgpr,
                                                  record_value_vgpr, site_token),
                        "ConSan MOI first-light probe could not rebuild its identity claim");
-      require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                           vector_source_vgpr(record_compare_vgpr), record_address_vgpr, arch)),
-                       "ConSan MOI first-light probe could not compare its identity claim");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its identity claim",
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  record_address_vgpr, arch));
       require_emission(
           sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero),
           "ConSan MOI first-light probe could not retry an access identity");
@@ -986,49 +980,48 @@ namespace consan_moi_impl {
                        "ConSan MOI first-light access-identity retry path is invalid");
     } else {
       // Direct capture retains the historical reversible dispatch token.
-      require_emission(
-          sequence.emit_all(
-              instrumentation::build_v_mov_b32_literal(
-                  record_compare_vgpr,
-                  static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask), arch),
-              instrumentation::build_v_xor_b32(record_value_vgpr,
-                                               vector_source_vgpr(record_compare_vgpr),
-                                               record_value_vgpr, arch)),
-          "ConSan MOI first-light probe could not compare its dispatch claim");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its dispatch claim",
+          instrumentation::build_v_mov_b32_literal(
+              record_compare_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask),
+              arch),
+          instrumentation::build_v_xor_b32(
+              record_value_vgpr, vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch));
       require_emission(append_moi_report_dispatch_id_word(words, dispatch_id_sources,
                                                           record_compare_vgpr,
                                                           /*high_word=*/false, arch),
                        "ConSan MOI first-light probe could not materialize a dispatch low word");
-      require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                           vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch)),
-                       "ConSan MOI first-light probe could not compare a direct dispatch low word");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare a direct dispatch low word",
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  record_value_vgpr, arch));
       require_emission(
           sequence.emit_branch(saturation_label, InstructionSequence::BranchKind::VccNonzero),
           "ConSan MOI first-light probe could not reject a dispatch low mismatch");
 
-      require_emission(
-          sequence.emit_all(
-              instrumentation::build_v_mov_b32_literal(
-                  record_compare_vgpr,
-                  static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask >> 32u), arch),
-              instrumentation::build_v_xor_b32(record_value_high_vgpr,
-                                               vector_source_vgpr(record_compare_vgpr),
-                                               record_value_high_vgpr, arch)),
-          "ConSan MOI first-light probe could not compare its dispatch claim");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its dispatch claim",
+          instrumentation::build_v_mov_b32_literal(
+              record_compare_vgpr,
+              static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask >> 32u), arch),
+          instrumentation::build_v_xor_b32(record_value_high_vgpr,
+                                           vector_source_vgpr(record_compare_vgpr),
+                                           record_value_high_vgpr, arch));
       require_emission(append_moi_report_dispatch_id_word(words, dispatch_id_sources,
                                                           record_compare_vgpr,
                                                           /*high_word=*/true, arch),
                        "ConSan MOI first-light probe could not materialize a dispatch high word");
-      require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                           vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr, arch)),
-                       "ConSan MOI first-light probe could not compare its dispatch claim");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its dispatch claim",
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  record_value_high_vgpr, arch));
       require_emission(
           sequence.emit_branch(saturation_label, InstructionSequence::BranchKind::VccNonzero),
           "ConSan MOI first-light probe could not reject a dispatch high mismatch");
-      require_emission(
-          sequence.emit(instrumentation::build_v_add_u64_signed_i24(
-              record_address_vgpr, offsetof(ConSanMoiAccessRecord, access_kind), arch)),
-          "ConSan MOI first-light probe could not address a direct access kind");
+      require_emission.append(
+          "ConSan MOI first-light probe could not address a direct access kind",
+          instrumentation::build_v_add_u64_signed_i24(
+              record_address_vgpr, offsetof(ConSanMoiAccessRecord, access_kind), arch));
     }
 
     // Use a no-op atomic compare-and-swap as an acquire-style read of the
@@ -1046,10 +1039,10 @@ namespace consan_moi_impl {
     words.push_back(build_v_mov_b32_e32(record_value_vgpr, scalar_positive_inline_u32(0), arch));
     words.push_back(
         build_v_mov_b32_e32(record_value_high_vgpr, scalar_positive_inline_u32(0), arch));
-    require_emission(sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-                         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-                         /*return_old_value=*/true, kAmdGpuScopeDevice, arch)),
-                     "ConSan MOI first-light probe could not observe its publication commit");
+    require_emission.append("ConSan MOI first-light probe could not observe its publication commit",
+                            instrumentation::build_flat_atomic_cmpswap_b32(
+                                record_address_vgpr, record_value_vgpr, record_value_vgpr,
+                                /*return_old_value=*/true, kAmdGpuScopeDevice, arch));
     require_emission(append_moi_global_atomic_wait(words, arch),
                      "ConSan MOI first-light probe could not wait for its publication observation");
     require_emission(
@@ -1066,11 +1059,11 @@ namespace consan_moi_impl {
             sequence.emit_branch(automatic_banked_capture ? owner_retry_label : saturation_label,
                                  InstructionSequence::BranchKind::VccNonzero),
         "ConSan MOI first-light probe could not reject a publication-kind mismatch");
-    require_emission(
-        sequence.emit(instrumentation::build_v_add_u64_signed_i24(
+    require_emission.append(
+        "ConSan MOI first-light probe could not recover its record base address",
+        instrumentation::build_v_add_u64_signed_i24(
             record_address_vgpr,
-            -static_cast<int32_t>(offsetof(ConSanMoiAccessRecord, access_kind)), arch)),
-        "ConSan MOI first-light probe could not recover its record base address");
+            -static_cast<int32_t>(offsetof(ConSanMoiAccessRecord, access_kind)), arch));
 
     if (automatic_banked_capture) {
       const auto reject_dispatch_mismatch = [&](uint32_t offset, bool high_word) {
@@ -1094,12 +1087,11 @@ namespace consan_moi_impl {
 
     require_emission(record.load(offsetof(ConSanMoiAccessRecord, site_token), record_value_vgpr),
                      "ConSan MOI first-light probe could not load its retained site");
-    require_emission(
-        sequence.emit_all(
-            instrumentation::build_v_mov_b32_literal(record_compare_vgpr, site_token, arch),
-            instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
-                                                    record_value_vgpr, arch)),
-        "ConSan MOI first-light probe could not qualify its retained site");
+    require_emission.append(
+        "ConSan MOI first-light probe could not qualify its retained site",
+        instrumentation::build_v_mov_b32_literal(record_compare_vgpr, site_token, arch),
+        instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                record_value_vgpr, arch));
     require_emission(
         sequence.emit_branch(automatic_banked_capture ? owner_retry_label : saturation_label,
                              InstructionSequence::BranchKind::VccNonzero),
@@ -1137,9 +1129,10 @@ namespace consan_moi_impl {
       require_emission(record.load(offsetof(ConSanMoiAccessRecord, wave_id), record_value_vgpr) &&
                            append_owner_id(record_compare_vgpr),
                        "ConSan MOI first-light probe could not qualify its retained owner");
-      require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                           vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch)),
-                       "ConSan MOI first-light probe could not compare its retained owner");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its retained owner",
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  record_value_vgpr, arch));
       require_emission(
           sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero),
           "ConSan MOI first-light probe could not qualify its retained owner");
@@ -1149,17 +1142,18 @@ namespace consan_moi_impl {
           "ConSan MOI first-light probe could not load its retained address group");
       words.push_back(build_v_mov_b32_e32(record_compare_vgpr, address_key_sgpr, arch));
       if (candidate.lowering_offset(range) != 0u) {
-        require_emission(
-            sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                                  record_compare_high_vgpr, candidate.lowering_offset(range), arch),
-                              instrumentation::build_v_add_u32(
-                                  record_compare_vgpr, vector_source_vgpr(record_compare_vgpr),
-                                  record_compare_high_vgpr, arch)),
-            "ConSan MOI first-light probe could not qualify its retained address group");
+        require_emission.append(
+            "ConSan MOI first-light probe could not qualify its retained address group",
+            instrumentation::build_v_mov_b32_literal(record_compare_high_vgpr,
+                                                     candidate.lowering_offset(range), arch),
+            instrumentation::build_v_add_u32(record_compare_vgpr,
+                                             vector_source_vgpr(record_compare_vgpr),
+                                             record_compare_high_vgpr, arch));
       }
-      require_emission(sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-                           vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch)),
-                       "ConSan MOI first-light probe could not compare its retained address group");
+      require_emission.append(
+          "ConSan MOI first-light probe could not compare its retained address group",
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  record_value_vgpr, arch));
       require_emission(
           sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero),
           "ConSan MOI first-light probe could not qualify its retained address group");
@@ -1174,16 +1168,15 @@ namespace consan_moi_impl {
       // Mirror consan_moi_record_replay_advance_probe(): triangular probing is
       // a permutation of every power-of-two table and avoids the primary
       // clustering of a linear walk at higher load.
-      require_emission(
-          sequence.emit_all(
-              instrumentation::build_v_add_u32_literal(bank_probe_count_vgpr, record_compare_vgpr,
-                                                       1u, bank_probe_count_vgpr, arch),
-              instrumentation::build_v_mov_b32_literal(
-                  record_compare_vgpr,
-                  std::min(access_record_capacity, kConSanMoiRecordReplayProbeLimit), arch),
-              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(record_compare_vgpr),
-                                                      bank_probe_count_vgpr, arch)),
-          "ConSan MOI first-light probe could not advance its access-identity probe");
+      require_emission.append(
+          "ConSan MOI first-light probe could not advance its access-identity probe",
+          instrumentation::build_v_add_u32_literal(bank_probe_count_vgpr, record_compare_vgpr, 1u,
+                                                   bank_probe_count_vgpr, arch),
+          instrumentation::build_v_mov_b32_literal(
+              record_compare_vgpr,
+              std::min(access_record_capacity, kConSanMoiRecordReplayProbeLimit), arch),
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(record_compare_vgpr),
+                                                  bank_probe_count_vgpr, arch));
       require_emission(
           sequence.emit_branch(owner_saturation_label, InstructionSequence::BranchKind::VccZero),
           "ConSan MOI first-light probe could not bound its access-identity retry");
@@ -1246,9 +1239,8 @@ namespace consan_moi_impl {
       automatic_banked_capture ? original_exec_sgpr : *point.moi_exec_save_sgpr;
   require_emission(sequence.bind(restore_exec_label),
                    "ConSan MOI first-light probe could not bind its EXEC restore");
-  require_emission(
-      sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, restore_exec_sgpr, arch)),
-      "ConSan MOI first-light probe could not restore EXEC");
+  require_emission.append("ConSan MOI first-light probe could not restore EXEC",
+                          instrumentation::build_s_mov_b64(kAmdGpuExecLo, restore_exec_sgpr, arch));
   require_emission(append_restore_moi_special_state(words, scalar_abi.special_state, arch),
                    "ConSan MOI first-light probe could not restore VCC/SCC");
 

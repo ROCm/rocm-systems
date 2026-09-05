@@ -83,21 +83,19 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
   };
 
   emission.stage("validity and owner comparison");
-  emission.require(sequence.emit(
-      instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch)));
-  emission.require(append_required_predicate(
-                       instrumentation::build_v_cmp_ne_u32_vcc(
-                           scalar_positive_inline_u32(0), tmp_vgpr, arch)) &&
-                   append_extract_exact_shadow_field(
-                       words, address_lo_vgpr, current_low_vgpr,
-                       consan_moi_sampled_watchpoint::owner_shift,
-                       consan_moi_sampled_watchpoint::max_owner, arch) &&
-                   append_extract_exact_shadow_field(
-                       words, address_hi_vgpr, prior_low_vgpr,
-                       consan_moi_sampled_watchpoint::owner_shift,
-                       consan_moi_sampled_watchpoint::max_owner, arch) &&
-                   append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
-                       vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch)));
+  emission.require(
+      sequence.emit(instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch)));
+  emission.require(
+      append_required_predicate(
+          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch)) &&
+      append_extract_exact_shadow_field(words, address_lo_vgpr, current_low_vgpr,
+                                        consan_moi_sampled_watchpoint::owner_shift,
+                                        consan_moi_sampled_watchpoint::max_owner, arch) &&
+      append_extract_exact_shadow_field(words, address_hi_vgpr, prior_low_vgpr,
+                                        consan_moi_sampled_watchpoint::owner_shift,
+                                        consan_moi_sampled_watchpoint::max_owner, arch) &&
+      append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
+          vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch)));
 
   const uint32_t low_epoch_generation_mask =
       static_cast<uint32_t>(consan_moi_sampled_watchpoint::epoch_generation_mask);
@@ -128,11 +126,10 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
           consan_moi_sampled_watchpoint::access_kind_shift,
           (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) &&
       append_extract_exact_shadow_field(
-          words, address_hi_vgpr, prior_low_vgpr,
-          consan_moi_sampled_watchpoint::access_kind_shift,
+          words, address_hi_vgpr, prior_low_vgpr, consan_moi_sampled_watchpoint::access_kind_shift,
           (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) &&
-      sequence.emit(instrumentation::build_v_and_b32(
-          tmp_vgpr, vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch)) &&
+      sequence.emit(instrumentation::build_v_and_b32(tmp_vgpr, vector_source_vgpr(address_lo_vgpr),
+                                                     address_hi_vgpr, arch)) &&
       append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
           scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read)),
           tmp_vgpr, arch)));
@@ -140,8 +137,8 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
   const uint64_t immediate_conflict_count_address =
       plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
   emission.stage("conflict publication");
-  emission.require(append_atomic_fetch_add_one_u32(
-      words, immediate_conflict_count_address, tmp_vgpr, plan.scratch_vgpr, arch));
+  emission.require(append_atomic_fetch_add_one_u32(words, immediate_conflict_count_address,
+                                                   tmp_vgpr, plan.scratch_vgpr, arch));
 
   // VCC is instrumentation-local here. The sampled body's common exit
   // restores guest VCC from its dedicated snapshot, so saving VCC in this
@@ -450,14 +447,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   const uint16_t selection_vcc_save_sgpr = publication_state->selection_vcc_save_sgpr;
   const uint16_t publication_exec_save_sgpr = publication_state->publication_exec_save_sgpr;
   const uint16_t publication_scc_save_sgpr = publication_state->guest_scc_snapshot_sgpr;
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(original_exec_save_sgpr, kAmdGpuExecLo, arch),
-          instrumentation::build_s_cselect_b32(publication_scc_save_sgpr,
-                                               scalar_positive_inline_u32(1),
-                                               scalar_positive_inline_u32(0), arch),
-          instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kAmdGpuVccLo, arch)),
-      "ConSan MOI sampled probe could not save guest EXEC/VCC/SCC");
+  require_emission.append(
+      "ConSan MOI sampled probe could not save guest EXEC/VCC/SCC",
+      instrumentation::build_s_mov_b64(original_exec_save_sgpr, kAmdGpuExecLo, arch),
+      instrumentation::build_s_cselect_b32(publication_scc_save_sgpr, scalar_positive_inline_u32(1),
+                                           scalar_positive_inline_u32(0), arch),
+      instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kAmdGpuVccLo, arch));
   // Publication has several nested EXEC-narrowing paths. Some paths reuse the
   // publication-save pair after an earlier narrowing, so that pair is not a
   // reliable copy of the guest mask at the common exit. Keep the otherwise
@@ -478,11 +473,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       require_emission(
           append_sampled_workgroup_residue(words, plan, bank_vgpr, high_vgpr, low_vgpr, arch),
           "ConSan MOI runtime sampled probe could not select a private-state workgroup");
-      require_emission(sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                                             high_vgpr, plan.runtime_sample_offset, arch),
-                                         instrumentation::build_v_cmp_eq_u32_vcc(
-                                             vector_source_vgpr(high_vgpr), bank_vgpr, arch)),
-                       "ConSan MOI runtime sampled probe could not encode its body workgroup gate");
+      require_emission.append(
+          "ConSan MOI runtime sampled probe could not encode its body workgroup gate",
+          instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch));
       sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
           .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr,
                                                             kAmdGpuVccLo, arch));
@@ -504,16 +498,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       words.push_back(
           build_v_mov_b32_e32(low_vgpr, vector_source_vgpr(*lds_byte_offset_vgpr), arch));
     }
-    require_emission(
-        sequence.emit_all(
-            instrumentation::build_v_lshrrev_b32(
-                low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
-                low_vgpr, arch),
-            instrumentation::build_v_and_b32_literal(low_vgpr, plan.runtime_sample_stride - 1u,
-                                                     low_vgpr, arch),
-            instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), low_vgpr, arch)),
-        "ConSan MOI runtime sampled probe could not encode LDS-cell selector");
+    require_emission.append(
+        "ConSan MOI runtime sampled probe could not encode LDS-cell selector",
+        instrumentation::build_v_lshrrev_b32(
+            low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), low_vgpr,
+            arch),
+        instrumentation::build_v_and_b32_literal(low_vgpr, plan.runtime_sample_stride - 1u,
+                                                 low_vgpr, arch),
+        instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), low_vgpr, arch));
     sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
         .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo,
                                                           arch));
@@ -589,18 +582,16 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       sizeof(ConSanMoiSampledCausalWindow), plan.window_bank_count, bank_vgpr, plan.scratch_vgpr,
       arch);
   require_emission(claimed_window, "ConSan MOI sampled probe could not claim a causal window slot");
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(
-              low_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Publishing),
-              arch),
-          instrumentation::build_v_mov_b32_literal(
-              high_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Empty),
-              arch),
-          instrumentation::build_flat_atomic_cmpswap_b32(plan.scratch_vgpr, low_vgpr, low_vgpr,
-                                                         /*return_old_value=*/true,
-                                                         kAmdGpuScopeDevice, arch)),
-      "ConSan MOI sampled probe could not claim a causal window slot");
+  require_emission.append(
+      "ConSan MOI sampled probe could not claim a causal window slot",
+      instrumentation::build_v_mov_b32_literal(
+          low_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Publishing),
+          arch),
+      instrumentation::build_v_mov_b32_literal(
+          high_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Empty), arch),
+      instrumentation::build_flat_atomic_cmpswap_b32(plan.scratch_vgpr, low_vgpr, low_vgpr,
+                                                     /*return_old_value=*/true, kAmdGpuScopeDevice,
+                                                     arch));
   sequence.require(append_moi_global_atomic_wait(words, arch))
       .append(instrumentation::build_v_cmp_eq_u32_vcc(
           scalar_positive_inline_u32(
@@ -648,9 +639,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
                                  plan.workgroup_sources.cluster_workgroup_id),
       "ConSan MOI sampled probe could not publish causal window metadata");
 
-  require_emission(
-      sequence.emit(instrumentation::build_v_mov_b32_literal(low_vgpr, low_literal, arch)),
-      "ConSan MOI sampled probe could not encode sampled entry low word");
+  require_emission.append("ConSan MOI sampled probe could not encode sampled entry low word",
+                          instrumentation::build_v_mov_b32_literal(low_vgpr, low_literal, arch));
   if (plan.owner_epoch_vgprs.owner || derived_owner_vgpr)
     require_emission(append_add_shifted_vgpr_field(
                          words, low_vgpr, owner_vgpr, consan_moi_sampled_watchpoint::owner_shift,
@@ -680,12 +670,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
         "ConSan MOI sampled probe could not encode effective LDS byte offset");
     effective_lds_byte_offset_vgpr = tmp_vgpr;
   }
-  require_emission(
-      sequence.emit(instrumentation::build_v_lshlrev_b32(
+  require_emission.append(
+      "ConSan MOI sampled probe could not encode sampled entry byte offset",
+      instrumentation::build_v_lshlrev_b32(
           high_vgpr,
           scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_byte_shift - 32u),
-          effective_lds_byte_offset_vgpr, arch)),
-      "ConSan MOI sampled probe could not encode sampled entry byte offset");
+          effective_lds_byte_offset_vgpr, arch));
   require_emission(append_add_literal_field(words, high_vgpr,
                                             encoded_byte_count | encoded_generation_high, tmp_vgpr,
                                             arch),
@@ -806,13 +796,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
                    "ConSan MOI sampled probe could not count a saturated causal window claim");
   sequence.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, arch))
       .bind_label(restore_label);
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec_save_sgpr, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuVccLo, selection_vcc_save_sgpr, arch),
-          instrumentation::build_s_cmp_lg_u32(publication_scc_save_sgpr,
-                                              scalar_positive_inline_u32(0), arch)),
-      "ConSan MOI sampled probe could not restore guest EXEC/VCC/SCC");
+  require_emission.append(
+      "ConSan MOI sampled probe could not restore guest EXEC/VCC/SCC",
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec_save_sgpr, arch),
+      instrumentation::build_s_mov_b64(kAmdGpuVccLo, selection_vcc_save_sgpr, arch),
+      instrumentation::build_s_cmp_lg_u32(publication_scc_save_sgpr, scalar_positive_inline_u32(0),
+                                          arch));
   if (!sequence.finish(arch)) {
     errors.emplace_back("ConSan MOI sampled probe local branch is out of range");
     return std::nullopt;

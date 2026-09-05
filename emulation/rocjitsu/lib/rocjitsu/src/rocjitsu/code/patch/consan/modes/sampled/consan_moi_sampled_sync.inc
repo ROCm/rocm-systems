@@ -185,14 +185,12 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   }
   require_emission(append_save_moi_special_state(words, plan.scalar_abi.special_state, arch),
                    "ConSan MOI sampled barrier failed at special-state save");
-  require_emission(
-      sequence.emit(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch)),
-      "ConSan MOI sampled barrier failed at EXEC snapshot");
+  require_emission.append("ConSan MOI sampled barrier failed at EXEC snapshot",
+                          instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch));
   for (const SampledBarrierWindow &window : candidate.windows) {
     const auto next_window_label = sequence.make_label();
-    require_emission(
-        sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)),
-        "ConSan MOI sampled barrier failed at window-scan EXEC restoration");
+    require_emission.append("ConSan MOI sampled barrier failed at window-scan EXEC restoration",
+                            instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch));
     require_emission(append_sampled_window_bank_index(
                          words, plan.dispatch_id, plan.workgroup_sources, window.bank_count,
                          bank_vgpr, value, *plan.owner_epoch_vgprs.owner, arch),
@@ -200,9 +198,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     if (window.first_slot != 0u) {
       // VALUE is dead after bank selection and is distinct from BANK. Use it
       // as CDNA4's explicit literal temporary while keeping the result in BANK.
-      require_emission(sequence.emit(instrumentation::build_v_add_u32_literal(
-                           bank_vgpr, value, window.first_slot, bank_vgpr, arch)),
-                       "ConSan MOI sampled barrier failed at absolute slot materialization");
+      require_emission.append("ConSan MOI sampled barrier failed at absolute slot materialization",
+                              instrumentation::build_v_add_u32_literal(
+                                  bank_vgpr, value, window.first_slot, bank_vgpr, arch));
     }
     require_emission(consan_detail::append_moi_indexed_address(
                          words,
@@ -241,9 +239,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // before the wave-local lane election below so exactly one wave can publish
   // the workgroup-wide transition. Without this narrowing, every wave races
   // the same metadata slot and the losing waves look like unsupported sync.
-  require_emission(sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-                       scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch)),
-                   "ConSan MOI sampled barrier failed at owner election");
+  require_emission.append("ConSan MOI sampled barrier failed at owner election",
+                          instrumentation::build_v_cmp_eq_u32_vcc(
+                              scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch));
   const bool began_owner_narrowing = static_cast<bool>(sequence);
   narrow_current();
   if (began_owner_narrowing && !sequence)
@@ -252,8 +250,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       expected, consan_moi_sampled_watchpoint::max_epoch, arch);
   const auto epoch_has_successor = instrumentation::build_v_cmp_ne_u32_vcc(
       vector_source_vgpr(expected), *plan.owner_epoch_vgprs.epoch, arch);
-  require_emission(sequence.emit_all(max_epoch, epoch_has_successor),
-                   "ConSan MOI sampled barrier failed at epoch successor check");
+  require_emission.append("ConSan MOI sampled barrier failed at epoch successor check", max_epoch,
+                          epoch_has_successor);
   const bool began_epoch_narrowing = static_cast<bool>(sequence);
   narrow_current();
   if (began_epoch_narrowing && !sequence)
@@ -281,11 +279,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
                                 base, value, value, true, kAmdGpuScopeDevice, arch)),
       "ConSan MOI sampled barrier failed at metadata claim setup");
   sequence.require(append_moi_global_atomic_wait(words, arch));
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
-      "ConSan MOI sampled barrier failed at metadata claim result");
+  require_emission.append(
+      "ConSan MOI sampled barrier failed at metadata claim result",
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
   const bool began_existing_branch = static_cast<bool>(sequence);
   sequence.branch(existing_label, InstructionSequence::BranchKind::SccZero);
   if (began_existing_branch && !sequence)
@@ -293,8 +290,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
                                                           *plan.owner_epoch_vgprs.epoch, arch);
-  require_emission(sequence.emit(increment),
-                   "ConSan MOI sampled barrier failed at next-epoch materialization");
+  require_emission.append("ConSan MOI sampled barrier failed at next-epoch materialization",
+                          increment);
   require_emission(consan_detail::append_moi_indexed_address(
                        words,
                        {.table_address = first_metadata_address,
@@ -310,13 +307,12 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
                             *plan.owner_epoch_vgprs.epoch) &&
           record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after), next_epoch),
       "ConSan MOI sampled barrier failed at metadata body stores");
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_wait_global_store0(arch),
-          instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch),
-          instrumentation::build_v_mov_b32_literal(
-              expected, kConSanMoiSampledSyncPublishingDescriptor, arch)),
-      "ConSan MOI sampled barrier failed at metadata commit setup");
+  require_emission.append(
+      "ConSan MOI sampled barrier failed at metadata commit setup",
+      instrumentation::build_s_wait_global_store0(arch),
+      instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch),
+      instrumentation::build_v_mov_b32_literal(expected, kConSanMoiSampledSyncPublishingDescriptor,
+                                               arch));
   require_emission(consan_detail::append_moi_indexed_address(
                        words,
                        {.table_address = first_metadata_address +
@@ -326,15 +322,14 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
                         .index_vgpr = bank_vgpr},
                        *target),
                    "ConSan MOI sampled barrier failed at metadata commit addressing");
-  require_emission(sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-                       base, value, value, true, kAmdGpuScopeDevice, arch)),
-                   "ConSan MOI sampled barrier failed at metadata commit setup");
+  require_emission.append("ConSan MOI sampled barrier failed at metadata commit setup",
+                          instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
+                                                                         kAmdGpuScopeDevice, arch));
   sequence.require(append_moi_global_atomic_wait(words, arch));
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
-      "ConSan MOI sampled barrier failed at metadata commit result");
+  require_emission.append(
+      "ConSan MOI sampled barrier failed at metadata commit result",
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
   sequence.branch(collision_label, InstructionSequence::BranchKind::SccZero);
   require_emission(append_atomic_fetch_add_one_u32(
                        words,
@@ -353,12 +348,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   sequence.bind_label(existing_label);
   if (began_existing_bind && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed to bind existing metadata");
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch),
-          instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch)),
-      "ConSan MOI sampled barrier failed at existing metadata descriptor");
+  require_emission.append(
+      "ConSan MOI sampled barrier failed at existing metadata descriptor",
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch),
+      instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch));
   sequence.branch(collision_label, InstructionSequence::BranchKind::VccZero).append(increment);
   require_emission(consan_detail::append_moi_indexed_address(
                        words,
@@ -403,29 +397,26 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       "ConSan MOI sampled barrier failed at collision accounting");
 
   sequence.bind_label(restore_label);
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
-          epoch_has_successor,
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch),
-          instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch,
-                                           scalar_positive_inline_u32(1),
-                                           *plan.owner_epoch_vgprs.epoch, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)),
-      "ConSan MOI sampled barrier failed at epoch-advance narrowing");
+  require_emission.append(
+      "ConSan MOI sampled barrier failed at epoch-advance narrowing",
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
+      epoch_has_successor,
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch),
+      instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch, scalar_positive_inline_u32(1),
+                                       *plan.owner_epoch_vgprs.epoch, arch),
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch));
   if (scalar_persistent) {
-    require_emission(
-        sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
-                              *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch),
-                          instrumentation::build_salu_dependency_delay(arch)),
-        "ConSan MOI sampled barrier failed at scalar epoch persistence");
+    require_emission.append(
+        "ConSan MOI sampled barrier failed at scalar epoch persistence",
+        instrumentation::build_v_readfirstlane_b32(*plan.persistent_sgprs.epoch(),
+                                                   *plan.owner_epoch_vgprs.epoch, arch),
+        instrumentation::build_salu_dependency_delay(arch));
   }
   if (private_layout) {
-    require_emission(
-        sequence.emit_all(instrumentation::build_private_store_b32(
-                              *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
-                          instrumentation::build_s_wait_private_store0(arch)),
-        "ConSan MOI sampled barrier failed at private epoch store");
+    require_emission.append("ConSan MOI sampled barrier failed at private epoch store",
+                            instrumentation::build_private_store_b32(
+                                *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
+                            instrumentation::build_s_wait_private_store0(arch));
   }
   require_emission(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch),
                    "ConSan MOI sampled barrier failed at special-state restore");

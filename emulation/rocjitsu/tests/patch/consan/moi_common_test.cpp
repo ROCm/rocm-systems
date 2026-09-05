@@ -56,6 +56,21 @@ TEST(ConSanMoi, StagedEmissionCommitsWithoutDiagnostic) {
   EXPECT_TRUE(errors.empty());
 }
 
+TEST(ConSanMoi, EmissionRequirementOwnsAppendFailureAndFirstDiagnostic) {
+  std::vector<uint32_t> words{0xfeedfaceu};
+  std::vector<std::string> errors;
+  {
+    InstructionSequence sequence(words);
+    consan_moi_impl::MoiEmissionRequirement emission(sequence, errors);
+    emission.append("first append", 0x12345678u, std::optional<uint32_t>{std::nullopt});
+    emission.append("later append", 0x87654321u);
+    EXPECT_FALSE(sequence.finish());
+  }
+
+  EXPECT_EQ(words, std::vector<uint32_t>{0xfeedfaceu});
+  EXPECT_EQ(errors, (std::vector<std::string>{"first append"}));
+}
+
 TEST(ConSanMoi, DynamicRecordEmitterRollsBackCompleteRecordAfterFieldFailure) {
   constexpr uint16_t kScratchVgpr = 40u;
   std::vector<uint32_t> words = {0xfeedfaceu};
