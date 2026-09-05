@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/instruction_sequence.h"
 
 #include <cstddef>
 #include <vector>
@@ -34,7 +35,6 @@ public:
   DynamicRecordEmitter(std::vector<uint32_t> &words, const DynamicRecordLayout &layout,
                        uint64_t record_base, uint16_t slot_vgpr, uint16_t scratch_vgpr,
                        rj_code_arch_t arch);
-  ~DynamicRecordEmitter();
 
   DynamicRecordEmitter(const DynamicRecordEmitter &) = delete;
   DynamicRecordEmitter &operator=(const DynamicRecordEmitter &) = delete;
@@ -47,8 +47,8 @@ public:
   DynamicRecordEmitter &workgroup(size_t field_offset, const ConSanMoiWorkgroupSource &source);
   DynamicRecordEmitter &event_index(size_t field_offset, uint64_t counter_address);
 
-  [[nodiscard]] explicit operator bool() const { return !failed_; }
-  [[nodiscard]] bool finish() const { return !failed_; }
+  [[nodiscard]] explicit operator bool() const { return static_cast<bool>(sequence_); }
+  [[nodiscard]] bool finish() const { return sequence_.finish(); }
 
 private:
   void require(bool success);
@@ -60,8 +60,7 @@ private:
   uint16_t slot_vgpr_ = 0;
   uint16_t scratch_vgpr_ = 0;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
-  size_t initial_size_ = 0;
-  bool failed_ = false;
+  InstructionSequence sequence_;
 };
 
 enum class MoiVisibleEvidencePublicationResult : uint8_t {

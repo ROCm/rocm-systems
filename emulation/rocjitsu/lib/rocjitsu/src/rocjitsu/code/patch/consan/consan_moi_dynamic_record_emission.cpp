@@ -186,22 +186,12 @@ DynamicRecordEmitter::DynamicRecordEmitter(std::vector<uint32_t> &words,
                                            uint16_t slot_vgpr, uint16_t scratch_vgpr,
                                            rj_code_arch_t arch)
     : words_(words), layout_(layout), record_base_(record_base), slot_vgpr_(slot_vgpr),
-      scratch_vgpr_(scratch_vgpr), arch_(arch), initial_size_(words.size()) {}
+      scratch_vgpr_(scratch_vgpr), arch_(arch), sequence_(words) {}
 
-DynamicRecordEmitter::~DynamicRecordEmitter() {
-  if (failed_)
-    words_.resize(initial_size_);
-}
-
-void DynamicRecordEmitter::require(bool success) {
-  if (failed_ || success)
-    return;
-  words_.resize(initial_size_);
-  failed_ = true;
-}
+void DynamicRecordEmitter::require(bool success) { sequence_.require(success); }
 
 DynamicRecordEmitter &DynamicRecordEmitter::vgpr(size_t field_offset, uint16_t value_vgpr) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   if (value_vgpr == scratch_vgpr_ || value_vgpr == static_cast<uint16_t>(scratch_vgpr_ + 1u)) {
     require(false);
@@ -210,58 +200,58 @@ DynamicRecordEmitter &DynamicRecordEmitter::vgpr(size_t field_offset, uint16_t v
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
   require(store && append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
                                                  slot_vgpr_, scratch_vgpr_, arch_));
-  if (!failed_)
+  if (sequence_)
     words_.insert(words_.end(), store->begin(), store->end());
   return *this;
 }
 
 DynamicRecordEmitter &DynamicRecordEmitter::scalar(size_t field_offset, uint16_t scalar_src) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   require(value_vgpr != slot_vgpr_ &&
           append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
                                         scratch_vgpr_, arch_));
-  if (failed_)
+  if (!sequence_)
     return *this;
   words_.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch_));
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
   require(store.has_value());
-  if (!failed_)
+  if (sequence_)
     words_.insert(words_.end(), store->begin(), store->end());
   return *this;
 }
 
 DynamicRecordEmitter &DynamicRecordEmitter::literal(size_t field_offset, uint32_t value) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   require(value_vgpr != slot_vgpr_ &&
           append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
                                         scratch_vgpr_, arch_));
-  if (failed_)
+  if (!sequence_)
     return *this;
   const auto mov_value = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch_);
   require(mov_value.has_value());
-  if (failed_)
+  if (!sequence_)
     return *this;
   words_.insert(words_.end(), mov_value->begin(), mov_value->end());
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
   require(store.has_value());
-  if (!failed_)
+  if (sequence_)
     words_.insert(words_.end(), store->begin(), store->end());
   return *this;
 }
 
 DynamicRecordEmitter &DynamicRecordEmitter::private_value(size_t field_offset,
                                                           uint32_t private_offset) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch_);
   const auto wait = instrumentation::build_s_wait_private_load0(arch_);
   require(load.has_value() && wait.has_value());
-  if (failed_)
+  if (!sequence_)
     return *this;
   words_.insert(words_.end(), load->begin(), load->end());
   words_.push_back(*wait);
@@ -271,7 +261,7 @@ DynamicRecordEmitter &DynamicRecordEmitter::private_value(size_t field_offset,
 DynamicRecordEmitter &
 DynamicRecordEmitter::dispatch_id(size_t field_offset,
                                   const ConSanMoiReportDispatchIdSource &source) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   if (!source.is_well_formed()) {
     require(false);
@@ -295,7 +285,7 @@ DynamicRecordEmitter::dispatch_id(size_t field_offset,
 
 DynamicRecordEmitter &DynamicRecordEmitter::workgroup(size_t field_offset,
                                                       const ConSanMoiWorkgroupSource &source) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   if (!source.is_well_formed()) {
     require(false);
@@ -305,19 +295,19 @@ DynamicRecordEmitter &DynamicRecordEmitter::workgroup(size_t field_offset,
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   require(consan_detail::append_workgroup_source_value(words_, source, value_vgpr, arch_));
-  if (!failed_)
+  if (sequence_)
     vgpr(field_offset, value_vgpr);
   return *this;
 }
 
 DynamicRecordEmitter &DynamicRecordEmitter::event_index(size_t field_offset,
                                                         uint64_t counter_address) {
-  if (failed_)
+  if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   require(
       append_atomic_fetch_add_one_u32(words_, counter_address, value_vgpr, scratch_vgpr_, arch_));
-  if (!failed_)
+  if (sequence_)
     vgpr(field_offset, value_vgpr);
   return *this;
 }
