@@ -1194,19 +1194,24 @@ void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
+void apply_common_vector_memory_encoding(ConSanDecodedMemoryOperands &operands,
+                                         const ConSanVectorMemoryEncoding &encoding) {
+  operands.raw_saddr = encoding.raw_saddr;
+  operands.raw_scale_offset = encoding.raw_scale_offset;
+  operands.raw_vaddr = encoding.raw_vaddr;
+  operands.raw_vsrc = encoding.raw_vsrc;
+  operands.raw_vdst = encoding.raw_vdst;
+  operands.raw_ioffset = encoding.raw_ioffset;
+  operands.raw_scope = encoding.raw_scope;
+  operands.raw_th = encoding.raw_th;
+  operands.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
+}
+
 void apply_flat_memory_encoding(ConSanProgramSite &site, const ConSanVectorMemoryEncoding &encoding,
                                 const FlatPointerTracker &tracker) {
+  apply_common_vector_memory_encoding(site.operands, encoding);
   site.operands.raw_op = encoding.raw_op;
-  site.operands.raw_saddr = encoding.raw_saddr;
-  site.operands.raw_scale_offset = encoding.raw_scale_offset;
-  site.operands.raw_vaddr = encoding.raw_vaddr;
-  site.operands.raw_vsrc = encoding.raw_vsrc;
-  site.operands.raw_vdst = encoding.raw_vdst;
-  site.operands.raw_ioffset = encoding.raw_ioffset;
   site.operands.raw_segment = encoding.raw_segment;
-  site.operands.raw_scope = encoding.raw_scope;
-  site.operands.raw_th = encoding.raw_th;
-  site.operands.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
   if (encoding.encoded_segment == ConSanEncodedFlatSegment::Private)
     site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Private;
   else if (encoding.encoded_segment == ConSanEncodedFlatSegment::Global)
@@ -1278,21 +1283,14 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
 
 void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
                                   const ConSanVectorMemoryEncoding &encoding) {
-  site.raw_saddr = encoding.raw_saddr;
+  apply_common_vector_memory_encoding(site, encoding);
   site.raw_nv = encoding.raw_nv;
-  site.raw_scale_offset = encoding.raw_scale_offset;
   site.raw_sve = encoding.raw_sve;
-  site.raw_vaddr = encoding.raw_vaddr;
-  site.raw_vsrc = encoding.raw_vsrc;
-  site.raw_vdst = encoding.raw_vdst;
-  site.raw_ioffset = encoding.raw_ioffset;
-  site.raw_scope = encoding.raw_scope;
   site.scope = encoding.scope_follows_address_space
                    ? (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group
                           ? ConSanMemoryScope::Workgroup
                           : ConSanMemoryScope::Agent)
                    : encoding.scope;
-  site.raw_th = encoding.raw_th;
   site.workgroup_acquire_ordering = encoding.workgroup_acquire_ordering;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
   if (encoding.scalar_provenance_sgpr)

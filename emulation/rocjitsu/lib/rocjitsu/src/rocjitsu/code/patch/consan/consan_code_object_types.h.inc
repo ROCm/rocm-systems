@@ -152,15 +152,10 @@ enum class ConSanOrdinaryMemorySupportReason : uint8_t {
   MissingValueVgpr,
 };
 
-/// Location and operand vocabulary shared by ordinary-memory and atomic
-/// decoding. Both kinds feed the same addressed-communication classifiers;
-/// keeping one representation avoids translating ordinary operations into a
-/// second atomic-shaped field bag before policy and lowering.
-struct ConSanDecodedMemorySite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
+/// Register and raw-encoding vocabulary shared by access, ordinary-memory,
+/// and atomic decoding. Individual semantic records add only their
+/// irreducible operands and interpretation.
+struct ConSanDecodedMemoryOperands {
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> data_vgpr;
@@ -180,8 +175,21 @@ struct ConSanDecodedMemorySite {
   /// one exists and retains the legacy numeric spelling for implicit forms.
   /// Semantic consumers must use `scope`.
   std::optional<uint32_t> raw_scope;
-  std::optional<ConSanMemoryScope> scope;
   std::optional<uint32_t> raw_th;
+
+  bool operator==(const ConSanDecodedMemoryOperands &) const = default;
+};
+
+/// Location and semantic memory vocabulary shared by ordinary-memory and
+/// atomic decoding. Both kinds feed the same addressed-communication
+/// classifiers, so policy can transfer this base rather than rebuilding an
+/// atomic-shaped field bag.
+struct ConSanDecodedMemorySite : ConSanDecodedMemoryOperands {
+  uint64_t text_offset = 0;
+  uint64_t file_offset = 0;
+  uint32_t size = 0;
+  uint32_t width_bits = 0;
+  std::optional<ConSanMemoryScope> scope;
   std::string mnemonic;
 
   bool operator==(const ConSanDecodedMemorySite &) const = default;
@@ -373,26 +381,14 @@ enum class ConSanAccessOrigin : uint8_t {
 /// interpreting whether a particular combination is instrumentable belongs to
 /// engine policy and target lowering. The MOI lowering candidate embeds this
 /// same record rather than copying selected operands into a parallel schema.
-struct ConSanAccessOperandFacts {
-  std::optional<uint16_t> destination_vgpr;
+struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
   std::optional<uint16_t> destination_accvgpr;
-  std::optional<uint16_t> address_vgpr;
   /// Target-normalized scalar half of a scalar-vector FLAT address. The raw
   /// SADDR encoding remains below for exact lowering validation; absence here
   /// means that the target decoder identified its vector-only sentinel.
-  std::optional<uint16_t> scalar_address_sgpr;
-  std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
   std::optional<uint32_t> raw_op;
-  std::optional<uint32_t> raw_saddr;
-  std::optional<bool> raw_scale_offset;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<int32_t> raw_ioffset;
   std::optional<uint32_t> raw_segment;
-  std::optional<uint32_t> raw_scope;
-  std::optional<uint32_t> raw_th;
 
   bool operator==(const ConSanAccessOperandFacts &) const = default;
 };
