@@ -36,8 +36,7 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
       !site->barrier_id || site->operand_source != ConSanBarrierSite::OperandSource::Immediate)
     return;
   const ConSanSyncEvent *event =
-      synchronization.find_unique_event(ConSanSyncEventKind::Barrier, decoded.container.name,
-                                        decoded.container.is_kernel(), site->text_offset);
+      synchronization.find_unique_event(ConSanSyncEventKind::Barrier, decoded.physical_id);
   if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
       synchronization.source(*event) != &decoded)
     return;

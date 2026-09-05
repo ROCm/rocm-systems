@@ -417,9 +417,6 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(view.find_event(event.semantic_id), &view.sync_events.front());
   EXPECT_EQ(view.find_event("event"), &view.sync_events.front());
   EXPECT_EQ(view.find_event("missing"), nullptr);
-  EXPECT_EQ(view.find_unique_event(ConSanSyncEventKind::Fence, "", true, 16),
-            &view.sync_events.front());
-  EXPECT_EQ(view.find_unique_event(ConSanSyncEventKind::Atomic, "", true, 16), nullptr);
   EXPECT_EQ(view.find_unique_sequence_containing(event.semantic_id), &view.sync_sequences.front());
   EXPECT_EQ(view.find_unique_sequence_containing("event"), &view.sync_sequences.front());
   EXPECT_EQ(view.find_unique_sequence_containing("missing"), nullptr);
@@ -481,12 +478,6 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   const ProgramInventory inventory = builder.view();
   const SynchronizationInventoryView graph = inventory.sync();
   EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, first.semantic_id.physical),
-            nullptr);
-  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "first-container", true, 12),
-            &graph.sync_events[0]);
-  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "alias-container", true, 12),
-            &graph.sync_events[1]);
-  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "unknown-container", true, 12),
             nullptr);
   EXPECT_EQ(graph.find_unique_sequence_containing(first.semantic_id), nullptr);
   EXPECT_EQ(graph.find_unique_sequence_containing("first"), nullptr);

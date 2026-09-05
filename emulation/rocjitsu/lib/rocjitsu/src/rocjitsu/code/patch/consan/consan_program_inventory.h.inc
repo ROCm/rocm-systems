@@ -382,39 +382,6 @@ struct SynchronizationInventoryView {
     return match;
   }
 
-  /// Resolve one physical synchronization site without rebuilding an
-  /// engine-private event index.
-  ///
-  /// Container identity is preferred because it distinguishes independently
-  /// decoded functions that happen to use the same text-relative offset. A
-  /// canonicalized physical event may retain a different representative
-  /// container after equivalent symbol aliases are merged, so the query falls
-  /// back to a unique kind/offset match. Either ambiguous match fails closed.
-  [[nodiscard]] const ConSanSyncEvent *find_unique_event(ConSanSyncEventKind kind,
-                                                         std::string_view container_name,
-                                                         bool in_kernel,
-                                                         uint64_t text_offset) const {
-    const ConSanSyncEvent *exact = nullptr;
-    const ConSanSyncEvent *physical = nullptr;
-    bool physical_is_ambiguous = false;
-    for (const ConSanSyncEvent &event : sync_events) {
-      if (event.kind != kind || event.text_offset() != text_offset)
-        continue;
-      if (physical != nullptr)
-        physical_is_ambiguous = true;
-      else
-        physical = &event;
-      if (this->container_name(event) != container_name || this->in_kernel(event) != in_kernel)
-        continue;
-      if (exact != nullptr)
-        return nullptr;
-      exact = &event;
-    }
-    if (exact != nullptr)
-      return exact;
-    return physical_is_ambiguous ? nullptr : physical;
-  }
-
   /// Find the unique logical sequence containing a typed event identity.
   ///
   /// Typed membership is the authoritative graph edge. Absence and ambiguous
