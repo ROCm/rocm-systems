@@ -1416,67 +1416,64 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   InstructionSequence sequence(words);
   const auto poll = sequence.make_label();
   const auto restore_bounded = sequence.make_label();
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(4u),
-                                               saved_cell_vgpr, arch),
-          instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(2u),
-                                               temporary_vgpr, arch),
-          instrumentation::build_v_add_u32_literal(
-              validity_address_vgpr, workgroup_shadow.validity_base, temporary_vgpr, arch),
-          build_v_mov_b32_e32(ready_mask_vgpr, scalar_positive_inline_u32(1u), arch),
-          instrumentation::build_v_and_b32_literal(initializing_mask_vgpr, 15u, saved_cell_vgpr,
-                                                   arch),
-          instrumentation::build_v_lshlrev_b32(
-              initializing_mask_vgpr, scalar_positive_inline_u32(1u), initializing_mask_vgpr, arch),
-          instrumentation::build_v_lshlrev_b32(initializing_mask_vgpr,
-                                               vector_source_vgpr(initializing_mask_vgpr),
-                                               ready_mask_vgpr, arch),
-          instrumentation::build_v_lshlrev_b32(ready_mask_vgpr, scalar_positive_inline_u32(1u),
-                                               initializing_mask_vgpr, arch),
-          instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch)) ||
-      !append_moi_lds_wait(words, arch) ||
-      !sequence.emit_all(
-          instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
-                                           state_vgpr, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
-                                                  temporary_vgpr, arch),
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)) ||
-      !sequence.emit_branch(restore_bounded, InstructionSequence::BranchKind::ExecZero) ||
-      !sequence.emit(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
-                                                          initializing_mask_vgpr, 0u, arch)) ||
-      !append_moi_lds_wait(words, arch) ||
-      !sequence.emit_all(
-          instrumentation::build_v_and_b32(
-              temporary_vgpr, vector_source_vgpr(initializing_mask_vgpr), state_vgpr, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), temporary_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          build_v_mov_b32_e32(state_vgpr, scalar_positive_inline_u32(0u), arch),
-          build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0u), arch),
-          instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(3u),
-                                               saved_cell_vgpr, arch),
-          instrumentation::build_v_add_u32_literal(address_vgpr, workgroup_shadow.base,
+  sequence
+      .append(instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(4u),
+                                                   saved_cell_vgpr, arch),
+              instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(2u),
                                                    temporary_vgpr, arch),
-          instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch)) ||
-      !append_moi_lds_wait(words, arch) ||
-      !sequence.emit(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
-                                                          ready_mask_vgpr, 0u, arch)) ||
-      !append_moi_lds_wait(words, arch) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec_sgpr, arch)) ||
-      !sequence.bind(poll) ||
-      !sequence.emit(
-          instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch)) ||
-      !append_moi_lds_wait(words, arch) ||
-      !sequence.emit_all(
-          instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
-                                           state_vgpr, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
-                                                  temporary_vgpr, arch),
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)) ||
-      !sequence.emit_branch(poll, InstructionSequence::BranchKind::ExecNonzero) ||
-      !sequence.bind(restore_bounded) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch)) ||
-      !sequence.resolve_branches(arch)) {
+              instrumentation::build_v_add_u32_literal(
+                  validity_address_vgpr, workgroup_shadow.validity_base, temporary_vgpr, arch),
+              build_v_mov_b32_e32(ready_mask_vgpr, scalar_positive_inline_u32(1u), arch),
+              instrumentation::build_v_and_b32_literal(initializing_mask_vgpr, 15u, saved_cell_vgpr,
+                                                       arch),
+              instrumentation::build_v_lshlrev_b32(initializing_mask_vgpr,
+                                                   scalar_positive_inline_u32(1u),
+                                                   initializing_mask_vgpr, arch),
+              instrumentation::build_v_lshlrev_b32(initializing_mask_vgpr,
+                                                   vector_source_vgpr(initializing_mask_vgpr),
+                                                   ready_mask_vgpr, arch),
+              instrumentation::build_v_lshlrev_b32(ready_mask_vgpr, scalar_positive_inline_u32(1u),
+                                                   initializing_mask_vgpr, arch),
+              instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch))
+      .require(append_moi_lds_wait(words, arch))
+      .append(instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
+                                               state_vgpr, arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
+                                                      temporary_vgpr, arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch))
+      .branch(restore_bounded, InstructionSequence::BranchKind::ExecZero)
+      .append(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
+                                                   initializing_mask_vgpr, 0u, arch))
+      .require(append_moi_lds_wait(words, arch))
+      .append(instrumentation::build_v_and_b32(
+                  temporary_vgpr, vector_source_vgpr(initializing_mask_vgpr), state_vgpr, arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u),
+                                                      temporary_vgpr, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+              build_v_mov_b32_e32(state_vgpr, scalar_positive_inline_u32(0u), arch),
+              build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0u), arch),
+              instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(3u),
+                                                   saved_cell_vgpr, arch),
+              instrumentation::build_v_add_u32_literal(address_vgpr, workgroup_shadow.base,
+                                                       temporary_vgpr, arch),
+              instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch))
+      .require(append_moi_lds_wait(words, arch))
+      .append(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
+                                                   ready_mask_vgpr, 0u, arch))
+      .require(append_moi_lds_wait(words, arch))
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec_sgpr, arch))
+      .bind_label(poll)
+      .append(instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch))
+      .require(append_moi_lds_wait(words, arch))
+      .append(instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
+                                               state_vgpr, arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
+                                                      temporary_vgpr, arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch))
+      .branch(poll, InstructionSequence::BranchKind::ExecNonzero)
+      .bind_label(restore_bounded)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch));
+  if (!sequence.finish(arch)) {
     errors.emplace_back(
         "ConSan MOI lazy local shadow could not encode packed RDNA4 state transitions");
     return false;
@@ -1513,38 +1510,37 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t valid_workgroup_exec_sgpr = static_cast<uint16_t>(exec_base + 22u);
   const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success && !message.empty())
+      errors.emplace_back(message);
+    sequence.require(success);
+  };
   const auto restore_valid_workgroup =
       instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_workgroup_exec_sgpr, arch);
-  if (!restore_valid_workgroup) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow local publish could not restore its workgroup lanes");
-    return false;
-  }
+  require_emission(restore_valid_workgroup.has_value(),
+                   "ConSan MOI inline-shadow local publish could not restore its workgroup lanes");
 
-  (void)sequence.emit_all(
+  sequence.append(
       build_v_mov_b32_e32(saved_current_low_vgpr, vector_source_vgpr(current_low_vgpr), arch),
       build_v_mov_b32_e32(saved_current_high_vgpr, vector_source_vgpr(current_high_vgpr), arch));
-  if (!append_exact_byte_cell_provenance_base(
-          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, cell_index,
-          relative_cell_index_vgpr, byte_count, consan_moi_shadow_cell::granule_bytes,
-          current_low_vgpr, current_high_vgpr, provenance_temporary_vgpr, temporary_vgpr)) {
-    errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
-    return false;
-  }
+  require_emission(append_exact_byte_cell_provenance_base(
+                       words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
+                       cell_index, relative_cell_index_vgpr, byte_count,
+                       consan_moi_shadow_cell::granule_bytes, current_low_vgpr, current_high_vgpr,
+                       provenance_temporary_vgpr, temporary_vgpr),
+                   "ConSan MOI local publish could not encode exact byte-cell provenance");
   // Worst-case cell loops deliberately include iterations that are empty for
   // some runtime alignments. Remove those lanes before bounds accounting or
   // LDS traffic so only bytes actually touched can consume shadow coverage.
-  if (!sequence.emit_all(
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), current_high_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch)))
-    return false;
+  sequence.append(
+      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), current_high_vgpr,
+                                              arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch));
 
   uint16_t effective_offset_vgpr = lds_byte_offset_vgpr;
   if (static_byte_offset != 0u) {
-    if (!append_compute_effective_lds_byte_offset(words, temporary_vgpr, lds_byte_offset_vgpr,
-                                                  static_byte_offset, arch))
-      return false;
+    sequence.require(append_compute_effective_lds_byte_offset(
+        words, temporary_vgpr, lds_byte_offset_vgpr, static_byte_offset, arch));
     effective_offset_vgpr = temporary_vgpr;
   }
 
@@ -1553,115 +1549,100 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint32_t cell_capacity =
       final_cell_index < shadow_cell_capacity ? shadow_cell_capacity - final_cell_index : 0u;
   const uint32_t local_base = workgroup_shadow.base + cell_index * sizeof(uint64_t);
-  if (!sequence.emit_all(
-          instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch),
-          instrumentation::build_v_lshrrev_b32(
-              temporary_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
-              effective_offset_vgpr, arch),
-          build_v_mov_b32_e32(saved_cell_vgpr, vector_source_vgpr(temporary_vgpr), arch),
-          instrumentation::build_v_mov_b32_literal(address_vgpr, cell_capacity, arch),
-          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(address_vgpr), temporary_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          instrumentation::build_s_mov_b64(bounded_exec_sgpr, kAmdGpuExecLo, arch),
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, incoming_exec_sgpr, bounded_exec_sgpr,
-                                             arch))) {
+  const bool began_bounded_selection = static_cast<bool>(sequence);
+  sequence.append(
+      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch),
+      instrumentation::build_v_lshrrev_b32(
+          temporary_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
+          effective_offset_vgpr, arch),
+      build_v_mov_b32_e32(saved_cell_vgpr, vector_source_vgpr(temporary_vgpr), arch),
+      instrumentation::build_v_mov_b32_literal(address_vgpr, cell_capacity, arch),
+      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(address_vgpr), temporary_vgpr,
+                                              arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_s_mov_b64(bounded_exec_sgpr, kAmdGpuExecLo, arch),
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, incoming_exec_sgpr, bounded_exec_sgpr,
+                                         arch));
+  if (began_bounded_selection && !sequence)
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode bounded lane selection");
-    return false;
-  }
   const InstructionSequence::Label restore_bounded_exec = sequence.make_label();
-  if (!sequence.emit_branch(restore_bounded_exec, InstructionSequence::BranchKind::ExecZero))
-    return false;
-  if (!append_atomic_fetch_add_one_u32(
+  sequence.branch(restore_bounded_exec, InstructionSequence::BranchKind::ExecZero);
+  require_emission(
+      append_atomic_fetch_add_one_u32(
           words,
           plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
-          temporary_vgpr, address_vgpr, arch)) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow local publish could not encode undercoverage accounting");
-    return false;
-  }
-  if (!sequence.bind(restore_bounded_exec) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch))) {
+          temporary_vgpr, address_vgpr, arch),
+      "ConSan MOI inline-shadow local publish could not encode undercoverage "
+      "accounting");
+  const bool began_restore = static_cast<bool>(sequence);
+  sequence.bind_label(restore_bounded_exec)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch));
+  if (began_restore && !sequence)
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not skip empty undercoverage accounting");
-    return false;
-  }
-  if (!append_workgroup_local_lazy_shadow_ready(words, plan, arch, workgroup_shadow,
-                                                saved_cell_vgpr, errors)) {
-    return false;
-  }
-  (void)sequence.emit(
+  if (sequence)
+    sequence.require(append_workgroup_local_lazy_shadow_ready(words, plan, arch, workgroup_shadow,
+                                                              saved_cell_vgpr, errors));
+  sequence.append(
       build_v_mov_b32_e32(provenance_temporary_vgpr, vector_source_vgpr(current_low_vgpr), arch));
-  if (!append_exact_byte_representative_lane(words, arch, provenance_temporary_vgpr,
-                                             current_high_vgpr)) {
-    errors.emplace_back("ConSan MOI local publish could not encode its representative lane");
-    return false;
-  }
-  (void)sequence.emit_all(
+  require_emission(append_exact_byte_representative_lane(words, arch, provenance_temporary_vgpr,
+                                                         current_high_vgpr),
+                   "ConSan MOI local publish could not encode its representative lane");
+  sequence.append(
       build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch),
       build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(saved_current_high_vgpr), arch));
-  if (!append_add_exact_shadow_generation(words, current_low_vgpr, current_high_vgpr,
-                                          provenance_temporary_vgpr, temporary_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI local publish could not embed exact byte-cell provenance");
-    return false;
-  }
-  if (!sequence.emit_all(
-          build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(saved_cell_vgpr), arch),
-          instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(3u),
-                                               temporary_vgpr, arch),
-          instrumentation::build_v_add_u32_literal(address_vgpr, local_base, temporary_vgpr, arch),
-          instrumentation::build_ds_storexchg_rtn_b64(old_value_vgpr, address_vgpr,
-                                                      current_low_vgpr, 0u, arch))) {
+  require_emission(append_add_exact_shadow_generation(words, current_low_vgpr, current_high_vgpr,
+                                                      provenance_temporary_vgpr, temporary_vgpr,
+                                                      arch),
+                   "ConSan MOI local publish could not embed exact byte-cell provenance");
+  const bool began_ds_operations = static_cast<bool>(sequence);
+  sequence.append(
+      build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(saved_cell_vgpr), arch),
+      instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(3u),
+                                           temporary_vgpr, arch),
+      instrumentation::build_v_add_u32_literal(address_vgpr, local_base, temporary_vgpr, arch),
+      instrumentation::build_ds_storexchg_rtn_b64(old_value_vgpr, address_vgpr, current_low_vgpr,
+                                                  0u, arch));
+  if (began_ds_operations && !sequence)
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode CDNA vector/DS operations");
-    return false;
-  }
-  if (!append_moi_lds_wait(words, arch)) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow local publish could not encode its LDS result wait");
-    return false;
-  }
+  require_emission(append_moi_lds_wait(words, arch),
+                   "ConSan MOI inline-shadow local publish could not encode its LDS result wait");
 
   // Address formation and conflict filtering use condition state. Reinstall
   // the displaced program's state before the diagnostic helper, whose final
   // restoration makes the local path observationally transparent.
-  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow local publish could not restore special scalar state");
-    return false;
-  }
+  require_emission(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch),
+                   "ConSan MOI inline-shadow local publish could not restore special scalar state");
   const uint16_t prior_byte_provenance_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
   const uint16_t current_byte_provenance_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
-  if (!append_extract_exact_shadow_generation(words, prior_byte_provenance_vgpr, old_value_vgpr,
-                                              static_cast<uint16_t>(old_value_vgpr + 1u),
-                                              temporary_vgpr, arch) ||
-      !append_extract_exact_shadow_generation(words, current_byte_provenance_vgpr, current_low_vgpr,
-                                              current_high_vgpr, temporary_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI local publish could not recover exact byte-cell provenance");
-    return false;
-  }
-  if (!append_inline_shadow_diagnostic_words(
-          words, candidate, plan, arch, report_layout, old_value_vgpr,
-          static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
-          diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, byte_count,
-          consan_moi_shadow_cell::granule_bytes,
-          /*special_state_already_saved=*/true,
-          /*diagnostic_lane_mask_sgpr=*/std::nullopt,
-          /*capture_first_diagnostic_only=*/true,
-          /*workgroup_local_shadow=*/true, prior_byte_provenance_vgpr, current_byte_provenance_vgpr,
-          relative_cell_index_vgpr, cell_index)) {
-    errors.emplace_back(
+  require_emission(append_extract_exact_shadow_generation(
+                       words, prior_byte_provenance_vgpr, old_value_vgpr,
+                       static_cast<uint16_t>(old_value_vgpr + 1u), temporary_vgpr, arch) &&
+                       append_extract_exact_shadow_generation(words, current_byte_provenance_vgpr,
+                                                              current_low_vgpr, current_high_vgpr,
+                                                              temporary_vgpr, arch),
+                   "ConSan MOI local publish could not recover exact byte-cell provenance");
+  if (sequence)
+    require_emission(
+        append_inline_shadow_diagnostic_words(
+            words, candidate, plan, arch, report_layout, old_value_vgpr,
+            static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
+            diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, byte_count,
+            consan_moi_shadow_cell::granule_bytes,
+            /*special_state_already_saved=*/true,
+            /*diagnostic_lane_mask_sgpr=*/std::nullopt,
+            /*capture_first_diagnostic_only=*/true,
+            /*workgroup_local_shadow=*/true, prior_byte_provenance_vgpr,
+            current_byte_provenance_vgpr, relative_cell_index_vgpr, cell_index),
         "ConSan MOI inline-shadow local publish could not encode conflict diagnostics");
-    return false;
-  }
 
-  return sequence.emit_all(build_v_mov_b32_e32(current_low_vgpr,
-                                               vector_source_vgpr(saved_current_low_vgpr), arch),
-                           build_v_mov_b32_e32(current_high_vgpr,
-                                               vector_source_vgpr(saved_current_high_vgpr), arch),
-                           restore_valid_workgroup) &&
-         sequence.resolve_branches(arch);
+  sequence.append(
+      build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch),
+      build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(saved_current_high_vgpr), arch),
+      restore_valid_workgroup);
+  return sequence.finish(arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
