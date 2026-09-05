@@ -241,7 +241,7 @@ struct SynchronizationInventoryView {
     const ConSanSyncEvent *physical = nullptr;
     bool physical_is_ambiguous = false;
     for (const ConSanSyncEvent &event : sync_events) {
-      if (event.kind != kind || event.text_offset != text_offset)
+      if (event.kind != kind || event.text_offset() != text_offset)
         continue;
       if (physical != nullptr)
         physical_is_ambiguous = true;

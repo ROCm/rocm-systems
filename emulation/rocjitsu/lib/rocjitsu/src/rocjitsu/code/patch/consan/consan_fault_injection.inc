@@ -1027,8 +1027,8 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     ConSanPatchInfo patch;
     patch.phase = ConSanPatchPhase::Mutation;
     patch.kind = ConSanPatchKind::InlineBarrierIdScopeRewrite;
-    patch.anchor_offset = member->text_offset;
-    patch.trampoline_offset = member->text_offset;
+    patch.anchor_offset = member->text_offset();
+    patch.trampoline_offset = member->text_offset();
     patch.original_size = member->size;
     result.patches.push_back(std::move(patch));
   }
@@ -1426,8 +1426,8 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       }
       for (uint32_t offset = 0; offset < fence->size; offset += sizeof(uint32_t))
         std::memcpy(result.replacement.data() + fence->file_offset + offset, &nop, sizeof(nop));
-      info.anchor_offset = fence->text_offset;
-      info.trampoline_offset = fence->text_offset;
+      info.anchor_offset = fence->text_offset();
+      info.trampoline_offset = fence->text_offset();
       info.original_size = fence->size;
       result.patches.push_back(info);
       removed_boundary = fence->mnemonic;
@@ -1677,7 +1677,7 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
     for (uint32_t offset = 0; offset < target->cache->size; offset += sizeof(uint32_t))
       std::memcpy(candidate.data() + target->cache->file_offset + offset, &nop, sizeof(nop));
     patches.push_back(make_info(ConSanPatchKind::InlineOrdinaryOrderRewrite,
-                                target->cache->text_offset, target->cache->size,
+                                target->cache->text_offset(), target->cache->size,
                                 target->cache->identity));
   }
   if (mutate_scope) {

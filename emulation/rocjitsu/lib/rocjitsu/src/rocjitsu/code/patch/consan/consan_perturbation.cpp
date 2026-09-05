@@ -57,7 +57,7 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       candidate.in_kernel = sequence.in_kernel;
       candidate.basic_block_index = sequence.basic_block_index.value_or(0);
       candidate.anchor_event_identity = anchor == nullptr ? std::string{} : anchor->identity;
-      candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset;
+      candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset();
       candidate.anchor_size = anchor == nullptr ? 0 : anchor->size;
       candidate.ordered_member_identities = sequence.member_event_identities;
       candidate.eligible =
@@ -70,8 +70,8 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
 }
 
 void build_perturbation_plan(const ConSanOptions &options,
-                             ConSanPerturbationPlanningState &planning,
-                             ConSanMutationTally &tally, std::vector<std::string> &errors,
+                             ConSanPerturbationPlanningState &planning, ConSanMutationTally &tally,
+                             std::vector<std::string> &errors,
                              std::span<const CarriedPerturbationPlan> carried_plans) {
   tally.requested =
       options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
@@ -96,8 +96,7 @@ void build_perturbation_plan(const ConSanOptions &options,
 
   if (!carried_plans.empty()) {
     if (carried_plans.size() > options.sc_perturb_max) {
-      errors.emplace_back(
-          "ConSan carried SC perturbation plans exceed the selected maximum");
+      errors.emplace_back("ConSan carried SC perturbation plans exceed the selected maximum");
       return;
     }
     for (const CarriedPerturbationPlan &carried : carried_plans) {
@@ -167,9 +166,9 @@ void build_perturbation_plan(const ConSanOptions &options,
     tally.planned = planning.plans.size();
     if (options.sc_perturb_required_count != 0u &&
         tally.planned != options.sc_perturb_required_count) {
-      errors.emplace_back(
-          "ConSan SC perturb required " + std::to_string(options.sc_perturb_required_count) +
-          " plans, got " + std::to_string(tally.planned));
+      errors.emplace_back("ConSan SC perturb required " +
+                          std::to_string(options.sc_perturb_required_count) + " plans, got " +
+                          std::to_string(tally.planned));
     }
     return;
   }

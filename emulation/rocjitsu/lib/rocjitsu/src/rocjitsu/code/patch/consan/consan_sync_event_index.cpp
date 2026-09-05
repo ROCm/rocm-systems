@@ -21,12 +21,12 @@ template <typename FindEvent>
     const ConSanSyncEvent *event = find_event(event_identity);
     if (event == nullptr || event->container_name != sequence.container_name ||
         event->identity != sequence.member_event_identities[index] ||
-        event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
-        event->text_offset < sequence.begin_text_offset ||
-        event->text_offset + event->size > sequence.end_text_offset) {
+        event->in_kernel != sequence.in_kernel || event->text_offset() < prior_end ||
+        event->text_offset() < sequence.begin_text_offset ||
+        event->text_offset() + event->size > sequence.end_text_offset) {
       return false;
     }
-    prior_end = event->text_offset + event->size;
+    prior_end = event->text_offset() + event->size;
   }
   return !sequence.member_semantic_ids.empty();
 }

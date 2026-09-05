@@ -66,16 +66,15 @@ build_event_index(std::span<const ConSanSyncEvent> events) {
 
 [[nodiscard]] bool event_policy_semantics_equal(const ConSanSyncEvent &lhs,
                                                 const ConSanSyncEvent &rhs) {
-  return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
-                  lhs.confidence, lhs.memory_role_confidence, lhs.text_offset, lhs.file_offset,
-                  lhs.size, lhs.width_bits, lhs.cache_operation,
-                  lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
-                  lhs.raw_scope, lhs.scope) ==
+  return lhs.semantic_id.physical == rhs.semantic_id.physical &&
+         std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
+                  lhs.confidence, lhs.memory_role_confidence, lhs.file_offset, lhs.size,
+                  lhs.width_bits, lhs.cache_operation, lhs.ordinary_acquire_mutation_supported,
+                  lhs.mnemonic, lhs.static_byte_offset, lhs.raw_scope, lhs.scope) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
-                      rhs.confidence, rhs.memory_role_confidence, rhs.text_offset, rhs.file_offset,
-                      rhs.size, rhs.width_bits, rhs.cache_operation,
-                      rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
-                      rhs.raw_scope, rhs.scope) &&
+                      rhs.confidence, rhs.memory_role_confidence, rhs.file_offset, rhs.size,
+                      rhs.width_bits, rhs.cache_operation, rhs.ordinary_acquire_mutation_supported,
+                      rhs.mnemonic, rhs.static_byte_offset, rhs.raw_scope, rhs.scope) &&
          owner_semantics_equal(lhs.execution_owners, rhs.execution_owners);
 }
 
@@ -120,7 +119,7 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
     return event.semantic_id;
   return {
       .physical = {.code_object = inventory.code_object_id(),
-                   .original_text_offset = event.text_offset},
+                   .original_text_offset = event.text_offset()},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
 }
@@ -373,7 +372,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
     if (event.kind == ConSanSyncEventKind::Atomic ||
         event.kind == ConSanSyncEventKind::OrdinaryMemory) {
-      aliases_by_site[{event.kind, event.text_offset}].push_back(&event);
+      aliases_by_site[{event.kind, event.text_offset()}].push_back(&event);
     }
   }
 

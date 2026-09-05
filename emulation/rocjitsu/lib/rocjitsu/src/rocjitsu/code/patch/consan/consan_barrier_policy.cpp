@@ -91,8 +91,8 @@ completion_event(const ConSanSyncSequence &sequence,
     if (found == events_by_offset.end() || found->second.empty())
       continue;
     const ConSanSyncEvent *event = found->second.front();
-    if (event->text_offset <= sequence.end_text_offset &&
-        event->size == sequence.end_text_offset - event->text_offset) {
+    if (event->text_offset() <= sequence.end_text_offset &&
+        event->size == sequence.end_text_offset - event->text_offset()) {
       if (result != nullptr && result->semantic_id.physical != event->semantic_id.physical)
         return nullptr;
       result = event;

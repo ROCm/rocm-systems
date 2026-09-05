@@ -126,7 +126,7 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
       const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
       if (in_kernel != communication->in_kernel ||
           access.container.name != communication->container_name ||
-          access.physical_id.original_text_offset != communication->text_offset ||
+          access.physical_id.original_text_offset != communication->text_offset() ||
           std::ranges::find(reservations, access.physical_id) != reservations.end()) {
         continue;
       }

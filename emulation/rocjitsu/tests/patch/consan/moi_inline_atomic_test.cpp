@@ -3657,8 +3657,8 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     ASSERT_NE(candidate_sequence, result.program_inventory.sync().sync_sequences.end());
     EXPECT_EQ(candidate_sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
-    EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset);
-    EXPECT_GE(candidate_sequence->end_text_offset, fence_event->text_offset + fence_event->size);
+    EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset());
+    EXPECT_GE(candidate_sequence->end_text_offset, fence_event->text_offset() + fence_event->size);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(
                   result.program_inventory, result.program_inventory.kernels().front())

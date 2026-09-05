@@ -138,7 +138,7 @@ ConSanSyncEvent make_atomic_event(
   event.identity = container + "|atomic=" + std::to_string(offset);
   event.container_name = std::move(container);
   event.in_kernel = true;
-  event.text_offset = offset;
+  event.semantic_id.physical.original_text_offset = offset;
   event.file_offset = offset;
   event.size = 12;
   event.width_bits = 32;
@@ -187,8 +187,8 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.identity = std::move(identity);
   sequence.container_name = event.container_name;
   sequence.in_kernel = event.in_kernel;
-  sequence.begin_text_offset = event.text_offset;
-  sequence.end_text_offset = event.text_offset + event.size;
+  sequence.begin_text_offset = event.text_offset();
+  sequence.end_text_offset = event.text_offset() + event.size;
   sequence.basic_block_index = 0;
   SemanticSiteId member = event.semantic_id;
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
@@ -239,7 +239,7 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
                                  decoded.get_if<ConSanAtomicSite>() != nullptr) ||
                                 (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
                                  decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr);
-      if (!kind_matches || decoded.text_offset() != event.text_offset)
+      if (!kind_matches || decoded.text_offset() != event.text_offset())
         continue;
       if (match) {
         match.reset();

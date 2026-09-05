@@ -291,8 +291,9 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
   const ConSanProgramContainerRef container_ref = consan_program_container_ref(container);
   const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind, uint32_t occurrence,
                                 ConSanProgramSiteId source_site) {
+    const ConSanDecodedProgramSite &source = decoded_sites[source_site.ordinal];
     event.semantic_id.physical.code_object = code_object_id;
-    event.semantic_id.physical.original_text_offset = event.text_offset;
+    event.semantic_id.physical.original_text_offset = source.text_offset();
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.source_site = source_site;
     event.source_containers = {container.name};
@@ -300,7 +301,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
                      "|event=" + std::string(kind) + "|pc=0x" +
-                     consan_fixed_hex(event.text_offset, 16) + "|mnemonic=" + event.mnemonic +
+                     consan_fixed_hex(event.text_offset(), 16) + "|mnemonic=" + event.mnemonic +
                      "|occurrence=" + std::to_string(occurrence);
     events.push_back(std::move(event));
   };
@@ -347,7 +348,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.confidence = ConSanSemanticConfidence::Unsupported;
       event.confidence_reason = "barrier ID or scope is not a supported decoded form";
     }
-    event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
     event.mnemonic = site.mnemonic;
@@ -410,7 +410,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.confidence = ConSanSemanticConfidence::Conservative;
     event.confidence_reason =
         "cache operation is decoded but its high-level memory role requires sequence association";
-    event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
     event.cache_operation = site.cache_operation;
@@ -447,7 +446,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.confidence = ConSanSemanticConfidence::Conservative;
     event.confidence_reason = "bounded ordinary-memory encoding is decoded; ordering requires "
                               "same-block cache-sequence association";
-    event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
     event.width_bits = site.width_bits;
@@ -483,7 +481,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
     }
     classify_atomic_sync_confidence(site, event);
-    event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
     event.width_bits = site.width_bits;
@@ -507,7 +504,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
 
   std::stable_sort(events.begin() + static_cast<std::ptrdiff_t>(container_begin), events.end(),
                    [](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
-                     return lhs.text_offset < rhs.text_offset;
+                     return lhs.text_offset() < rhs.text_offset();
                    });
 }
 
@@ -530,7 +527,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                               const ConSanSyncEvent &rhs) {
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.in_kernel,
-                  lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
+                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
                   lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
                   lhs.raw_scope, lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
                   lhs.barrier_raw_operand_selector, lhs.barrier_literal_width_bits,
@@ -538,7 +535,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                   lhs.participant_count, lhs.participant_mask) ==
          std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                   rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason, rhs.in_kernel,
-                  rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
+                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
                   rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
                   rhs.raw_scope, rhs.scope, rhs.barrier_id, rhs.barrier_operand_source,
                   rhs.barrier_raw_operand_selector, rhs.barrier_literal_width_bits,
@@ -664,8 +661,8 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.identity = event.identity + "|sequence=singleton";
     sequence.container_name = event.container_name;
     sequence.in_kernel = event.in_kernel;
-    sequence.begin_text_offset = event.text_offset;
-    sequence.end_text_offset = event.text_offset + event.size;
+    sequence.begin_text_offset = event.text_offset();
+    sequence.end_text_offset = event.text_offset() + event.size;
     SemanticSiteId member_id = event.semantic_id;
     member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
     sequence.member_semantic_ids.push_back(std::move(member_id));
@@ -684,11 +681,11 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.participant_count = event.participant_count;
     sequence.participant_mask = event.participant_mask;
 
-    BasicBlock *block = block_for_offset(block_offset_index, event.text_offset);
+    BasicBlock *block = block_for_offset(block_offset_index, event.text_offset());
     if (block != nullptr) {
       const auto instruction =
           std::ranges::find_if(block->instructions(), [&](const Instruction &candidate) {
-            return candidate.src_loc() == event.text_offset &&
+            return candidate.src_loc() == event.text_offset() &&
                    static_cast<uint32_t>(candidate.size()) == event.size;
           });
       if (instruction != block->instructions().end()) {
@@ -700,7 +697,7 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
             in_cycle = block_is_in_cycle(block);
           sequence.in_cyclic_cfg_component = *in_cycle;
           sequence.scalar_clause_text_offset =
-              scalar_clause_covering_instruction(*block, event.text_offset);
+              scalar_clause_covering_instruction(*block, event.text_offset());
           sequence.inside_scalar_clause = sequence.scalar_clause_text_offset.has_value();
         }
       }
@@ -2361,9 +2358,9 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
   event_by_physical_site.reserve(result.program_inventory.sync().sync_events.size());
   for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
     event_by_site.emplace(
-        EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset}, &event);
+        EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset()}, &event);
     const auto [entry, inserted] =
-        event_by_physical_site.emplace(PhysicalEventKey{event.kind, event.text_offset}, &event);
+        event_by_physical_site.emplace(PhysicalEventKey{event.kind, event.text_offset()}, &event);
     if (!inserted)
       entry->second = nullptr;
   }
@@ -2564,7 +2561,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
         execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
   for (ConSanSyncEvent &event : inventory.sync_events)
     event.execution_owners =
-        execution_owners_for_offset(owners_by_block, block_index, event.text_offset);
+        execution_owners_for_offset(owners_by_block, block_index, event.text_offset());
   for (ConSanBarrierMoveDestination &destination : result.barrier_move_destinations) {
     destination.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, destination.text_offset);

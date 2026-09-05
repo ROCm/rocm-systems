@@ -1656,7 +1656,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(atomic_event.rmw_outcome, ConSanSyncRmwOutcome::NoReturn);
   EXPECT_EQ(atomic_event.confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_FALSE(atomic_event.confidence_reason.empty());
-  EXPECT_EQ(atomic_event.text_offset, 16u);
+  EXPECT_EQ(atomic_event.text_offset(), 16u);
   EXPECT_EQ(atomic_event.width_bits, 32u);
   EXPECT_EQ(atomic_event.static_byte_offset, 0);
   EXPECT_FALSE(atomic_event.scope);
@@ -1666,7 +1666,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(barrier_event.operation, ConSanSyncOperation::BarrierWait);
   EXPECT_EQ(barrier_event.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(barrier_event.confidence, ConSanSemanticConfidence::Unsupported);
-  EXPECT_EQ(barrier_event.text_offset, 24u);
+  EXPECT_EQ(barrier_event.text_offset(), 24u);
   ASSERT_TRUE(barrier_event.barrier_id);
   EXPECT_EQ(*barrier_event.barrier_id, 0);
   EXPECT_EQ(barrier_event.barrier_operand_source, ConSanBarrierSite::OperandSource::Immediate);
@@ -1679,7 +1679,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(fence_event.operation, ConSanSyncOperation::Fence);
   EXPECT_EQ(fence_event.memory_role, ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(fence_event.confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(fence_event.text_offset, 32u);
+  EXPECT_EQ(fence_event.text_offset(), 32u);
   EXPECT_EQ(fence_event.semantic_id.physical.code_object,
             atomic_event.semantic_id.physical.code_object);
   EXPECT_NE(fence_event.identity.find("|kernel=lds_probe|event=fence|"), std::string::npos);
@@ -1692,9 +1692,10 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
     EXPECT_EQ(sequence.member_event_identities.front(),
               result.program_inventory.sync().sync_events[i].identity);
     EXPECT_EQ(sequence.begin_text_offset,
-              result.program_inventory.sync().sync_events[i].text_offset);
-    EXPECT_EQ(sequence.end_text_offset, result.program_inventory.sync().sync_events[i].text_offset +
-                                            result.program_inventory.sync().sync_events[i].size);
+              result.program_inventory.sync().sync_events[i].text_offset());
+    EXPECT_EQ(sequence.end_text_offset,
+              result.program_inventory.sync().sync_events[i].text_offset() +
+                  result.program_inventory.sync().sync_events[i].size);
   }
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Atomic);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind,
@@ -4648,7 +4649,7 @@ TEST(ConSan, DecodedSitesUseFinalContainerFactsDiscoveredLaterInTheRange) {
   const auto sites = test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
   ASSERT_EQ(sites.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
-  EXPECT_EQ(result.program_inventory.sync().sync_events.front().text_offset, 0u);
+  EXPECT_EQ(result.program_inventory.sync().sync_events.front().text_offset(), 0u);
 }
 
 TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {

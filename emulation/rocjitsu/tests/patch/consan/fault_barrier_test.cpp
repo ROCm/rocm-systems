@@ -525,12 +525,12 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   EXPECT_EQ(barrier_record_count, 5u);
   EXPECT_EQ(nested_instrumentation_count, 4u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.phase == ConSanPatchPhase::Mutation && patch.anchor_offset == init->text_offset;
+    return patch.phase == ConSanPatchPhase::Mutation && patch.anchor_offset == init->text_offset();
   }));
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Instrumentation &&
            patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord &&
-           patch.anchor_offset == init->text_offset;
+           patch.anchor_offset == init->text_offset();
   }));
 }
 

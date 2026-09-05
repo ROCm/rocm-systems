@@ -367,7 +367,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   barrier.operation = ConSanSyncOperation::BarrierFull;
   barrier.container_name = "kernel_c";
   barrier.in_kernel = true;
-  barrier.text_offset = 16u;
+  barrier.semantic_id.physical.original_text_offset = 16u;
   barrier.file_offset = 16u;
   barrier.size = sizeof(uint32_t);
   barrier.execution_owners.push_back({.descriptor_file_offset = 192u});

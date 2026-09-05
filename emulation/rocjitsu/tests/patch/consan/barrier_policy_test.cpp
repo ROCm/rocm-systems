@@ -40,7 +40,7 @@ make_barrier_event(uint64_t offset,
   event.identity = container + "|barrier=" + std::to_string(offset);
   event.container_name = std::move(container);
   event.in_kernel = true;
-  event.text_offset = offset;
+  event.semantic_id.physical.original_text_offset = offset;
   event.file_offset = offset;
   event.size = sizeof(uint32_t);
   event.mnemonic = "s_barrier";
@@ -61,8 +61,8 @@ ConSanSyncSequence make_barrier_sequence(std::span<const ConSanSyncEvent> events
   sequence.identity = "barrier-sequence";
   sequence.container_name = events.front().container_name;
   sequence.in_kernel = events.front().in_kernel;
-  sequence.begin_text_offset = events.front().text_offset;
-  sequence.end_text_offset = events.back().text_offset + events.back().size;
+  sequence.begin_text_offset = events.front().text_offset();
+  sequence.end_text_offset = events.back().text_offset() + events.back().size;
   sequence.basic_block_index = 0;
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;

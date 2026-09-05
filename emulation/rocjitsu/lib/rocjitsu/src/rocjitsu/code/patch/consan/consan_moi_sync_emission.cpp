@@ -298,7 +298,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plan.evidence_intent = evidence;
     plan.address_capture_intent = address_capture;
     plan.memory_role = association->memory_role;
-    plan.patch_text_offset = fence_event->text_offset;
+    plan.patch_text_offset = fence_event->text_offset();
     plan.patch_file_offset = fence_event->file_offset;
     plan.patch_size = fence_event->size;
     auto container = resolve_moi_evidence_container(inventory, fence_event->in_kernel,
@@ -332,7 +332,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
             sequence->begin_text_offset != site->text_offset ||
             sequence->end_text_offset <= sequence->begin_text_offset ||
-            sequence->end_text_offset < fence_event->text_offset + fence_event->size ||
+            sequence->end_text_offset < fence_event->text_offset() + fence_event->size ||
             sequence->end_text_offset - sequence->begin_text_offset >
                 std::numeric_limits<uint32_t>::max()) {
           errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");

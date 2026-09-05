@@ -789,7 +789,7 @@ struct MoiResourcePlanningState {
                             problem.observation_plan().probe_intents.size() +
                             problem.inventory().kernels().size());
       for (const ConSanSyncEvent &event : sync.sync_events)
-        query_offsets.insert(event.text_offset);
+        query_offsets.insert(event.text_offset());
       for (const ConSanCandidateResourcePlan &plan : prior_site_plans)
         query_offsets.insert(plan.text_offset);
       for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)

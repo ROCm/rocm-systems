@@ -349,7 +349,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
-  event.text_offset = 16;
+  event.semantic_id.physical.original_text_offset = 16;
   build.sync_events.push_back(event);
   ConSanSyncSequence sequence;
   sequence.identity = "sequence";
@@ -418,7 +418,7 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   first.kind = ConSanSyncEventKind::Atomic;
   first.identity = "first";
   first.container_name = "first-container";
-  first.text_offset = 12;
+  first.semantic_id.physical.original_text_offset = 12;
   first.semantic_id = {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 12},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
@@ -550,11 +550,11 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
     EXPECT_TRUE(event.source_site.valid());
     EXPECT_EQ(event.semantic_id.domain, ConSanSemanticSiteDomain::SynchronizationEvent);
     EXPECT_EQ(event.semantic_id.physical.code_object, result.program_inventory.code_object_id());
-    EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset);
+    EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset());
     const ConSanDecodedProgramSite *source =
         result.program_inventory.decoded_site(event.source_site);
     ASSERT_NE(source, nullptr);
-    EXPECT_EQ(source->text_offset(), event.text_offset);
+    EXPECT_EQ(source->text_offset(), event.text_offset());
     EXPECT_NE(source->get_if<ConSanBarrierSite>(), nullptr);
   }
   EXPECT_EQ(result.program_inventory.decoded_site(ConSanProgramSiteId{}), nullptr);

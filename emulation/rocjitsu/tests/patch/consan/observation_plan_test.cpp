@@ -220,7 +220,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = "barrier";
   event.container_name = "kernel";
-  event.text_offset = 8;
+  event.semantic_id.physical.original_text_offset = 8;
   event.file_offset = 0;
   event.size = 4;
   event.barrier_id = 0;

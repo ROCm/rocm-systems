@@ -256,7 +256,6 @@ struct ConSanSyncEvent {
   std::vector<std::string> source_containers;
   std::string container_name;
   bool in_kernel = true;
-  uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
   uint32_t width_bits = 0;
@@ -277,6 +276,11 @@ struct ConSanSyncEvent {
   std::optional<uint32_t> participant_count;
   std::optional<uint64_t> participant_mask;
   std::vector<ConSanExecutionOwner> execution_owners;
+
+  /// Original text position is part of the event's canonical physical
+  /// identity. Keeping a second mutable copy allowed the two identities to
+  /// disagree after an event was assembled or copied.
+  [[nodiscard]] uint64_t text_offset() const { return semantic_id.physical.original_text_offset; }
 };
 
 enum class ConSanSyncSequenceKind : uint8_t {

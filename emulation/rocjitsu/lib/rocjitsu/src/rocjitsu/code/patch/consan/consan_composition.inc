@@ -161,7 +161,7 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
             std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
               return item.container_name == candidate->container_name &&
                      item.in_kernel == candidate->in_kernel &&
-                     item.text_offset == patch.anchor_offset && item.size == patch.original_size;
+                     item.text_offset() == patch.anchor_offset && item.size == patch.original_size;
             });
         if (event != pristine_inventory.sync().sync_events.end() &&
             std::ranges::find(candidate->ordered_member_identities, event->identity) !=
@@ -585,18 +585,19 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         try_apply_flat_check_trap_patch(*code_object, *target_profile, redundant_options, result);
       } else {
         const uint32_t max_patches = redundant_options.max_patches;
-        const uint32_t access_patches = static_cast<uint32_t>(
-            std::ranges::count_if(result.patches, [](const ConSanPatchLoweringProduct &patch) {
-              switch (patch.kind) {
-              case ConSanPatchKind::LdsLoadCheckTrap:
-              case ConSanPatchKind::LdsStoreCheckTrap:
-              case ConSanPatchKind::FlatLoadCheckTrap:
-              case ConSanPatchKind::FlatStoreCheckTrap:
-                return true;
-              default:
-                return false;
-              }
-            })) +
+        const uint32_t access_patches = static_cast<uint32_t>(std::ranges::count_if(
+                                            result.patches,
+                                            [](const ConSanPatchLoweringProduct &patch) {
+                                              switch (patch.kind) {
+                                              case ConSanPatchKind::LdsLoadCheckTrap:
+                                              case ConSanPatchKind::LdsStoreCheckTrap:
+                                              case ConSanPatchKind::FlatLoadCheckTrap:
+                                              case ConSanPatchKind::FlatStoreCheckTrap:
+                                                return true;
+                                              default:
+                                                return false;
+                                              }
+                                            })) +
                                         static_cast<uint32_t>(result.staged_text_fragments.size());
         if (access_patches >= max_patches && redundant_options.max_patches_is_expert_limit) {
           ConSanOptions flat_options = redundant_options;

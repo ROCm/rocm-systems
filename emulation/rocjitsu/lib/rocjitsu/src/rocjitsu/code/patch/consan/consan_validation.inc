@@ -708,7 +708,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       if (patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite) {
         if (patch.fault_companion_identity != target->cache->identity ||
-            patch.anchor_offset != target->cache->text_offset ||
+            patch.anchor_offset != target->cache->text_offset() ||
             patch.original_size != target->cache->size) {
           errors.emplace_back(
               "ConSan mutation proof did not target the exact ordinary acquire cache boundary");
@@ -1588,9 +1588,9 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
           (composite && patch.perturbation_source_anchor_identity != outer_member) ||
           anchor_event->container_name != sequence->container_name ||
           anchor_event->in_kernel != sequence->in_kernel ||
-          candidate->anchor_text_offset != anchor_event->text_offset ||
+          candidate->anchor_text_offset != anchor_event->text_offset() ||
           candidate->anchor_size != anchor_event->size ||
-          proof_anchor_offset != anchor_event->text_offset ||
+          proof_anchor_offset != anchor_event->text_offset() ||
           proof_anchor_size != anchor_event->size || patch.original_size != proof_anchor_size) {
         errors.emplace_back(
             "ConSan SC perturbation proof did not target the rederived outer sequence member");
@@ -2326,7 +2326,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     const auto event = std::ranges::find_if(result.program_inventory.sync().sync_events,
                                             [&](const ConSanSyncEvent &item) {
                                               return item.kind == ConSanSyncEventKind::Atomic &&
-                                                     item.text_offset == patch.anchor_offset;
+                                                     item.text_offset() == patch.anchor_offset;
                                             });
     if (event == result.program_inventory.sync().sync_events.end())
       return false;
