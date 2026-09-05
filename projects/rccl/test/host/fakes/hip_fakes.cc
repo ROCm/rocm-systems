@@ -177,6 +177,10 @@ static hipError_t DefaultHipGetDeviceCount(int* count)
 }
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 
+// Defined with the plain HIP stubs below, where the attribute switch lives.
+static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
+static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
+
 // --- deep-path result seams (commAlloc/devCommSetup) --------------------
 // Default to failure so any call a test hasn't opted into surfaces as an
 // unexpected call; a test sets the relevant seam to hipSuccess to enable the
@@ -209,6 +213,8 @@ void ResetHipFakes()
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
     g_deviceCount                   = 8;
+    g_hipDeviceGetAttribute         = DefaultHipDeviceGetAttribute;
+    g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
     g_currentDevice                 = 0;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
@@ -269,7 +275,7 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
     return hipSuccess;
 }
 
-hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
+static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
     if (!pi) return g_hipDeviceGetAttributeResult;
     switch (attr) {
@@ -281,6 +287,13 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
             *pi = 0; break;
     }
     return g_hipDeviceGetAttributeResult;
+}
+std::function<hipError_t(int*, hipDeviceAttribute_t, int)>
+    g_hipDeviceGetAttribute = DefaultHipDeviceGetAttribute;
+
+hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
+{
+    return g_hipDeviceGetAttribute(pi, attr, device);
 }
 
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
@@ -463,7 +476,9 @@ hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
 
 // --- init.cc deep-path HIP stubs (commAlloc/devCommSetup) ---------------
 hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }
-hipError_t hipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
+std::function<hipError_t(hipLimit_t, size_t)> g_hipDeviceSetLimit = DefaultHipDeviceSetLimit;
+hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) { return g_hipDeviceSetLimit(limit, value); }
 hipError_t hipEventCreateWithFlags(hipEvent_t* e, unsigned int) {
     if (e) *e = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
     return g_hipEventCreateResult;
