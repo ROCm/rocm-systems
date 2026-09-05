@@ -65,16 +65,16 @@
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
     }
-    plan.site = *site;
-    if (!plan.is_well_formed() || plan.site.text_offset != event->text_offset()) {
+    if (!plan.is_well_formed() || site->text_offset != event->text_offset()) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
     }
     plans.push_back(std::move(plan));
   }
 
-  std::ranges::sort(plans, {},
-                    [](const MoiBarrierEvidenceSitePlan &plan) { return plan.site.text_offset; });
+  std::ranges::sort(plans, {}, [&](const MoiBarrierEvidenceSitePlan &plan) {
+    return graph.find_event(plan.event)->text_offset();
+  });
   return plans;
 }
 
@@ -189,6 +189,7 @@ using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
 
 struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
+  const ConSanBarrierSite *site = nullptr;
   MoiBarrierBodyPlan body;
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
@@ -200,6 +201,7 @@ struct MoiPrivateBarrierPlanningContext {
   const ConSanOptions &options;
   ConSanMoiOperatingPoint point;
   const MoiBarrierEvidenceSitePlan &candidate;
+  const ConSanBarrierSite &site;
   const ConSanCandidateResourcePlan &resource_plan;
   const ConSanPatchLoweringProduct &access_patch;
   const MoiObjectModeSemantics &semantics;
@@ -305,7 +307,13 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
   for (const MoiBarrierEvidenceSitePlan &candidate : candidates) {
     if (selected_candidates.size() == options.max_patches)
       break;
-    const ConSanBarrierSite &site = candidate.site;
+    const ConSanBarrierSite *source =
+        result.program_inventory.program_site<ConSanBarrierSite>(candidate.source_site);
+    if (source == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier selection lost its decoded source");
+      return;
+    }
+    const ConSanBarrierSite &site = *source;
     if (site.size != sizeof(uint32_t)) {
       result.warnings.emplace_back(
           "ConSan MOI inline-shadow barrier epoch patch skipped non-32-bit barrier " +
@@ -342,8 +350,13 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
   const MoiBarrierPatchOwnerIndex patch_owner_index(result.patches, result.staged_text_fragments);
   if (operating_point.automatic_moi_private_epoch) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
-      const ConSanCandidateResourcePlan *plan =
-          resource_plan_index.find(candidate.site.text_offset);
+      const ConSanBarrierSite *site =
+          result.program_inventory.program_site<ConSanBarrierSite>(candidate.source_site);
+      if (site == nullptr) {
+        result.errors.emplace_back("ConSan MOI private barrier planning lost its decoded source");
+        return;
+      }
+      const ConSanCandidateResourcePlan *plan = resource_plan_index.find(site->text_offset);
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no owned resource scope in " +
@@ -378,6 +391,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
           .options = options,
           .point = std::move(owner_point),
           .candidate = candidate,
+          .site = *site,
           .resource_plan = *plan,
           .access_patch = *access_patch,
           .semantics = semantics,
@@ -396,8 +410,14 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     }
   }
   for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
+    const ConSanBarrierSite *site =
+        result.program_inventory.program_site<ConSanBarrierSite>(candidate.source_site);
+    if (site == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier planning lost its decoded source");
+      return;
+    }
     std::vector<uint64_t> owners;
-    const ConSanCandidateResourcePlan *plan = resource_plan_index.find(candidate.site.text_offset);
+    const ConSanCandidateResourcePlan *plan = resource_plan_index.find(site->text_offset);
     if (plan) {
       owners = plan->owner_descriptor_file_offsets;
     }
@@ -492,6 +512,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);
     planned_candidates.push_back(PlannedBarrierLowering{
         .candidate = candidate,
+        .site = site,
         .body = std::move(*body),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -508,7 +529,11 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
   const ConSanMoiReportBufferLayout &record_layout = semantics.report_layout;
   for (const PlannedBarrierLowering &planned : planned_candidates) {
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
-    const ConSanBarrierSite &site = candidate.site;
+    if (planned.site == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier emission lost its decoded source");
+      return;
+    }
+    const ConSanBarrierSite &site = *planned.site;
     const ConSanProgramContainer *container =
         resolve_moi_evidence_container(result.program_inventory, candidate.source_site);
     if (container == nullptr) {
@@ -525,7 +550,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     std::optional<std::vector<uint32_t>> words;
     if (const auto *record = std::get_if<MoiRecordEventEmissionPlan>(&planned.body)) {
       words = build_barrier_record_cave_words(
-          active_bytes, candidate, *container, *record, planned.spill ? &*planned.spill : nullptr,
+          active_bytes, site, *container, *record, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
           original_barrier_word, result.errors, &guest_instruction_offset);

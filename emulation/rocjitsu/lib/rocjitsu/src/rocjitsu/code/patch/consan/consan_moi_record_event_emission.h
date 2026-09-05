@@ -37,7 +37,7 @@ struct MoiRecordEventEmissionPlan {
 };
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiBarrierEvidenceSitePlan &candidate,
+    std::span<const uint8_t> bytes, const ConSanBarrierSite &site,
     const ConSanProgramContainer &container, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,

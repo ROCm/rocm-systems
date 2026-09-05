@@ -8,6 +8,7 @@ struct SampledBarrierWindow {
 struct SampledBarrierCandidate {
   const ConSanSyncSequence *sequence = nullptr;
   MoiBarrierEvidenceSitePlan barrier;
+  const ConSanBarrierSite *site = nullptr;
   uint64_t owner_descriptor_file_offset = 0;
   std::vector<SampledBarrierWindow> windows;
   bool uses_cluster_workgroup_id = false;
@@ -89,15 +90,15 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
       !plan.workitem_owner || candidate.owner_descriptor_file_offset == 0u ||
       static_cast<uint32_t>(plan.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
-      candidate.windows.empty() ||
+      candidate.windows.empty() || candidate.sequence == nullptr || candidate.site == nullptr ||
       std::ranges::any_of(candidate.windows, [&](const SampledBarrierWindow &window) {
         return window.first_slot >= layout.sampled_sync_metadata_capacity ||
                window.bank_count == 0 ||
                window.bank_count > layout.sampled_sync_metadata_capacity - window.first_slot;
       }))
     return std::nullopt;
-  if (candidate.barrier.site.file_offset > bytes.size() ||
-      candidate.barrier.site.size > bytes.size() - candidate.barrier.site.file_offset) {
+  if (candidate.site->file_offset > bytes.size() ||
+      candidate.site->size > bytes.size() - candidate.site->file_offset) {
     errors.emplace_back("ConSan MOI sampled barrier sequence exceeds ELF bytes");
     return std::nullopt;
   }
@@ -158,9 +159,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
         0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.barrier.site.size; offset += sizeof(uint32_t)) {
+  for (uint64_t offset = 0; offset < candidate.site->size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.barrier.site.file_offset + offset, sizeof(word));
+    std::memcpy(&word, bytes.data() + candidate.site->file_offset + offset, sizeof(word));
     words.push_back(word);
   }
   if (restore_guest_vgpr_bank)
@@ -618,8 +619,14 @@ void try_apply_sampled_barrier_sync_patch(
     }
     const uint64_t owner_descriptor =
         result.program_inventory.kernel(sequence_owners.front())->descriptor_file_offset;
-    candidates.push_back(
-        {&sequence, barrier_plan, owner_descriptor, std::move(windows), uses_cluster_workgroup_id});
+    const ConSanBarrierSite *barrier_site =
+        result.program_inventory.program_site<ConSanBarrierSite>(barrier_plan.source_site);
+    if (barrier_site == nullptr) {
+      result.errors.emplace_back("ConSan MOI sampled barrier lost its decoded source");
+      return;
+    }
+    candidates.push_back({&sequence, barrier_plan, barrier_site, owner_descriptor,
+                          std::move(windows), uses_cluster_workgroup_id});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -627,7 +634,7 @@ void try_apply_sampled_barrier_sync_patch(
     return;
   }
   std::ranges::sort(candidates, {}, [](const SampledBarrierCandidate &candidate) {
-    return candidate.barrier.site.text_offset;
+    return candidate.site->text_offset;
   });
   if (candidates.size() > options.max_patches)
     candidates.resize(options.max_patches);
@@ -681,7 +688,7 @@ void try_apply_sampled_barrier_sync_patch(
   }
   for (size_t index = 0; index < candidates.size(); ++index) {
     SampledBarrierCandidate candidate = candidates[index];
-    const ConSanBarrierSite &site = candidate.barrier.site;
+    const ConSanBarrierSite &site = *candidate.site;
     if (site.size == 0 || site.size % sizeof(uint32_t) != 0 || site.text_offset > old_text.size() ||
         site.size > old_text.size() - site.text_offset)
       continue;
@@ -756,7 +763,7 @@ void try_apply_sampled_barrier_sync_patch(
   for (const Planned &planned : selected) {
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);
-    const ConSanBarrierSite &site = planned.candidate.barrier.site;
+    const ConSanBarrierSite &site = *planned.candidate.site;
     const ConSanProgramContainer *container = resolve_moi_evidence_container(
         result.program_inventory, planned.candidate.barrier.source_site);
     if (container == nullptr) {

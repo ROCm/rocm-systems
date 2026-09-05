@@ -798,9 +798,6 @@ struct MoiBarrierEvidenceSitePlan {
   /// Engine-specific barrier evidence intent implemented by this plan.
   ConSanProbeIntentId evidence_intent;
 
-  /// Decoded completing barrier instruction used only for native lowering.
-  ConSanBarrierSite site;
-
   /// Stable decoded source whose operands and execution owners scope lowering.
   ConSanProgramSiteId source_site;
 
@@ -808,8 +805,7 @@ struct MoiBarrierEvidenceSitePlan {
   /// form one complete barrier lowering operation.
   [[nodiscard]] std::array<ConSanProbeIntentId, 1> intent_ids() const { return {evidence_intent}; }
   [[nodiscard]] bool is_well_formed() const {
-    return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
-           site.size != 0u;
+    return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid();
   }
 };
 

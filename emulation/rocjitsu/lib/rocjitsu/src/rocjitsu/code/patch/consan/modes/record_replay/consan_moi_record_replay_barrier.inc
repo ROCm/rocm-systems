@@ -50,6 +50,7 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
 
   struct PlannedBarrierRecord : MoiPlannedRecordEvent {
     MoiBarrierEvidenceSitePlan candidate;
+    const ConSanBarrierSite *site = nullptr;
   };
   std::vector<PlannedBarrierRecord> selected;
   std::unordered_set<uint64_t> selected_offsets;
@@ -62,7 +63,13 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
   MoiDescriptorPrivateRequirements private_bytes;
   for (size_t index = 0u; index < candidates.size() && selected.size() < max_candidates; ++index) {
     MoiBarrierEvidenceSitePlan candidate = candidates[index];
-    const ConSanBarrierSite &site = candidate.site;
+    const ConSanBarrierSite *source =
+        result.program_inventory.program_site<ConSanBarrierSite>(candidate.source_site);
+    if (source == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier record planning lost its decoded source");
+      return;
+    }
+    const ConSanBarrierSite &site = *source;
     if (site.size != sizeof(uint32_t)) {
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch skipped non-32-bit barrier " + site.mnemonic + " in " +
@@ -103,7 +110,7 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     note_descriptor_requirements(vgprs, event->resources);
     note_moi_sgpr_requirements(sgprs, event->resources, event->emission, arch);
     note_moi_probe_private_requirements(private_bytes, *event);
-    selected.push_back({std::move(*event), std::move(candidate)});
+    selected.push_back({std::move(*event), std::move(candidate), source});
   }
   if (selected.empty()) {
     result.warnings.emplace_back(
@@ -125,17 +132,17 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
   for (const PlannedBarrierRecord &planned : selected) {
     const ConSanProgramContainer *container =
         resolve_moi_evidence_container(result.program_inventory, planned.candidate.source_site);
-    if (container == nullptr) {
-      result.errors.emplace_back("ConSan MOI barrier record emission lost its source container");
+    if (container == nullptr || planned.site == nullptr) {
+      result.errors.emplace_back(
+          "ConSan MOI barrier record emission lost its source container or decode");
       return;
     }
+    const ConSanBarrierSite &site = *planned.site;
     uint32_t barrier_word = 0u;
-    std::memcpy(&barrier_word, text.data() + planned.candidate.site.text_offset,
-                sizeof(barrier_word));
+    std::memcpy(&barrier_word, text.data() + site.text_offset, sizeof(barrier_word));
     uint32_t guest_offset = 0u;
     auto words = build_barrier_record_cave_words(
-        active_bytes, planned.candidate, *container, planned.emission,
-        planned.spill ? &*planned.spill : nullptr,
+        active_bytes, site, *container, planned.emission, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, barrier_word, result.errors,
         &guest_offset);
@@ -143,13 +150,12 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
       return;
     ConSanPatchInfo patch;
     patch.kind = ConSanPatchKind::TrampolineMoiBarrierRecord;
-    patch.anchor_offset = planned.candidate.site.text_offset;
-    patch.original_size = planned.candidate.site.size;
+    patch.anchor_offset = site.text_offset;
+    patch.original_size = site.size;
     note_moi_probe_patch_info(patch, planned);
     auto fragment = make_consan_around_text_fragment(
-        std::move(*words), guest_offset, planned.candidate.site.size,
-        planned.candidate.intent_ids(), {}, std::move(patch), result.errors,
-        "MOI barrier record patch");
+        std::move(*words), guest_offset, site.size, planned.candidate.intent_ids(), {},
+        std::move(patch), result.errors, "MOI barrier record patch");
     if (!fragment)
       return;
     if (accesses_are_runtime_gated && planned.emission.runtime_workgroup_gate) {

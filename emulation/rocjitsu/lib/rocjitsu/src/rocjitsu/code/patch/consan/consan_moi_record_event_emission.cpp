@@ -40,7 +40,7 @@ using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
-    std::span<const uint8_t> bytes, const MoiBarrierEvidenceSitePlan &candidate,
+    std::span<const uint8_t> bytes, const ConSanBarrierSite &site,
     const ConSanProgramContainer &container, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
@@ -95,8 +95,7 @@ using consan_moi_detail::kFenceRecordLayout;
   const std::optional<uint16_t> vgpr_msb_mode =
       target != nullptr && target->has_selectable_vgpr_bank
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
-                                                container.entry_text_offset,
-                                                candidate.site.file_offset)
+                                                container.entry_text_offset, site.file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
@@ -155,7 +154,7 @@ using consan_moi_detail::kFenceRecordLayout;
   if (options.moi_persistent_sgprs.owner())
     record.scalar(offsetof(ConSanMoiBarrierRecord, wave_id), *options.moi_persistent_sgprs.owner());
   record.literal(offsetof(ConSanMoiBarrierRecord, instruction_offset),
-                 static_cast<uint32_t>(candidate.site.text_offset));
+                 static_cast<uint32_t>(site.text_offset));
   if (!record.finish()) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode record stores");
     return std::nullopt;

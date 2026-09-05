@@ -17,23 +17,29 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiBarrierEvidenceSitePlan &candidate = candidates[index];
+      const ConSanProgramSite *source = problem.inventory().program_site(candidate.source_site);
+      if (source == nullptr) {
+        errors.emplace_back("ConSan MOI barrier resource planning lost its decoded source");
+        return;
+      }
+      const uint64_t text_offset = source->text_offset();
       const auto scratch_count_for = [&](const ConSanMoiOperatingPoint &site_point) {
         return mode.barrier_scratch_vgpr_count(
             project_moi_barrier_scratch_facts(bound_resources, site_point, mode_semantics));
       };
       ConSanMoiOperatingPoint site_point = point;
       const uint16_t scratch_count = scratch_count_for(site_point);
-      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, request, debug, site_point, ConSanResourceSiteKind::Barrier, index,
-          candidate.site.text_offset, candidate.source_site, scratch_count);
+      ConSanCandidateResourcePlan plan =
+          plan_moi_resource_site(state, request, debug, site_point, ConSanResourceSiteKind::Barrier,
+                                 index, text_offset, candidate.source_site, scratch_count);
       ConSanMoiOperatingPoint owner_point = site_point;
       if (apply_moi_persistent_vgpr_assignment(owner_point, point,
                                                plan.owner_descriptor_file_offsets)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_point);
         if (owner_scratch_count != scratch_count) {
-          plan = plan_moi_resource_site(
-              state, request, debug, owner_point, ConSanResourceSiteKind::Barrier, index,
-              candidate.site.text_offset, candidate.source_site, owner_scratch_count);
+          plan = plan_moi_resource_site(state, request, debug, owner_point,
+                                        ConSanResourceSiteKind::Barrier, index, text_offset,
+                                        candidate.source_site, owner_scratch_count);
         }
       }
       plan.intent_ids = {candidate.evidence_intent};

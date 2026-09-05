@@ -154,8 +154,8 @@ void append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
-  auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
-         arch, inventory, assignments, warnings] = context;
+  auto &[bytes, options, point, candidate, site, resource_plan, access_patch, semantics,
+         spill_managers, arch, inventory, assignments, warnings] = context;
   const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
   const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
@@ -177,6 +177,7 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
       owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
   return PlannedBarrierLowering{
       .candidate = candidate,
+      .site = &site,
       .body =
           MoiInlinePrivateEpochBarrierEmissionPlan{
               .scratch_vgpr = *access_patch.scratch_vgpr,

@@ -525,8 +525,6 @@ TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
   plan.sequence = {0u};
   plan.source_site = {0u};
   plan.evidence_intent = {.value = 9u};
-  plan.site.text_offset = 64u;
-  plan.site.size = 4u;
   EXPECT_TRUE(plan.is_well_formed());
 
   consan_detail::MoiBarrierEvidenceSitePlan missing_source_site = plan;
@@ -538,9 +536,6 @@ TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
   consan_detail::MoiBarrierEvidenceSitePlan missing_sequence = plan;
   missing_sequence.sequence = {};
   EXPECT_FALSE(missing_sequence.is_well_formed());
-  consan_detail::MoiBarrierEvidenceSitePlan missing_decode = plan;
-  missing_decode.site.size = 0u;
-  EXPECT_FALSE(missing_decode.is_well_formed());
 }
 
 TEST(ConSanMoi, WorkitemOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
