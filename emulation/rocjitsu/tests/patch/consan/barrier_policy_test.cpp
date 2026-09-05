@@ -60,11 +60,8 @@ make_barrier_sequence(std::span<const ConSanSyncEvent> events,
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = scope;
   sequence.execution_owners.push_back({});
-  for (const ConSanSyncEvent &event : events) {
-    SemanticSiteId member = event.semantic_id;
-    member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-    sequence.member_semantic_ids.push_back(std::move(member));
-  }
+  for (size_t index = 0; index < events.size(); ++index)
+    sequence.member_event_ids.push_back({static_cast<uint32_t>(index)});
   return sequence;
 }
 
@@ -94,10 +91,8 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
     site.scope = ConSanBarrierSite::Scope::Workgroup;
     for (const ConSanSyncSequence &sequence : sequences) {
-      SemanticSiteId member = event.semantic_id;
-      member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-      if (std::ranges::find(sequence.member_semantic_ids, member) !=
-          sequence.member_semantic_ids.end()) {
+      const ConSanSyncEventId member{static_cast<uint32_t>(index)};
+      if (std::ranges::find(sequence.member_event_ids, member) != sequence.member_event_ids.end()) {
         site.scope = sequence.barrier_scope;
         break;
       }
@@ -291,6 +286,7 @@ TEST(ConSanBarrierPolicy, InvalidEncodingAndRedundantFullBarrierHaveTypedReasons
       make_barrier_sequence(std::span<const ConSanSyncEvent>(adjacent_events).first(1))};
   adjacent_sequences.push_back(
       make_barrier_sequence(std::span<const ConSanSyncEvent>(adjacent_events).subspan(1)));
+  adjacent_sequences.back().member_event_ids = {{1}};
   const ConSanBarrierPolicyResult adjacent = plan_consan_barrier_observation(
       build_barrier_inventory(std::move(adjacent_events), std::move(adjacent_sequences)),
       barrier_request(ConSanCapabilityEngine::RecordReplay));
@@ -317,7 +313,7 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
        [](auto &s) { s.barrier_operand_source = ConSanBarrierSite::OperandSource::DynamicM0; }},
       {"id", [](auto &s) { s.barrier_id.reset(); }},
       {"scope", [](auto &s) { s.barrier_scope = ConSanBarrierSite::Scope::Unknown; }},
-      {"members", [](auto &s) { s.member_semantic_ids.clear(); }},
+      {"members", [](auto &s) { s.member_event_ids.clear(); }},
       {"bounds", [](auto &s) { s.end_text_offset = s.begin_text_offset; }},
   };
   for (const auto &[name, mutate] : cases) {
@@ -400,7 +396,7 @@ TEST(ConSanBarrierPolicy, PolicyIsDeterministicAndDoesNotMutateInventory) {
   EXPECT_EQ(view.sync_events.front().semantic_id, events.front().semantic_id);
   EXPECT_EQ(view.sync_events.front().operation, events.front().operation);
   EXPECT_EQ(view.sync_sequences.front().identity, sequences.front().identity);
-  EXPECT_EQ(view.sync_sequences.front().member_semantic_ids, sequences.front().member_semantic_ids);
+  EXPECT_EQ(view.sync_sequences.front().member_event_ids, sequences.front().member_event_ids);
   EXPECT_EQ(view.sync_sequences.front().operation, sequences.front().operation);
 }
 

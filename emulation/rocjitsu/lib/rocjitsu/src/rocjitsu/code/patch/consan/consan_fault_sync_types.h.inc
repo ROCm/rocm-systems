@@ -254,6 +254,21 @@ struct ConSanSyncSemantics {
   bool operator==(const ConSanSyncSemantics &) const = default;
 };
 
+/// Stable handle into one immutable synchronization-event arena.
+///
+/// Sequence topology is inventory-local, so it uses this compact handle
+/// instead of copying content-stable code-object identities onto every edge.
+/// Stable semantic identities remain on events for diagnostics, mutation
+/// selection, and other boundaries that outlive one inventory revision.
+struct ConSanSyncEventId {
+  static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
+  uint32_t ordinal = kInvalidOrdinal;
+
+  [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
+
+  auto operator<=>(const ConSanSyncEventId &) const = default;
+};
+
 /// Flavor-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
 struct ConSanSyncEvent : ConSanSyncSemantics {
@@ -307,10 +322,10 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
   /// s_clause may not have a control-flow instruction inserted between it and
   /// the memory operations that it covers.
   std::optional<uint64_t> scalar_clause_text_offset;
-  /// Stable identities of the original synchronization events in semantic
-  /// order. Diagnostic and mutation-selection names are resolved from the
-  /// event arena only when crossing those presentation boundaries.
-  std::vector<SemanticSiteId> member_semantic_ids;
+  /// Inventory-local handles of the original synchronization events in
+  /// semantic order. Stable names are resolved only at presentation and
+  /// mutation-selection boundaries.
+  std::vector<ConSanSyncEventId> member_event_ids;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;
@@ -365,11 +380,11 @@ enum class ConSanFenceAssociation : uint8_t {
 /// the fence is outside the observation contract.
 struct ConSanMoiFenceCandidate {
   /// Original cache/fence event being associated.
-  SemanticSiteId fence_event;
+  ConSanSyncEventId fence_event;
   /// Stable identity of the unique synchronization sequence, when one exists.
   std::string sequence_identity;
   /// Unique address-bearing event selected from the sequence when qualified.
-  std::optional<SemanticSiteId> communication_event;
+  std::optional<ConSanSyncEventId> communication_event;
   /// Release/acquire role contributed by this fence within the sequence.
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
   /// Typed result of shared sequence association.
@@ -408,8 +423,8 @@ struct ConSanBarrierLifecycleGroup {
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
-  /// Stable original-program identities of every event in lifecycle order.
-  std::vector<SemanticSiteId> member_semantic_ids;
+  /// Inventory-local handles of every event in lifecycle order.
+  std::vector<ConSanSyncEventId> member_event_ids;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
   ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::Count;

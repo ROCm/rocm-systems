@@ -3531,12 +3531,13 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
       return location.emitted_text_offset == fence->trampoline_offset;
     }));
   }
-  EXPECT_EQ(fences[0]->anchor_offset, result.program_inventory.sync()
-                                          .moi_fence_candidates[0]
-                                          .fence_event.physical.original_text_offset);
-  EXPECT_EQ(fences[1]->anchor_offset, result.program_inventory.sync()
-                                          .moi_fence_candidates[1]
-                                          .fence_event.physical.original_text_offset);
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  ASSERT_NE(sync.find_event(sync.moi_fence_candidates[0].fence_event), nullptr);
+  ASSERT_NE(sync.find_event(sync.moi_fence_candidates[1].fence_event), nullptr);
+  EXPECT_EQ(fences[0]->anchor_offset,
+            sync.find_event(sync.moi_fence_candidates[0].fence_event)->text_offset());
+  EXPECT_EQ(fences[1]->anchor_offset,
+            sync.find_event(sync.moi_fence_candidates[1].fence_event)->text_offset());
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             2);
@@ -3641,15 +3642,13 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const ConSanMoiFenceCandidate &semantic_fence =
         result.program_inventory.sync().moi_fence_candidates.front();
     ASSERT_TRUE(semantic_fence.communication_event);
-    const auto communication =
-        std::ranges::find(result.program_inventory.sync().sync_events,
-                          *semantic_fence.communication_event, &ConSanSyncEvent::semantic_id);
-    ASSERT_NE(communication, result.program_inventory.sync().sync_events.end());
+    const ConSanSyncEvent *communication =
+        result.program_inventory.sync().find_event(*semantic_fence.communication_event);
+    ASSERT_NE(communication, nullptr);
     ASSERT_FALSE(result.program_inventory.sync().execution_owners(*communication).empty());
-    const auto fence_event =
-        std::ranges::find(result.program_inventory.sync().sync_events, semantic_fence.fence_event,
-                          &ConSanSyncEvent::semantic_id);
-    ASSERT_NE(fence_event, result.program_inventory.sync().sync_events.end());
+    const ConSanSyncEvent *fence_event =
+        result.program_inventory.sync().find_event(semantic_fence.fence_event);
+    ASSERT_NE(fence_event, nullptr);
     const auto candidate_sequence = std::ranges::find(
         result.program_inventory.sync().sync_sequences,
         result.program_inventory.sync().moi_fence_candidates.front().sequence_identity,
@@ -3688,7 +3687,10 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     ASSERT_NE(fence, result.patches.end()) << testing::PrintToString(result.patches);
     ASSERT_TRUE(semantic_fence.eligible());
     EXPECT_EQ(fence->anchor_offset, 0u);
-    const uint64_t semantic_fence_offset = semantic_fence.fence_event.physical.original_text_offset;
+    const ConSanSyncEvent *semantic_fence_event =
+        result.program_inventory.sync().find_event(semantic_fence.fence_event);
+    ASSERT_NE(semantic_fence_event, nullptr);
+    const uint64_t semantic_fence_offset = semantic_fence_event->text_offset();
     EXPECT_GT(semantic_fence_offset, fence->anchor_offset);
 
     const auto sequence = std::ranges::find_if(

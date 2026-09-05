@@ -182,22 +182,21 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.begin_text_offset = event.text_offset();
   sequence.end_text_offset = event.text_offset() + 12u;
   sequence.basic_block_index = 0;
-  SemanticSiteId member = event.semantic_id;
-  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-  sequence.member_semantic_ids.push_back(member);
+  sequence.member_event_ids.push_back({0});
   sequence.scope = event.scope;
   sequence.execution_owners.push_back({});
   return sequence;
 }
 
 ConSanMoiFenceCandidate
-make_fence_candidate(const ConSanSyncEvent &communication, const ConSanSyncEvent &fence,
+make_fence_candidate([[maybe_unused]] const ConSanSyncEvent &communication,
+                     [[maybe_unused]] const ConSanSyncEvent &fence,
                      const ConSanSyncSequence &sequence,
                      ConSanFenceAssociation association = ConSanFenceAssociation::Qualified) {
   return {
-      .fence_event = fence.semantic_id,
+      .fence_event = {1},
       .sequence_identity = sequence.identity,
-      .communication_event = communication.semantic_id,
+      .communication_event = ConSanSyncEventId{0},
       .memory_role = fence.memory_role,
       .association = association,
   };
@@ -821,7 +820,7 @@ TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) 
   std::vector missing_sequences{make_atomic_sequence(missing_events.front())};
   ConSanMoiFenceCandidate missing_fence =
       make_fence_candidate(missing_events[0], missing_events[1], missing_sequences[0]);
-  missing_fence.communication_event->physical.original_text_offset = 999u;
+  missing_fence.communication_event = ConSanSyncEventId{999u};
   const ConSanAtomicFencePolicyResult missing_communication = plan_consan_atomic_fence_observation(
       build_atomic_inventory(std::move(missing_events), std::move(missing_sequences), {},
                              {make_global_store_site({})}, {std::move(missing_fence)}),

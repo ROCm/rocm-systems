@@ -7,18 +7,9 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 
 #include <span>
-#include <unordered_map>
+#include <vector>
 
 namespace rocjitsu {
-
-struct SyncEventSemanticIdHash {
-  [[nodiscard]] size_t operator()(const SemanticSiteId &identity) const noexcept;
-};
-
-struct SyncEventSemanticIndex {
-  std::unordered_map<SemanticSiteId, const ConSanSyncEvent *, SyncEventSemanticIdHash> events;
-  std::span<const ConSanProgramSite> program_sites;
-};
 
 /// Unique logical sequence membership for one event. A null sequence with an
 /// ambiguous flag is distinct from a missing map entry so policy can retain
@@ -28,27 +19,18 @@ struct SyncSequenceMembership {
   bool ambiguous = false;
 };
 
-using SyncSequenceMembershipIndex =
-    std::unordered_map<SemanticSiteId, SyncSequenceMembership, SyncEventSemanticIdHash>;
-
-[[nodiscard]] SyncEventSemanticIndex
-build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
-                                std::span<const ConSanProgramSite> program_sites);
-
-[[nodiscard]] const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
-                                                                SemanticSiteId identity);
+using SyncSequenceMembershipIndex = std::vector<SyncSequenceMembership>;
 
 [[nodiscard]] SyncSequenceMembershipIndex
-build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences);
+build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences,
+                                     size_t event_count);
+
+[[nodiscard]] const SyncSequenceMembership *
+find_sync_sequence_membership(const SyncSequenceMembershipIndex &index, ConSanSyncEventId event);
 
 /// Verify that every declared sequence member resolves to the same ordered,
 /// bounded event in the immutable program inventory.
 [[nodiscard]] bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
-                                              const ConSanSyncSequence &sequence);
-
-/// Indexed form used while synchronization analysis is still constructing its
-/// immutable inventory revision.
-[[nodiscard]] bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
                                               const ConSanSyncSequence &sequence);
 
 } // namespace rocjitsu

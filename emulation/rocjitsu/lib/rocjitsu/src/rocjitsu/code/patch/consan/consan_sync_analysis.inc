@@ -576,7 +576,8 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
   std::vector<std::optional<bool>> cyclic_block_cache(blocks.size());
   inventory.sync_sequences.clear();
   inventory.sync_sequences.reserve(inventory.sync_events.size());
-  for (const ConSanSyncEvent &event : inventory.sync_events) {
+  for (size_t event_ordinal = 0; event_ordinal < inventory.sync_events.size(); ++event_ordinal) {
+    const ConSanSyncEvent &event = inventory.sync_events[event_ordinal];
     if (!event.source_site.valid() || event.source_site.ordinal >= inventory.program_sites.size())
       continue;
     const ConSanProgramSite &source = inventory.program_sites[event.source_site.ordinal];
@@ -588,8 +589,7 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.in_kernel = source.container.is_kernel();
     sequence.begin_text_offset = event.text_offset();
     sequence.end_text_offset = event.text_offset() + source.size();
-    sequence.member_semantic_ids.push_back(
-        event.semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember));
+    sequence.member_event_ids.push_back({static_cast<uint32_t>(event_ordinal)});
     if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
       sequence.barrier_id = site->barrier_id;
       sequence.barrier_operand_source = site->operand_source;
@@ -855,9 +855,8 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
       sequence.end_text_offset = wait.end_text_offset;
       sequence.in_cyclic_cfg_component |= wait.in_cyclic_cfg_component;
       sequence.inside_scalar_clause |= wait.inside_scalar_clause;
-      sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
-                                          wait.member_semantic_ids.begin(),
-                                          wait.member_semantic_ids.end());
+      sequence.member_event_ids.insert(sequence.member_event_ids.end(),
+                                       wait.member_event_ids.begin(), wait.member_event_ids.end());
       if (!sequence.participant_count)
         sequence.participant_count = wait.participant_count;
       if (!sequence.participant_mask)
@@ -882,11 +881,12 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
   sync_sequences = std::move(associated);
 }
 
-[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
-                                                          const ConSanSyncSequence &sequence);
+[[nodiscard]] const ConSanSyncEvent *
+first_sequence_event(const SynchronizationInventoryView &events,
+                     const ConSanSyncSequence &sequence);
 
 void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView inventory,
-                                             const SyncEventSemanticIndex &events) {
+                                             const SynchronizationInventoryView &events) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &groups = inventory.barrier_lifecycle_groups;
   groups.clear();
@@ -899,7 +899,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     group.identity = init.identity + "|lifecycle-group=static-run";
     group.container_name = init.container_name;
     group.in_kernel = init.in_kernel;
-    group.member_semantic_ids = init.member_semantic_ids;
+    group.member_event_ids = init.member_event_ids;
     group.barrier_id = init.barrier_id;
     group.barrier_scope = init.barrier_scope;
     const std::optional<uint32_t> basic_block_index = init.basic_block_index;
@@ -907,9 +907,8 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
 
     const auto append_member = [&](const ConSanSyncSequence &sequence) {
       end_text_offset = sequence.end_text_offset;
-      group.member_semantic_ids.insert(group.member_semantic_ids.end(),
-                                       sequence.member_semantic_ids.begin(),
-                                       sequence.member_semantic_ids.end());
+      group.member_event_ids.insert(group.member_event_ids.end(), sequence.member_event_ids.begin(),
+                                    sequence.member_event_ids.end());
     };
     const auto is_contiguous = [&](const ConSanSyncSequence &sequence) {
       return basic_block_index && sequence.basic_block_index == basic_block_index &&
@@ -1010,7 +1009,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
 
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-    const SyncEventSemanticIndex &events, rj_code_arch_t arch,
+    const SynchronizationInventoryView &events, rj_code_arch_t arch,
     std::span<const ConSanSyncSequence> sync_sequences, ConSanProgramAnalysisResult &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
@@ -1025,7 +1024,7 @@ void build_barrier_move_destination_inventory(
         sequence.operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(sequence.confidence,
                                       ConSanSemanticConfidence::Conservative) ||
-        sequence.member_semantic_ids.size() != 2u) {
+        sequence.member_event_ids.size() != 2u) {
       continue;
     }
     const ConSanSyncEvent *event = first_sequence_event(events, sequence);
@@ -1115,11 +1114,12 @@ void build_barrier_move_destination_inventory(
   }
 }
 
-[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
-                                                          const ConSanSyncSequence &sequence) {
-  if (sequence.member_semantic_ids.empty())
+[[nodiscard]] const ConSanSyncEvent *
+first_sequence_event(const SynchronizationInventoryView &events,
+                     const ConSanSyncSequence &sequence) {
+  if (sequence.member_event_ids.empty())
     return nullptr;
-  return find_sequence_member_event(events, sequence.member_semantic_ids.front());
+  return events.find_event(sequence.member_event_ids.front());
 }
 
 [[nodiscard]] bool has_exact_group_flat_communication_site(const ProgramInventory &inventory,
@@ -1282,7 +1282,7 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
 
 [[nodiscard]] bool
 is_exact_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSequence &second,
-                            const SyncEventSemanticIndex &events,
+                            const SynchronizationInventoryView &events,
                             const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
@@ -1438,36 +1438,36 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
   sequence.confidence_reason = acquire != nullptr
                                    ? "bounded atomic/acquire-cache compiler-bookkeeping proof"
                                    : "same-block RDNA4 release-cache/atomic waits-only proof";
-  std::vector<SemanticSiteId> semantic_members;
+  std::vector<ConSanSyncEventId> semantic_members;
   if (release != nullptr) {
     sequence.identity += "|release-cache=" + release->identity;
     sequence.begin_text_offset = release->begin_text_offset;
     sequence.in_cyclic_cfg_component |= release->in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= release->inside_scalar_clause;
-    semantic_members.insert(semantic_members.end(), release->member_semantic_ids.begin(),
-                            release->member_semantic_ids.end());
+    semantic_members.insert(semantic_members.end(), release->member_event_ids.begin(),
+                            release->member_event_ids.end());
   }
-  semantic_members.insert(semantic_members.end(), atomic.member_semantic_ids.begin(),
-                          atomic.member_semantic_ids.end());
+  semantic_members.insert(semantic_members.end(), atomic.member_event_ids.begin(),
+                          atomic.member_event_ids.end());
   if (acquire != nullptr) {
     sequence.identity += "|acquire-cache=" + acquire->identity;
     sequence.in_cyclic_cfg_component |= acquire->in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= acquire->inside_scalar_clause;
-    semantic_members.insert(semantic_members.end(), acquire->member_semantic_ids.begin(),
-                            acquire->member_semantic_ids.end());
+    semantic_members.insert(semantic_members.end(), acquire->member_event_ids.begin(),
+                            acquire->member_event_ids.end());
   }
   if (acquire_tail != nullptr) {
     sequence.identity += "|acquire-cache-tail=" + acquire_tail->identity;
     sequence.in_cyclic_cfg_component |= acquire_tail->in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= acquire_tail->inside_scalar_clause;
-    semantic_members.insert(semantic_members.end(), acquire_tail->member_semantic_ids.begin(),
-                            acquire_tail->member_semantic_ids.end());
+    semantic_members.insert(semantic_members.end(), acquire_tail->member_event_ids.begin(),
+                            acquire_tail->member_event_ids.end());
   }
   if (acquire_tail != nullptr)
     sequence.end_text_offset = acquire_tail->end_text_offset;
   else if (acquire != nullptr)
     sequence.end_text_offset = acquire->end_text_offset;
-  sequence.member_semantic_ids = std::move(semantic_members);
+  sequence.member_event_ids = std::move(semantic_members);
   return sequence;
 }
 
@@ -1497,7 +1497,8 @@ exact_release_wait_boundary(const ConSanSyncSequence &sequence,
 }
 
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                     rj_code_arch_t arch, const SyncEventSemanticIndex &events,
+                                     rj_code_arch_t arch,
+                                     const SynchronizationInventoryView &events,
                                      SynchronizationInventoryBuildView inventory,
                                      const ProgramInventory &program_inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
@@ -1636,25 +1637,25 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
   };
 
   const SyncSequenceMembershipIndex sequence_by_event =
-      build_sync_sequence_membership_index(sync_sequences);
-  const SyncEventSemanticIndex event_by_identity =
-      build_sync_event_semantic_index(sync_events, inventory.program_sites);
+      build_sync_sequence_membership_index(sync_sequences, sync_events.size());
+  const SynchronizationInventoryView event_inventory = inventory.view();
 
-  for (const ConSanSyncEvent &fence : sync_events) {
+  for (size_t fence_ordinal = 0; fence_ordinal < sync_events.size(); ++fence_ordinal) {
+    const ConSanSyncEvent &fence = sync_events[fence_ordinal];
     if (fence.kind != ConSanSyncEventKind::Fence)
       continue;
 
     ConSanMoiFenceCandidate candidate;
-    candidate.fence_event = fence.semantic_id;
+    candidate.fence_event = {static_cast<uint32_t>(fence_ordinal)};
 
-    const auto membership = sequence_by_event.find(fence.semantic_id);
-    if (membership == sequence_by_event.end() || membership->second.ambiguous ||
-        membership->second.sequence == nullptr) {
+    const SyncSequenceMembership *membership =
+        find_sync_sequence_membership(sequence_by_event, candidate.fence_event);
+    if (membership == nullptr || membership->ambiguous || membership->sequence == nullptr) {
       candidate.association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
       candidates.push_back(std::move(candidate));
       continue;
     }
-    const ConSanSyncSequence *sequence = membership->second.sequence;
+    const ConSanSyncSequence *sequence = membership->sequence;
     candidate.sequence_identity = sequence->identity;
 
     const bool addressed_atomic =
@@ -1679,14 +1680,13 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     }
 
     const auto sequence_has_cache_member = [&](ConSanCacheOperation operation) {
-      return std::ranges::any_of(
-          sequence->member_semantic_ids, [&](const SemanticSiteId &identity) {
-            const ConSanSyncEvent *event = find_sequence_member_event(event_by_identity, identity);
-            if (event == nullptr)
-              return false;
-            const ConSanFenceSite *source = fence_source(*event);
-            return source != nullptr && source->cache_operation == operation;
-          });
+      return std::ranges::any_of(sequence->member_event_ids, [&](const ConSanSyncEventId identity) {
+        const ConSanSyncEvent *event = event_inventory.find_event(identity);
+        if (event == nullptr)
+          return false;
+        const ConSanFenceSite *source = fence_source(*event);
+        return source != nullptr && source->cache_operation == operation;
+      });
     };
     const ConSanFenceSite *fence_site = fence_source(fence);
     if (fence_site == nullptr) {
@@ -1728,8 +1728,8 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
 
     const ConSanSyncEvent *communication = nullptr;
     bool malformed_member = false;
-    for (const SemanticSiteId &identity : sequence->member_semantic_ids) {
-      const ConSanSyncEvent *member = find_sequence_member_event(event_by_identity, identity);
+    for (const ConSanSyncEventId identity : sequence->member_event_ids) {
+      const ConSanSyncEvent *member = event_inventory.find_event(identity);
       if (member == nullptr) {
         malformed_member = true;
         break;
@@ -1762,7 +1762,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       continue;
     }
 
-    candidate.communication_event = communication->semantic_id;
+    candidate.communication_event = {static_cast<uint32_t>(communication - sync_events.data())};
     candidate.association = ConSanFenceAssociation::Qualified;
     candidates.push_back(std::move(candidate));
   }
@@ -1874,7 +1874,7 @@ fence_sequence_indices_by_begin(std::span<const ConSanSyncSequence> sync_sequenc
 
 void associate_ordinary_release_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, rj_code_arch_t arch,
-    const SyncEventSemanticIndex &events, SynchronizationInventoryBuildView inventory) {
+    const SynchronizationInventoryView &events, SynchronizationInventoryBuildView inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(sync_sequences);
   std::unordered_map<size_t, size_t> associations;
@@ -1939,10 +1939,10 @@ void associate_ordinary_release_sync_sequences(
     sequence.begin_text_offset = cache.begin_text_offset;
     sequence.in_cyclic_cfg_component |= cache.in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= cache.inside_scalar_clause;
-    std::vector<SemanticSiteId> semantic_members = cache.member_semantic_ids;
-    semantic_members.insert(semantic_members.end(), sequence.member_semantic_ids.begin(),
-                            sequence.member_semantic_ids.end());
-    sequence.member_semantic_ids = std::move(semantic_members);
+    std::vector<ConSanSyncEventId> semantic_members = cache.member_event_ids;
+    semantic_members.insert(semantic_members.end(), sequence.member_event_ids.begin(),
+                            sequence.member_event_ids.end());
+    sequence.member_event_ids = std::move(semantic_members);
     associated.push_back(std::move(sequence));
   }
   sync_sequences = std::move(associated);
@@ -1987,9 +1987,9 @@ void associate_ordinary_release_sync_sequences(
 }
 
 void associate_ordinary_acquire_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventSemanticIndex &events,
-    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory,
-    const ProgramInventory &program_inventory) {
+    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+    const SynchronizationInventoryView &events, rj_code_arch_t arch,
+    SynchronizationInventoryBuildView inventory, const ProgramInventory &program_inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   struct Association {
     size_t cache_index = 0;
@@ -2137,15 +2137,14 @@ void associate_ordinary_acquire_sync_sequences(
         cache_tail != nullptr ? cache_tail->end_text_offset : cache.end_text_offset;
     sequence.in_cyclic_cfg_component |= cache.in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= cache.inside_scalar_clause;
-    sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
-                                        cache.member_semantic_ids.begin(),
-                                        cache.member_semantic_ids.end());
+    sequence.member_event_ids.insert(sequence.member_event_ids.end(),
+                                     cache.member_event_ids.begin(), cache.member_event_ids.end());
     if (cache_tail != nullptr) {
       sequence.in_cyclic_cfg_component |= cache_tail->in_cyclic_cfg_component;
       sequence.inside_scalar_clause |= cache_tail->inside_scalar_clause;
-      sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
-                                          cache_tail->member_semantic_ids.begin(),
-                                          cache_tail->member_semantic_ids.end());
+      sequence.member_event_ids.insert(sequence.member_event_ids.end(),
+                                       cache_tail->member_event_ids.begin(),
+                                       cache_tail->member_event_ids.end());
     }
     associated.push_back(std::move(sequence));
   }
@@ -2189,25 +2188,19 @@ void associate_ordinary_acquire_sync_sequences(
 
 void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  const SyncEventSemanticIndex events =
-      build_sync_event_semantic_index(sync.sync_events, sync.program_sites);
   const SyncSequenceMembershipIndex sequence_by_event =
-      build_sync_sequence_membership_index(sync.sync_sequences);
+      build_sync_sequence_membership_index(sync.sync_sequences, sync.sync_events.size());
 
   for (ConSanFaultSite &site : result.fault_sites) {
     const ConSanProgramSite *source = result.program_inventory.program_site(site.source_site);
-    const ConSanSyncEvent *event =
-        source == nullptr
-            ? nullptr
-            : find_sequence_member_event(
-                  events, SemanticSiteId{.physical = source->physical_id,
-                                         .domain = ConSanSemanticSiteDomain::SynchronizationEvent});
+    const ConSanSyncEvent *event = source == nullptr ? nullptr : sync.find_event(site.source_site);
     if (event == nullptr)
       continue;
     site.sync_event_identity = event->identity;
-    const auto sequence_entry = sequence_by_event.find(event->semantic_id);
+    const SyncSequenceMembership *sequence_entry =
+        find_sync_sequence_membership(sequence_by_event, sync.event_id(*event));
     const ConSanSyncSequence *sequence =
-        sequence_entry == sequence_by_event.end() ? nullptr : sequence_entry->second.sequence;
+        sequence_entry == nullptr ? nullptr : sequence_entry->sequence;
     if (sequence == nullptr)
       continue;
     site.sync_sequence_identity = sequence->identity;
@@ -2377,12 +2370,11 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan
   // makes owner annotation quadratic in the sync inventory size.
-  const SyncEventSemanticIndex sync_event_by_identity =
-      build_sync_event_semantic_index(inventory.sync_events, inventory.program_sites);
+  const SynchronizationInventoryView sync_inventory = inventory.view();
   for (ConSanSyncSequence &sequence : inventory.sync_sequences) {
     bool first = true;
-    for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
-      const ConSanSyncEvent *event = find_sequence_member_event(sync_event_by_identity, identity);
+    for (const ConSanSyncEventId identity : sequence.member_event_ids) {
+      const ConSanSyncEvent *event = sync_inventory.find_event(identity);
       if (event == nullptr) {
         sequence.execution_owners.clear();
         first = false;
@@ -2437,8 +2429,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
     return false;
   }
 
-  const SyncEventSemanticIndex sync_events = build_sync_event_semantic_index(
-      synchronization_inventory.sync_events, synchronization_inventory.program_sites);
+  const SynchronizationInventoryView sync_events = synchronization_inventory.view();
   const auto sync_blocks =
       build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory);
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);

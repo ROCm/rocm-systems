@@ -245,10 +245,10 @@ void add_covered_site(ConSanObservationPlan &plan, ConSanProbeIntentId id,
 }
 
 [[nodiscard]] bool has_qualified_fence_for(const SynchronizationInventoryView &inventory,
-                                           const SemanticSiteId &communication_identity) {
+                                           ConSanSyncEventId communication) {
   return std::ranges::any_of(
       inventory.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-        return fence.eligible() && fence.communication_event == communication_identity;
+        return fence.eligible() && fence.communication_event == communication;
       });
 }
 
@@ -264,8 +264,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
-  const SyncSequenceMembershipIndex memberships =
-      build_sync_sequence_membership_index(synchronization.sync_sequences);
+  const SyncSequenceMembershipIndex memberships = build_sync_sequence_membership_index(
+      synchronization.sync_sequences, synchronization.sync_events.size());
   std::map<std::pair<ConSanSyncEventKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
       aliases_by_site;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
@@ -278,9 +278,10 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   for (const auto &[site_key, aliases] : aliases_by_site) {
     (void)site_key;
     const ConSanSyncEvent &event = *aliases.front();
-    const auto membership_entry = memberships.find(event.semantic_id);
+    const SyncSequenceMembership *membership_entry =
+        find_sync_sequence_membership(memberships, synchronization.event_id(event));
     const SyncSequenceMembership membership =
-        membership_entry == memberships.end() ? SyncSequenceMembership{} : membership_entry->second;
+        membership_entry == nullptr ? SyncSequenceMembership{} : *membership_entry;
     // Ordinary memory belongs to access policy unless synchronization
     // analysis associated an acquire/release sequence around it.
     if (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
@@ -375,7 +376,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       const bool independent_fence_owns_ordinary =
           vocabulary->fence != ConSanProbeIntentKind::Count &&
           event.kind == ConSanSyncEventKind::OrdinaryMemory &&
-          has_qualified_fence_for(synchronization, event.semantic_id);
+          has_qualified_fence_for(synchronization, synchronization.event_id(event));
       if (!independent_fence_owns_ordinary) {
         decision.intent_ids.push_back(add_intent(result.plan, semantic_id.physical, {semantic_id},
                                                  vocabulary->atomic, ConSanProbePosition::After,
@@ -386,8 +387,10 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   }
 
   std::map<uint64_t, std::vector<const ConSanMoiFenceCandidate *>> fence_aliases_by_site;
-  for (const ConSanMoiFenceCandidate &fence : synchronization.moi_fence_candidates)
-    fence_aliases_by_site[fence.fence_event.physical.original_text_offset].push_back(&fence);
+  for (const ConSanMoiFenceCandidate &fence : synchronization.moi_fence_candidates) {
+    if (const ConSanSyncEvent *event = synchronization.find_event(fence.fence_event))
+      fence_aliases_by_site[event->text_offset()].push_back(&fence);
+  }
 
   for (const auto &fence_aliases : fence_aliases_by_site) {
     const auto &aliases = fence_aliases.second;
@@ -400,7 +403,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         fence_events.push_back(event);
       }
     }
-    const SemanticSiteId fence_id = fence.fence_event;
+    const SemanticSiteId fence_id =
+        fence_event == nullptr ? SemanticSiteId{} : fence_event->semantic_id;
     const std::vector<std::string> names =
         synchronization.source_container_names(fence_events);
     const ConSanCapabilityDisposition capability = consan_capability_disposition(

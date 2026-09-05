@@ -40,14 +40,13 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
   if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
       synchronization.source(*event) != &decoded)
     return;
-  const SemanticSiteId member_identity =
-      event->semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
+  const ConSanSyncEventId member_identity = synchronization.event_id(*event);
   const bool belongs_to_sequence =
       std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
         return sequence.kind == ConSanSyncSequenceKind::Barrier &&
-               sequence.member_semantic_ids.size() > 1u &&
-               std::ranges::find(sequence.member_semantic_ids, member_identity) !=
-                   sequence.member_semantic_ids.end();
+               sequence.member_event_ids.size() > 1u &&
+               std::ranges::find(sequence.member_event_ids, member_identity) !=
+                   sequence.member_event_ids.end();
       });
   if (!belongs_to_sequence) {
     const ConSanProgramContainer *container = inventory.container(decoded.container.id);

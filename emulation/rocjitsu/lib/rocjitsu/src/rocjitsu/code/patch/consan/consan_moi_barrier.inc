@@ -42,11 +42,11 @@
     bool coverage_is_exact = !intent->covered_semantic_sites.empty();
     for (const SemanticSiteId &covered : intent->covered_semantic_sites) {
       const ConSanSyncEvent *member = graph.find_event(covered);
-      const SemanticSiteId member_id =
-          covered.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
+      const ConSanSyncEventId member_id =
+          member == nullptr ? ConSanSyncEventId{} : graph.event_id(*member);
       coverage_is_exact &= member != nullptr && member->kind == ConSanSyncEventKind::Barrier &&
-                           std::ranges::find(sequence->member_semantic_ids, member_id) !=
-                               sequence->member_semantic_ids.end();
+                           std::ranges::find(sequence->member_event_ids, member_id) !=
+                               sequence->member_event_ids.end();
     }
     if (!coverage_is_exact) {
       errors.emplace_back(

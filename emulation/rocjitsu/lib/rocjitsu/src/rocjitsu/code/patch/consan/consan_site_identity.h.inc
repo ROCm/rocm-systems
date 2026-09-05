@@ -106,8 +106,6 @@ enum class ConSanSemanticSiteDomain : uint8_t {
   /// A synchronization event decoded from an instruction or qualified
   /// instruction sequence.
   SynchronizationEvent,
-  /// A stable member of a logical synchronization sequence.
-  SynchronizationSequenceMember,
   /// One past the last domain. This is an iteration bound and is never a valid
   /// semantic identity.
   Count,

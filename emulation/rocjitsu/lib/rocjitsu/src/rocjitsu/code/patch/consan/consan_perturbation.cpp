@@ -27,8 +27,7 @@ namespace rocjitsu {
 void build_perturbation_candidate_inventory(const ProgramInventory &program_inventory,
                                             ConSanPerturbationPlanningState &planning) {
   planning.candidates.clear();
-  const SyncEventSemanticIndex events = build_sync_event_semantic_index(
-      program_inventory.sync().sync_events, program_inventory.program_sites());
+  const SynchronizationInventoryView events = program_inventory.sync();
   for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
@@ -36,18 +35,18 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
                                                           : ConSanPerturbationKind::None;
     if (kind == ConSanPerturbationKind::None)
       continue;
-    if (sequence.member_semantic_ids.empty())
+    if (sequence.member_event_ids.empty())
       continue;
     const auto member_identities =
-        program_inventory.sync().sequence_member_identities(sequence.member_semantic_ids);
+        program_inventory.sync().sequence_member_identities(sequence.member_event_ids);
     for (const ConSanPerturbationEdge edge :
          {ConSanPerturbationEdge::Release, ConSanPerturbationEdge::Acquire}) {
       const ConSanPerturbationRejectionReason rejection =
           perturbation_rejection_reason(events, sequence, kind, edge);
-      const SemanticSiteId &anchor_member = edge == ConSanPerturbationEdge::Release
-                                                ? sequence.member_semantic_ids.front()
-                                                : sequence.member_semantic_ids.back();
-      const ConSanSyncEvent *anchor = find_sequence_member_event(events, anchor_member);
+      const ConSanSyncEventId anchor_member = edge == ConSanPerturbationEdge::Release
+                                                  ? sequence.member_event_ids.front()
+                                                  : sequence.member_event_ids.back();
+      const ConSanSyncEvent *anchor = events.find_event(anchor_member);
       const ConSanProgramSite *anchor_source =
           anchor == nullptr ? nullptr : program_inventory.program_site(anchor->source_site);
       ConSanPerturbationCandidate candidate;

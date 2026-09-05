@@ -17,11 +17,12 @@ namespace {
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-[[nodiscard]] bool sequence_atomic_has_agent_or_system_scope(const SyncEventSemanticIndex &events,
-                                                             const ConSanSyncSequence &sequence) {
+[[nodiscard]] bool
+sequence_atomic_has_agent_or_system_scope(const SynchronizationInventoryView &events,
+                                          const ConSanSyncSequence &sequence) {
   const ConSanSyncEvent *atomic = nullptr;
-  for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
-    const ConSanSyncEvent *event = find_sequence_member_event(events, identity);
+  for (const ConSanSyncEventId identity : sequence.member_event_ids) {
+    const ConSanSyncEvent *event = events.find_event(identity);
     if (event == nullptr || event->kind != ConSanSyncEventKind::Atomic)
       continue;
     if (atomic != nullptr)
@@ -37,7 +38,7 @@ namespace {
 } // namespace
 
 ConSanPerturbationRejectionReason
-perturbation_rejection_reason(const SyncEventSemanticIndex &events,
+perturbation_rejection_reason(const SynchronizationInventoryView &events,
                               const ConSanSyncSequence &sequence, ConSanPerturbationKind kind,
                               ConSanPerturbationEdge edge) {
   using Reason = ConSanPerturbationRejectionReason;
@@ -57,7 +58,7 @@ perturbation_rejection_reason(const SyncEventSemanticIndex &events,
   if (kind == ConSanPerturbationKind::Barrier) {
     if (sequence.kind != ConSanSyncSequenceKind::Barrier ||
         sequence.operation != ConSanSyncOperation::BarrierFull ||
-        sequence.member_semantic_ids.size() != 2u)
+        sequence.member_event_ids.size() != 2u)
       return Reason::NotQualifiedFullBarrier;
     if (sequence.barrier_operand_source != ConSanBarrierSite::OperandSource::Immediate ||
         !sequence.barrier_id || sequence.barrier_scope == ConSanBarrierSite::Scope::Unknown)

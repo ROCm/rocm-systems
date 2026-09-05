@@ -11954,9 +11954,11 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_EQ(fence->anchor_offset, result.program_inventory.sync()
-                                      .moi_fence_candidates.front()
-                                      .fence_event.physical.original_text_offset);
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const ConSanSyncEvent *fence_event =
+      sync.find_event(sync.moi_fence_candidates.front().fence_event);
+  ASSERT_NE(fence_event, nullptr);
+  EXPECT_EQ(fence->anchor_offset, fence_event->text_offset());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
@@ -12057,7 +12059,7 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
        stale_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible());
     ASSERT_TRUE(candidate.communication_event);
-    ++candidate.communication_event->physical.original_text_offset;
+    candidate.communication_event = ConSanSyncEventId{999u};
   }
   inventory.program_inventory = stale_inventory.view();
 
@@ -12104,9 +12106,8 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
     ASSERT_TRUE(candidate.eligible());
     ASSERT_TRUE(candidate.communication_event);
     auto &sync_events = unowned_inventory.synchronization().sync_events;
-    const auto event = std::ranges::find(sync_events, *candidate.communication_event,
-                                         &ConSanSyncEvent::semantic_id);
-    ASSERT_NE(event, sync_events.end());
+    ASSERT_LT(candidate.communication_event->ordinal, sync_events.size());
+    const ConSanSyncEvent *event = &sync_events[candidate.communication_event->ordinal];
     auto &program_sites = unowned_inventory.synchronization().program_sites;
     ASSERT_LT(event->source_site.ordinal, program_sites.size());
     program_sites[event->source_site.ordinal].execution_owners.clear();

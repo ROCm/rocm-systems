@@ -24,17 +24,21 @@ namespace {
                   rhs.confidence, rhs.memory_role_confidence, rhs.scope);
 }
 
-[[nodiscard]] std::vector<uint64_t> sequence_offsets(const ConSanSyncSequence &sequence) {
+[[nodiscard]] std::vector<uint64_t> sequence_offsets(const SynchronizationInventoryView &inventory,
+                                                     const ConSanSyncSequence &sequence) {
   std::vector<uint64_t> offsets;
-  offsets.reserve(sequence.member_semantic_ids.size());
-  for (const SemanticSiteId &member : sequence.member_semantic_ids)
-    offsets.push_back(member.physical.original_text_offset);
+  offsets.reserve(sequence.member_event_ids.size());
+  for (const ConSanSyncEventId member : sequence.member_event_ids) {
+    if (const ConSanSyncEvent *event = inventory.find_event(member))
+      offsets.push_back(event->text_offset());
+  }
   return offsets;
 }
 
-[[nodiscard]] bool sequence_semantics_equal(const ConSanSyncSequence &lhs,
+[[nodiscard]] bool sequence_semantics_equal(const SynchronizationInventoryView &inventory,
+                                            const ConSanSyncSequence &lhs,
                                             const ConSanSyncSequence &rhs) {
-  return sequence_offsets(lhs) == sequence_offsets(rhs) &&
+  return sequence_offsets(inventory, lhs) == sequence_offsets(inventory, rhs) &&
          std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.begin_text_offset,
                   lhs.end_text_offset, lhs.basic_block_index, lhs.in_cyclic_cfg_component,
@@ -56,14 +60,12 @@ namespace {
 
 [[nodiscard]] const ConSanSyncEvent *
 completion_event(const ConSanSyncSequence &sequence,
-                 const std::map<uint64_t, std::vector<const ConSanSyncEvent *>> &events_by_offset,
                  const SynchronizationInventoryView &inventory) {
   const ConSanSyncEvent *result = nullptr;
-  for (const SemanticSiteId &member : sequence.member_semantic_ids) {
-    const auto found = events_by_offset.find(member.physical.original_text_offset);
-    if (found == events_by_offset.end() || found->second.empty())
+  for (const ConSanSyncEventId member : sequence.member_event_ids) {
+    const ConSanSyncEvent *event = inventory.find_event(member);
+    if (event == nullptr)
       continue;
-    const ConSanSyncEvent *event = found->second.front();
     const ConSanProgramSite *source = inventory.source(*event);
     if (source == nullptr)
       continue;
@@ -77,15 +79,14 @@ completion_event(const ConSanSyncSequence &sequence,
   return result;
 }
 
-[[nodiscard]] std::vector<SemanticSiteId> covered_event_ids(
-    const ConSanSyncSequence &sequence,
-    const std::map<uint64_t, std::vector<const ConSanSyncEvent *>> &events_by_offset) {
+[[nodiscard]] std::vector<SemanticSiteId>
+covered_event_ids(const SynchronizationInventoryView &inventory,
+                  const ConSanSyncSequence &sequence) {
   std::vector<SemanticSiteId> ids;
-  ids.reserve(sequence.member_semantic_ids.size());
-  for (const SemanticSiteId &member : sequence.member_semantic_ids) {
-    const auto found = events_by_offset.find(member.physical.original_text_offset);
-    if (found != events_by_offset.end() && !found->second.empty())
-      ids.push_back(found->second.front()->semantic_id);
+  ids.reserve(sequence.member_event_ids.size());
+  for (const ConSanSyncEventId member : sequence.member_event_ids) {
+    if (const ConSanSyncEvent *event = inventory.find_event(member))
+      ids.push_back(event->semantic_id);
   }
   return ids;
 }
@@ -112,10 +113,13 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   for (const ConSanSyncSequence &sequence : synchronization.sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Barrier)
       continue;
-    for (const SemanticSiteId &member : sequence.member_semantic_ids) {
-      auto &sequences = sequences_by_member_offset[member.physical.original_text_offset];
+    for (const ConSanSyncEventId member : sequence.member_event_ids) {
+      const ConSanSyncEvent *member_event = synchronization.find_event(member);
+      if (member_event == nullptr)
+        continue;
+      auto &sequences = sequences_by_member_offset[member_event->text_offset()];
       if (std::ranges::none_of(sequences, [&](const auto *known) {
-            return sequence_semantics_equal(*known, sequence);
+            return sequence_semantics_equal(synchronization, *known, sequence);
           })) {
         sequences.push_back(&sequence);
       }
@@ -179,7 +183,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
     if (!usable_sequences.empty()) {
       logical_sequence = usable_sequences.front();
       if (std::ranges::any_of(usable_sequences, [&](const auto *candidate) {
-            return !sequence_semantics_equal(*logical_sequence, *candidate);
+            return !sequence_semantics_equal(synchronization, *logical_sequence, *candidate);
           })) {
         reason = ConSanBarrierPolicyReason::AmbiguousSequenceMembership;
         decision_kind = ConSanSiteDecisionKind::Unsupported;
@@ -218,24 +222,24 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
       reason = ConSanBarrierPolicyReason::UnqualifiedSyncSequence;
     } else if (request.engine == ConSanCapabilityEngine::InlineShadow &&
                event.operation == ConSanSyncOperation::BarrierSignal &&
-               (logical_sequence == nullptr || logical_sequence->member_semantic_ids.size() < 2u)) {
+               (logical_sequence == nullptr || logical_sequence->member_event_ids.size() < 2u)) {
       reason = ConSanBarrierPolicyReason::UnqualifiedSyncSequence;
     } else {
       const bool sequence_intent =
           request.engine == ConSanCapabilityEngine::Sampled ||
           (request.engine == ConSanCapabilityEngine::InlineShadow && logical_sequence != nullptr &&
-           logical_sequence->member_semantic_ids.size() > 1u);
+           logical_sequence->member_event_ids.size() > 1u);
       const ConSanSyncEvent *placement = &event;
       std::vector<SemanticSiteId> covered{event.semantic_id};
       std::vector<uint64_t> sequence_key;
       if (sequence_intent) {
-        placement = completion_event(*logical_sequence, events_by_offset, synchronization);
+        placement = completion_event(*logical_sequence, synchronization);
         if (placement == nullptr) {
           decision_kind = ConSanSiteDecisionKind::Unsupported;
           reason = ConSanBarrierPolicyReason::MissingCompletingEvent;
         } else {
-          covered = covered_event_ids(*logical_sequence, events_by_offset);
-          sequence_key = sequence_offsets(*logical_sequence);
+          covered = covered_event_ids(synchronization, *logical_sequence);
+          sequence_key = sequence_offsets(synchronization, *logical_sequence);
         }
       }
       if (placement != nullptr && !covered.empty() &&

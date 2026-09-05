@@ -143,12 +143,12 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative) ||
-        !sequence->basic_block_index || sequence->member_semantic_ids.size() != 2u ||
+        !sequence->basic_block_index || sequence->member_event_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
-        sync.find_sequence_member(sequence->member_semantic_ids.front()) != load ||
+        sync.find_sequence_member(sequence->member_event_ids.front()) != load ||
         !consan_nonempty_execution_owners_equal(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
-    const ConSanSyncEvent *cache = sync.find_sequence_member(sequence->member_semantic_ids.back());
+    const ConSanSyncEvent *cache = sync.find_sequence_member(sequence->member_event_ids.back());
     const ConSanFenceSite *cache_source =
         cache == nullptr ? nullptr : sync.source_as<ConSanFenceSite>(*cache);
     if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
@@ -191,7 +191,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   if (sequence->kind != ConSanSyncSequenceKind::Barrier ||
       sequence->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
-      sequence->member_semantic_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||
+      sequence->member_event_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||
       !consan_execution_owners_include_requested_kernel(sequence->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
@@ -201,20 +201,19 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
       inventory, selection.primary_site_identity, ConSanFaultSiteKind::Barrier);
   const ConSanSyncEvent *primary_event =
       primary == nullptr ? nullptr : sync.find_event(primary->source_site);
-  SemanticSiteId primary_member_id;
+  ConSanSyncEventId primary_member_id;
   if (primary_event != nullptr)
-    primary_member_id = primary_event->semantic_id.in_domain(
-        ConSanSemanticSiteDomain::SynchronizationSequenceMember);
+    primary_member_id = sync.event_id(*primary_event);
   if (primary == nullptr || primary_event == nullptr ||
-      std::ranges::find(sequence->member_semantic_ids, primary_member_id) ==
-          sequence->member_semantic_ids.end() ||
+      std::ranges::find(sequence->member_event_ids, primary_member_id) ==
+          sequence->member_event_ids.end() ||
       !consan_execution_owners_include_requested_kernel(primary->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::PrimaryNotMember};
   }
 
   const ConSanFaultSite *companion = nullptr;
-  for (SemanticSiteId member_id : sequence->member_semantic_ids) {
+  for (ConSanSyncEventId member_id : sequence->member_event_ids) {
     const ConSanSyncEvent *member = sync.find_sequence_member(member_id);
     if (member == nullptr)
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};

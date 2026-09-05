@@ -1456,8 +1456,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
-  const SyncEventSemanticIndex pristine_events = build_sync_event_semantic_index(
-      pristine.program_inventory.sync().sync_events, pristine.program_inventory.program_sites());
+  const SynchronizationInventoryView pristine_events = pristine.program_inventory.sync();
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -1560,7 +1559,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
         sequence == pristine.program_inventory.sync().sync_sequences.end()
             ? std::optional<std::vector<std::string>>{}
             : pristine.program_inventory.sync().sequence_member_identities(
-                  sequence->member_semantic_ids);
+                  sequence->member_event_ids);
     if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
         !sequence->basic_block_index ||
         !consan_sync_confidence_meets(sequence->confidence,
@@ -1578,9 +1577,9 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     }
     const size_t outer_member_index = *patch.perturbation_edge == ConSanPerturbationEdge::Release
                                           ? 0u
-                                          : sequence->member_semantic_ids.size() - 1u;
-    const ConSanSyncEvent *anchor_event = find_sequence_member_event(
-        pristine_events, sequence->member_semantic_ids[outer_member_index]);
+                                          : sequence->member_event_ids.size() - 1u;
+    const ConSanSyncEvent *anchor_event =
+        pristine_events.find_event(sequence->member_event_ids[outer_member_index]);
     const std::string_view outer_member =
         anchor_event == nullptr ? std::string_view{} : anchor_event->identity;
     const ConSanProgramSite *anchor_source =

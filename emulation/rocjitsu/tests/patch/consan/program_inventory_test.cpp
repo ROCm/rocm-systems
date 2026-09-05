@@ -387,18 +387,17 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   build.sync_events.push_back(event);
   ConSanSyncSequence sequence;
   sequence.identity = "sequence";
-  SemanticSiteId member = event.semantic_id;
-  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-  sequence.member_semantic_ids.push_back(member);
+  const ConSanSyncEventId member{0};
+  sequence.member_event_ids.push_back(member);
   build.sync_sequences.push_back(sequence);
   ConSanBarrierLifecycleGroup lifecycle;
   lifecycle.identity = "lifecycle";
-  lifecycle.member_semantic_ids = {member};
+  lifecycle.member_event_ids = {member};
   build.barrier_lifecycle_groups.push_back(lifecycle);
   ConSanMoiFenceCandidate fence;
-  fence.fence_event = event.semantic_id;
+  fence.fence_event = {0};
   fence.sequence_identity = sequence.identity;
-  fence.communication_event = event.semantic_id;
+  fence.communication_event = ConSanSyncEventId{0};
   fence.association = ConSanFenceAssociation::Qualified;
   build.moi_fence_candidates.push_back(fence);
 
@@ -425,7 +424,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   SemanticSiteId absent_event = event.semantic_id;
   ++absent_event.physical.original_text_offset;
   EXPECT_EQ(view.find_event(absent_event), nullptr);
-  EXPECT_TRUE(view.sync_sequences.front().member_semantic_ids.front().valid());
+  EXPECT_TRUE(view.sync_sequences.front().member_event_ids.front().valid());
   EXPECT_TRUE(view.moi_fence_candidates.front().eligible());
 
   ConSanTransformArtifacts result;
@@ -436,7 +435,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(moved.program_inventory.sync().sync_sequences.front().identity, "sequence");
   EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_groups.front().identity, "lifecycle");
   EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().fence_event,
-            event.semantic_id);
+            ConSanSyncEventId{0});
 }
 
 TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
@@ -466,11 +465,9 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   builder.add_semantic_site(std::move(alias_source));
   build.sync_events = {first, alias};
 
-  SemanticSiteId member = first.semantic_id;
-  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   ConSanSyncSequence sequence;
   sequence.identity = "sequence";
-  sequence.member_semantic_ids = {member};
+  sequence.member_event_ids = {{0}};
   ConSanSyncSequence ambiguous_sequence = sequence;
   ambiguous_sequence.identity = "ambiguous-sequence";
   build.sync_sequences = {sequence, ambiguous_sequence};
@@ -513,7 +510,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   group.identity = "original-group";
   original.synchronization().barrier_lifecycle_groups.push_back(group);
   ConSanMoiFenceCandidate fence;
-  fence.fence_event = event.semantic_id;
+  fence.fence_event = {0};
   original.synchronization().moi_fence_candidates.push_back(fence);
   original.publish_decoded_accesses(bytes);
   const ProgramInventory published = original.view();
@@ -592,23 +589,19 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
                 static_cast<uint32_t>(result.program_inventory.program_sites().size())}),
             nullptr);
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    for (const SemanticSiteId &member : sequence.member_semantic_ids) {
+    for (const ConSanSyncEventId member : sequence.member_event_ids) {
       const ConSanSyncEvent *event = result.program_inventory.sync().find_sequence_member(member);
       ASSERT_NE(event, nullptr);
-      SemanticSiteId expected = event->semantic_id;
-      expected.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-      EXPECT_EQ(member, expected);
+      EXPECT_EQ(result.program_inventory.sync().find_event(member), event);
     }
   }
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const ConSanBarrierLifecycleGroup &group =
       result.program_inventory.sync().barrier_lifecycle_groups.front();
   EXPECT_TRUE(group.admissible());
-  EXPECT_EQ(group.member_semantic_ids.size(), 5u);
-  EXPECT_TRUE(std::ranges::all_of(group.member_semantic_ids, [](const SemanticSiteId &member_id) {
-    return member_id.valid() &&
-           member_id.domain == ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-  }));
+  EXPECT_EQ(group.member_event_ids.size(), 5u);
+  EXPECT_TRUE(std::ranges::all_of(group.member_event_ids,
+                                  [](ConSanSyncEventId member_id) { return member_id.valid(); }));
 }
 
 TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {

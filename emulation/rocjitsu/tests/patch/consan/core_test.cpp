@@ -946,21 +946,16 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
   event_b.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
   inventory.synchronization().sync_events = {event_a, event_b};
 
-  const auto sequence_member = [](SemanticSiteId identity) {
-    identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-    return identity;
-  };
   ConSanSyncSequence sequence;
   sequence.identity = "sequence-a";
-  sequence.member_semantic_ids = {sequence_member(event_a.semantic_id),
-                                  sequence_member(event_b.semantic_id)};
+  sequence.member_event_ids = {{0}, {1}};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
   ASSERT_NE(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);
   EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("missing"), nullptr);
 
   sequence.identity = "sequence-b";
-  sequence.member_semantic_ids = {sequence_member(event_b.semantic_id)};
+  sequence.member_event_ids = {{1}};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
   EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);

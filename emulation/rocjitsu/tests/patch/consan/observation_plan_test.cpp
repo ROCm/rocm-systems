@@ -248,9 +248,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   sequence.begin_text_offset = 8;
   sequence.end_text_offset = 12;
   sequence.basic_block_index = 0;
-  SemanticSiteId member = event.semantic_id;
-  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-  sequence.member_semantic_ids.push_back(member);
+  sequence.member_event_ids.push_back({0});
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
@@ -269,8 +267,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   broken.barrier_site_decisions.front().reason = ConSanBarrierPolicyReason::InvalidBarrierEncoding;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.barrier_site_decisions.front().semantic_site.domain =
-      ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  broken.barrier_site_decisions.front().semantic_site.domain = ConSanSemanticSiteDomain::Count;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
   broken.barrier_site_decisions.front().intent_ids = {{99}};

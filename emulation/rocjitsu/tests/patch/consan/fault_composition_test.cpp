@@ -96,7 +96,7 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   ASSERT_EQ(release_perturbation.plans.size(), 1u);
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncEvent *release_anchor = release.program_inventory.sync().find_sequence_member(
-      release.program_inventory.sync().sync_sequences[0].member_semantic_ids.front());
+      release.program_inventory.sync().sync_sequences[0].member_event_ids.front());
   ASSERT_NE(release_anchor, nullptr);
   EXPECT_EQ(release_perturbation.plans[0].candidate.anchor_event_identity,
             release_anchor->identity);
@@ -109,7 +109,7 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire_perturbation.plans.size(), 1u);
   const ConSanSyncEvent *acquire_anchor = acquire.program_inventory.sync().find_sequence_member(
-      acquire.program_inventory.sync().sync_sequences[0].member_semantic_ids.back());
+      acquire.program_inventory.sync().sync_sequences[0].member_event_ids.back());
   ASSERT_NE(acquire_anchor, nullptr);
   EXPECT_EQ(acquire_perturbation.plans[0].candidate.anchor_event_identity,
             acquire_anchor->identity);

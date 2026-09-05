@@ -382,6 +382,17 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve one inventory-local synchronization-event handle in constant
+  /// time. The arena is immutable for the lifetime of this view.
+  [[nodiscard]] const ConSanSyncEvent *find_event(ConSanSyncEventId id) const {
+    return id.valid() && id.ordinal < sync_events.size() ? &sync_events[id.ordinal] : nullptr;
+  }
+
+  /// Return the compact handle of an event owned by this arena.
+  [[nodiscard]] ConSanSyncEventId event_id(const ConSanSyncEvent &event) const {
+    return {static_cast<uint32_t>(&event - sync_events.data())};
+  }
+
   /// Resolve the synchronization event derived from one exact decoded site.
   /// Physical aliases intentionally converge on the canonical event; callers
   /// retain the source handle when symbol attribution must also be checked.
@@ -405,18 +416,18 @@ struct SynchronizationInventoryView {
   /// Resolve a sequence-member identity through the authoritative event
   /// arena. Sequence membership uses a distinct semantic domain so callers
   /// cannot accidentally treat a graph edge as an event record.
-  [[nodiscard]] const ConSanSyncEvent *find_sequence_member(SemanticSiteId identity) const {
-    return find_event(identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent));
+  [[nodiscard]] const ConSanSyncEvent *find_sequence_member(ConSanSyncEventId identity) const {
+    return find_event(identity);
   }
 
   /// Materialize stable diagnostic names only at an external presentation or
   /// mutation-plan boundary. The synchronization graph itself stores one
   /// typed member vector.
   [[nodiscard]] std::optional<std::vector<std::string>>
-  sequence_member_identities(std::span<const SemanticSiteId> members) const {
+  sequence_member_identities(std::span<const ConSanSyncEventId> members) const {
     std::vector<std::string> identities;
     identities.reserve(members.size());
-    for (SemanticSiteId member : members) {
+    for (ConSanSyncEventId member : members) {
       const ConSanSyncEvent *event = find_sequence_member(member);
       if (event == nullptr)
         return std::nullopt;
@@ -451,13 +462,11 @@ struct SynchronizationInventoryView {
   /// membership both return null so evidence policy cannot silently select one
   /// of several contradictory causal interpretations.
   [[nodiscard]] const ConSanSyncSequence *
-  find_unique_sequence_containing(const SemanticSiteId &event_identity) const {
-    const SemanticSiteId member_identity =
-        event_identity.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
+  find_unique_sequence_containing(ConSanSyncEventId event_identity) const {
     const ConSanSyncSequence *match = nullptr;
     for (const ConSanSyncSequence &sequence : sync_sequences) {
-      if (std::ranges::find(sequence.member_semantic_ids, member_identity) ==
-          sequence.member_semantic_ids.end())
+      if (std::ranges::find(sequence.member_event_ids, event_identity) ==
+          sequence.member_event_ids.end())
         continue;
       if (match != nullptr)
         return nullptr;
@@ -466,12 +475,19 @@ struct SynchronizationInventoryView {
     return match;
   }
 
+  [[nodiscard]] const ConSanSyncSequence *
+  find_unique_sequence_containing(const SemanticSiteId &event_identity) const {
+    const ConSanSyncEvent *event =
+        find_event(event_identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent));
+    return event == nullptr ? nullptr : find_unique_sequence_containing(event_id(*event));
+  }
+
   /// Find unique sequence membership from the exact decoded source rather
   /// than round-tripping through its presentation identity.
   [[nodiscard]] const ConSanSyncSequence *
   find_unique_sequence_containing(ConSanProgramSiteId source_site) const {
     const ConSanSyncEvent *event = find_event(source_site);
-    return event == nullptr ? nullptr : find_unique_sequence_containing(event->semantic_id);
+    return event == nullptr ? nullptr : find_unique_sequence_containing(event_id(*event));
   }
 
   /// Find the unique logical sequence containing a decoded event name.
@@ -480,7 +496,7 @@ struct SynchronizationInventoryView {
   [[nodiscard]] const ConSanSyncSequence *
   find_unique_sequence_containing(std::string_view event_identity) const {
     const ConSanSyncEvent *event = find_event(event_identity);
-    return event == nullptr ? nullptr : find_unique_sequence_containing(event->semantic_id);
+    return event == nullptr ? nullptr : find_unique_sequence_containing(event_id(*event));
   }
 
   /// Resolve one unique synchronization sequence by its stable graph identity.
@@ -518,6 +534,11 @@ struct SynchronizationInventoryBuildView {
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
   std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
+
+  [[nodiscard]] SynchronizationInventoryView view() const {
+    return {program_sites, sync_events, sync_sequences, barrier_lifecycle_groups,
+            moi_fence_candidates};
+  }
 };
 
 /// Internal shared storage owned by `ProgramInventory` and populated only by

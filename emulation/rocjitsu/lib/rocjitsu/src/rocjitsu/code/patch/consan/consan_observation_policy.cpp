@@ -103,7 +103,7 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
       continue;
     }
     const ConSanSyncEvent *communication = nullptr;
-    for (SemanticSiteId identity : sequence.member_semantic_ids) {
+    for (ConSanSyncEventId identity : sequence.member_event_ids) {
       const ConSanSyncEvent *event = sync.find_sequence_member(identity);
       if (event == nullptr || event->kind != ConSanSyncEventKind::OrdinaryMemory)
         continue;

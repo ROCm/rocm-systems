@@ -14,7 +14,7 @@ namespace rocjitsu {
 /// requested perturbation edge. Planning and validation branch on this typed
 /// reason; diagnostic code renders it separately.
 [[nodiscard]] ConSanPerturbationRejectionReason
-perturbation_rejection_reason(const SyncEventSemanticIndex &events,
+perturbation_rejection_reason(const SynchronizationInventoryView &events,
                               const ConSanSyncSequence &sequence, ConSanPerturbationKind kind,
                               ConSanPerturbationEdge edge);
 
