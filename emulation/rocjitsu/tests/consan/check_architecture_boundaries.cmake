@@ -3975,6 +3975,13 @@ if(_fault_composition_body MATCHES "find_fault_plan" OR
         "ConSan composition must not rediscover or dispatch private fault mechanisms"
     )
 endif()
+if(NOT _fault_composition_body MATCHES
+       "carry_perturbation_plans_across_mutation[^\)]*ConSanSynchronizationMutation" OR
+   _fault_composition_body MATCHES "mutation_stage[.]patches|ranges_overlap")
+    message(FATAL_ERROR
+        "ConSan composition must consume typed synchronization mutation effects rather than reverse-joining patch geometry"
+    )
+endif()
 if(_fault_composition_body MATCHES
        "ConSanDescriptor(Name|Owner)Index|pristine_code_object|staged_code_object" OR
    NOT _fault_composition_body MATCHES "translate_owner_descriptors")

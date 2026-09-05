@@ -60,117 +60,48 @@ initialize_consan_lowering_observation(const ConSanOptions &options,
   return valid;
 }
 
-[[nodiscard]] bool ranges_overlap(uint64_t first_offset, uint32_t first_size,
-                                  uint64_t second_offset, uint32_t second_size) {
-  return first_offset < second_offset + second_size && second_offset < first_offset + first_size;
-}
-
 [[nodiscard]] std::optional<std::vector<ConSanPerturbationPlan>>
 carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_inventory,
                                          const ConSanPerturbationPlanningState &planning,
-                                         const ConSanTransformArtifacts &mutation_stage,
+                                         const ConSanSynchronizationMutation &mutation,
                                          std::string *error) {
+  const SynchronizationInventoryView synchronization = pristine_inventory.sync();
   std::vector<ConSanPerturbationPlan> carried;
   carried.reserve(planning.plans.size());
   for (const ConSanPerturbationPlan &plan : planning.plans) {
     const ConSanPerturbationCandidate &candidate = plan.candidate;
-    const SynchronizationInventoryView sync = pristine_inventory.sync();
-    const ConSanSyncSequence *source_sequence = sync.find_sequence(candidate.sequence);
-    const ConSanSyncEvent *source_anchor = sync.find_event(candidate.anchor_event);
+    const ConSanSyncSequence *source_sequence = synchronization.find_sequence(candidate.sequence);
+    const ConSanSyncEvent *source_anchor = synchronization.find_event(candidate.anchor_event);
     if (!candidate.eligible || source_sequence == nullptr || source_anchor == nullptr ||
         plan.sequence_identity.empty() || plan.container_name.empty() || plan.anchor_size == 0u) {
       *error = "selected pristine perturbation identity is incomplete or stale";
       return std::nullopt;
     }
 
-    uint64_t translated_offset = plan.anchor_text_offset;
-    bool overlaps_atomic_mutation = false;
-    bool removed_cache_boundary = false;
-    bool sequence_semantics_weakened = false;
-    const auto dropped =
-        std::ranges::find_if(mutation_stage.patches, [&](const ConSanPatchMutationProduct &patch) {
-          return patch.kind == ConSanPatchKind::InlineBarrierNopRewrite &&
-                 ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
-                                patch.original_size);
-        });
-    if (dropped != mutation_stage.patches.end()) {
-      *error = "selected perturbation edge was destroyed by the barrier drop";
-      return std::nullopt;
-    }
-
-    std::vector<const ConSanPatchMutationProduct *> move_sources;
-    const ConSanPatchMutationProduct *move_target = nullptr;
-    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
-      if (patch.kind == ConSanPatchKind::InlineBarrierMoveSourceRewrite)
-        move_sources.push_back(&patch);
-      else if (patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite)
-        move_target = &patch;
-    }
-    const auto selected_source =
-        std::ranges::find_if(move_sources, [&](const ConSanPatchMutationProduct *patch) {
-          return ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch->anchor_offset,
-                                patch->original_size);
-        });
-    if (selected_source != move_sources.end()) {
-      if (move_sources.size() != 2u || move_target == nullptr ||
-          !move_target->barrier_move_direction || move_target->trampoline_size == 0u) {
-        *error = "barrier move lacks one exact whole-pair ownership record";
-        return std::nullopt;
-      }
-      const uint64_t first_source =
-          std::min(move_sources[0]->anchor_offset, move_sources[1]->anchor_offset);
-      const uint64_t source_delta = plan.anchor_text_offset - first_source;
-      const uint64_t pair_offset =
-          move_target->trampoline_offset +
-          (*move_target->barrier_move_direction == ConSanBarrierMoveDirection::Later
-               ? move_target->original_size
-               : 0u);
-      translated_offset = pair_offset + source_delta;
-    }
-
-    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
-      if (patch.phase == ConSanPatchPhase::Mutation &&
-          patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
-        const auto event =
-            std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
-              const ConSanProgramSite *source = pristine_inventory.program_site(item.source_site);
-              return source != nullptr && source->container.name == plan.container_name &&
-                     source->container.is_kernel() == plan.in_kernel &&
-                     item.text_offset() == patch.anchor_offset &&
-                     source->size() == patch.original_size;
-            });
-        if (event != pristine_inventory.sync().sync_events.end() && source_sequence != nullptr &&
-            std::ranges::find(source_sequence->member_event_ids,
-                              pristine_inventory.sync().event_id(*event)) !=
-                source_sequence->member_event_ids.end()) {
-          sequence_semantics_weakened = true;
-        }
-      }
-      if (patch.phase != ConSanPatchPhase::Mutation || patch.original_size == 0u ||
-          !ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
-                          patch.original_size))
-        continue;
-      const bool exact_alias =
-          plan.anchor_text_offset == patch.anchor_offset && plan.anchor_size == patch.original_size;
-      const bool atomic_mutation = patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite ||
-                                   patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite ||
-                                   patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
-      if (!atomic_mutation)
-        continue;
-      if (!exact_alias) {
-        *error = "selected perturbation edge partially overlaps a mutation";
-        return std::nullopt;
-      }
-      overlaps_atomic_mutation = true;
-      removed_cache_boundary = patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
-    }
-
     ConSanPerturbationPlan translated = plan;
-    translated.anchor_text_offset = translated_offset;
+    for (const ConSanSyncEventMutation &effect : mutation.events) {
+      if (effect.source_event != candidate.anchor_event)
+        continue;
+      switch (effect.kind) {
+      case ConSanSyncEventMutationKind::Destroyed:
+        *error = "selected perturbation edge was destroyed by the fault mutation";
+        return std::nullopt;
+      case ConSanSyncEventMutationKind::Relocated:
+        translated.anchor_text_offset = effect.relocated_text_offset;
+        break;
+      case ConSanSyncEventMutationKind::AtomicRewrite:
+        translated.overlaps_atomic_mutation = true;
+        break;
+      case ConSanSyncEventMutationKind::AtomicBoundaryRemoval:
+        translated.overlaps_atomic_mutation = true;
+        translated.removed_cache_boundary = true;
+        break;
+      }
+    }
+
     translated.source_sequence_identity = source_sequence->identity;
-    translated.overlaps_atomic_mutation = overlaps_atomic_mutation;
-    translated.removed_cache_boundary = removed_cache_boundary;
-    translated.source_sequence_semantics_weakened = sequence_semantics_weakened;
+    translated.source_sequence_semantics_weakened =
+        mutation.weakened_sequence == candidate.sequence;
     carried.push_back(std::move(translated));
   }
   return carried;
@@ -294,7 +225,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (has_perturbation) {
     std::string carry_error;
     auto carried = carry_perturbation_plans_across_mutation(
-        pristine_program_inventory, pristine_perturbation, fault_result, &carry_error);
+        pristine_program_inventory, pristine_perturbation, fault_result.synchronization_mutation,
+        &carry_error);
     if (!carried)
       return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
     instrument_options.sc_perturb_identity.clear();

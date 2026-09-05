@@ -212,6 +212,37 @@ struct ConSanMutationOutcome {
   bool operator==(const ConSanMutationOutcome &) const = default;
 };
 
+/// Semantic effect of one validation mutation on a synchronization event.
+///
+/// Fault mechanisms publish this inventory-local identity while they still
+/// own the pristine program arena. Composite perturbation lowering consumes
+/// it before reinventorying the mutated image, avoiding a reverse join from
+/// byte-oriented patch kinds and ranges back to synchronization semantics.
+enum class ConSanSyncEventMutationKind : uint8_t {
+  Destroyed,
+  Relocated,
+  AtomicRewrite,
+  AtomicBoundaryRemoval,
+};
+
+struct ConSanSyncEventMutation {
+  ConSanSyncEventId source_event;
+  ConSanSyncEventMutationKind kind = ConSanSyncEventMutationKind::Destroyed;
+  /// Current-image anchor, interpreted only for `Relocated`.
+  uint64_t relocated_text_offset = 0;
+};
+
+/// Pristine-arena semantic delta produced by the private fault transaction.
+/// This is transaction state rather than durable patch proof: composition
+/// consumes it before publishing an artifact whose inventory belongs to the
+/// mutated image.
+struct ConSanSynchronizationMutation {
+  std::vector<ConSanSyncEventMutation> events;
+  /// Atomic scope mutation can weaken the one selected sequence even when
+  /// staged reinventory no longer admits it.
+  std::optional<ConSanSyncSequenceId> weakened_sequence;
+};
+
 /// How one position-independent fragment composes at its source instruction.
 enum class ConSanTextFragmentKind : uint8_t {
   /// Execute client words in the translator-owned hardware launch stub.
@@ -303,6 +334,9 @@ struct ConSanTransformArtifacts {
   std::vector<ConSanFaultMutationPlan> fault_plans;
   /// Validation-only mutation facts produced by this static transform.
   ConSanMutationOutcome mutation;
+  /// Inventory-local synchronization effects retained only while a pristine
+  /// fault image is being composed with scheduling perturbation.
+  ConSanSynchronizationMutation synchronization_mutation;
   /// Resource alternatives considered by lowering.
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   /// Accepted MOI operating point consumed by emitted mechanisms and final
@@ -349,6 +383,7 @@ struct ConSanTransformArtifacts {
     patches.clear();
     text_relocation.reset();
     staged_text_fragments.clear();
+    synchronization_mutation = {};
     coverage_ledger.discard_instrumented_lowerings();
   }
   /// Publish the bytes, semantic commits, and patch proof of one completed
