@@ -873,11 +873,11 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream);
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
-                                  size_t* sizesA, size_t* sizesB,
+                                  size_t* sizes, size_t* sizesDst,
                                   hipExtMemcpyWait* waits,
                                   hipExtMemcpySignal* signals,
-                                  hipExtMemcpyOp* ops, size_t count,
-                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                   hipStream_t stream);
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream);

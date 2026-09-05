@@ -3643,18 +3643,17 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
     struct
     {
-        void**               dsts;
-        void**               srcs;
-        size_t*              sizesA;
-        size_t*              sizesB;
-        hipExtMemcpyWait*    waits;
-        hipExtMemcpySignal*  signals;
-        hipExtMemcpyOp*      ops;
-        size_t               count;
-        hipMemcpyAttributes* attrs;
-        size_t*              attrsIdxs;
-        size_t               numAttrs;
-        hipStream_t          stream;
+        void**                  dsts;
+        void**                  srcs;
+        size_t*                 sizes;
+        size_t*                 sizesDst;
+        hipExtMemcpyWait*       waits;
+        hipExtMemcpySignal*     signals;
+        size_t                  count;
+        hipExtMemcpyAttributes* attrs;
+        size_t*                 attrsIdxs;
+        size_t                  numAttrs;
+        hipStream_t             stream;
     } hipExtMemcpyBatchAsync;
 #endif
 } rocprofiler_hip_api_args_t;
