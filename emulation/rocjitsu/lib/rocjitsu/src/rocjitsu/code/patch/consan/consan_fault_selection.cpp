@@ -137,17 +137,14 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
       [&](const ConSanFaultSite &site) -> std::optional<OrdinaryAcquireMutationTarget> {
     if (site.kind != ConSanFaultSiteKind::OrdinaryMemory ||
         site.ordinary_memory_support_reason != ConSanOrdinaryMemorySupportReason::Supported ||
-        site.mnemonic != "global_load_b32" || !site.sync_event_identity ||
-        !site.sync_sequence_identity ||
+        site.mnemonic != "global_load_b32" ||
         !consan_execution_owners_include_requested_kernel(site.execution_owners, inventory,
                                                           selection.kernel_name_filter))
       return std::nullopt;
-    const ConSanSyncEvent *load = sync.find_event(*site.sync_event_identity);
-    const auto sequence_it = std::ranges::find(sync.sync_sequences, *site.sync_sequence_identity,
-                                               &ConSanSyncSequence::identity);
-    if (load == nullptr || sequence_it == sync.sync_sequences.end())
+    const ConSanSyncEvent *load = sync.find_event(site.source_site);
+    const ConSanSyncSequence *sequence = sync.find_unique_sequence_containing(site.source_site);
+    if (load == nullptr || sequence == nullptr)
       return std::nullopt;
-    const ConSanSyncSequence *sequence = &*sequence_it;
     if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->scope ||
         !consan_memory_scope_is_agent_or_system(*load->scope) ||
         sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
@@ -210,15 +207,13 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
 
   const ConSanFaultSite *primary = find_fault_site_by_identity(
       inventory, selection.primary_site_identity, ConSanFaultSiteKind::Barrier);
-  const ConSanSyncEvent *primary_event = primary != nullptr && primary->sync_event_identity
-                                             ? sync.find_event(*primary->sync_event_identity)
-                                             : nullptr;
+  const ConSanSyncEvent *primary_event =
+      primary == nullptr ? nullptr : sync.find_event(primary->source_site);
   SemanticSiteId primary_member_id;
   if (primary_event != nullptr)
     primary_member_id = primary_event->semantic_id.in_domain(
         ConSanSemanticSiteDomain::SynchronizationSequenceMember);
-  if (primary == nullptr || !primary->sync_event_identity || !primary->sync_sequence_identity ||
-      primary_event == nullptr || *primary->sync_sequence_identity != sequence->identity ||
+  if (primary == nullptr || primary_event == nullptr ||
       std::ranges::find(sequence->member_semantic_ids, primary_member_id) ==
           sequence->member_semantic_ids.end() ||
       !consan_execution_owners_include_requested_kernel(primary->execution_owners, inventory,
@@ -231,12 +226,10 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
     const ConSanSyncEvent *member = sync.find_sequence_member(member_id);
     if (member == nullptr)
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
-    const std::string &member_identity = member->identity;
     const auto matching_site =
         std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
-                 candidate.sync_event_identity == member_identity &&
-                 candidate.sync_sequence_identity == sequence->identity &&
+                 sync.find_event(candidate.source_site) == member &&
                  candidate.container_name == sequence->container_name &&
                  candidate.in_kernel == sequence->in_kernel &&
                  consan_execution_owners_include_requested_kernel(
@@ -249,7 +242,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
         std::ranges::find_if(std::next(matching_site), inventory.fault_sites.end(),
                              [&](const ConSanFaultSite &candidate) {
                                return candidate.kind == ConSanFaultSiteKind::Barrier &&
-                                      candidate.sync_event_identity == member_identity;
+                                      sync.find_event(candidate.source_site) == member;
                              });
     if (duplicate != inventory.fault_sites.end()) {
       return {.pair = std::nullopt, .issue = Issue::MemberSiteAmbiguous};

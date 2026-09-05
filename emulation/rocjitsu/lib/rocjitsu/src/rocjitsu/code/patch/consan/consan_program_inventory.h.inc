@@ -331,6 +331,18 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve the synchronization event derived from one exact decoded site.
+  /// Physical aliases intentionally converge on the canonical event; callers
+  /// retain the source handle when symbol attribution must also be checked.
+  [[nodiscard]] const ConSanSyncEvent *find_event(ConSanProgramSiteId source_site) const {
+    if (!source_site.valid() || source_site.ordinal >= program_sites.size())
+      return nullptr;
+    return find_event(SemanticSiteId{
+        .physical = program_sites[source_site.ordinal].physical_id,
+        .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+    });
+  }
+
   /// Resolve one decoded event name to its sole published record. Event names
   /// are the stable diagnostic and mutation-selection identity; target-neutral
   /// graph policy uses the typed `SemanticSiteId` overload above.
@@ -401,6 +413,14 @@ struct SynchronizationInventoryView {
       match = &sequence;
     }
     return match;
+  }
+
+  /// Find unique sequence membership from the exact decoded source rather
+  /// than round-tripping through its presentation identity.
+  [[nodiscard]] const ConSanSyncSequence *
+  find_unique_sequence_containing(ConSanProgramSiteId source_site) const {
+    const ConSanSyncEvent *event = find_event(source_site);
+    return event == nullptr ? nullptr : find_unique_sequence_containing(event->semantic_id);
   }
 
   /// Find the unique logical sequence containing a decoded event name.
