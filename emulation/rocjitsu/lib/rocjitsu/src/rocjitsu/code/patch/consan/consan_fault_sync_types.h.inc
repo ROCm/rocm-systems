@@ -280,6 +280,14 @@ struct ConSanSyncSequenceId {
   auto operator<=>(const ConSanSyncSequenceId &) const = default;
 };
 
+/// Published unique-sequence membership for one synchronization event.
+/// Missing membership has an invalid sequence; ambiguous membership retains
+/// that distinction so consumers fail closed without rescanning the graph.
+struct ConSanSyncSequenceMembership {
+  ConSanSyncSequenceId sequence;
+  bool ambiguous = false;
+};
+
 /// Flavor-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
 struct ConSanSyncEvent : ConSanSyncSemantics {

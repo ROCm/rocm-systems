@@ -1612,7 +1612,6 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
 
 void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inventory) {
   const std::vector<ConSanSyncEvent> &sync_events = inventory.sync_events;
-  const std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanMoiFenceCandidate> &candidates = inventory.moi_fence_candidates;
   candidates.clear();
   const auto fence_source = [&](const ConSanSyncEvent &event) -> const ConSanFenceSite * {
@@ -1620,8 +1619,6 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     return source == nullptr ? nullptr : source->get_if<ConSanFenceSite>();
   };
 
-  const SyncSequenceMembershipIndex sequence_by_event =
-      build_sync_sequence_membership_index(sync_sequences, sync_events.size());
   const SynchronizationInventoryView event_inventory = inventory.view();
 
   for (size_t fence_ordinal = 0; fence_ordinal < sync_events.size(); ++fence_ordinal) {
@@ -1632,17 +1629,14 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     ConSanMoiFenceCandidate candidate;
     candidate.fence_event = {static_cast<uint32_t>(fence_ordinal)};
 
-    const SyncSequenceMembership *membership =
-        find_sync_sequence_membership(sequence_by_event, candidate.fence_event);
-    if (membership == nullptr || membership->ambiguous || membership->sequence == nullptr) {
+    const ConSanSyncSequence *sequence =
+        event_inventory.find_unique_sequence_containing(candidate.fence_event);
+    if (sequence == nullptr) {
       candidate.association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
       candidates.push_back(std::move(candidate));
       continue;
     }
-    const ConSanSyncSequence *sequence = membership->sequence;
-    candidate.sequence = {
-        static_cast<uint32_t>(sequence - sync_sequences.data()),
-    };
+    candidate.sequence = event_inventory.sequence_id(*sequence);
 
     const bool addressed_atomic =
         sequence->kind == ConSanSyncKind::Atomic &&
@@ -2173,18 +2167,13 @@ void associate_ordinary_acquire_sync_sequences(
 
 void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  const SyncSequenceMembershipIndex sequence_by_event =
-      build_sync_sequence_membership_index(sync.sync_sequences, sync.sync_events.size());
-
   for (ConSanFaultSite &site : result.fault_sites) {
     const ConSanProgramSite *source = result.program_inventory.program_site(site.source_site);
     const ConSanSyncEvent *event = source == nullptr ? nullptr : sync.find_event(site.source_site);
     if (event == nullptr)
       continue;
-    const SyncSequenceMembership *sequence_entry =
-        find_sync_sequence_membership(sequence_by_event, sync.event_id(*event));
     const ConSanSyncSequence *sequence =
-        sequence_entry == nullptr ? nullptr : sequence_entry->sequence;
+        sync.find_unique_sequence_containing(sync.event_id(*event));
     if (sequence == nullptr)
       continue;
     site.sync_confidence = sequence->confidence;
@@ -2435,6 +2424,8 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
                                             synchronization_inventory);
   associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
                                             synchronization_inventory, result.program_inventory);
+  synchronization_inventory.sequence_membership_by_event = build_sync_sequence_membership_index(
+      synchronization_inventory.sync_sequences, synchronization_inventory.sync_events.size());
   build_moi_fence_candidate_inventory(synchronization_inventory);
   result.program_inventory = inventory_builder.view();
   build_perturbation_candidate_inventory(result.program_inventory, perturbation);

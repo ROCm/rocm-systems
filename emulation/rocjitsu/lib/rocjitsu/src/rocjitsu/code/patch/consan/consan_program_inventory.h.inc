@@ -305,6 +305,7 @@ struct SynchronizationInventoryView {
   std::span<const ConSanProgramSite> program_sites;
   std::span<const ConSanSyncEvent> sync_events;
   std::span<const ConSanSyncSequence> sync_sequences;
+  std::span<const ConSanSyncSequenceMembership> sequence_membership_by_event;
   std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
 
@@ -404,6 +405,26 @@ struct SynchronizationInventoryView {
     return {static_cast<uint32_t>(&sequence - sync_sequences.data())};
   }
 
+  /// Return the published membership fact when this inventory has completed
+  /// graph construction. Mutable test/build views without an index fall back
+  /// to the authoritative sequence scan in higher-level queries.
+  [[nodiscard]] ConSanSyncSequenceMembership
+  sequence_membership(ConSanSyncEventId event) const {
+    if (!event.valid() || event.ordinal >= sync_events.size())
+      return {};
+    if (sequence_membership_by_event.size() == sync_events.size())
+      return sequence_membership_by_event[event.ordinal];
+    ConSanSyncSequenceMembership membership;
+    for (const ConSanSyncSequence &sequence : sync_sequences) {
+      if (std::ranges::find(sequence.member_event_ids, event) == sequence.member_event_ids.end())
+        continue;
+      if (membership.sequence.valid())
+        return {.sequence = {}, .ambiguous = true};
+      membership.sequence = sequence_id(sequence);
+    }
+    return membership;
+  }
+
   /// Resolve the synchronization event derived from one exact decoded site.
   /// Physical aliases intentionally converge on the canonical event; callers
   /// retain the source handle when symbol attribution must also be checked.
@@ -467,16 +488,8 @@ struct SynchronizationInventoryView {
   /// of several contradictory causal interpretations.
   [[nodiscard]] const ConSanSyncSequence *
   find_unique_sequence_containing(ConSanSyncEventId event_identity) const {
-    const ConSanSyncSequence *match = nullptr;
-    for (const ConSanSyncSequence &sequence : sync_sequences) {
-      if (std::ranges::find(sequence.member_event_ids, event_identity) ==
-          sequence.member_event_ids.end())
-        continue;
-      if (match != nullptr)
-        return nullptr;
-      match = &sequence;
-    }
-    return match;
+    const ConSanSyncSequenceMembership membership = sequence_membership(event_identity);
+    return membership.ambiguous ? nullptr : find_sequence(membership.sequence);
   }
 
   [[nodiscard]] const ConSanSyncSequence *
@@ -536,12 +549,13 @@ struct SynchronizationInventoryBuildView {
   std::vector<ConSanProgramSite> &program_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
+  std::vector<ConSanSyncSequenceMembership> &sequence_membership_by_event;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
   std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
 
   [[nodiscard]] SynchronizationInventoryView view() const {
-    return {program_sites, sync_events, sync_sequences, barrier_lifecycle_groups,
-            moi_fence_candidates};
+    return {program_sites, sync_events, sync_sequences, sequence_membership_by_event,
+            barrier_lifecycle_groups, moi_fence_candidates};
   }
 };
 
@@ -579,6 +593,7 @@ struct ConSanProgramInventoryStorage {
   ConSanProgramSiteArena program_sites;
   std::vector<ConSanSyncEvent> sync_events;
   std::vector<ConSanSyncSequence> sync_sequences;
+  std::vector<ConSanSyncSequenceMembership> sequence_membership_by_event;
   std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   std::vector<ConSanMoiFenceCandidate> moi_fence_candidates;
 };
@@ -728,6 +743,7 @@ public:
         .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
+        .sequence_membership_by_event = storage_->sequence_membership_by_event,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
         .moi_fence_candidates = storage_->moi_fence_candidates,
     };
@@ -838,10 +854,13 @@ public:
   }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
+    // Acquiring mutable synchronization storage invalidates the derived index.
+    storage_->sequence_membership_by_event.clear();
     return {
         .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
+        .sequence_membership_by_event = storage_->sequence_membership_by_event,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
         .moi_fence_candidates = storage_->moi_fence_candidates,
     };

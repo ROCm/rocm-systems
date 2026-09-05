@@ -22,29 +22,25 @@ bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
   return !sequence.member_event_ids.empty();
 }
 
-SyncSequenceMembershipIndex
+std::vector<ConSanSyncSequenceMembership>
 build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences,
                                      size_t event_count) {
-  SyncSequenceMembershipIndex result(event_count);
-  for (const ConSanSyncSequence &sequence : sequences) {
+  std::vector<ConSanSyncSequenceMembership> result(event_count);
+  for (size_t sequence_ordinal = 0; sequence_ordinal < sequences.size(); ++sequence_ordinal) {
+    const ConSanSyncSequence &sequence = sequences[sequence_ordinal];
     for (const ConSanSyncEventId member : sequence.member_event_ids) {
       if (!member.valid() || member.ordinal >= result.size())
         continue;
-      SyncSequenceMembership &entry = result[member.ordinal];
-      if (entry.sequence == nullptr && !entry.ambiguous)
-        entry.sequence = &sequence;
+      ConSanSyncSequenceMembership &entry = result[member.ordinal];
+      if (!entry.sequence.valid() && !entry.ambiguous)
+        entry.sequence = {static_cast<uint32_t>(sequence_ordinal)};
       else {
-        entry.sequence = nullptr;
+        entry.sequence = {};
         entry.ambiguous = true;
       }
     }
   }
   return result;
-}
-
-const SyncSequenceMembership *
-find_sync_sequence_membership(const SyncSequenceMembershipIndex &index, ConSanSyncEventId event) {
-  return event.valid() && event.ordinal < index.size() ? &index[event.ordinal] : nullptr;
 }
 
 } // namespace rocjitsu

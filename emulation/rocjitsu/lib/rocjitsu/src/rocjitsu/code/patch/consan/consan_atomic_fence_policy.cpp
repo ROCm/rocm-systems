@@ -183,10 +183,10 @@ struct AtomicEncodingDecision {
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
-classify_atomic_semantics(const ConSanSyncEvent &event, const SyncSequenceMembership &membership) {
-  if (membership.ambiguous)
+classify_atomic_semantics(const ConSanSyncEvent &event, const ConSanSyncSequence *sequence,
+                          bool ambiguous_membership) {
+  if (ambiguous_membership)
     return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
-  const ConSanSyncSequence *sequence = membership.sequence;
   if (sequence == nullptr || !sequence_is_atomic_contract(event, *sequence) ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
@@ -264,8 +264,6 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
-  const SyncSequenceMembershipIndex memberships = build_sync_sequence_membership_index(
-      synchronization.sync_sequences, synchronization.sync_events.size());
   std::map<std::pair<ConSanSyncKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
       aliases_by_site;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
@@ -277,17 +275,16 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   for (const auto &[site_key, aliases] : aliases_by_site) {
     (void)site_key;
     const ConSanSyncEvent &event = *aliases.front();
-    const SyncSequenceMembership *membership_entry =
-        find_sync_sequence_membership(memberships, synchronization.event_id(event));
-    const SyncSequenceMembership membership =
-        membership_entry == nullptr ? SyncSequenceMembership{} : *membership_entry;
+    const ConSanSyncEventId event_id = synchronization.event_id(event);
+    const ConSanSyncSequenceMembership membership = synchronization.sequence_membership(event_id);
+    const ConSanSyncSequence *sequence = synchronization.find_unique_sequence_containing(event_id);
+    const bool ambiguous_membership = membership.ambiguous;
     // Ordinary memory belongs to access policy unless synchronization
     // analysis associated an acquire/release sequence around it.
     if (event.kind == ConSanSyncKind::OrdinaryMemory &&
-        (membership.sequence == nullptr ||
-         membership.sequence->kind != ConSanSyncKind::OrdinaryMemory ||
-         membership.sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
-         membership.sequence->memory_role == ConSanSyncMemoryRole::None)) {
+        (sequence == nullptr || sequence->kind != ConSanSyncKind::OrdinaryMemory ||
+         sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
+         sequence->memory_role == ConSanSyncMemoryRole::None)) {
       continue;
     }
 
@@ -327,20 +324,20 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::ConflictingPhysicalAliases;
       result.atomic_errors.push_back(reason);
     } else {
-      reason = classify_atomic_semantics(event, membership);
+      reason = classify_atomic_semantics(event, sequence, ambiguous_membership);
       if (reason == ConSanAtomicPolicyReason::None) {
         AtomicEncodingDecision encoding =
-            classify_atomic_encoding(inventory, event, *membership.sequence, request.engine);
+            classify_atomic_encoding(inventory, event, *sequence, request.engine);
         reason = encoding.reason;
         lowering_form = std::move(encoding.form);
       }
       const bool semantic_not_applicable =
           reason == ConSanAtomicPolicyReason::UnqualifiedSyncSequence ||
-          (reason == ConSanAtomicPolicyReason::UnsupportedMemoryRole && membership.sequence &&
-           (membership.sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
-            membership.sequence->memory_role == ConSanSyncMemoryRole::None)) ||
-          (reason == ConSanAtomicPolicyReason::UnsupportedScope && membership.sequence &&
-           membership.sequence->scope == ConSanMemoryScope::Wavefront);
+          (reason == ConSanAtomicPolicyReason::UnsupportedMemoryRole && sequence &&
+           (sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
+            sequence->memory_role == ConSanSyncMemoryRole::None)) ||
+          (reason == ConSanAtomicPolicyReason::UnsupportedScope && sequence &&
+           sequence->scope == ConSanMemoryScope::Wavefront);
       kind = reason == ConSanAtomicPolicyReason::None ? ConSanSiteDecisionKind::Admitted
              : semantic_not_applicable                ? ConSanSiteDecisionKind::NotApplicable
                                                       : ConSanSiteDecisionKind::Unsupported;
@@ -363,8 +360,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .intent_ids = {},
         .source_containers = names,
     };
-    if (membership.sequence != nullptr)
-      decision.association = ConSanSynchronizationAssociationId{membership.sequence->identity};
+    if (sequence != nullptr)
+      decision.association = ConSanSynchronizationAssociationId{sequence->identity};
 
     if (decision.kind == ConSanSiteDecisionKind::Admitted && decision.association) {
       const ConSanProbeIntentId capture =
