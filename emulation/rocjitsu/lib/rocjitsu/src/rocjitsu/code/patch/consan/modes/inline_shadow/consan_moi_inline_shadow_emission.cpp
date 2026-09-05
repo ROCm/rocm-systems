@@ -739,13 +739,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
+    std::string_view failed_stage;
     bool succeeded = false;
     ~FailureStage() {
       if (!succeeded)
         errors.emplace_back("ConSan MOI versioned exact-shadow transaction failed during " +
-                            std::string(stage));
+                            std::string(failed_stage.empty() ? stage : failed_stage));
     }
-  } failure{errors};
+  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
   const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
   if (!plan.scalar_state.exec_save_sgpr ||
       (!has_hardware_dispatch_id && !plan.dispatch_id.literal) ||
@@ -773,6 +774,16 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
   MoiPublicationExec exec_masks(words, temporary_exec_sgpr, arch);
+  const auto require_emission = [&](bool success) {
+    if (sequence && !success)
+      failure.failed_stage = failure.stage;
+    sequence.require(success);
+  };
+  const auto set_stage = [&](std::string_view stage) {
+    if (!sequence && failure.failed_stage.empty())
+      failure.failed_stage = failure.stage;
+    failure.stage = stage;
+  };
   const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) {
     return exec_masks.require_literal(value_vgpr, literal, true);
   };
@@ -780,26 +791,27 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return exec_masks.require_literal(value_vgpr, literal, false);
   };
   const auto restore_slot_address = [&]() {
-    (void)sequence.emit_all(
+    sequence.append(
         build_v_mov_b32_e32(address_lo_vgpr, vector_source_vgpr(saved_address_lo_vgpr), arch),
         build_v_mov_b32_e32(static_cast<uint16_t>(address_lo_vgpr + 1u),
                             vector_source_vgpr(saved_address_hi_vgpr), arch));
   };
 
   const auto append_exact_candidate = [&]() {
-    failure.stage = "slot snapshot";
+    set_stage("slot snapshot");
     // Use the same coherent first read as the other bounded publishers. This
     // gives the common retry loop one uniform entry point at a small fast-path
     // cost and removes exact-shadow's private refresh/re-entry lifecycle.
-    if (!append_add_literal_field(words, address_lo_vgpr,
-                                  offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
-                                  arch) ||
-        !append_atomic_load_u32(words, address_lo_vgpr, ready_version_vgpr, arch) ||
-        !append_add_literal_field(
+    sequence
+        .require(append_add_literal_field(words, address_lo_vgpr,
+                                          offsetof(ConSanMoiInlineExactShadowSlot, version),
+                                          tmp_vgpr, arch))
+        .require(append_atomic_load_u32(words, address_lo_vgpr, ready_version_vgpr, arch))
+        .require(append_add_literal_field(
             words, address_lo_vgpr,
             0u - static_cast<uint32_t>(offsetof(ConSanMoiInlineExactShadowSlot, version)), tmp_vgpr,
-            arch) ||
-        !append_moi_publication_loads(
+            arch))
+        .require(append_moi_publication_loads(
             words, address_lo_vgpr,
             {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), old_value_vgpr},
              {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
@@ -809,253 +821,214 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
               prior_dispatch_high_vgpr},
              {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), tmp_vgpr},
              {offsetof(ConSanMoiInlineExactShadowSlot, version), cas_expected_vgpr}},
-            arch))
-      return false;
+            arch));
 
     // A changed read, odd predecessor, or terminal version is unusable. Keep
     // narrowing instead of branching so a mixed wave can still publish valid
     // independent slots.
-    failure.stage = "payload validation";
-    if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(ready_version_vgpr), cas_expected_vgpr, arch)) ||
-        !exec_masks.narrow_vcc() ||
-        !sequence.emit(
-            instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch)) ||
-        !require_equal_literal(cas_new_vgpr, 0) ||
-        !sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                               cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch),
-                           instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(cas_new_vgpr),
-                                                                   ready_version_vgpr, arch)) ||
-        !exec_masks.narrow_vcc() ||
-        !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
-      return false;
+    set_stage("payload validation");
+    sequence
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_version_vgpr),
+                                                        cas_expected_vgpr, arch))
+        .require(exec_masks.narrow_vcc())
+        .append(
+            instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch))
+        .require(require_equal_literal(cas_new_vgpr, 0))
+        .append(instrumentation::build_v_mov_b32_literal(
+                    cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch),
+                instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(cas_new_vgpr),
+                                                        ready_version_vgpr, arch))
+        .require(exec_masks.narrow_vcc())
+        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch));
 
     // Version zero is empty only when every payload word is zero.
-    if (!require_equal_literal(ready_version_vgpr, 0) ||
-        !require_equal_literal(old_value_vgpr, 0) ||
-        !require_equal_literal(static_cast<uint16_t>(old_value_vgpr + 1u), 0) ||
-        !require_equal_literal(prior_dispatch_low_vgpr, 0) ||
-        !require_equal_literal(prior_dispatch_high_vgpr, 0) ||
-        !require_equal_literal(tmp_vgpr, 0)) {
-      return false;
-    }
-    if (!sequence.emit_all(
-            instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
-      return false;
+    sequence.require(require_equal_literal(ready_version_vgpr, 0))
+        .require(require_equal_literal(old_value_vgpr, 0))
+        .require(require_equal_literal(static_cast<uint16_t>(old_value_vgpr + 1u), 0))
+        .require(require_equal_literal(prior_dispatch_low_vgpr, 0))
+        .require(require_equal_literal(prior_dispatch_high_vgpr, 0))
+        .require(require_equal_literal(tmp_vgpr, 0))
+        .append(instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch),
+                instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch));
 
     // A nonempty ready predecessor must itself be structurally valid. Owner and
     // epoch zero are legal packed values; access kind, workgroup key, dispatch,
     // and exact-byte provenance are the discriminants.
-    if (!require_not_equal_literal(ready_version_vgpr, 0) ||
-        !require_not_equal_literal(tmp_vgpr, 0)) {
-      return false;
-    }
-    if (!sequence.emit(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch)) ||
-        !require_equal_literal(cas_new_vgpr, 0) ||
-        !sequence.emit(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch)))
-      return false;
+    sequence.require(require_not_equal_literal(ready_version_vgpr, 0))
+        .require(require_not_equal_literal(tmp_vgpr, 0))
+        .append(instrumentation::build_v_and_b32_literal(
+            cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch))
+        .require(require_equal_literal(cas_new_vgpr, 0))
+        .append(instrumentation::build_v_and_b32_literal(
+            cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch));
     for (uint32_t byte_mask = 0; byte_mask <= consan_moi_exact_byte_cell::byte_mask_mask;
          ++byte_mask) {
-      if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) &&
-          !require_not_equal_literal(cas_new_vgpr, byte_mask)) {
-        return false;
-      }
+      if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask))
+        sequence.require(require_not_equal_literal(cas_new_vgpr, byte_mask));
     }
     const auto require_canonical_provenance_field = [&](uint32_t field_shift,
                                                         uint32_t field_lookup) {
-      return sequence.emit_all(
-                 instrumentation::build_v_and_b32_literal(
-                     cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch),
-                 instrumentation::build_v_lshlrev_b32(cas_new_vgpr, scalar_positive_inline_u32(1u),
-                                                      cas_new_vgpr, arch),
-                 instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch),
-                 instrumentation::build_v_lshrrev_b32(
-                     cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch),
-                 instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u,
-                                                          cas_expected_vgpr, arch),
-                 instrumentation::build_v_lshrrev_b32(
-                     cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch),
-                 instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch),
-                 instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
-                                                         cas_new_vgpr, arch)) &&
-             exec_masks.narrow_vcc();
+      sequence
+          .append(instrumentation::build_v_and_b32_literal(
+                      cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch),
+                  instrumentation::build_v_lshlrev_b32(cas_new_vgpr, scalar_positive_inline_u32(1u),
+                                                       cas_new_vgpr, arch),
+                  instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch),
+                  instrumentation::build_v_lshrrev_b32(
+                      cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch),
+                  instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u,
+                                                           cas_expected_vgpr, arch),
+                  instrumentation::build_v_lshrrev_b32(
+                      cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch),
+                  instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch),
+                  instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
+                                                          cas_new_vgpr, arch))
+          .require(exec_masks.narrow_vcc());
     };
-    if (!require_canonical_provenance_field(
-            consan_moi_exact_byte_cell::byte_offset_shift,
-            consan_moi_exact_byte_cell::byte_offset_by_mask_lookup) ||
-        !require_canonical_provenance_field(
-            consan_moi_exact_byte_cell::byte_end_minus_one_shift,
-            consan_moi_exact_byte_cell::byte_end_minus_one_by_mask_lookup)) {
-      return false;
-    }
-    if (!sequence.emit(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch)) ||
-        !require_not_equal_literal(cas_new_vgpr, 0) ||
-        !sequence.emit(instrumentation::build_v_lshrrev_b32(
-            cas_new_vgpr,
-            scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-            cas_new_vgpr, arch)) ||
-        !sequence.emit(instrumentation::build_v_add_u32_literal(
-            cas_new_vgpr, tmp_vgpr, std::numeric_limits<uint32_t>::max(), cas_new_vgpr, arch)) ||
-        !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
-            scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u), cas_new_vgpr,
-            arch)) ||
-        !exec_masks.narrow_vcc() ||
-        !sequence.emit(instrumentation::build_v_and_b32_literal(
+    require_canonical_provenance_field(consan_moi_exact_byte_cell::byte_offset_shift,
+                                       consan_moi_exact_byte_cell::byte_offset_by_mask_lookup);
+    require_canonical_provenance_field(
+        consan_moi_exact_byte_cell::byte_end_minus_one_shift,
+        consan_moi_exact_byte_cell::byte_end_minus_one_by_mask_lookup);
+    sequence
+        .append(instrumentation::build_v_and_b32_literal(
+            cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch))
+        .require(require_not_equal_literal(cas_new_vgpr, 0))
+        .append(instrumentation::build_v_lshrrev_b32(
+                    cas_new_vgpr,
+                    scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+                    cas_new_vgpr, arch),
+                instrumentation::build_v_add_u32_literal(cas_new_vgpr, tmp_vgpr,
+                                                         std::numeric_limits<uint32_t>::max(),
+                                                         cas_new_vgpr, arch),
+                instrumentation::build_v_cmp_gt_u32_vcc(
+                    scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u),
+                    cas_new_vgpr, arch))
+        .require(exec_masks.narrow_vcc())
+        .append(instrumentation::build_v_and_b32_literal(
             tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
-            old_value_vgpr, arch)) ||
-        !require_not_equal_literal(tmp_vgpr, 0) ||
-        !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
+            old_value_vgpr, arch))
+        .require(require_not_equal_literal(tmp_vgpr, 0))
+        .append(instrumentation::build_v_cmp_gt_u32_vcc(
             scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic) +
                                        1u),
-            tmp_vgpr, arch)) ||
-        !exec_masks.narrow_vcc() ||
-        !append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
-                                                static_cast<uint16_t>(old_value_vgpr + 1u),
-                                                cas_new_vgpr, arch) ||
-        !require_not_equal_literal(tmp_vgpr, 0)) {
-      return false;
-    }
-    if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
-      return false;
+            tmp_vgpr, arch))
+        .require(exec_masks.narrow_vcc())
+        .require(append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
+                                                        static_cast<uint16_t>(old_value_vgpr + 1u),
+                                                        cas_new_vgpr, arch))
+        .require(require_not_equal_literal(tmp_vgpr, 0))
+        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch));
 
     // Form the nonzero 64-bit dispatch predicate without truncating it: the low
     // nonzero and low-zero/high-nonzero masks are disjoint, so XOR is their union.
-    if (!require_not_equal_literal(prior_dispatch_low_vgpr, 0))
-      return false;
-    if (!sequence.emit_all(
-            instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
-      return false;
-    if (!require_equal_literal(prior_dispatch_low_vgpr, 0) ||
-        !require_not_equal_literal(prior_dispatch_high_vgpr, 0)) {
-      return false;
-    }
-    return sequence.emit_all(
-        instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch),
-        instrumentation::build_s_xor_b64(ready_exec_sgpr, low_dispatch_exec_sgpr,
-                                         committed_exec_sgpr, arch),
-        instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr, arch));
+    sequence.require(require_not_equal_literal(prior_dispatch_low_vgpr, 0))
+        .append(instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
+                instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch))
+        .require(require_equal_literal(prior_dispatch_low_vgpr, 0))
+        .require(require_not_equal_literal(prior_dispatch_high_vgpr, 0))
+        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch),
+                instrumentation::build_s_xor_b64(ready_exec_sgpr, low_dispatch_exec_sgpr,
+                                                 committed_exec_sgpr, arch),
+                instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr,
+                                                 arch));
+    return static_cast<bool>(sequence);
   };
 
-  failure.stage = "reservation";
-  if (!append_moi_bounded_version_claim(
-          words, sequence, exec_masks,
-          {.slot_address_vgpr = address_lo_vgpr,
-           .eligible_exec_sgpr = publisher_exec_sgpr,
-           .claimed_exec_sgpr = committed_exec_sgpr,
-           .retry_exec_sgpr = low_dispatch_exec_sgpr,
-           .retry_count_sgpr = retry_count_sgpr,
-           .base_version_vgpr = ready_version_vgpr,
-           .desired_vgpr = cas_new_vgpr,
-           .expected_vgpr = cas_expected_vgpr,
-           .version_offset = offsetof(ConSanMoiInlineExactShadowSlot, version),
-           .retry_limit = retry_contention ? kConSanMoiInlineMetadataPublicationRetryLimit : 0u,
-           .sleep_delay = 1u},
-          append_exact_candidate, arch)) {
-    return false;
-  }
+  set_stage("reservation");
+  require_emission(append_moi_bounded_version_claim(
+      words, sequence, exec_masks,
+      {.slot_address_vgpr = address_lo_vgpr,
+       .eligible_exec_sgpr = publisher_exec_sgpr,
+       .claimed_exec_sgpr = committed_exec_sgpr,
+       .retry_exec_sgpr = low_dispatch_exec_sgpr,
+       .retry_count_sgpr = retry_count_sgpr,
+       .base_version_vgpr = ready_version_vgpr,
+       .desired_vgpr = cas_new_vgpr,
+       .expected_vgpr = cas_expected_vgpr,
+       .version_offset = offsetof(ConSanMoiInlineExactShadowSlot, version),
+       .retry_limit = retry_contention ? kConSanMoiInlineMetadataPublicationRetryLimit : 0u,
+       .sleep_delay = 1u},
+      append_exact_candidate, arch));
 
   // Qualify the predecessor's complete dispatch identity while its payload
   // registers are still live. The resulting scalar mask survives publication;
   // the vector dispatch pair can then retain exact-byte provenance for the
   // diagnostic path without growing the scratch window.
-  failure.stage = "dispatch qualification";
-  if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
-    return false;
-  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_low_vgpr,
-                                                  tmp_vgpr,
-                                                  /*high_word=*/false, arch)) {
-    return false;
-  }
-  if (!exec_masks.narrow_vcc())
-    return false;
-  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_high_vgpr,
-                                                  tmp_vgpr,
-                                                  /*high_word=*/true, arch)) {
-    return false;
-  }
-  if (!exec_masks.narrow_vcc() ||
-      !sequence.emit_all(
-          instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
-    return false;
+  set_stage("dispatch qualification");
+  sequence.append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch))
+      .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id,
+                                                          prior_dispatch_low_vgpr, tmp_vgpr,
+                                                          /*high_word=*/false, arch))
+      .require(exec_masks.narrow_vcc())
+      .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id,
+                                                          prior_dispatch_high_vgpr, tmp_vgpr,
+                                                          /*high_word=*/true, arch))
+      .require(exec_masks.narrow_vcc())
+      .append(instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch));
 
   restore_slot_address();
-  if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                      offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
-                                      prior_dispatch_low_vgpr, arch)) {
-    return false;
-  }
+  sequence.require(append_load_u32_vgpr_at_offset(
+      words, address_lo_vgpr, offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
+      prior_dispatch_low_vgpr, arch));
   words.push_back(
       build_v_mov_b32_e32(prior_dispatch_high_vgpr, vector_source_vgpr(current_low_vgpr), arch));
   restore_slot_address();
 
-  failure.stage = "publication";
-  if (!append_moi_publication_stores(
+  set_stage("publication");
+  sequence
+      .require(append_moi_publication_stores(
           words, address_lo_vgpr,
           {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), saved_current_low_vgpr},
            {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
             saved_current_high_vgpr},
            {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), current_low_vgpr}},
-          arch) ||
-      !append_moi_report_dispatch_id_pair(words, plan.dispatch_id, current_low_vgpr,
-                                          static_cast<uint16_t>(current_low_vgpr + 1u), arch) ||
-      !append_moi_publication_stores(
+          arch))
+      .require(append_moi_report_dispatch_id_pair(words, plan.dispatch_id, current_low_vgpr,
+                                                  static_cast<uint16_t>(current_low_vgpr + 1u),
+                                                  arch))
+      .require(append_moi_publication_stores(
           words, address_lo_vgpr,
           {{offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id), current_low_vgpr},
            {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t),
             static_cast<uint16_t>(current_low_vgpr + 1u)}},
-          arch)) {
-    return false;
-  }
-  if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
-    return false;
+          arch))
+      .append(instrumentation::build_s_wait_global_store0(arch));
 
-  failure.stage = "commit";
-  if (!append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
-                                     offsetof(ConSanMoiInlineExactShadowSlot, version),
-                                     ready_version_vgpr, cas_new_vgpr, cas_expected_vgpr,
-                                     /*desired_delta=*/2u, /*expected_delta=*/1u, arch)) {
-    return false;
-  }
-  if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
-    return false;
+  set_stage("commit");
+  sequence
+      .require(append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
+                                             offsetof(ConSanMoiInlineExactShadowSlot, version),
+                                             ready_version_vgpr, cas_new_vgpr, cas_expected_vgpr,
+                                             /*desired_delta=*/2u, /*expected_delta=*/1u, arch))
+      .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch));
 
   // Count successful publications before excluding cross-dispatch priors from
   // diagnosis. The event counter therefore remains a successful-commit count.
-  failure.stage = "accounting";
-  if (!append_atomic_fetch_add_one_u32(
-          words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
-          tmp_vgpr, address_lo_vgpr, arch)) {
-    return false;
-  }
+  set_stage("accounting");
+  sequence.require(append_atomic_fetch_add_one_u32(
+      words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter), tmp_vgpr,
+      address_lo_vgpr, arch));
   restore_slot_address();
 
-  if (!sequence.emit_all(instrumentation::build_s_mov_b64(kAmdGpuExecLo, publisher_exec_sgpr, arch),
-                         instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
-                                                            committed_exec_sgpr, arch)))
-    return false;
-  if (!append_atomic_fetch_add_one_u32(
+  sequence
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, publisher_exec_sgpr, arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
+                                                 committed_exec_sgpr, arch))
+      .require(append_atomic_fetch_add_one_u32(
           words,
           plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
-          tmp_vgpr, address_lo_vgpr, arch)) {
-    return false;
-  }
-  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
-    return false;
+          tmp_vgpr, address_lo_vgpr, arch))
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch));
   restore_slot_address();
   words.push_back(
       build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
   words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
-  if (!sequence.emit(instrumentation::build_s_and_b64(kAmdGpuExecLo, committed_exec_sgpr,
-                                                      low_dispatch_exec_sgpr, arch)))
-    return false;
-  failure.succeeded = sequence.resolve_branches(arch);
+  sequence.append(instrumentation::build_s_and_b64(kAmdGpuExecLo, committed_exec_sgpr,
+                                                   low_dispatch_exec_sgpr, arch));
+  failure.succeeded = sequence.finish(arch);
   return failure.succeeded;
 }
 
