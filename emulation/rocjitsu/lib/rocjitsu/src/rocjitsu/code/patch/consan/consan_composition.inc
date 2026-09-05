@@ -156,9 +156,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       true, options.fault_require_exactly_one, ConSanLoweringExtent::Complete, nullptr);
   if (pristine_mutation_plan.outcome == ConSanTransformOutcome::Unsupported)
     return pristine_mutation_plan;
-  const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
-  const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
-      pristine_mutation_plan.fault_plans;
   if (has_perturbation &&
       (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
        pristine_perturbation.plans.empty())) {
@@ -280,10 +277,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // Retain the exact applied mutation plan. The instrumentation pass
     // inventories the mutated image, so without this provenance a live
     // staged result loses which dry-run plan authorized the mutation.
-    if (!retained_fault_plans.empty()) {
-      instrument_result.mutation.fault.planned = retained_planned_faults;
-      instrument_result.fault_plans = retained_fault_plans;
-    }
+    if (!fault_result.fault_plans.empty())
+      instrument_result.fault_plans = std::move(fault_result.fault_plans);
     if (has_perturbation) {
       instrument_result.mutation.perturbation.requested = retained_perturbation_tally.requested;
       instrument_result.mutation.perturbation.planned = retained_perturbation_tally.planned;
@@ -295,10 +290,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   case ConSanTransformOutcome::Unchanged:
     // A no-target instrumentation stage must not discard an otherwise valid
     // mutation. Its inventory describes the staged image being committed.
-    if (!retained_fault_plans.empty()) {
-      instrument_result.mutation.fault.planned = retained_planned_faults;
-      instrument_result.fault_plans = retained_fault_plans;
-    }
+    if (!fault_result.fault_plans.empty())
+      instrument_result.fault_plans = std::move(fault_result.fault_plans);
     instrument_result.replacement = std::move(fault_result.replacement);
     instrument_result.patches = std::move(fault_result.patches);
     instrument_result.mark_modified();
@@ -313,10 +306,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       // preflight skip. With no instrumentation request, that is not a
       // reason to discard an independently validated mutation stage.
       instrument_result.outcome = ConSanTransformOutcome::Unchanged;
-      if (!retained_fault_plans.empty()) {
-        instrument_result.mutation.fault.planned = retained_planned_faults;
-        instrument_result.fault_plans = retained_fault_plans;
-      }
+      if (!fault_result.fault_plans.empty())
+        instrument_result.fault_plans = std::move(fault_result.fault_plans);
       instrument_result.replacement = std::move(fault_result.replacement);
       instrument_result.patches = std::move(fault_result.patches);
       instrument_result.mark_modified();
