@@ -124,8 +124,8 @@ TEST(AmdSmiFabricState, PayloadFromSysfsBackedDeviceIsUsable)
 
 TEST(AmdSmiFabricLayout, MatchesShippedLibraryAbi)
 {
-    const int recognized = (amdSmiFabricLayoutIs8Gpu ? 1 : 0) + (amdSmiFabricLayoutIs16Gpu ? 1 : 0)
-                           + (amdSmiFabricLayoutIsExtendedUnion ? 1 : 0);
+    const int recognized = (amdSmiFabricLayoutIs8Gpu ? 1 : 0) + (amdSmiFabricLayoutIs16Gpu ? 1 : 0) +
+                           (amdSmiFabricLayoutIsExtendedUnion ? 1 : 0);
     EXPECT_EQ(recognized, 1) << "exactly one layout must match the header in use";
 }
 
@@ -167,13 +167,37 @@ TEST(AmdSmiFabricRuntimeLayout, DetectsExtendedUnionWriter)
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::ExtendedUnion);
 }
 
-// An untouched buffer means the call wrote nothing, which says nothing about the
-// layout and must not be read as one.
+// An untouched v1 payload means the call wrote nothing, which says nothing about
+// the layout and must not be read as one.
 TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
 {
     amdSmiFabricInfoBuffer buffer;
     amdSmiPrepareFabricInfoBuffer(buffer);
     buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// Pins the upper edge of the ExtendedUnion window at 288. The dirty byte sits at
+// 288, outside [256,288), so the classification must not change; widening that
+// window to 320 would swallow the byte and reclassify.
+TEST(AmdSmiFabricRuntimeLayout, DirtyByteAtTheEightGpuBoundaryStaysExtendedUnion)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadEnd);
+    buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::ExtendedUnion);
+}
+
+// A writer that stops partway through the 16-GPU tail matches no shipped layout,
+// so it must not be concluded to be 16-GPU by elimination.
+TEST(AmdSmiFabricRuntimeLayout, PartialSixteenGpuWriteIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricInfo16GpuSize - 1);
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
@@ -281,14 +305,13 @@ TEST(AmdSmiFabricLayoutCompat, ReadsPayloadFromFlatShape)
 // The rename did not move anything, which is why one set of ABI asserts covers
 // both headers. If a future layout change breaks this, the accessors are no
 // longer enough on their own. The mocks carry a v1-only payload union, so they
-// stay at the 16-GPU size; on an extended-union header the real struct is larger
-// and only the v1 window is expected to line up.
+// stay at the 16-GPU size while an extended-union header is larger; the buffer is
+// what has to cover the real struct, and asserting that holds in every config.
 TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
 {
     EXPECT_EQ(sizeof(MockNestedFabricInfo), sizeof(MockFlatFabricInfo));
-    if (!kAmdSmiFabricHeaderIsExtended) {
-        EXPECT_EQ(sizeof(MockFlatFabricInfo), sizeof(amdsmi_fabric_info_t));
-    }
+    EXPECT_GE(sizeof(amdSmiFabricInfoBuffer), sizeof(amdsmi_fabric_info_t))
+        << "the probe buffer must be able to name the struct it is cast to";
 
     EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, version),
               offsetof(MockFlatFabricInfo, fabric_version));

@@ -484,9 +484,10 @@ constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
 constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
 constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
-// End of the v1 payload in the 16-GPU shape: bdf (8) + fabric_version (4) + sizeof(v1) (244).
-// amd_smi 27.x writes exactly this much on the v1 path, which is what separates it at runtime
+// The v1 payload in the 16-GPU shape sits after bdf (8) and fabric_version (4) and runs 244 bytes.
+// amd_smi 27.x writes exactly up to its end on the v1 path, which is what separates it at runtime
 // from the older libraries that assign the whole object.
+constexpr size_t kAmdSmiFabricV1PayloadBegin = 12;
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
 
 // The one fact the guard, the buffer and the detector all turn on.
@@ -507,13 +508,16 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
 // amd_smi 27.x added amdsmi_fabric_info_v2_t to the payload union. That member is larger than v1,
 // so the outer struct grows and reserved moves, but the v1 window we read keeps its 16-GPU
 // offsets. Recognize it by those offsets plus an outer struct that outgrew the 16-GPU size, rather
-// than by a third hardcoded size, so a later v2 growth does not break the build again. RCCL does
-// not read v2, and a runtime on this layout is routed to sysfs by
-// amdSmiDetectFabricRuntimeLayout.
+// than by a third hardcoded size, so a later v2 growth does not break the build again. The
+// reserved clause keeps the anchor both siblings have: without it nothing pins where the v1 window
+// sits in the outer struct, and reserved could overlap the bytes the detector reads as v1. RCCL
+// does not read v2, and a runtime on this layout is classified by amdSmiDetectFabricRuntimeLayout
+// and routed to sysfs by amd_smi_ensureFabricInitialized.
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
   sizeof(amdsmi_fabric_info_v1_t) == 244 && kAmdSmiFabricHeaderIsExtended &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
-  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset;
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
+  offsetof(amdsmi_fabric_info_t, reserved) >= kAmdSmiFabricV1PayloadEnd;
 
 static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
               "unsupported amdsmi fabric layout");
@@ -599,10 +603,10 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
 // field-wise and stops after the v1 payload at kAmdSmiFabricV1PayloadEnd.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
-// Never smaller than the struct our header declares. No shipped runtime writes more than 320
-// bytes, since the union member is chosen by the caller-supplied fabric_version and RCCL always
-// asks for v1, so this is not about overrun: amdSmiFabricInfoBufferAsInfo reinterpret_casts the
-// array to amdsmi_fabric_info_t*, and a 320-byte array cannot name a 552-byte object.
+// Never smaller than the struct our header declares, because amdSmiFabricInfoBufferAsInfo
+// reinterpret_casts the array to amdsmi_fabric_info_t* and a 320-byte array cannot name a
+// 552-byte object. The floor is also never below the largest layout we know how to classify, so
+// the probe can still tell an over-writing runtime from a 16-GPU one on a smaller build header.
 constexpr size_t kAmdSmiFabricInfoBufferSize =
   kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
 
@@ -617,8 +621,13 @@ enum class amdSmiFabricRuntimeLayout {
   Unknown,
 };
 
+// Canary everywhere except the request header. bdf and fabric_version are zeroed so the probe asks
+// for exactly what the per-device call at amd_smi_ensureFabricInitialized asks for; leaving the
+// canary in fabric_version would send 0xA5A5A5A5 and measure a request RCCL never makes. The zeroed
+// prefix is excluded from the detector's windows, so it is never mistaken for a library write.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
+  memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
 }
 
 inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer& buffer) {
@@ -636,6 +645,17 @@ inline bool amdSmiFabricWindowUntouched(const amdSmiFabricInfoBuffer& buffer, si
   return true;
 }
 
+// The complement: no canary left anywhere in the window, so the runtime wrote all of it. Used to
+// confirm a layout rather than infer it from the absence of the others.
+inline bool amdSmiFabricWindowWritten(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+  for (size_t i = begin; i < end; ++i) {
+    if (buffer.bytes[i] == kAmdSmiFabricBufferCanary) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Identify the runtime by its write extent, which is the only thing all three shipped libraries
 // differ in observably:
 //
@@ -644,9 +664,11 @@ inline bool amdSmiFabricWindowUntouched(const amdSmiFabricInfoBuffer& buffer, si
 //   288 bytes       : 8-GPU, whole-object assign
 //   320 bytes       : 16-GPU, whole-object assign
 //
-// Ordered widest-canary first, so each arm only has to rule out the runtimes that write less.
+// Every arm is positive, including the last: an extent that matches none of the three is Unknown
+// and falls back to sysfs. Concluding SixteenGpu by elimination would send an unrecognized runtime
+// down the typed path, which is the one outcome the probe exists to prevent.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  if (amdSmiFabricWindowUntouched(buffer, 0, kAmdSmiFabricV1PayloadEnd)) {
+  if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd)) {
     return amdSmiFabricRuntimeLayout::Unknown;
   }
   if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
@@ -655,7 +677,13 @@ inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFab
   if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
-  return amdSmiFabricRuntimeLayout::SixteenGpu;
+  // A 16-GPU runtime fills through 320 and stops there. Requiring both halves rejects a writer that
+  // stopped partway into [288, 320) or ran past the end of the layout.
+  if (amdSmiFabricWindowWritten(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize) &&
+      amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
+    return amdSmiFabricRuntimeLayout::SixteenGpu;
+  }
+  return amdSmiFabricRuntimeLayout::Unknown;
 }
 
 // amd_smi 27.0 also changed amdsmi_fabric_telem_id_to_string from returning the name

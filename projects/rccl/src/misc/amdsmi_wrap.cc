@@ -648,6 +648,11 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         probeStatus == AMDSMI_STATUS_SUCCESS ? amdSmiDetectFabricRuntimeLayout(probeBuffer)
                                              : amdSmiFabricRuntimeLayout::Unknown;
       const bool runtimeLayoutIs8Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::EightGpu;
+      const bool runtimeLayoutIs16Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::SixteenGpu;
+      // Both bits, not just the 8-GPU one: an extended-union build against a 16-GPU runtime agrees
+      // on false != false and would otherwise fall through to the typed path unwarned.
+      const bool layoutsAgree =
+        runtimeLayoutIs8Gpu == amdSmiFabricLayoutIs8Gpu && runtimeLayoutIs16Gpu == amdSmiFabricLayoutIs16Gpu;
       if (runtimeLayout == amdSmiFabricRuntimeLayout::Unknown) {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
         useSysfs = true;
@@ -658,7 +663,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         WARN("AMD SMI fabric: the loaded library uses the extended fabric union, which RCCL does not read yet; "
              "falling back to sysfs");
         useSysfs = true;
-      } else if (runtimeLayoutIs8Gpu != amdSmiFabricLayoutIs8Gpu) {
+      } else if (!layoutsAgree) {
         // Name all three on both sides. Reporting an extended-union build as "16-GPU" sends
         // whoever debugs this next after the wrong mismatch.
         WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %s layout, but the loaded library uses the %s "
