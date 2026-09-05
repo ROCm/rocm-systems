@@ -348,6 +348,15 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
     return hipErrorInvalidValue;
   }
+  {
+    // Decided at load (roc::Kernel::init); named here, before a command exists.
+    const device::Kernel* devKernel = kernel->getDeviceKernel(*device);
+    if (devKernel != nullptr && devKernel->hostcallUnsatisfiable()) {
+      LogPrintfError("launch of %s refused: it declares a hostcall buffer and device %d has no PCIe atomics",
+                     kernel->name().c_str(), deviceId);
+      return hipErrorNotSupported;
+    }
+  }
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
