@@ -301,6 +301,7 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -356,6 +357,7 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -415,6 +417,7 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -481,6 +484,7 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -514,6 +518,7 @@ hipError_t capturehipModuleLaunchCooperativeKernel(hipStream_t& stream, hipFunct
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -543,6 +548,7 @@ hipError_t capturehipLaunchByPtr(hipStream_t& stream, hipFunction_t func, dim3 b
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -574,6 +580,7 @@ hipError_t capturehipLaunchCooperativeKernel(hipStream_t& stream, const void*& f
   if (status != hipSuccess) {
     return status;
   }
+  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -1727,6 +1734,16 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
   HIP_RETURN(status, ReturnPtrValue(pGraphExec));
 }
 
+// The instantiate flags each entry point accepts. Deliberately not all four
+// declared flags: hipGraphInstantiateWithFlags has never accepted Upload or
+// DeviceLaunch, and widening it here would make the existing negative test
+// (which passes the literal 10 = Upload | UseNodePriority) start succeeding.
+static constexpr unsigned long long kValidInstantiateFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUseNodePriority;
+static constexpr unsigned long long kValidInstantiateParamsFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUpload |
+    hipGraphInstantiateFlagDeviceLaunch | hipGraphInstantiateFlagUseNodePriority;
+
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags = 0) {
   HIP_INIT_API(hipGraphInstantiateWithFlags, pGraphExec, graph, flags);
@@ -1734,9 +1751,10 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // invalid flag check
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  // invalid flag check. flags is a bitmask, so test the bits rather than the
+  // whole word: an equality chain accepts each flag alone and rejects every
+  // combination of two, which is not what the parameter means.
+  if ((flags & ~kValidInstantiateFlags) != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1755,9 +1773,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
 
   unsigned long long flags = instantiateParams->flags;
 
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUpload && flags != hipGraphInstantiateFlagDeviceLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  if ((flags & ~kValidInstantiateParamsFlags) != 0) {
     instantiateParams->result_out = hipGraphInstantiateError;
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -1773,7 +1789,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
   instantiateParams->result_out = hipGraphInstantiateSuccess;
   instantiateParams->errNode_out = nullptr;
 
-  if (flags == hipGraphInstantiateFlagUpload) {
+  if ((flags & hipGraphInstantiateFlagUpload) != 0) {
     hipError_t status = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
     HIP_RETURN(status);
   }
