@@ -362,32 +362,31 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
                  : Reason::UnsupportedMnemonic;
     compare = native_compare_support(access, *target, two_address, *register_count);
   } else if (access.origin == ConSanAccessOrigin::Flat) {
-    if ((access.size() != 2u * sizeof(uint32_t) && access.size() != 3u * sizeof(uint32_t)) ||
-        !access.operands.address_vgpr)
+    const ConSanVectorMemoryCapability &memory = target->vector_memory;
+    const uint32_t instruction_size = memory.instruction_word_count * sizeof(uint32_t);
+    if (access.size() != instruction_size || !access.operands.address_vgpr)
       return reject(access.operands.address_vgpr ? Reason::UnsupportedEncoding
                                                  : Reason::MissingAddressOperand);
     const auto register_count = flat_data_register_count(access);
     if (!register_count)
       return reject(Reason::UnsupportedMnemonic);
     form.data_register_count = *register_count;
-    const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target->arch);
-    const bool scalar_vector_address = rdna4_or_cdna5 && access.operands.scalar_address_sgpr;
+    const bool scalar_vector_address =
+        memory.supports_flat_scalar_base && access.operands.scalar_address_sgpr;
     form.kind = scalar_vector_address ? ConSanAccessLoweringFormKind::FlatScalarVectorAddress
                                       : ConSanAccessLoweringFormKind::FlatVectorAddress;
     form.address_vgpr_count = scalar_vector_address ? 1u : 2u;
     if (scalar_vector_address)
       form.scalar_address_sgpr = *access.operands.scalar_address_sgpr;
 
-    const bool exact_modern_encoding = access.size() == 3u * sizeof(uint32_t);
-    const bool cdna4_encoding =
-        access.size() == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
-    if (!exact_modern_encoding && !cdna4_encoding) {
+    const bool extended_encoding = memory.instruction_word_count == 3u;
+    if (!extended_encoding && access.operands.raw_segment != 0u) {
       replay = Reason::UnsupportedEncoding;
     } else if (!access.operands.raw_ioffset ||
-               (rdna4_or_cdna5 &&
+               (extended_encoding &&
                 (!access.operands.raw_saddr || !access.operands.raw_scale_offset))) {
       replay = Reason::UnsupportedEncoding;
-    } else if (*access.operands.raw_ioffset != 0 && !rdna4_or_cdna5) {
+    } else if (*access.operands.raw_ioffset != 0 && memory.immediate_offset_bits == 13u) {
       replay = Reason::NonzeroImmediateOffset;
     } else if (scalar_vector_address &&
                (*access.operands.raw_saddr > 104u || (*access.operands.raw_saddr & 1u) != 0u)) {

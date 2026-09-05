@@ -133,9 +133,9 @@ TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTar
 TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabulary) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
-    const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
-    ConSanProgramSite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
-    if (rdna4_or_cdna5) {
+    const ConSanVectorMemoryCapability &memory = consan_target_profile(target.arch)->vector_memory;
+    ConSanProgramSite input = flat_store_site(memory.instruction_word_count * sizeof(uint32_t));
+    if (memory.instruction_word_count == 3u) {
       input.operands.raw_saddr = 124;
       input.operands.raw_scale_offset = true;
     }
@@ -148,6 +148,21 @@ TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabula
     EXPECT_EQ(site.lowering.form->destination_register_count, 0u);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_TRUE(site.lowering.compare_observed_value.available());
+  }
+}
+
+TEST(ConSanAccessClassifier, FlatInstructionShapeIsOwnedByTheTargetProfile) {
+  for (const TargetCase &target : kTargets) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const ConSanVectorMemoryCapability &memory = consan_target_profile(target.arch)->vector_memory;
+    const uint32_t wrong_word_count = memory.instruction_word_count == 2u ? 3u : 2u;
+    ConSanProgramSite input = flat_store_site(wrong_word_count * sizeof(uint32_t));
+    input.operands.raw_saddr = 124;
+    input.operands.raw_scale_offset = true;
+    const ConSanProgramSite site = complete_site(std::move(input), target.arch, target.target);
+    EXPECT_FALSE(site.lowering.form);
+    EXPECT_EQ(site.lowering.normalization_reason,
+              ConSanAccessClassifierReason::UnsupportedEncoding);
   }
 }
 
@@ -168,8 +183,9 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
     for (const Case &test : cases) {
       SCOPED_TRACE(rj_code_target_name(target.target));
       SCOPED_TRACE(test.mnemonic);
-      const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
-      ConSanProgramSite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
+      const ConSanVectorMemoryCapability &memory =
+          consan_target_profile(target.arch)->vector_memory;
+      ConSanProgramSite input = flat_store_site(memory.instruction_word_count * sizeof(uint32_t));
       input.decoded_site().mnemonic = test.mnemonic;
       input.kind = test.kind;
       input.decoded_width_bits = test.width_bits;
@@ -177,7 +193,7 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
         input.operands.data_vgpr.reset();
         input.operands.destination_vgpr = 7;
       }
-      if (rdna4_or_cdna5) {
+      if (memory.instruction_word_count == 3u) {
         input.operands.raw_saddr = 124;
         input.operands.raw_scale_offset = true;
       }
