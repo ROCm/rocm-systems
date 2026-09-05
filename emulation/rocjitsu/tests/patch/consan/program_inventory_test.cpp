@@ -489,7 +489,8 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
 
   const ProgramInventory inventory = builder.view();
   const SynchronizationInventoryView graph = inventory.sync();
-  EXPECT_EQ(graph.find_unique_event(ConSanSyncKind::Atomic, first.semantic_id.physical), nullptr);
+  EXPECT_EQ(graph.find_event(first.source_site), &graph.sync_events[0]);
+  EXPECT_EQ(graph.find_event(alias.source_site), &graph.sync_events[1]);
   EXPECT_EQ(graph.find_unique_sequence_containing(first.semantic_id), nullptr);
   EXPECT_EQ(graph.find_unique_sequence_containing("first"), nullptr);
   EXPECT_EQ(graph.find_unique_sequence("sequence"), &graph.sync_sequences[0]);
@@ -498,11 +499,6 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   duplicate_sequence.synchronization().sync_sequences[1].identity = "sequence";
   EXPECT_EQ(duplicate_sequence.view().sync().find_unique_sequence("sequence"), nullptr);
 
-  ProgramInventoryBuilder unique_event(builder.view());
-  unique_event.synchronization().sync_events.pop_back();
-  EXPECT_EQ(unique_event.view().sync().find_unique_event(ConSanSyncKind::Atomic,
-                                                         first.semantic_id.physical),
-            &unique_event.view().sync().sync_events.front());
 }
 
 TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {

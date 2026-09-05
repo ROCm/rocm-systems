@@ -414,6 +414,11 @@ if(NOT _observation_plan_contracts MATCHES
         "ConSan observation intents must retain authoritative program-site handles without physical reverse joins"
     )
 endif()
+if(_program_site_contracts MATCHES "find_unique_event")
+    message(FATAL_ERROR
+        "ConSan consumers must resolve synchronization events through typed identities, not physical reverse joins"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_program_inventory.h.inc"
     "bind_container|reference[.](name|kind)"
