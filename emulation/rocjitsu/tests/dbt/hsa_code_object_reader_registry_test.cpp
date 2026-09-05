@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 
@@ -16,6 +17,45 @@
 namespace {
 
 using rocjitsu::hooks::HsaCodeObjectReaderRegistry;
+
+int original_function(int value) { return value; }
+int replacement_function(int value) { return value + 1; }
+int later_tool_function(int value) { return value + 2; }
+
+TEST(HsaApiFunctionPatchTest, RestoresOnlyItsOwnInstalledReplacement) {
+  using Function = int (*)(int);
+  Function slot = original_function;
+  rocjitsu::hooks::HsaApiFunctionPatch<Function> patch;
+
+  patch.capture(&slot);
+  EXPECT_EQ(patch.original(), original_function);
+  patch.install(replacement_function);
+  EXPECT_EQ(slot, replacement_function);
+  patch.restore();
+  EXPECT_EQ(slot, original_function);
+  EXPECT_EQ(patch.original(), original_function);
+
+  patch.capture(&slot);
+  patch.install(replacement_function);
+  slot = later_tool_function;
+  patch.restore();
+  EXPECT_EQ(slot, later_tool_function);
+  EXPECT_EQ(patch.original(), original_function);
+  patch.clear();
+  EXPECT_EQ(patch.original(), nullptr);
+}
+
+TEST(HsaApiFunctionPatchTest, CanCaptureAnUnpatchedSavedFunction) {
+  using Function = int (*)(int);
+  Function slot = original_function;
+  rocjitsu::hooks::HsaApiFunctionPatch<Function> patch;
+
+  patch.capture(&slot);
+  EXPECT_EQ(patch.original(), original_function);
+  EXPECT_EQ(slot, original_function);
+  patch.restore();
+  EXPECT_EQ(slot, original_function);
+}
 
 class ScopedFd {
 public:

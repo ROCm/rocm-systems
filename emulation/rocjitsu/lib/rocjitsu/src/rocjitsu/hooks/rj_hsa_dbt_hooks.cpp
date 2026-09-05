@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/rj_hsa_dbt_test_seams.h"
@@ -1095,28 +1096,28 @@ public:
 
 #define RJ_SAVE_SAVED_ONLY(name, table_ptr, present, field, type)                                  \
   if (present)                                                                                     \
-    original_##name##_ = (table_ptr)->field;
+    name##_.capture(&(table_ptr)->field);
     RJ_HSA_SAVED_ONLY_ENTRIES(RJ_SAVE_SAVED_ONLY)
 #undef RJ_SAVE_SAVED_ONLY
 
 #define RJ_SAVE_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)           \
   if (present)                                                                                     \
-    original_##name##_ = (table_ptr)->field;
+    name##_.capture(&(table_ptr)->field);
     RJ_HSA_PATCH_ENTRIES(RJ_SAVE_PATCH)
 #undef RJ_SAVE_PATCH
 
-    if (original_create_from_file_ == nullptr || original_create_from_memory_ == nullptr ||
-        original_destroy_ == nullptr || original_load_agent_code_object_ == nullptr ||
-        original_iterate_agents_ == nullptr || original_agent_get_info_ == nullptr ||
-        original_agent_iterate_isas_ == nullptr || original_isa_get_info_alt_ == nullptr) {
+    if (create_from_file_.original() == nullptr || create_from_memory_.original() == nullptr ||
+        destroy_.original() == nullptr || load_agent_code_object_.original() == nullptr ||
+        iterate_agents_.original() == nullptr || agent_get_info_.original() == nullptr ||
+        agent_iterate_isas_.original() == nullptr || isa_get_info_alt_.original() == nullptr) {
       std::fprintf(stderr, "[rocjitsu-hooks] HSA core table contains null code-object entries\n");
       clear_unlocked();
       return false;
     }
 
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  if ((present) && (!(patch_if_original) || original_##name##_ != nullptr))                        \
-    (table_ptr)->field = wrapper;
+  if ((present) && (!(patch_if_original) || name##_.original() != nullptr))                        \
+    name##_.install(wrapper);
     RJ_HSA_PATCH_ENTRIES(RJ_INSTALL_PATCH)
 #undef RJ_INSTALL_PATCH
 
@@ -1137,8 +1138,7 @@ public:
       if (active_ && core_ != nullptr) {
         log_message(kLogVerbose, "uninstall begin");
 #define RJ_RESTORE_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  if ((present) && (table_ptr)->field == wrapper)                                                  \
-    (table_ptr)->field = original_##name##_;
+  name##_.restore();
         RJ_HSA_PATCH_ENTRIES(RJ_RESTORE_PATCH)
 #undef RJ_RESTORE_PATCH
       }
@@ -1177,7 +1177,7 @@ public:
 #define RJ_DEFINE_SAVED_ONLY_GETTER(name, table_ptr, present, field, type)                         \
   [[nodiscard]] type name() const {                                                                \
     std::lock_guard lock(mutex_);                                                                  \
-    return original_##name##_;                                                                     \
+    return name##_.original();                                                                     \
   }
   RJ_HSA_SAVED_ONLY_ENTRIES(RJ_DEFINE_SAVED_ONLY_GETTER)
 #undef RJ_DEFINE_SAVED_ONLY_GETTER
@@ -1185,7 +1185,7 @@ public:
 #define RJ_DEFINE_PATCH_GETTER(name, table_ptr, present, patch_if_original, field, wrapper, type)  \
   [[nodiscard]] type name() const {                                                                \
     std::lock_guard lock(mutex_);                                                                  \
-    return original_##name##_;                                                                     \
+    return name##_.original();                                                                     \
   }
   RJ_HSA_PATCH_ENTRIES(RJ_DEFINE_PATCH_GETTER)
 #undef RJ_DEFINE_PATCH_GETTER
@@ -1220,12 +1220,12 @@ private:
     amd_ext_ = nullptr;
     config_.reset();
 
-#define RJ_CLEAR_SAVED_ONLY(name, table_ptr, present, field, type) original_##name##_ = nullptr;
+#define RJ_CLEAR_SAVED_ONLY(name, table_ptr, present, field, type) name##_.clear();
     RJ_HSA_SAVED_ONLY_ENTRIES(RJ_CLEAR_SAVED_ONLY)
 #undef RJ_CLEAR_SAVED_ONLY
 
 #define RJ_CLEAR_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)          \
-  original_##name##_ = nullptr;
+  name##_.clear();
     RJ_HSA_PATCH_ENTRIES(RJ_CLEAR_PATCH)
 #undef RJ_CLEAR_PATCH
   }
@@ -1238,12 +1238,12 @@ private:
   bool active_ = false;
 
 #define RJ_DECLARE_SAVED_ONLY(name, table_ptr, present, field, type)                               \
-  type original_##name##_ = nullptr;
+  rocjitsu::hooks::HsaApiFunctionPatch<type> name##_;
   RJ_HSA_SAVED_ONLY_ENTRIES(RJ_DECLARE_SAVED_ONLY)
 #undef RJ_DECLARE_SAVED_ONLY
 
 #define RJ_DECLARE_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  type original_##name##_ = nullptr;
+  rocjitsu::hooks::HsaApiFunctionPatch<type> name##_;
   RJ_HSA_PATCH_ENTRIES(RJ_DECLARE_PATCH)
 #undef RJ_DECLARE_PATCH
 };

@@ -9,6 +9,7 @@
 
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 
 #include <algorithm>
@@ -560,6 +561,32 @@ hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
 hsa_status_t HSA_API waitcheck_reader_create_from_file_with_offset_size(
     hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t *reader);
 
+// Core API slots owned by WaitCheck. The final column is the runtime condition
+// for installing the replacement; every entry is captured so wrappers and
+// dispatch setup can still call the chain predecessor.
+#define WAITCHECK_HSA_CORE_FUNCTIONS(X)                                                            \
+  X(get_extension_table, hsa_system_get_extension_table_fn, waitcheck_system_get_extension_table,  \
+    decltype(hsa_system_get_extension_table) *, true)                                              \
+  X(get_major_extension_table, hsa_system_get_major_extension_table_fn,                            \
+    waitcheck_system_get_major_extension_table, decltype(hsa_system_get_major_extension_table) *,  \
+    true)                                                                                          \
+  X(create_from_file, hsa_code_object_reader_create_from_file_fn,                                  \
+    waitcheck_reader_create_from_file, decltype(hsa_code_object_reader_create_from_file) *, true)  \
+  X(create_from_memory, hsa_code_object_reader_create_from_memory_fn,                              \
+    waitcheck_reader_create_from_memory, decltype(hsa_code_object_reader_create_from_memory) *,    \
+    true)                                                                                          \
+  X(destroy, hsa_code_object_reader_destroy_fn, waitcheck_reader_destroy,                          \
+    decltype(hsa_code_object_reader_destroy) *, true)                                              \
+  X(load, hsa_executable_load_agent_code_object_fn, waitcheck_executable_load_agent_code_object,   \
+    decltype(hsa_executable_load_agent_code_object) *, true)                                       \
+  X(freeze, hsa_executable_freeze_fn, waitcheck_executable_freeze,                                 \
+    decltype(hsa_executable_freeze) *, mode_ == RuntimeMode::Dispatch)                             \
+  X(executable_destroy, hsa_executable_destroy_fn, waitcheck_executable_destroy,                   \
+    decltype(hsa_executable_destroy) *, mode_ == RuntimeMode::Dispatch)                            \
+  X(queue_create, hsa_queue_create_fn, waitcheck_queue_create, decltype(hsa_queue_create) *,       \
+    mode_ == RuntimeMode::Dispatch)                                                                \
+  X(queue_destroy, hsa_queue_destroy_fn, nullptr, decltype(hsa_queue_destroy) *, false)
+
 class WaitcheckHsaLayer {
 public:
   bool install(HsaApiTable *table) {
@@ -573,22 +600,16 @@ public:
 
     core_ = table->core_;
     amd_ext_ = table->amd_ext_;
-    original_get_extension_table_ = core_->hsa_system_get_extension_table_fn;
-    original_get_major_extension_table_ = core_->hsa_system_get_major_extension_table_fn;
-    original_create_from_file_ = core_->hsa_code_object_reader_create_from_file_fn;
-    original_create_from_memory_ = core_->hsa_code_object_reader_create_from_memory_fn;
-    original_destroy_ = core_->hsa_code_object_reader_destroy_fn;
-    original_load_ = core_->hsa_executable_load_agent_code_object_fn;
-    original_freeze_ = core_->hsa_executable_freeze_fn;
-    original_executable_destroy_ = core_->hsa_executable_destroy_fn;
-    original_queue_create_ = core_->hsa_queue_create_fn;
-    original_queue_destroy_ = core_->hsa_queue_destroy_fn;
+#define WAITCHECK_CAPTURE_CORE(name, field, wrapper, type, install_if)                             \
+  name##_.capture(&core_->field);
+    WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_CAPTURE_CORE)
+#undef WAITCHECK_CAPTURE_CORE
     const bool amd_queue_create_table_valid =
         amd_ext_ != nullptr &&
         amd_ext_->version.minor_id >= offsetof(AmdExtTable, hsa_amd_queue_create_fn) +
                                           sizeof(AmdExtTable::hsa_amd_queue_create_fn);
-    original_amd_queue_create_ =
-        amd_queue_create_table_valid ? amd_ext_->hsa_amd_queue_create_fn : nullptr;
+    if (amd_queue_create_table_valid)
+      amd_queue_create_.capture(&amd_ext_->hsa_amd_queue_create_fn);
     mode_ = runtime_mode();
 
     if (mode_ == RuntimeMode::Dispatch) {
@@ -602,36 +623,32 @@ public:
                      "rocjitsu-waitcheck: queue interception unavailable; using eager mode\n");
         mode_ = RuntimeMode::Eager;
       } else {
-        original_intercept_create_ = table->amd_ext_->hsa_amd_queue_intercept_create_fn;
-        original_intercept_register_ = table->amd_ext_->hsa_amd_queue_intercept_register_fn;
+        intercept_create_.capture(&amd_ext_->hsa_amd_queue_intercept_create_fn);
+        intercept_register_.capture(&amd_ext_->hsa_amd_queue_intercept_register_fn);
       }
     }
 
-    if (original_get_extension_table_ == nullptr ||
-        original_get_major_extension_table_ == nullptr || original_create_from_file_ == nullptr ||
-        original_create_from_memory_ == nullptr || original_destroy_ == nullptr ||
-        original_load_ == nullptr ||
+    if (get_extension_table_.original() == nullptr ||
+        get_major_extension_table_.original() == nullptr ||
+        create_from_file_.original() == nullptr || create_from_memory_.original() == nullptr ||
+        destroy_.original() == nullptr || load_.original() == nullptr ||
         (mode_ == RuntimeMode::Dispatch &&
-         (original_freeze_ == nullptr || original_executable_destroy_ == nullptr ||
-          original_queue_create_ == nullptr || original_queue_destroy_ == nullptr))) {
+         (freeze_.original() == nullptr || executable_destroy_.original() == nullptr ||
+          queue_create_.original() == nullptr || queue_destroy_.original() == nullptr))) {
       std::fprintf(stderr, "rocjitsu-waitcheck: HSA core table contains null required entries\n");
       clear_unlocked();
       return false;
     }
 
-    core_->hsa_system_get_extension_table_fn = waitcheck_system_get_extension_table;
-    core_->hsa_system_get_major_extension_table_fn = waitcheck_system_get_major_extension_table;
-    core_->hsa_code_object_reader_create_from_file_fn = waitcheck_reader_create_from_file;
-    core_->hsa_code_object_reader_create_from_memory_fn = waitcheck_reader_create_from_memory;
-    core_->hsa_code_object_reader_destroy_fn = waitcheck_reader_destroy;
-    core_->hsa_executable_load_agent_code_object_fn = waitcheck_executable_load_agent_code_object;
+#define WAITCHECK_INSTALL_CORE(name, field, wrapper, type, install_if)                             \
+  if (install_if)                                                                                  \
+    name##_.install(wrapper);
+    WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_INSTALL_CORE)
+#undef WAITCHECK_INSTALL_CORE
     if (mode_ == RuntimeMode::Dispatch) {
-      core_->hsa_executable_freeze_fn = waitcheck_executable_freeze;
-      core_->hsa_executable_destroy_fn = waitcheck_executable_destroy;
-      core_->hsa_queue_create_fn = waitcheck_queue_create;
-      amd_ext_->hsa_amd_queue_intercept_create_fn = waitcheck_amd_queue_intercept_create;
-      if (original_amd_queue_create_ != nullptr)
-        amd_ext_->hsa_amd_queue_create_fn = waitcheck_amd_queue_create;
+      intercept_create_.install(waitcheck_amd_queue_intercept_create);
+      if (amd_queue_create_.original() != nullptr)
+        amd_queue_create_.install(waitcheck_amd_queue_create);
     }
     active_ = true;
     g_stats.reset();
@@ -647,38 +664,11 @@ public:
     {
       std::lock_guard lock(mutex_);
       if (active_ && core_ != nullptr) {
-        if (core_->hsa_system_get_extension_table_fn == waitcheck_system_get_extension_table)
-          core_->hsa_system_get_extension_table_fn = original_get_extension_table_;
-        if (core_->hsa_system_get_major_extension_table_fn ==
-            waitcheck_system_get_major_extension_table) {
-          core_->hsa_system_get_major_extension_table_fn = original_get_major_extension_table_;
-        }
-        if (core_->hsa_code_object_reader_create_from_file_fn == waitcheck_reader_create_from_file)
-          core_->hsa_code_object_reader_create_from_file_fn = original_create_from_file_;
-        if (core_->hsa_code_object_reader_create_from_memory_fn ==
-            waitcheck_reader_create_from_memory) {
-          core_->hsa_code_object_reader_create_from_memory_fn = original_create_from_memory_;
-        }
-        if (core_->hsa_code_object_reader_destroy_fn == waitcheck_reader_destroy)
-          core_->hsa_code_object_reader_destroy_fn = original_destroy_;
-        if (core_->hsa_executable_load_agent_code_object_fn ==
-            waitcheck_executable_load_agent_code_object) {
-          core_->hsa_executable_load_agent_code_object_fn = original_load_;
-        }
-        if (core_->hsa_executable_freeze_fn == waitcheck_executable_freeze)
-          core_->hsa_executable_freeze_fn = original_freeze_;
-        if (core_->hsa_executable_destroy_fn == waitcheck_executable_destroy)
-          core_->hsa_executable_destroy_fn = original_executable_destroy_;
-        if (core_->hsa_queue_create_fn == waitcheck_queue_create)
-          core_->hsa_queue_create_fn = original_queue_create_;
-        if (amd_ext_ != nullptr &&
-            amd_ext_->hsa_amd_queue_intercept_create_fn == waitcheck_amd_queue_intercept_create) {
-          amd_ext_->hsa_amd_queue_intercept_create_fn = original_intercept_create_;
-        }
-        if (amd_ext_ != nullptr &&
-            amd_ext_->hsa_amd_queue_create_fn == waitcheck_amd_queue_create) {
-          amd_ext_->hsa_amd_queue_create_fn = original_amd_queue_create_;
-        }
+#define WAITCHECK_RESTORE_CORE(name, field, wrapper, type, install_if) name##_.restore();
+        WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_RESTORE_CORE)
+#undef WAITCHECK_RESTORE_CORE
+        intercept_create_.restore();
+        amd_queue_create_.restore();
       }
       active_ = false;
     }
@@ -691,45 +681,16 @@ public:
     clear_unlocked();
   }
 
-  [[nodiscard]] decltype(hsa_system_get_extension_table) *get_extension_table() const {
-    std::lock_guard lock(mutex_);
-    return original_get_extension_table_;
+#define WAITCHECK_CORE_GETTER(name, field, wrapper, type, install_if)                              \
+  [[nodiscard]] type name() const {                                                                \
+    std::lock_guard lock(mutex_);                                                                  \
+    return name##_.original();                                                                     \
   }
-  [[nodiscard]] decltype(hsa_system_get_major_extension_table) *get_major_extension_table() const {
-    std::lock_guard lock(mutex_);
-    return original_get_major_extension_table_;
-  }
-  [[nodiscard]] decltype(hsa_code_object_reader_create_from_file) *create_from_file() const {
-    std::lock_guard lock(mutex_);
-    return original_create_from_file_;
-  }
-  [[nodiscard]] decltype(hsa_code_object_reader_create_from_memory) *create_from_memory() const {
-    std::lock_guard lock(mutex_);
-    return original_create_from_memory_;
-  }
-  [[nodiscard]] decltype(hsa_code_object_reader_destroy) *destroy() const {
-    std::lock_guard lock(mutex_);
-    return original_destroy_;
-  }
-  [[nodiscard]] decltype(hsa_executable_load_agent_code_object) *load() const {
-    std::lock_guard lock(mutex_);
-    return original_load_;
-  }
-  [[nodiscard]] decltype(hsa_executable_freeze) *freeze() const {
-    std::lock_guard lock(mutex_);
-    return original_freeze_;
-  }
-  [[nodiscard]] decltype(hsa_executable_destroy) *executable_destroy() const {
-    std::lock_guard lock(mutex_);
-    return original_executable_destroy_;
-  }
-  [[nodiscard]] decltype(hsa_queue_destroy) *queue_destroy() const {
-    std::lock_guard lock(mutex_);
-    return original_queue_destroy_;
-  }
+  WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_CORE_GETTER)
+#undef WAITCHECK_CORE_GETTER
   [[nodiscard]] hsa_amd_queue_create_fn_t amd_queue_create() const {
     std::lock_guard lock(mutex_);
-    return original_amd_queue_create_;
+    return amd_queue_create_.original();
   }
   [[nodiscard]] hsa_amd_queue_set_priority_fn_t queue_set_priority() const {
     std::lock_guard lock(mutex_);
@@ -741,11 +702,11 @@ public:
   }
   [[nodiscard]] hsa_amd_queue_intercept_create_fn_t intercept_create() const {
     std::lock_guard lock(mutex_);
-    return original_intercept_create_;
+    return intercept_create_.original();
   }
   [[nodiscard]] hsa_amd_queue_intercept_register_fn_t intercept_register() const {
     std::lock_guard lock(mutex_);
-    return original_intercept_register_;
+    return intercept_register_.original();
   }
   [[nodiscard]] LoadedCodeObjectGetInfoFn loaded_code_object_get_info() const {
     std::lock_guard lock(mutex_);
@@ -792,19 +753,12 @@ private:
     active_ = false;
     core_ = nullptr;
     amd_ext_ = nullptr;
-    original_get_extension_table_ = nullptr;
-    original_get_major_extension_table_ = nullptr;
-    original_create_from_file_ = nullptr;
-    original_create_from_memory_ = nullptr;
-    original_destroy_ = nullptr;
-    original_load_ = nullptr;
-    original_freeze_ = nullptr;
-    original_executable_destroy_ = nullptr;
-    original_queue_create_ = nullptr;
-    original_queue_destroy_ = nullptr;
-    original_amd_queue_create_ = nullptr;
-    original_intercept_create_ = nullptr;
-    original_intercept_register_ = nullptr;
+#define WAITCHECK_CLEAR_CORE(name, field, wrapper, type, install_if) name##_.clear();
+    WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_CLEAR_CORE)
+#undef WAITCHECK_CLEAR_CORE
+    amd_queue_create_.clear();
+    intercept_create_.clear();
+    intercept_register_.clear();
     original_loaded_code_object_get_info_ = nullptr;
     original_file_range_create_ = nullptr;
     mode_ = RuntimeMode::Eager;
@@ -814,23 +768,19 @@ private:
   bool active_ = false;
   CoreApiTable *core_ = nullptr;
   AmdExtTable *amd_ext_ = nullptr;
-  decltype(hsa_system_get_extension_table) *original_get_extension_table_ = nullptr;
-  decltype(hsa_system_get_major_extension_table) *original_get_major_extension_table_ = nullptr;
-  decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
-  decltype(hsa_code_object_reader_create_from_memory) *original_create_from_memory_ = nullptr;
-  decltype(hsa_code_object_reader_destroy) *original_destroy_ = nullptr;
-  decltype(hsa_executable_load_agent_code_object) *original_load_ = nullptr;
-  decltype(hsa_executable_freeze) *original_freeze_ = nullptr;
-  decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
-  decltype(hsa_queue_create) *original_queue_create_ = nullptr;
-  decltype(hsa_queue_destroy) *original_queue_destroy_ = nullptr;
-  hsa_amd_queue_create_fn_t original_amd_queue_create_ = nullptr;
-  hsa_amd_queue_intercept_create_fn_t original_intercept_create_ = nullptr;
-  hsa_amd_queue_intercept_register_fn_t original_intercept_register_ = nullptr;
+#define WAITCHECK_DECLARE_CORE(name, field, wrapper, type, install_if)                             \
+  rocjitsu::hooks::HsaApiFunctionPatch<type> name##_;
+  WAITCHECK_HSA_CORE_FUNCTIONS(WAITCHECK_DECLARE_CORE)
+#undef WAITCHECK_DECLARE_CORE
+  rocjitsu::hooks::HsaApiFunctionPatch<hsa_amd_queue_create_fn_t> amd_queue_create_;
+  rocjitsu::hooks::HsaApiFunctionPatch<hsa_amd_queue_intercept_create_fn_t> intercept_create_;
+  rocjitsu::hooks::HsaApiFunctionPatch<hsa_amd_queue_intercept_register_fn_t> intercept_register_;
   LoadedCodeObjectGetInfoFn original_loaded_code_object_get_info_ = nullptr;
   CreateFromFileWithOffsetSizeFn original_file_range_create_ = nullptr;
   RuntimeMode mode_ = RuntimeMode::Eager;
 };
+
+#undef WAITCHECK_HSA_CORE_FUNCTIONS
 
 WaitcheckHsaLayer &layer() {
   static WaitcheckHsaLayer *state = new WaitcheckHsaLayer();

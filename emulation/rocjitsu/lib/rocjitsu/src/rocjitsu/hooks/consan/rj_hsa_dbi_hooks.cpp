@@ -25,6 +25,7 @@
 #include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
+#include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/hsa_tool_lifetime.h"
@@ -1909,6 +1910,42 @@ hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
 hsa_status_t HSA_API rj_dbi_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
                                              uint32_t num_descs);
 
+#define RJ_DBI_HSA_CORE_FUNCTIONS(X)                                                               \
+  X(create_from_file, hsa_code_object_reader_create_from_file_fn,                                  \
+    rj_dbi_code_object_reader_create_from_file,                                                    \
+    decltype(hsa_code_object_reader_create_from_file) *, true)                                     \
+  X(create_from_memory, hsa_code_object_reader_create_from_memory_fn,                              \
+    rj_dbi_code_object_reader_create_from_memory,                                                  \
+    decltype(hsa_code_object_reader_create_from_memory) *, true)                                   \
+  X(destroy, hsa_code_object_reader_destroy_fn, rj_dbi_code_object_reader_destroy,                 \
+    decltype(hsa_code_object_reader_destroy) *, true)                                              \
+  X(get_extension_table, hsa_system_get_extension_table_fn, rj_dbi_system_get_extension_table,     \
+    decltype(hsa_system_get_extension_table) *, true)                                              \
+  X(get_major_extension_table, hsa_system_get_major_extension_table_fn,                            \
+    rj_dbi_system_get_major_extension_table, decltype(hsa_system_get_major_extension_table) *,     \
+    true)                                                                                          \
+  X(load_agent_code_object, hsa_executable_load_agent_code_object_fn,                              \
+    rj_dbi_executable_load_agent_code_object, decltype(hsa_executable_load_agent_code_object) *,   \
+    true)                                                                                          \
+  X(executable_destroy, hsa_executable_destroy_fn, rj_dbi_executable_destroy,                      \
+    decltype(hsa_executable_destroy) *, true)                                                      \
+  X(get_symbol, hsa_executable_get_symbol_fn, rj_dbi_executable_get_symbol,                        \
+    decltype(hsa_executable_get_symbol) *,                                                         \
+    intercept_dispatch_segments_ &&get_symbol_.original() != nullptr)                              \
+  X(get_symbol_by_name, hsa_executable_get_symbol_by_name_fn,                                      \
+    rj_dbi_executable_get_symbol_by_name, decltype(hsa_executable_get_symbol_by_name) *,           \
+    intercept_dispatch_segments_)                                                                  \
+  X(iterate_symbols, hsa_executable_iterate_symbols_fn, rj_dbi_executable_iterate_symbols,         \
+    decltype(hsa_executable_iterate_symbols) *,                                                    \
+    intercept_dispatch_segments_ &&iterate_symbols_.original() != nullptr)                         \
+  X(iterate_agent_symbols, hsa_executable_iterate_agent_symbols_fn,                                \
+    rj_dbi_executable_iterate_agent_symbols, decltype(hsa_executable_iterate_agent_symbols) *,     \
+    intercept_dispatch_segments_)                                                                  \
+  X(symbol_get_info, hsa_executable_symbol_get_info_fn, rj_dbi_executable_symbol_get_info,         \
+    decltype(hsa_executable_symbol_get_info) *, intercept_dispatch_segments_)                      \
+  X(queue_create, hsa_queue_create_fn, rj_dbi_queue_create, decltype(hsa_queue_create) *,          \
+    intercept_dispatch_packets_)
+
 class RjDbiHsaLayer {
 public:
   bool install(HsaApiTable *table, HookConfig config) {
@@ -1936,25 +1973,15 @@ public:
     fault_load_selector_.reset();
     if (config.fault_load_occurrence)
       fault_load_selector_.emplace(*config.fault_load_occurrence);
-    original_create_from_file_ = core_->hsa_code_object_reader_create_from_file_fn;
-    original_create_from_memory_ = core_->hsa_code_object_reader_create_from_memory_fn;
-    original_destroy_ = core_->hsa_code_object_reader_destroy_fn;
-    original_get_extension_table_ = core_->hsa_system_get_extension_table_fn;
-    original_get_major_extension_table_ = core_->hsa_system_get_major_extension_table_fn;
-    original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
-    original_executable_destroy_ = core_->hsa_executable_destroy_fn;
-    original_get_symbol_ = core_->hsa_executable_get_symbol_fn;
-    original_get_symbol_by_name_ = core_->hsa_executable_get_symbol_by_name_fn;
-    original_iterate_symbols_ = core_->hsa_executable_iterate_symbols_fn;
-    original_iterate_agent_symbols_ = core_->hsa_executable_iterate_agent_symbols_fn;
-    original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
-    original_queue_create_ = core_->hsa_queue_create_fn;
+#define RJ_DBI_CAPTURE_CORE(name, field, wrapper, type, install_if) name##_.capture(&core_->field);
+    RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_CAPTURE_CORE)
+#undef RJ_DBI_CAPTURE_CORE
     const bool amd_queue_create_table_valid =
         amd_ext_ != nullptr &&
         amd_ext_->version.minor_id >= offsetof(AmdExtTable, hsa_amd_queue_create_fn) +
                                           sizeof(AmdExtTable::hsa_amd_queue_create_fn);
-    original_amd_queue_create_ =
-        amd_queue_create_table_valid ? amd_ext_->hsa_amd_queue_create_fn : nullptr;
+    if (amd_queue_create_table_valid)
+      amd_queue_create_.capture(&amd_ext_->hsa_amd_queue_create_fn);
     intercept_dispatch_segments_ =
         config.flavor.value_or(rocjitsu::ConSanFlavor::None) != rocjitsu::ConSanFlavor::None;
     const bool require_dispatch_packets =
@@ -1963,46 +1990,32 @@ public:
         amd_ext_ != nullptr &&
         amd_ext_->version.minor_id >= offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn) +
                                           sizeof(AmdExtTable::hsa_amd_queue_intercept_register_fn);
-    intercept_dispatch_packets_ = intercept_dispatch_segments_ &&
-                                  original_queue_create_ != nullptr && amd_intercept_table_valid &&
-                                  amd_ext_->hsa_amd_queue_intercept_create_fn != nullptr &&
-                                  amd_ext_->hsa_amd_queue_intercept_register_fn != nullptr;
+    intercept_dispatch_packets_ =
+        intercept_dispatch_segments_ && queue_create_.original() != nullptr &&
+        amd_intercept_table_valid && amd_ext_->hsa_amd_queue_intercept_create_fn != nullptr &&
+        amd_ext_->hsa_amd_queue_intercept_register_fn != nullptr;
 
-    if (original_create_from_file_ == nullptr || original_create_from_memory_ == nullptr ||
-        original_destroy_ == nullptr || original_get_extension_table_ == nullptr ||
-        original_get_major_extension_table_ == nullptr ||
-        original_load_agent_code_object_ == nullptr || original_executable_destroy_ == nullptr ||
-        (intercept_dispatch_segments_ &&
-         (original_get_symbol_by_name_ == nullptr || original_iterate_agent_symbols_ == nullptr ||
-          original_symbol_get_info_ == nullptr)) ||
+    if (create_from_file_.original() == nullptr || create_from_memory_.original() == nullptr ||
+        destroy_.original() == nullptr || get_extension_table_.original() == nullptr ||
+        get_major_extension_table_.original() == nullptr ||
+        load_agent_code_object_.original() == nullptr ||
+        executable_destroy_.original() == nullptr ||
+        (intercept_dispatch_segments_ && (get_symbol_by_name_.original() == nullptr ||
+                                          iterate_agent_symbols_.original() == nullptr ||
+                                          symbol_get_info_.original() == nullptr)) ||
         (require_dispatch_packets && !intercept_dispatch_packets_)) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] HSA API table lacks a required DBI entry\n");
       clear_unlocked();
       return false;
     }
 
-    core_->hsa_code_object_reader_create_from_file_fn = rj_dbi_code_object_reader_create_from_file;
-    core_->hsa_code_object_reader_create_from_memory_fn =
-        rj_dbi_code_object_reader_create_from_memory;
-    core_->hsa_code_object_reader_destroy_fn = rj_dbi_code_object_reader_destroy;
-    core_->hsa_system_get_extension_table_fn = rj_dbi_system_get_extension_table;
-    core_->hsa_system_get_major_extension_table_fn = rj_dbi_system_get_major_extension_table;
-    core_->hsa_executable_load_agent_code_object_fn = rj_dbi_executable_load_agent_code_object;
-    core_->hsa_executable_destroy_fn = rj_dbi_executable_destroy;
-    if (intercept_dispatch_segments_) {
-      if (original_get_symbol_ != nullptr)
-        core_->hsa_executable_get_symbol_fn = rj_dbi_executable_get_symbol;
-      core_->hsa_executable_get_symbol_by_name_fn = rj_dbi_executable_get_symbol_by_name;
-      if (original_iterate_symbols_ != nullptr)
-        core_->hsa_executable_iterate_symbols_fn = rj_dbi_executable_iterate_symbols;
-      core_->hsa_executable_iterate_agent_symbols_fn = rj_dbi_executable_iterate_agent_symbols;
-      core_->hsa_executable_symbol_get_info_fn = rj_dbi_executable_symbol_get_info;
-    }
-    if (intercept_dispatch_packets_) {
-      core_->hsa_queue_create_fn = rj_dbi_queue_create;
-      if (original_amd_queue_create_ != nullptr)
-        amd_ext_->hsa_amd_queue_create_fn = rj_dbi_amd_queue_create;
-    }
+#define RJ_DBI_INSTALL_CORE(name, field, wrapper, type, install_if)                                \
+  if (install_if)                                                                                  \
+    name##_.install(wrapper);
+    RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_INSTALL_CORE)
+#undef RJ_DBI_INSTALL_CORE
+    if (intercept_dispatch_packets_ && amd_queue_create_.original() != nullptr)
+      amd_queue_create_.install(rj_dbi_amd_queue_create);
     KernelPrivateDispatchRegistry::instance().configure_allowlist(config.kernel_name_allowlist);
     active_ = true;
     ConSanStaticCoverageRegistry::instance().clear();
@@ -2131,40 +2144,12 @@ public:
             ? std::to_string(*config_->process_patched_image_growth_limit_bytes)
             : "unlimited";
     if (active_ && core_ != nullptr) {
-      if (core_->hsa_code_object_reader_create_from_file_fn ==
-          rj_dbi_code_object_reader_create_from_file)
-        core_->hsa_code_object_reader_create_from_file_fn = original_create_from_file_;
-      if (core_->hsa_code_object_reader_create_from_memory_fn ==
-          rj_dbi_code_object_reader_create_from_memory)
-        core_->hsa_code_object_reader_create_from_memory_fn = original_create_from_memory_;
-      if (core_->hsa_code_object_reader_destroy_fn == rj_dbi_code_object_reader_destroy)
-        core_->hsa_code_object_reader_destroy_fn = original_destroy_;
-      if (core_->hsa_system_get_extension_table_fn == rj_dbi_system_get_extension_table)
-        core_->hsa_system_get_extension_table_fn = original_get_extension_table_;
-      if (core_->hsa_system_get_major_extension_table_fn == rj_dbi_system_get_major_extension_table)
-        core_->hsa_system_get_major_extension_table_fn = original_get_major_extension_table_;
-      if (core_->hsa_executable_load_agent_code_object_fn ==
-          rj_dbi_executable_load_agent_code_object)
-        core_->hsa_executable_load_agent_code_object_fn = original_load_agent_code_object_;
-      if (core_->hsa_executable_destroy_fn == rj_dbi_executable_destroy)
-        core_->hsa_executable_destroy_fn = original_executable_destroy_;
-      if (core_->hsa_executable_get_symbol_fn == rj_dbi_executable_get_symbol)
-        core_->hsa_executable_get_symbol_fn = original_get_symbol_;
-      if (core_->hsa_executable_get_symbol_by_name_fn == rj_dbi_executable_get_symbol_by_name)
-        core_->hsa_executable_get_symbol_by_name_fn = original_get_symbol_by_name_;
-      if (core_->hsa_executable_iterate_symbols_fn == rj_dbi_executable_iterate_symbols)
-        core_->hsa_executable_iterate_symbols_fn = original_iterate_symbols_;
-      if (core_->hsa_executable_iterate_agent_symbols_fn == rj_dbi_executable_iterate_agent_symbols)
-        core_->hsa_executable_iterate_agent_symbols_fn = original_iterate_agent_symbols_;
-      if (core_->hsa_executable_symbol_get_info_fn == rj_dbi_executable_symbol_get_info)
-        core_->hsa_executable_symbol_get_info_fn = original_symbol_get_info_;
-      if (core_->hsa_queue_create_fn == rj_dbi_queue_create)
-        core_->hsa_queue_create_fn = original_queue_create_;
+#define RJ_DBI_RESTORE_CORE(name, field, wrapper, type, install_if) name##_.restore();
+      RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_RESTORE_CORE)
+#undef RJ_DBI_RESTORE_CORE
     }
-    if (active_ && amd_ext_ != nullptr && original_amd_queue_create_ != nullptr &&
-        amd_ext_->hsa_amd_queue_create_fn == rj_dbi_amd_queue_create) {
-      amd_ext_->hsa_amd_queue_create_fn = original_amd_queue_create_;
-    }
+    if (active_)
+      amd_queue_create_.restore();
 
     const AutoScReportBufferRegistry::Summary sc_report_summary =
         AutoScReportBufferRegistry::instance().summarize_and_clear(core_);
@@ -2555,30 +2540,13 @@ public:
     return fault_load_selector_->observe();
   }
 
-  [[nodiscard]] decltype(hsa_code_object_reader_create_from_file) *create_from_file() const {
-    std::lock_guard lock(mutex_);
-    return original_create_from_file_;
+#define RJ_DBI_CORE_GETTER(name, field, wrapper, type, install_if)                                 \
+  [[nodiscard]] type name() const {                                                                \
+    std::lock_guard lock(mutex_);                                                                  \
+    return name##_.original();                                                                     \
   }
-
-  [[nodiscard]] decltype(hsa_code_object_reader_create_from_memory) *create_from_memory() const {
-    std::lock_guard lock(mutex_);
-    return original_create_from_memory_;
-  }
-
-  [[nodiscard]] decltype(hsa_code_object_reader_destroy) *destroy() const {
-    std::lock_guard lock(mutex_);
-    return original_destroy_;
-  }
-
-  [[nodiscard]] decltype(hsa_system_get_extension_table) *get_extension_table() const {
-    std::lock_guard lock(mutex_);
-    return original_get_extension_table_;
-  }
-
-  [[nodiscard]] decltype(hsa_system_get_major_extension_table) *get_major_extension_table() const {
-    std::lock_guard lock(mutex_);
-    return original_get_major_extension_table_;
-  }
+  RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_CORE_GETTER)
+#undef RJ_DBI_CORE_GETTER
 
   void set_loader_create_from_file_with_offset_size(LoaderCreateFromFileWithOffsetSize function) {
     std::lock_guard lock(mutex_);
@@ -2591,49 +2559,9 @@ public:
     return original_loader_create_from_file_with_offset_size_;
   }
 
-  [[nodiscard]] decltype(hsa_executable_load_agent_code_object) *load_agent_code_object() const {
-    std::lock_guard lock(mutex_);
-    return original_load_agent_code_object_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_destroy) *executable_destroy() const {
-    std::lock_guard lock(mutex_);
-    return original_executable_destroy_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_get_symbol) *get_symbol() const {
-    std::lock_guard lock(mutex_);
-    return original_get_symbol_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_get_symbol_by_name) *get_symbol_by_name() const {
-    std::lock_guard lock(mutex_);
-    return original_get_symbol_by_name_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_iterate_symbols) *iterate_symbols() const {
-    std::lock_guard lock(mutex_);
-    return original_iterate_symbols_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_iterate_agent_symbols) *iterate_agent_symbols() const {
-    std::lock_guard lock(mutex_);
-    return original_iterate_agent_symbols_;
-  }
-
-  [[nodiscard]] decltype(hsa_executable_symbol_get_info) *symbol_get_info() const {
-    std::lock_guard lock(mutex_);
-    return original_symbol_get_info_;
-  }
-
-  [[nodiscard]] decltype(hsa_queue_create) *queue_create() const {
-    std::lock_guard lock(mutex_);
-    return original_queue_create_;
-  }
-
   [[nodiscard]] hsa_amd_queue_create_fn_t amd_queue_create() const {
     std::lock_guard lock(mutex_);
-    return original_amd_queue_create_;
+    return amd_queue_create_.original();
   }
 
   [[nodiscard]] decltype(hsa_queue_destroy) *queue_destroy() const {
@@ -2713,21 +2641,11 @@ private:
     moi_runtime_sample_stride_ = 1u;
     moi_runtime_sample_offset_ = 0u;
     fault_load_selector_.reset();
-    original_create_from_file_ = nullptr;
-    original_create_from_memory_ = nullptr;
-    original_destroy_ = nullptr;
-    original_get_extension_table_ = nullptr;
-    original_get_major_extension_table_ = nullptr;
+#define RJ_DBI_CLEAR_CORE(name, field, wrapper, type, install_if) name##_.clear();
+    RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_CLEAR_CORE)
+#undef RJ_DBI_CLEAR_CORE
     original_loader_create_from_file_with_offset_size_ = nullptr;
-    original_load_agent_code_object_ = nullptr;
-    original_executable_destroy_ = nullptr;
-    original_get_symbol_ = nullptr;
-    original_get_symbol_by_name_ = nullptr;
-    original_iterate_symbols_ = nullptr;
-    original_iterate_agent_symbols_ = nullptr;
-    original_symbol_get_info_ = nullptr;
-    original_queue_create_ = nullptr;
-    original_amd_queue_create_ = nullptr;
+    amd_queue_create_.clear();
     intercept_dispatch_segments_ = false;
     intercept_dispatch_packets_ = false;
   }
@@ -2748,24 +2666,17 @@ private:
   uint32_t moi_runtime_sample_offset_ = 0u;
   std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector_;
   bool active_ = false;
-  decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
-  decltype(hsa_code_object_reader_create_from_memory) *original_create_from_memory_ = nullptr;
-  decltype(hsa_code_object_reader_destroy) *original_destroy_ = nullptr;
-  decltype(hsa_system_get_extension_table) *original_get_extension_table_ = nullptr;
-  decltype(hsa_system_get_major_extension_table) *original_get_major_extension_table_ = nullptr;
+#define RJ_DBI_DECLARE_CORE(name, field, wrapper, type, install_if)                                \
+  rocjitsu::hooks::HsaApiFunctionPatch<type> name##_;
+  RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_DECLARE_CORE)
+#undef RJ_DBI_DECLARE_CORE
   LoaderCreateFromFileWithOffsetSize original_loader_create_from_file_with_offset_size_ = nullptr;
-  decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
-  decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
-  decltype(hsa_executable_get_symbol) *original_get_symbol_ = nullptr;
-  decltype(hsa_executable_get_symbol_by_name) *original_get_symbol_by_name_ = nullptr;
-  decltype(hsa_executable_iterate_symbols) *original_iterate_symbols_ = nullptr;
-  decltype(hsa_executable_iterate_agent_symbols) *original_iterate_agent_symbols_ = nullptr;
-  decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
-  decltype(hsa_queue_create) *original_queue_create_ = nullptr;
-  hsa_amd_queue_create_fn_t original_amd_queue_create_ = nullptr;
+  rocjitsu::hooks::HsaApiFunctionPatch<hsa_amd_queue_create_fn_t> amd_queue_create_;
   bool intercept_dispatch_segments_ = false;
   bool intercept_dispatch_packets_ = false;
 };
+
+#undef RJ_DBI_HSA_CORE_FUNCTIONS
 
 RjDbiHsaLayer &layer() {
   static RjDbiHsaLayer state;
@@ -4367,8 +4278,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           reason.c_str(),
           sequence_container != nullptr ? sequence_container->name.c_str() : "<unresolved>",
           sequence_container != nullptr && sequence_container->is_kernel() ? "kernel" : "function",
-          block.c_str(),
-          static_cast<unsigned long long>(sequence.begin_text_offset),
+          block.c_str(), static_cast<unsigned long long>(sequence.begin_text_offset),
           static_cast<unsigned long long>(sequence.end_text_offset),
           memory != nullptr ? memory->width_bits : 0u, static_offset.c_str(), raw_scope.c_str(),
           barrier_id.c_str(),
@@ -4636,9 +4546,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         const std::vector<std::string> source_containers =
             transform_result.program_inventory.source_container_names(
                 decision.semantic_site.physical);
-        const std::string_view source = source_containers.empty()
-                                            ? std::string_view{"<none>"}
-                                            : source_containers.front();
+        const std::string_view source =
+            source_containers.empty() ? std::string_view{"<none>"} : source_containers.front();
         std::string reason(reason_name(decision.reason));
         std::ranges::replace(reason, '-', '_');
         log_message(
