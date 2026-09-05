@@ -725,7 +725,7 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleEnumerateFunctions, hipModuleEnumerateFunctions, hipModuleEnumerateFunctions_fn, functions, numFunctions, mod);
-HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync_fn, dsts, srcs, sizesA, sizesB, waits, signals, ops, count, attrs, attrsIdxs, numAttrs, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync_fn, dsts, srcs, sizes, sizesDst, waits, signals, count, attrs, attrsIdxs, numAttrs, stream);
 #endif
 // clang-format on
 
