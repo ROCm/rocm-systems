@@ -1197,15 +1197,30 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
+    std::string_view failed_stage;
     bool succeeded = false;
     ~FailureStage() {
       if (!succeeded)
         errors.emplace_back("ConSan MOI wave-coalesced exact-shadow swap failed during " +
-                            std::string(stage));
+                            std::string(failed_stage.empty() ? stage : failed_stage));
     }
-  } failure{errors};
+  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
   if (!plan.scalar_state.exec_save_sgpr)
     return false;
+
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success) {
+      failure.failed_stage = failure.stage;
+      if (!message.empty())
+        errors.emplace_back(message);
+    }
+    sequence.require(success);
+  };
+  const auto set_stage = [&](std::string_view stage) {
+    if (!sequence && failure.failed_stage.empty())
+      failure.failed_stage = failure.stage;
+    failure.stage = stage;
+  };
 
   const uint16_t base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(base + 2u);
@@ -1222,7 +1237,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t saved_current_low_vgpr = static_cast<uint16_t>(old_value_vgpr + 4u);
   const uint16_t saved_current_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 5u);
 
-  failure.stage = "partition setup";
+  set_stage("partition setup");
   const uint32_t save_address_lo =
       build_v_mov_b32_e32(saved_address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), arch);
   const uint32_t save_address_hi = build_v_mov_b32_e32(
@@ -1243,38 +1258,33 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // the current partition key is the low word.
   const auto read_address_high = instrumentation::build_v_readfirstlane_b32(
       value_key_sgpr, static_cast<uint16_t>(address_lo_vgpr + 1u), arch);
-  if (!read_address_high ||
-      !sequence.emit_all(instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch),
-                         instrumentation::build_s_mov_b64(pending_exec_sgpr, kAmdGpuExecLo, arch),
-                         save_address_lo, save_address_hi, save_current_low, save_current_high))
-    return false;
+  sequence.append(read_address_high,
+                  instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch),
+                  instrumentation::build_s_mov_b64(pending_exec_sgpr, kAmdGpuExecLo, arch),
+                  save_address_lo, save_address_hi, save_current_low, save_current_high);
 
   const InstructionSequence::Label loop = sequence.mark_label();
-  if (!sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch),
-          restore_address_lo, restore_address_hi, restore_current_low, restore_current_high,
-          instrumentation::build_v_readfirstlane_b32(address_key_sgpr, address_lo_vgpr, arch),
-          instrumentation::build_v_readfirstlane_b32(value_key_sgpr, current_low_vgpr, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, address_lo_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch)))
-    return false;
-  failure.stage = "composite-key provenance";
-  if (!append_exact_byte_cell_provenance_base(
-          words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
-          relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
-          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(plan.scratch_vgpr + 4u))) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
-    return false;
-  }
-  if (!sequence.emit_all(
-          instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          instrumentation::build_s_mov_b64(group_exec_sgpr, kAmdGpuExecLo, arch)))
-    return false;
+  sequence.append(
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch), restore_address_lo,
+      restore_address_hi, restore_current_low, restore_current_high,
+      instrumentation::build_v_readfirstlane_b32(address_key_sgpr, address_lo_vgpr, arch),
+      instrumentation::build_v_readfirstlane_b32(value_key_sgpr, current_low_vgpr, arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, address_lo_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch));
+  set_stage("composite-key provenance");
+  require_emission(append_exact_byte_cell_provenance_base(
+                       words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
+                       relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
+                       lane_rank_vgpr, current_high_vgpr,
+                       static_cast<uint16_t>(plan.scratch_vgpr + 4u)),
+                   "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
+  sequence.append(
+      instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_s_mov_b64(group_exec_sgpr, kAmdGpuExecLo, arch));
   // Partition pending lanes by their complete publication key. Address and
   // packed access were selected above; exact-byte provenance contributes the
   // final mask component here. Saving that subgroup directly avoids emitting
@@ -1283,40 +1293,34 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // by the next bounded loop iteration.
   const auto use_group_diagnostic_mask =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, group_exec_sgpr, arch);
-  if (!use_group_diagnostic_mask ||
-      !sequence.emit_all(
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, group_exec_sgpr,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr,
-                                                    static_cast<uint16_t>(group_exec_sgpr + 1u),
-                                                    vector_source_vgpr(lane_rank_vgpr), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-          instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch)))
-    return false;
-  if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
-    return false;
-  }
-  failure.stage = "composite-key transaction";
-  if (!append_versioned_exact_shadow_transaction(
-          words, plan, arch, address_lo_vgpr, current_low_vgpr, old_value_vgpr, publisher_exec_sgpr,
-          committed_exec_sgpr, /*retry_contention=*/true, errors)) {
-    return false;
-  }
+  sequence.append(
+      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, group_exec_sgpr,
+                                                scalar_positive_inline_u32(0), arch),
+      instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr,
+                                                static_cast<uint16_t>(group_exec_sgpr + 1u),
+                                                vector_source_vgpr(lane_rank_vgpr), arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch));
+  sequence.require(
+      append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr));
+  set_stage("composite-key transaction");
+  sequence.require(append_versioned_exact_shadow_transaction(
+      words, plan, arch, address_lo_vgpr, current_low_vgpr, old_value_vgpr, publisher_exec_sgpr,
+      committed_exec_sgpr, /*retry_contention=*/true, errors));
   // The representative stands for the complete metadata-identical subgroup.
   // Retain that exact subgroup as the diagnostic lane mask.
-  if (!sequence.emit(*use_group_diagnostic_mask))
-    return false;
+  sequence.append(use_group_diagnostic_mask);
 
   // Counter updates and version-address CAS operations use the working address
   // pair. Restore it from the loop invariants before diagnostics and the next
   // partition iteration.
   words.push_back(restore_address_lo);
   words.push_back(restore_address_hi);
+  if (!sequence)
+    return false;
   // Narrow spill-backed paths deliberately pay one reload per partition only
   // when diagnostics can consume the recovered guest address.
   if (layout.diagnostic_capacity != 0 && spill_backed_lds_byte_offset_source) {
@@ -1338,56 +1342,47 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // The partition operations changed VCC/SCC. Restore the incoming values so
   // the existing diagnostic helper can snapshot and restore the true program
   // state while evaluating every lane in this address group.
-  failure.stage = "pre-diagnostic state restoration";
-  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return false;
-  failure.stage = "diagnostic encoding";
-  if (!append_inline_shadow_diagnostic_words(
-          words, candidate, plan, arch, layout, old_value_vgpr,
-          static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
-          lds_byte_offset_vgpr, static_byte_offset, byte_count, shadow_granule_bytes,
-          /*special_state_already_saved=*/true,
-          /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr,
-          /*capture_first_diagnostic_only=*/false,
-          /*workgroup_local_shadow=*/false,
-          /*prior_byte_provenance_vgpr=*/
-          static_cast<uint16_t>(old_value_vgpr + 6u),
-          /*current_byte_provenance_vgpr=*/
-          static_cast<uint16_t>(old_value_vgpr + 7u), relative_cell_index_vgpr,
-          relative_cell_index))
-    return false;
+  set_stage("pre-diagnostic state restoration");
+  sequence.require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
+  set_stage("diagnostic encoding");
+  sequence.require(append_inline_shadow_diagnostic_words(
+      words, candidate, plan, arch, layout, old_value_vgpr,
+      static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
+      lds_byte_offset_vgpr, static_byte_offset, byte_count, shadow_granule_bytes,
+      /*special_state_already_saved=*/true,
+      /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr,
+      /*capture_first_diagnostic_only=*/false,
+      /*workgroup_local_shadow=*/false,
+      /*prior_byte_provenance_vgpr=*/
+      static_cast<uint16_t>(old_value_vgpr + 6u),
+      /*current_byte_provenance_vgpr=*/
+      static_cast<uint16_t>(old_value_vgpr + 7u), relative_cell_index_vgpr, relative_cell_index));
 
   // The selected group is a subset of pending EXEC, so XOR removes exactly
   // that group. Keep this independent of the RDNA4 AND-NOT operand convention;
   // live qualification is the authority for this generated control flow.
-  failure.stage = "loop completion";
-  if (!sequence.emit(instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr,
-                                                      group_exec_sgpr, arch)))
-    return false;
+  set_stage("loop completion");
+  sequence.append(instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr,
+                                                   group_exec_sgpr, arch));
   // Install the remaining mask into EXEC and branch on it. Live gfx1201 debug
   // telemetry proved this traversal reaches the final divergent lane when
   // there is scalar distance after the pending-mask XOR. Keep that dependency
   // explicit: without it, both an immediate EXEC move and an immediate scalar
   // compare observed only the first address group in acceptance runs.
-  if (!sequence.emit_all(
-          build_s_nop(0, arch), build_s_nop(0, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch)) ||
-      !sequence.emit_branch(loop, InstructionSequence::BranchKind::ExecNonzero))
-    return false;
-  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch)))
-    return false;
+  sequence
+      .append(build_s_nop(0, arch), build_s_nop(0, arch),
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch))
+      .branch(loop, InstructionSequence::BranchKind::ExecNonzero)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch));
   // The diagnostic path uses current_high_vgpr as a field temporary. Restore
   // both packed words before returning so a following cell of the same wide
   // access starts from the original owner/epoch/workgroup metadata.
   words.push_back(restore_current_low);
   words.push_back(restore_current_high);
-  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return false;
+  sequence.require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
 
-  if (!sequence.resolve_branches(arch))
-    return false;
-  failure.succeeded = true;
-  return true;
+  failure.succeeded = sequence.finish(arch);
+  return failure.succeeded;
 }
 
 // Make one packed-validity local slot ready without eagerly clearing the full
