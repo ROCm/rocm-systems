@@ -677,13 +677,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       const std::span<const ConSanExecutionOwner> target_owners =
           target ? pristine_faults.execution_owners(*target->site)
                  : std::span<const ConSanExecutionOwner>{};
+      const std::vector<uint64_t> target_owner_descriptors =
+          pristine_faults.program_inventory.execution_owner_descriptors(target_owners);
       const bool identities_match =
           target && target_source != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_sequence_identity == target->sequence->identity &&
           result.mutation.applied_fault_logical_identity == patch.fault_sequence_identity &&
-          patch.owner_descriptor_file_offsets.size() == target_owners.size() &&
-          std::ranges::equal(patch.owner_descriptor_file_offsets, target_owners, {},
-                             std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
+          patch.owner_descriptor_file_offsets == target_owner_descriptors;
       if (!identities_match) {
         errors.emplace_back(
             "ConSan mutation proof could not rederive the exact ordinary acquire identity and "
@@ -769,15 +769,15 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       const std::span<const ConSanExecutionOwner> target_owners =
           target == nullptr ? std::span<const ConSanExecutionOwner>{}
                             : pristine_faults.execution_owners(*target);
+      const std::vector<uint64_t> target_owner_descriptors =
+          pristine_faults.program_inventory.execution_owner_descriptors(target_owners);
       const std::optional<uint16_t> target_address_vgpr =
           target_source == nullptr ? std::nullopt : target_source->operands.address_vgpr;
       const bool identities_match =
           target != nullptr && target_source != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_primary_identity == target->identity &&
           result.mutation.applied_fault_logical_identity == patch.fault_primary_identity &&
-          patch.owner_descriptor_file_offsets.size() == target_owners.size() &&
-          std::ranges::equal(patch.owner_descriptor_file_offsets, target_owners, {},
-                             std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
+          patch.owner_descriptor_file_offsets == target_owner_descriptors;
       if (!identities_match) {
         errors.emplace_back(
             "ConSan mutation proof could not rederive the exact LDS access identity and owners");

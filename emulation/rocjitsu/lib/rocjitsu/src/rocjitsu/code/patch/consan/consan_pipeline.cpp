@@ -205,8 +205,10 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
     for (const ConSanProgramSite &site : inventory.program_sites()) {
       if (site.physical_id != physical)
         continue;
-      for (const ConSanExecutionOwner &owner : site.execution_owners)
-        attributed |= note_descriptor(owner.descriptor_file_offset, apply);
+      for (const ConSanExecutionOwner &owner : site.execution_owners) {
+        if (const ConSanProgramContainer *kernel = inventory.kernel(owner))
+          attributed |= note_kernel(*kernel, apply);
+      }
     }
     if (attributed)
       return;
@@ -501,7 +503,8 @@ bool TransformResult::well_formed() const {
       outcome != ConSanTransformOutcome::Invalid) {
     return false;
   }
-  if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
+  if (!program_inventory.empty() && (program_inventory.code_object_id() != code_object ||
+                                     !program_inventory.execution_owners_well_formed()))
     return false;
   if (std::ranges::any_of(private_lowering_.fault_sites, [&](const ConSanFaultSite &site) {
         return program_inventory.program_site(site) == nullptr;

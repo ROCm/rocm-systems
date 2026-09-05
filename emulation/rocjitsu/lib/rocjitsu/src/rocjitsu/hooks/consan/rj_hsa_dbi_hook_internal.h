@@ -260,16 +260,15 @@ owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
   fields.names.clear();
   fields.proofs.clear();
   for (const rocjitsu::ConSanExecutionOwner &owner : owners) {
-    const auto kernel =
-        std::ranges::find(kernels, owner.descriptor_file_offset,
-                          &rocjitsu::ConSanProgramContainer::descriptor_file_offset);
-    if (kernel == kernels.end())
+    if (!owner.kernel.valid() || owner.kernel.ordinal >= kernels.size() ||
+        kernels[owner.kernel.ordinal].id != owner.kernel)
       return {};
+    const rocjitsu::ConSanProgramContainer &kernel = kernels[owner.kernel.ordinal];
     if (!fields.names.empty()) {
       fields.names += ',';
       fields.proofs += ',';
     }
-    fields.names += kernel->name;
+    fields.names += kernel.name;
     fields.proofs += owner_proof_name(owner.proof);
   }
   return fields;

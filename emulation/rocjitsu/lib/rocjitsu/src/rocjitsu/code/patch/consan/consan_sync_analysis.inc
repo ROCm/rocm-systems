@@ -2173,8 +2173,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
         cfg.kernel_entries, text);
     if (scope) {
       for (const auto &[block, proof] : scope->owner_proofs) {
-        owners_by_block[block].push_back({.descriptor_file_offset = kernel.descriptor_file_offset,
-                                          .proof = owner_proof_kind(proof)});
+        owners_by_block[block].push_back({.kernel = kernel.id, .proof = owner_proof_kind(proof)});
       }
     }
   }

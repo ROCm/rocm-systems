@@ -1,25 +1,35 @@
 namespace {
 
-using ConSanDescriptorNameIndex = std::unordered_map<std::string, uint64_t>;
-using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
-
-[[nodiscard]] uint64_t measure_descriptor_name_index(const void *context) noexcept {
-  const auto &index = *static_cast<const ConSanDescriptorNameIndex *>(context);
-  uint64_t bytes = byte_accounting::saturating_multiply(
-      index.size(), sizeof(ConSanDescriptorNameIndex::value_type) +
-                        amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
-  for (const auto &[name, offset] : index) {
-    (void)offset;
-    bytes = byte_accounting::saturating_add(bytes, name.capacity() + 1u);
+/// Translate physical descriptor locations between two inventory revisions.
+/// Kernel arena IDs are assigned after the parser's deterministic name sort,
+/// so the same ID and name identify one logical kernel even when an earlier
+/// mutation moved its descriptor bytes.  Any mismatch is stale transaction
+/// state and fails closed instead of preserving an ambiguous physical offset.
+[[nodiscard]] bool translate_owner_descriptors(const ProgramInventory &source,
+                                               const ProgramInventory &destination,
+                                               std::vector<uint64_t> &offsets,
+                                               uint64_t *stale_offset) {
+  for (uint64_t &offset : offsets) {
+    const ConSanProgramContainer *source_kernel = source.find_kernel_by_descriptor(offset);
+    if (source_kernel == nullptr) {
+      // Retry-carried operating-point plans are already expressed in the
+      // destination revision.  Accept only an exact destination descriptor;
+      // an offset belonging to neither revision is stale.
+      if (destination.find_kernel_by_descriptor(offset) == nullptr) {
+        *stale_offset = offset;
+        return false;
+      }
+      continue;
+    }
+    const ConSanProgramContainer *destination_kernel = destination.container(source_kernel->id);
+    if (destination_kernel == nullptr || !destination_kernel->is_kernel() ||
+        destination_kernel->name != source_kernel->name) {
+      *stale_offset = offset;
+      return false;
+    }
+    offset = destination_kernel->descriptor_file_offset;
   }
-  return bytes;
-}
-
-[[nodiscard]] uint64_t measure_descriptor_owner_index(const void *context) noexcept {
-  const auto &index = *static_cast<const ConSanDescriptorOwnerIndex *>(context);
-  return byte_accounting::saturating_multiply(
-      index.size(), sizeof(ConSanDescriptorOwnerIndex::value_type) +
-                        amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
+  return true;
 }
 
 /// Install the transaction's immutable observation product into native
@@ -80,8 +90,8 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
     const auto dropped =
         std::ranges::find_if(mutation_stage.patches, [&](const ConSanPatchMutationProduct &patch) {
           return patch.kind == ConSanPatchKind::InlineBarrierNopRewrite &&
-                 ranges_overlap(plan.anchor_text_offset, plan.anchor_size,
-                                patch.anchor_offset, patch.original_size);
+                 ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
+                                patch.original_size);
         });
     if (dropped != mutation_stage.patches.end()) {
       *error = "selected perturbation edge was destroyed by the barrier drop";
@@ -98,8 +108,8 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
     }
     const auto selected_source =
         std::ranges::find_if(move_sources, [&](const ConSanPatchMutationProduct *patch) {
-          return ranges_overlap(plan.anchor_text_offset, plan.anchor_size,
-                                patch->anchor_offset, patch->original_size);
+          return ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch->anchor_offset,
+                                patch->original_size);
         });
     if (selected_source != move_sources.end()) {
       if (move_sources.size() != 2u || move_target == nullptr ||
@@ -140,8 +150,8 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
           !ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
                           patch.original_size))
         continue;
-      const bool exact_alias = plan.anchor_text_offset == patch.anchor_offset &&
-                               plan.anchor_size == patch.original_size;
+      const bool exact_alias =
+          plan.anchor_text_offset == patch.anchor_offset && plan.anchor_size == patch.original_size;
       const bool atomic_mutation = patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite ||
                                    patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite ||
                                    patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
@@ -218,6 +228,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
   const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
       pristine_mutation_plan.fault_plans;
+  // Retain the immutable semantic revision independently of the mutation
+  // artifact, which is moved into `fault_result` when no perturbation needs
+  // its remaining planning state.
+  const ProgramInventory pristine_program_inventory = pristine_mutation_plan.program_inventory;
   if (has_perturbation &&
       (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
        pristine_perturbation.plans.empty())) {
@@ -279,9 +293,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   std::vector<ConSanPerturbationPlan> staged_carried;
   if (has_perturbation) {
     std::string carry_error;
-    auto carried =
-        carry_perturbation_plans_across_mutation(pristine_mutation_plan.program_inventory,
-                                                 pristine_perturbation, fault_result, &carry_error);
+    auto carried = carry_perturbation_plans_across_mutation(
+        pristine_program_inventory, pristine_perturbation, fault_result, &carry_error);
     if (!carried)
       return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
     instrument_options.sc_perturb_identity.clear();
@@ -299,47 +312,28 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     instrument_result.outcome = ConSanTransformOutcome::Unsupported;
   const major_image_ownership::ScopedOwner instrument_result_owner(
       major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
-  // Resource ownership is a logical kernel identity, but instrumentation of
-  // a staged mutation records descriptor offsets in the mutation image.
-  // Normalize those offsets before merging stages: an intermediate offset
-  // can otherwise collide with a different pristine kernel descriptor.
-  ConSanDescriptorNameIndex pristine_descriptor_offsets;
-  const major_image_ownership::ScopedOwner pristine_index_owner(
-      major_image_ownership::OwnerKind::CompactIndex, &pristine_descriptor_offsets,
-      measure_descriptor_name_index);
-  {
-    AmdGpuCodeObject pristine_code_object(code_object_bytes.data(), code_object_bytes.size());
-    pristine_descriptor_offsets.reserve(pristine_code_object.kernels().size());
-    for (const AmdGpuKernelInfo &kernel : pristine_code_object.kernels())
-      pristine_descriptor_offsets.emplace(kernel.name, kernel.descriptor_file_offset);
-    pristine_index_owner.checkpoint();
-  }
-  ConSanDescriptorOwnerIndex pristine_owner_offsets;
-  const major_image_ownership::ScopedOwner owner_index_owner(
-      major_image_ownership::OwnerKind::CompactIndex, &pristine_owner_offsets,
-      measure_descriptor_owner_index);
-  {
-    AmdGpuCodeObject staged_code_object(fault_result.replacement.data(),
-                                        fault_result.replacement.size());
-    for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
-      const auto pristine = pristine_descriptor_offsets.find(staged_kernel.name);
-      if (pristine != pristine_descriptor_offsets.end()) {
-        pristine_owner_offsets.emplace(staged_kernel.descriptor_file_offset, pristine->second);
-      }
-    }
-    owner_index_owner.checkpoint();
-  }
-  const auto normalize_owner_offsets = [&](std::vector<uint64_t> &offsets) {
-    for (uint64_t &offset : offsets) {
-      const auto pristine = pristine_owner_offsets.find(offset);
-      if (pristine != pristine_owner_offsets.end())
-        offset = pristine->second;
-    }
+  // Lowering materializes descriptor locations in its current mutation image.
+  // Translate those byte coordinates through stable kernel handles before
+  // merging proof from the pristine and staged revisions.
+  uint64_t stale_owner_offset = 0;
+  const auto translate_owners = [&](std::vector<uint64_t> &offsets) {
+    return translate_owner_descriptors(instrument_result.program_inventory,
+                                       pristine_program_inventory, offsets, &stale_owner_offset);
   };
-  for (ConSanCandidateResourcePlan &plan : instrument_result.resource_plans)
-    normalize_owner_offsets(plan.owner_descriptor_file_offsets);
-  for (ConSanPatchAbiEffects &patch : instrument_result.patches)
-    normalize_owner_offsets(patch.owner_descriptor_file_offsets);
+  const bool resource_owners_valid =
+      std::ranges::all_of(instrument_result.resource_plans, [&](ConSanCandidateResourcePlan &plan) {
+        return translate_owners(plan.owner_descriptor_file_offsets);
+      });
+  const bool patch_owners_valid =
+      std::ranges::all_of(instrument_result.patches, [&](ConSanPatchAbiEffects &patch) {
+        return translate_owners(patch.owner_descriptor_file_offsets);
+      });
+  if (!resource_owners_valid || !patch_owners_valid) {
+    instrument_result.errors.emplace_back(
+        "ConSan staged composition found stale execution-owner identity at descriptor offset " +
+        std::to_string(stale_owner_offset));
+    instrument_result.outcome = ConSanTransformOutcome::Invalid;
+  }
   instrument_result.warnings.insert(instrument_result.warnings.begin(),
                                     std::make_move_iterator(fault_result.warnings.begin()),
                                     std::make_move_iterator(fault_result.warnings.end()));

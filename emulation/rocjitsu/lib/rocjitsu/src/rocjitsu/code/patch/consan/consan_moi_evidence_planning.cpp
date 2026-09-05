@@ -32,14 +32,13 @@ resolve_moi_evidence_container(const ProgramInventory &inventory, bool in_kernel
 
   const ConSanProgramContainer *kernel = inventory.find_kernel_by_name(container_name);
   if (kernel == nullptr && execution_owners.size() == 1u) {
-    kernel = inventory.find_kernel_by_descriptor(execution_owners.front().descriptor_file_offset);
+    kernel = inventory.kernel(execution_owners.front());
   }
   if (kernel == nullptr || is_rocclr_runtime_kernel_name(kernel->name))
     return std::nullopt;
 
   std::optional<uint64_t> descriptor_file_offset = kernel->descriptor_file_offset;
-  if (execution_owners.size() != 1u ||
-      execution_owners.front().descriptor_file_offset != kernel->descriptor_file_offset) {
+  if (execution_owners.size() != 1u || execution_owners.front().kernel != kernel->id) {
     descriptor_file_offset.reset();
   }
   return make_view(*kernel, descriptor_file_offset,

@@ -322,12 +322,18 @@ consan_source_container_names(std::span<const ConSanProgramSite> sites,
 /// owner is alive. Fault planning and engine policy may query this projection
 /// but cannot modify or rebuild sanitizer semantics through it.
 struct SynchronizationInventoryView {
+  std::span<const ConSanProgramContainer> program_containers;
   std::span<const ConSanProgramSite> program_sites;
   std::span<const ConSanSyncEvent> sync_events;
   std::span<const ConSanSyncSequence> sync_sequences;
   std::span<const ConSanSyncSequenceMembership> sequence_membership_by_event;
   std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
+
+  [[nodiscard]] const ConSanProgramContainer *container(ConSanProgramContainerId id) const {
+    return id.valid() && id.ordinal < program_containers.size() ? &program_containers[id.ordinal]
+                                                                : nullptr;
+  }
 
   [[nodiscard]] const ConSanProgramSite *source(const ConSanSyncEvent &event) const {
     return consan_program_site(program_sites, event);
@@ -363,8 +369,8 @@ struct SynchronizationInventoryView {
         continue;
       }
       std::erase_if(intersection, [&](ConSanExecutionOwner &left) {
-        const auto right = std::ranges::find(member_owners, left.descriptor_file_offset,
-                                             &ConSanExecutionOwner::descriptor_file_offset);
+        const auto right =
+            std::ranges::find(member_owners, left.kernel, &ConSanExecutionOwner::kernel);
         if (right == member_owners.end())
           return true;
         if (static_cast<uint8_t>(right->proof) > static_cast<uint8_t>(left.proof))
@@ -432,8 +438,11 @@ struct SynchronizationInventoryView {
   execution_owner_descriptors(std::span<const ConSanSyncEvent *const> aliases) const {
     std::vector<uint64_t> descriptors;
     for (const ConSanSyncEvent *event : aliases) {
-      for (const ConSanExecutionOwner &owner : execution_owners(*event))
-        descriptors.push_back(owner.descriptor_file_offset);
+      for (const ConSanExecutionOwner &owner : execution_owners(*event)) {
+        const ConSanProgramContainer *kernel = container(owner.kernel);
+        if (kernel != nullptr && kernel->is_kernel())
+          descriptors.push_back(kernel->descriptor_file_offset);
+      }
     }
     std::ranges::sort(descriptors);
     descriptors.erase(std::ranges::unique(descriptors).begin(), descriptors.end());
@@ -637,6 +646,7 @@ struct SynchronizationInventoryView {
 /// view must not escape analysis; published consumers receive only
 /// `SynchronizationInventoryView`.
 struct SynchronizationInventoryBuildView {
+  const std::vector<ConSanProgramContainer> &program_containers;
   std::vector<ConSanProgramSite> &program_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
@@ -645,12 +655,15 @@ struct SynchronizationInventoryBuildView {
   std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
 
   [[nodiscard]] SynchronizationInventoryView view() const {
-    return {program_sites,
-            sync_events,
-            sync_sequences,
-            sequence_membership_by_event,
-            barrier_lifecycle_groups,
-            moi_fence_candidates};
+    return {
+        .program_containers = program_containers,
+        .program_sites = program_sites,
+        .sync_events = sync_events,
+        .sync_sequences = sync_sequences,
+        .sequence_membership_by_event = sequence_membership_by_event,
+        .barrier_lifecycle_groups = barrier_lifecycle_groups,
+        .moi_fence_candidates = moi_fence_candidates,
+    };
   }
 };
 
@@ -770,6 +783,36 @@ public:
     const auto kernel = std::ranges::find(records, name, &ConSanProgramContainer::name);
     return kernel == records.end() ? nullptr : &*kernel;
   }
+  /// Resolve a semantic execution owner to the kernel record in this exact
+  /// inventory revision.  A stale, invalid, or non-kernel handle fails closed.
+  [[nodiscard]] const ConSanProgramContainer *kernel(const ConSanExecutionOwner &owner) const {
+    const ConSanProgramContainer *record = container(owner.kernel);
+    return record != nullptr && record->is_kernel() ? record : nullptr;
+  }
+  /// Materialize physical descriptor locations at a byte-oriented boundary.
+  /// Semantic analysis and policy retain kernel handles instead.
+  [[nodiscard]] std::vector<uint64_t>
+  execution_owner_descriptors(std::span<const ConSanExecutionOwner> owners) const {
+    std::vector<uint64_t> descriptors;
+    descriptors.reserve(owners.size());
+    for (const ConSanExecutionOwner &owner : owners) {
+      if (const ConSanProgramContainer *record = kernel(owner))
+        descriptors.push_back(record->descriptor_file_offset);
+    }
+    std::ranges::sort(descriptors);
+    descriptors.erase(std::ranges::unique(descriptors).begin(), descriptors.end());
+    return descriptors;
+  }
+  /// Return whether every published semantic owner names a kernel in this
+  /// exact immutable revision.  This catches cross-revision handle leakage at
+  /// the public result boundary.
+  [[nodiscard]] bool execution_owners_well_formed() const {
+    return std::ranges::all_of(program_sites(), [&](const ConSanProgramSite &site) {
+      return std::ranges::all_of(site.execution_owners, [&](const ConSanExecutionOwner &owner) {
+        return kernel(owner) != nullptr;
+      });
+    });
+  }
   [[nodiscard]] std::span<const ConSanProgramContainer> functions() const {
     return containers().subspan(storage_ ? storage_->kernel_count : 0);
   }
@@ -792,8 +835,10 @@ public:
   execution_owner_descriptors(const ConSanProgramSite &site) const {
     std::vector<uint64_t> owners;
     owners.reserve(site.execution_owners.size() + 1u);
-    for (const ConSanExecutionOwner &owner : site.execution_owners)
-      owners.push_back(owner.descriptor_file_offset);
+    for (const ConSanExecutionOwner &owner : site.execution_owners) {
+      if (const ConSanProgramContainer *record = kernel(owner))
+        owners.push_back(record->descriptor_file_offset);
+    }
     if (const ConSanProgramContainer *record = container(site.container.id);
         record != nullptr && record->is_kernel())
       owners.push_back(record->descriptor_file_offset);
@@ -805,8 +850,10 @@ public:
   execution_owner_descriptors(std::span<const ConSanProgramSite *const> aliases) const {
     std::vector<uint64_t> owners;
     for (const ConSanProgramSite *site : aliases) {
-      for (const ConSanExecutionOwner &owner : site->execution_owners)
-        owners.push_back(owner.descriptor_file_offset);
+      for (const ConSanExecutionOwner &owner : site->execution_owners) {
+        if (const ConSanProgramContainer *record = kernel(owner))
+          owners.push_back(record->descriptor_file_offset);
+      }
     }
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
@@ -845,6 +892,7 @@ public:
     if (!storage_)
       return {};
     return {
+        .program_containers = storage_->containers,
         .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
@@ -962,6 +1010,7 @@ public:
     // Acquiring mutable synchronization storage invalidates the derived index.
     storage_->sequence_membership_by_event.clear();
     return {
+        .program_containers = storage_->containers,
         .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,

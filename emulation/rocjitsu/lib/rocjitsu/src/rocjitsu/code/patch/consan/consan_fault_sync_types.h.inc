@@ -61,7 +61,14 @@ enum class ConSanOwnerProofKind : uint8_t {
 };
 
 struct ConSanExecutionOwner {
-  uint64_t descriptor_file_offset = 0;
+  /// Stable kernel handle in the owning ProgramInventory revision.
+  ///
+  /// Descriptor offsets are physical locations and can change when a prior
+  /// mutation rewrites the ELF.  Keeping the semantic owner as an arena
+  /// handle prevents analysis products from treating those locations as
+  /// cross-revision identities.  Lowering resolves the current descriptor
+  /// only when it must read or modify descriptor bytes.
+  ConSanProgramContainerId kernel;
   ConSanOwnerProofKind proof = ConSanOwnerProofKind::KernelLocal;
 
   bool operator==(const ConSanExecutionOwner &) const = default;

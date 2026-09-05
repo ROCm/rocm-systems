@@ -1639,8 +1639,13 @@ static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_co
           : 0u;
   const uint32_t physical_target_address_vgpr = address_bank * 256u + target_address_vgpr;
   for (const ConSanExecutionOwner &owner : execution_owners) {
+    const ConSanProgramContainer *kernel = result.program_inventory.kernel(owner);
+    if (kernel == nullptr) {
+      result.errors.emplace_back("ConSan LDS address fault found a stale execution-owner handle");
+      return;
+    }
     const auto allocated =
-        read_descriptor_vgpr_allocation_count(original_bytes, owner.descriptor_file_offset, arch);
+        read_descriptor_vgpr_allocation_count(original_bytes, kernel->descriptor_file_offset, arch);
     if (!allocated) {
       result.errors.emplace_back(
           "ConSan LDS address fault could not read an execution-owner descriptor");
@@ -1682,8 +1687,8 @@ static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_co
   info.fault_primary_identity = selected->identity;
   info.fault_original_address_vgpr = address_vgpr;
   info.fault_target_address_vgpr = target_address_vgpr;
-  for (const ConSanExecutionOwner &owner : execution_owners)
-    info.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
+  info.owner_descriptor_file_offsets =
+      result.program_inventory.execution_owner_descriptors(execution_owners);
   result.patches.push_back(std::move(info));
   result.mutation.applied_fault_logical_identity = selected->identity;
   result.mark_modified();
@@ -1741,8 +1746,8 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
     info.fault_primary_identity = target->site->identity;
     info.fault_companion_identity = std::move(companion);
     info.fault_sequence_identity = target->sequence->identity;
-    for (const ConSanExecutionOwner &owner : result.execution_owners(*target->site))
-      info.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
+    info.owner_descriptor_file_offsets = result.program_inventory.execution_owner_descriptors(
+        result.execution_owners(*target->site));
     return info;
   };
 

@@ -493,8 +493,7 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
   ASSERT_EQ(access->execution_owners.size(), 1u);
-  EXPECT_EQ(access->execution_owners.front().descriptor_file_offset,
-            result.program_inventory.kernels().front().descriptor_file_offset);
+  EXPECT_EQ(access->execution_owners.front().kernel, result.program_inventory.kernels().front().id);
 }
 
 TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
@@ -525,8 +524,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
   ASSERT_EQ(access->execution_owners.size(), 1u);
-  EXPECT_EQ(access->execution_owners.front().descriptor_file_offset,
-            result.program_inventory.kernels().front().descriptor_file_offset);
+  EXPECT_EQ(access->execution_owners.front().kernel, result.program_inventory.kernels().front().id);
 }
 
 TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {

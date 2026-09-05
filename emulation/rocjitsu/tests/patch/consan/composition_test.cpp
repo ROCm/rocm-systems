@@ -363,7 +363,9 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
   EXPECT_NE(composite.observed_owner_mask &
                 ownership_mask(major_image_ownership::OwnerKind::CompositeImage),
             0u);
-  EXPECT_NE(composite.observed_owner_mask &
+  // Stable kernel handles eliminate the former pair of descriptor-remapping
+  // hash tables from staged composition.
+  EXPECT_EQ(composite.observed_owner_mask &
                 ownership_mask(major_image_ownership::OwnerKind::CompactIndex),
             0u);
   EXPECT_EQ(composite.observed_owner_mask &

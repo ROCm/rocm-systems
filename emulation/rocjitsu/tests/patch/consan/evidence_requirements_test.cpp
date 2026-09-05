@@ -188,7 +188,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
   }
   builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(bytes);
-  builder.access_sites().front().execution_owners = {{.descriptor_file_offset = 512}};
+  builder.access_sites().front().execution_owners = {{.kernel = builder.kernels().front().id}};
 
   InlineEvidenceFixture fixture;
   fixture.inventory = builder.view();

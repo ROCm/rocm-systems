@@ -99,8 +99,7 @@ bool consan_execution_owners_include_requested_kernel(std::span<const ConSanExec
   const ConSanProgramContainer *kernel =
       requested_kernel_owner(inventory.program_inventory, kernel_name_filter);
   return kernel != nullptr &&
-         std::ranges::find(owners, kernel->descriptor_file_offset,
-                           &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
+         std::ranges::find(owners, kernel->id, &ConSanExecutionOwner::kernel) != owners.end();
 }
 
 const ConSanFaultSite *select_fault_site_for_plan(const ConSanFaultSelectionView &inventory,

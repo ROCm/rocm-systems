@@ -357,8 +357,8 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   kernel_c.has_text_range = true;
   inventory_builder.add_kernel(kernel_c);
   inventory_builder.publish_decoded_accesses(bytes);
-  inventory_builder.access_sites().front().execution_owners = {{.descriptor_file_offset = 64u},
-                                                               {.descriptor_file_offset = 128u}};
+  inventory_builder.access_sites().front().execution_owners = {
+      {.kernel = inventory_builder.kernels()[0].id}, {.kernel = inventory_builder.kernels()[1].id}};
   ConSanSyncEvent barrier;
   barrier.semantic_id = {
       .physical = {.code_object = inventory_builder.view().code_object_id(),
@@ -371,7 +371,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ConSanProgramSite fault_source;
   fault_source.physical_id = barrier.semantic_id.physical;
   fault_source.container = consan_program_container_ref(inventory_builder.kernels().back());
-  fault_source.execution_owners.push_back({.descriptor_file_offset = 192u});
+  fault_source.execution_owners.push_back({.kernel = inventory_builder.kernels()[2].id});
   ConSanAtomicSite atomic_source;
   atomic_source.text_offset = 16u;
   atomic_source.file_offset = 16u;
@@ -460,7 +460,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   published_destination.size = 4u;
   published_destination.mnemonic = "v_add_f32";
   published_destination.execution_owners = {
-      {.descriptor_file_offset = 128u, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}};
+      {.kernel = {1}, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}};
   const ConSanBarrierMoveDestinationPresentation expected_destination = published_destination;
   mechanism.barrier_move_destinations.push_back(std::move(published_destination));
 
@@ -499,6 +499,10 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   publication_resources.moi_report_buffer_size = 128u * 1024u * 1024u;
   ConSanTransformArtifacts invalid_fault_source = mechanism;
   invalid_fault_source.fault_sites.front().source_site = {};
+  ConSanTransformArtifacts invalid_execution_owner = mechanism;
+  ProgramInventoryBuilder invalid_owner_builder(inventory);
+  invalid_owner_builder.access_sites().front().execution_owners.front().kernel = {99};
+  invalid_execution_owner.program_inventory = invalid_owner_builder.view();
   const TransformResult published = TransformResultTestAccess::publish(
       bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
@@ -524,8 +528,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   EXPECT_EQ(fault_diagnostic.decoded_operands, "addr_vgpr=2");
   EXPECT_EQ(fault_diagnostic.sync_confidence, ConSanSemanticConfidence::Exact);
   EXPECT_EQ(fault_diagnostic.sync_memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(fault_diagnostic.execution_owners,
-            std::vector<ConSanExecutionOwner>{{.descriptor_file_offset = 192u}});
+  EXPECT_EQ(fault_diagnostic.execution_owners, std::vector<ConSanExecutionOwner>{{.kernel = {2}}});
   EXPECT_EQ(fault_diagnostic.sync_event_identity, "event:24");
   EXPECT_EQ(fault_diagnostic.sync_sequence_identity, "sequence:24");
   const TransformResult malformed_fault_source = TransformResultTestAccess::publish(
@@ -533,6 +536,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
       complete_runtime_capabilities(), publication_resources, std::move(invalid_fault_source));
   EXPECT_FALSE(malformed_fault_source.well_formed());
+  const TransformResult malformed_execution_owner = TransformResultTestAccess::publish(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
+      complete_runtime_capabilities(), publication_resources, std::move(invalid_execution_owner));
+  EXPECT_FALSE(malformed_execution_owner.well_formed());
   ASSERT_EQ(published_diagnostics.barrier_move_destinations.size(), 1u);
   EXPECT_EQ(published_diagnostics.barrier_move_destinations.front(), expected_destination);
   ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);

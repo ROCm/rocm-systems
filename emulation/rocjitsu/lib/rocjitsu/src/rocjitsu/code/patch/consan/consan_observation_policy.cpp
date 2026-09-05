@@ -65,8 +65,9 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
                std::to_string(decision.semantic_site.physical.original_text_offset) +
                " was decoded inconsistently through ";
     message += supercollider ? "physical aliases"
-                             : "aliases '" + quoted_aliases(inventory.source_container_names(
-                                                  decision.semantic_site.physical)) +
+                             : "aliases '" +
+                                   quoted_aliases(inventory.source_container_names(
+                                       decision.semantic_site.physical)) +
                                    "'";
     product.diagnostics.push_back(std::move(message));
   }
@@ -165,8 +166,10 @@ bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
                                           std::span<const std::string> kernel_name_allowlist) {
   std::vector<uint64_t> descriptors;
   descriptors.reserve(execution_owners.size());
-  for (const ConSanExecutionOwner &owner : execution_owners)
-    descriptors.push_back(owner.descriptor_file_offset);
+  for (const ConSanExecutionOwner &owner : execution_owners) {
+    if (const ConSanProgramContainer *kernel = inventory.kernel(owner))
+      descriptors.push_back(kernel->descriptor_file_offset);
+  }
   return consan_site_matches_kernel_allowlist(inventory, descriptors, source_containers,
                                               kernel_name_allowlist);
 }

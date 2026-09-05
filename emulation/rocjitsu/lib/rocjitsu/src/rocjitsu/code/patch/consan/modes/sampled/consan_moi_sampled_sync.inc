@@ -517,12 +517,10 @@ void try_apply_sampled_barrier_sync_patch(
     const ConSanSyncSequence *sequence_ptr =
         result.program_inventory.sync().find_unique_sequence(barrier_plan.association.value);
     const std::vector<ConSanExecutionOwner> sequence_owners =
-        sequence_ptr != nullptr
-            ? result.program_inventory.sync().execution_owners(*sequence_ptr)
-            : std::vector<ConSanExecutionOwner>{};
+        sequence_ptr != nullptr ? result.program_inventory.sync().execution_owners(*sequence_ptr)
+                                : std::vector<ConSanExecutionOwner>{};
     if (sequence_ptr == nullptr ||
-        !consan_moi_sampled_qualifies_barrier_sequence(*sequence_ptr,
-                                                      !sequence_owners.empty())) {
+        !consan_moi_sampled_qualifies_barrier_sequence(*sequence_ptr, !sequence_owners.empty())) {
       result.errors.emplace_back("ConSan MOI sampled barrier evidence lost its qualified sequence");
       return;
     }
@@ -537,13 +535,13 @@ void try_apply_sampled_barrier_sync_patch(
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
     std::optional<uint16_t> common_owner_shift;
     for (const ConSanExecutionOwner &owner : sequence_owners) {
-      const ConSanProgramContainer *owner_kernel =
-          result.program_inventory.find_kernel_by_descriptor(owner.descriptor_file_offset);
+      const ConSanProgramContainer *owner_kernel = result.program_inventory.kernel(owner);
       if (owner_kernel == nullptr ||
-          !moi_resource_has_owner_context(resource_state, owner.descriptor_file_offset)) {
+          !moi_resource_has_owner_context(resource_state, owner_kernel->descriptor_file_offset)) {
         owner_lowering_failure = "missing kernel resource context";
         break;
       }
+      const uint64_t owner_descriptor_file_offset = owner_kernel->descriptor_file_offset;
       if (!first_owner && uses_cluster_workgroup_id != owner_kernel->uses_cluster_workgroup_id) {
         owner_lowering_failure = "incompatible cluster workgroup ABI";
         break;
@@ -551,9 +549,9 @@ void try_apply_sampled_barrier_sync_patch(
       uses_cluster_workgroup_id = owner_kernel->uses_cluster_workgroup_id;
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
-          bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
+          bytes, owner_descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
       ConSanMoiOperatingPoint owner_point = operating_point;
-      const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
+      const std::array<uint64_t, 1> owner_descriptor = {owner_descriptor_file_offset};
       if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point,
                                                 owner_descriptor)) {
         owner_lowering_failure = "missing owner-local persistent assignment";
@@ -561,7 +559,7 @@ void try_apply_sampled_barrier_sync_patch(
       }
       const auto owner_shift =
           owner_point.automatic_moi_private_epoch
-              ? moi_descriptor_owner_shift(bytes, owner.descriptor_file_offset, arch, result.errors)
+              ? moi_descriptor_owner_shift(bytes, owner_descriptor_file_offset, arch, result.errors)
               : std::optional<uint16_t>(0u);
       if (!workgroup_sources || !owner_shift ||
           (common_workgroup_sources && *common_workgroup_sources != *workgroup_sources) ||
@@ -572,12 +570,12 @@ void try_apply_sampled_barrier_sync_patch(
       common_workgroup_sources = *workgroup_sources;
       common_owner_shift = *owner_shift;
       const auto distance_index = make_moi_cfg_forward_distance_index(
-          resource_state, owner.descriptor_file_offset, sequence.begin_text_offset);
+          resource_state, owner_descriptor_file_offset, sequence.begin_text_offset);
       if (!distance_index) {
         owner_lowering_failure = "missing owner CFG distance proof";
         break;
       }
-      const auto owner_windows = windows_by_descriptor.find(owner.descriptor_file_offset);
+      const auto owner_windows = windows_by_descriptor.find(owner_descriptor_file_offset);
       if (owner_windows == windows_by_descriptor.end()) {
         every_owner_has_window = false;
         break;
@@ -626,7 +624,7 @@ void try_apply_sampled_barrier_sync_patch(
     }
     MoiBarrierEvidenceSitePlan lowering_plan = barrier_plan;
     lowering_plan.kernel_descriptor_file_offset =
-        sequence_owners.front().descriptor_file_offset;
+        result.program_inventory.kernel(sequence_owners.front())->descriptor_file_offset;
     candidates.push_back(
         {&sequence, std::move(lowering_plan), std::move(windows), uses_cluster_workgroup_id});
   }

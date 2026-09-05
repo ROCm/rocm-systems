@@ -185,8 +185,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       if (fault_source == nullptr || fault_source->container.is_kernel() ||
           fault_source->container.name != site.container.name)
         continue;
-      for (const ConSanExecutionOwner &owner : fault_source->execution_owners)
-        owners.push_back(owner.descriptor_file_offset);
+      const std::vector<uint64_t> fault_owners =
+          result.program_inventory.execution_owner_descriptors(fault_source->execution_owners);
+      owners.insert(owners.end(), fault_owners.begin(), fault_owners.end());
     }
     auto facts = owner_analysis.site_facts(site, std::move(owners));
     if (!facts || !facts->common_unified_vgpr_count || !facts->common_sgpr_count) {

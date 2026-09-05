@@ -5376,21 +5376,19 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
       semantic_site(0x40u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
   const rocjitsu::ConSanSynchronizationAssociationId atomic_association{"test-atomic"};
   const rocjitsu::ConSanSynchronizationAssociationId fence_association{"test-fence"};
-  install_consan_test_program_inventory(
-      result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
-        const auto add_source = [&](uint64_t offset, std::string name) {
-          rocjitsu::ConSanProgramSite site;
-          site.physical_id.original_text_offset = offset;
-          site.container = {.id = {},
-                            .kind = rocjitsu::ConSanProgramContainerKind::Kernel,
-                            .name = std::move(name)};
-          builder.add_semantic_site(std::move(site));
-        };
-        add_source(0x10u, "unsupported_kernel");
-        add_source(0x20u, "barrier_helper");
-        add_source(0x30u, "atomic_kernel");
-        add_source(0x40u, "fence_kernel");
-      });
+  install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+    const auto add_source = [&](uint64_t offset, std::string name) {
+      rocjitsu::ConSanProgramSite site;
+      site.physical_id.original_text_offset = offset;
+      site.container = {
+          .id = {}, .kind = rocjitsu::ConSanProgramContainerKind::Kernel, .name = std::move(name)};
+      builder.add_semantic_site(std::move(site));
+    };
+    add_source(0x10u, "unsupported_kernel");
+    add_source(0x20u, "barrier_helper");
+    add_source(0x30u, "atomic_kernel");
+    add_source(0x40u, "fence_kernel");
+  });
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
@@ -5482,15 +5480,13 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
       .member_ordinal = 0u,
       .range_ordinal = 0u,
   };
-  install_consan_test_program_inventory(
-      result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
-        rocjitsu::ConSanProgramSite site;
-        site.physical_id.original_text_offset = 0x10u;
-        site.container = {.id = {},
-                          .kind = rocjitsu::ConSanProgramContainerKind::Kernel,
-                          .name = "typed_kernel"};
-        builder.add_semantic_site(std::move(site));
-      });
+  install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+    rocjitsu::ConSanProgramSite site;
+    site.physical_id.original_text_offset = 0x10u;
+    site.container = {
+        .id = {}, .kind = rocjitsu::ConSanProgramContainerKind::Kernel, .name = "typed_kernel"};
+    builder.add_semantic_site(std::move(site));
+  });
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
@@ -6006,8 +6002,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   inventory.add_access_site(std::move(access));
   inventory.add_kernel(std::move(kernel));
   inventory.publish_decoded_accesses(instruction_bytes);
-  inventory.access_sites().front().execution_owners = {
-      {.descriptor_file_offset = owner_descriptor_offset}};
+  inventory.access_sites().front().execution_owners = {{.kernel = inventory.kernels().front().id}};
   result.program_inventory = inventory.view();
   install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
                                rocjitsu::ConSanAccessPolicyReason::None,

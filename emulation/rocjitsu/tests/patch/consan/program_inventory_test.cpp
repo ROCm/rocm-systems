@@ -298,13 +298,23 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.find_kernel_by_name("missing"), nullptr);
   EXPECT_EQ(inventory.find_function_by_name("helper"), &inventory.functions()[0]);
   EXPECT_EQ(inventory.find_function_by_name("missing"), nullptr);
+  EXPECT_EQ(inventory.kernel({.kernel = inventory.kernels()[1].id}), &inventory.kernels()[1]);
+  EXPECT_EQ(inventory.kernel({.kernel = inventory.functions()[0].id}), nullptr);
+  EXPECT_EQ(inventory.kernel({}), nullptr);
 
   ConSanProgramSite owned;
   owned.container = consan_program_container_ref(inventory.kernels()[0]);
-  owned.execution_owners = {{.descriptor_file_offset = 768},
-                            {.descriptor_file_offset = 512},
-                            {.descriptor_file_offset = 768}};
+  owned.execution_owners = {{.kernel = inventory.kernels()[1].id},
+                            {.kernel = inventory.kernels()[0].id},
+                            {.kernel = inventory.kernels()[1].id}};
   EXPECT_EQ(inventory.execution_owner_descriptors(owned), (std::vector<uint64_t>{512, 768}));
+  EXPECT_TRUE(inventory.execution_owners_well_formed());
+
+  ProgramInventoryBuilder stale_owner(builder.view());
+  ConSanProgramSite stale_site;
+  stale_site.execution_owners = {{.kernel = {99}}};
+  stale_owner.add_semantic_site(std::move(stale_site));
+  EXPECT_FALSE(stale_owner.view().execution_owners_well_formed());
 
   // A pre-insertion synthetic reference may be rebound by kind and name only
   // when that attribution is unique. Duplicate symbol names must not silently
@@ -499,14 +509,14 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   first_source.container = {
       .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "shared-owner"};
   first_source.execution_owners = {
-      {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::KernelLocal},
-      {.descriptor_file_offset = 128, .proof = ConSanOwnerProofKind::DirectCall},
+      {.kernel = {0}, .proof = ConSanOwnerProofKind::KernelLocal},
+      {.kernel = {1}, .proof = ConSanOwnerProofKind::DirectCall},
   };
   ConSanProgramSite second_source;
   second_source.container = first_source.container;
   second_source.execution_owners = {
-      {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::RecoveredIndirectCall},
-      {.descriptor_file_offset = 256, .proof = ConSanOwnerProofKind::KernelLocal},
+      {.kernel = {0}, .proof = ConSanOwnerProofKind::RecoveredIndirectCall},
+      {.kernel = {2}, .proof = ConSanOwnerProofKind::KernelLocal},
   };
   builder.add_semantic_site(std::move(first_source));
   builder.add_semantic_site(std::move(second_source));
@@ -526,8 +536,8 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   ASSERT_NE(graph.container(graph.sync_sequences.front()), nullptr);
   EXPECT_EQ(graph.container_name(graph.sync_sequences.front()), "shared-owner");
   EXPECT_EQ(graph.execution_owners(graph.sync_sequences.front()),
-            (std::vector<ConSanExecutionOwner>{{.descriptor_file_offset = 64,
-                                                .proof = ConSanOwnerProofKind::RecoveredIndirectCall}}));
+            (std::vector<ConSanExecutionOwner>{
+                {.kernel = {0}, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}}));
 
   ProgramInventoryBuilder malformed(builder.view());
   malformed.synchronization().sync_sequences.front().member_event_ids.push_back({99});
@@ -1108,8 +1118,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
     EXPECT_FALSE(site.mnemonic_view().empty());
     EXPECT_TRUE(site.operands.address_vgpr);
     ASSERT_EQ(site.execution_owners.size(), 1u);
-    EXPECT_EQ(site.execution_owners.front().descriptor_file_offset,
-              result.program_inventory.kernels().front().descriptor_file_offset);
+    EXPECT_EQ(site.execution_owners.front().kernel, result.program_inventory.kernels().front().id);
   }
 }
 

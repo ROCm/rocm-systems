@@ -192,6 +192,14 @@ endif()
 file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
 file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
 file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
+string(REGEX MATCH "struct ConSanExecutionOwner [{][^}]*[}];" _execution_owner_contract
+             "${_fault_presentation_contract}")
+if(NOT _execution_owner_contract MATCHES "ConSanProgramContainerId kernel" OR
+   _execution_owner_contract MATCHES "descriptor_file_offset")
+    message(FATAL_ERROR
+        "ConSan semantic execution owners must retain kernel handles, not physical descriptors"
+    )
+endif()
 string(REGEX MATCH "struct ConSanFaultSite [{][^}]*[}];" _fault_site_contract
              "${_fault_presentation_contract}")
 if(NOT _fault_site_contract MATCHES "ConSanProgramSiteId source_site")
@@ -3787,6 +3795,13 @@ if(_fault_composition_body MATCHES "find_fault_plan" OR
    _fault_composition_body MATCHES "try_apply_.*fault_patch")
     message(FATAL_ERROR
         "ConSan composition must not rediscover or dispatch private fault mechanisms"
+    )
+endif()
+if(_fault_composition_body MATCHES
+       "ConSanDescriptor(Name|Owner)Index|pristine_code_object|staged_code_object" OR
+   NOT _fault_composition_body MATCHES "translate_owner_descriptors")
+    message(FATAL_ERROR
+        "ConSan composition must translate owners through stable inventory identities"
     )
 endif()
 
