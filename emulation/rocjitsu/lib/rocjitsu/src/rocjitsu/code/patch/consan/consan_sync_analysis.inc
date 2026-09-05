@@ -1984,12 +1984,8 @@ void associate_ordinary_release_sync_sequences(
         !consan_memory_scope_is_agent_or_system(*store->scope) ||
         store->confidence != ConSanSemanticConfidence::Conservative ||
         store_decoded->execution_owners.empty() ||
-        !std::ranges::equal(
-            store_decoded->execution_owners, sequence.execution_owners,
-            [](const ConSanExecutionOwner &left, const ConSanExecutionOwner &right) {
-              return left.descriptor_file_offset == right.descriptor_file_offset &&
-                     left.proof == right.proof;
-            })) {
+        !consan_execution_owners_equal(store_decoded->execution_owners,
+                                       sequence.execution_owners)) {
       continue;
     }
     const auto boundary = exact_release_wait_boundary(sequence, blocks, arch);

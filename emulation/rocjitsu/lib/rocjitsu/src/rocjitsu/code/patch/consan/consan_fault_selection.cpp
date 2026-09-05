@@ -14,15 +14,6 @@
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] bool same_execution_owners(std::span<const ConSanExecutionOwner> lhs,
-                                         std::span<const ConSanExecutionOwner> rhs) {
-  return !lhs.empty() && lhs.size() == rhs.size() &&
-         std::ranges::equal(lhs, rhs, [](const auto &left, const auto &right) {
-           return left.descriptor_file_offset == right.descriptor_file_offset &&
-                  left.proof == right.proof;
-         });
-}
-
 [[nodiscard]] const ConSanProgramContainer *
 requested_kernel_owner(const ProgramInventory &inventory, std::string_view filter) {
   if (filter.empty())
@@ -155,7 +146,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         !sequence->basic_block_index || sequence->member_semantic_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
         sync.find_sequence_member(sequence->member_semantic_ids.front()) != load ||
-        !same_execution_owners(sequence->execution_owners, site.execution_owners))
+        !consan_nonempty_execution_owners_equal(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
     const ConSanSyncEvent *cache = sync.find_sequence_member(sequence->member_semantic_ids.back());
     const ConSanFenceSite *cache_source =
@@ -163,7 +154,8 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
     if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
         cache_source->cache_operation != ConSanCacheOperation::Acquire ||
         !cache_source->ordinary_acquire_mutation_supported || !sync.same_container(*cache, *load) ||
-        !same_execution_owners(sync.execution_owners(*cache), sync.execution_owners(*load)) ||
+        !consan_nonempty_execution_owners_equal(sync.execution_owners(*cache),
+                                                sync.execution_owners(*load)) ||
         cache_source->size == 0u || cache_source->size % sizeof(uint32_t) != 0u)
       return std::nullopt;
     return OrdinaryAcquireMutationTarget{&site, load, cache, sequence};
@@ -291,8 +283,8 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
   }
   if (first.pair->sequence->container_name != second.pair->sequence->container_name ||
       first.pair->sequence->in_kernel != second.pair->sequence->in_kernel ||
-      !same_execution_owners(first.pair->sequence->execution_owners,
-                             second.pair->sequence->execution_owners)) {
+      !consan_nonempty_execution_owners_equal(first.pair->sequence->execution_owners,
+                                              second.pair->sequence->execution_owners)) {
     return {.group = std::nullopt,
             .issue = Issue::PairsHaveDifferentOwners,
             .member_issue = ExactBarrierDropPairIssue::None};

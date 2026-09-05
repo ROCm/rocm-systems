@@ -67,6 +67,17 @@ struct ConSanExecutionOwner {
   bool operator==(const ConSanExecutionOwner &) const = default;
 };
 
+[[nodiscard]] inline bool consan_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs,
+                                                        std::span<const ConSanExecutionOwner> rhs) {
+  return std::ranges::equal(lhs, rhs);
+}
+
+[[nodiscard]] inline bool
+consan_nonempty_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs,
+                                       std::span<const ConSanExecutionOwner> rhs) {
+  return !lhs.empty() && consan_execution_owners_equal(lhs, rhs);
+}
+
 /// Stable presentation facts for one currently injectable instruction.
 ///
 /// Completed analysis products inherit this value and add only application-

@@ -8,20 +8,6 @@
 #include <span>
 
 namespace rocjitsu {
-namespace {
-
-[[nodiscard]] bool same_execution_owners(std::span<const ConSanExecutionOwner> lhs,
-                                         std::span<const ConSanExecutionOwner> rhs) {
-  return !lhs.empty() && lhs.size() == rhs.size() &&
-         std::ranges::equal(
-             lhs, rhs, [](const ConSanExecutionOwner &left, const ConSanExecutionOwner &right) {
-               return left.descriptor_file_offset == right.descriptor_file_offset &&
-                      left.proof == right.proof;
-             });
-}
-
-} // namespace
-
 bool is_release_cache_event(std::span<const ConSanProgramSite> program_sites,
                             const ConSanSyncEvent *event) {
   const ConSanFenceSite *fence =
@@ -81,9 +67,12 @@ bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSi
          load_sequence.basic_block_index && cache_sequence.basic_block_index &&
          (!require_same_block ||
           load_sequence.basic_block_index == cache_sequence.basic_block_index) &&
-         same_execution_owners(load_decoded->execution_owners, cache_decoded->execution_owners) &&
-         same_execution_owners(load_sequence.execution_owners, cache_sequence.execution_owners) &&
-         same_execution_owners(load_decoded->execution_owners, load_sequence.execution_owners);
+         consan_nonempty_execution_owners_equal(load_decoded->execution_owners,
+                                                cache_decoded->execution_owners) &&
+         consan_nonempty_execution_owners_equal(load_sequence.execution_owners,
+                                                cache_sequence.execution_owners) &&
+         consan_nonempty_execution_owners_equal(load_decoded->execution_owners,
+                                                load_sequence.execution_owners);
 }
 
 bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSite> program_sites,
@@ -124,9 +113,12 @@ bool consan_ordinary_release_metadata_compatible(std::span<const ConSanProgramSi
          store_sequence.operation == ConSanSyncOperation::OrdinaryStore &&
          cache_sequence.basic_block_index &&
          cache_sequence.basic_block_index == store_sequence.basic_block_index &&
-         same_execution_owners(cache_decoded->execution_owners, store_decoded->execution_owners) &&
-         same_execution_owners(cache_sequence.execution_owners, store_sequence.execution_owners) &&
-         same_execution_owners(store_decoded->execution_owners, store_sequence.execution_owners);
+         consan_nonempty_execution_owners_equal(cache_decoded->execution_owners,
+                                                store_decoded->execution_owners) &&
+         consan_nonempty_execution_owners_equal(cache_sequence.execution_owners,
+                                                store_sequence.execution_owners) &&
+         consan_nonempty_execution_owners_equal(store_decoded->execution_owners,
+                                                store_sequence.execution_owners);
 }
 
 } // namespace rocjitsu

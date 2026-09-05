@@ -19,9 +19,7 @@ namespace {
 /// whether no sequence or multiple incompatible sequences caused rejection.
 [[nodiscard]] bool owner_semantics_equal(std::span<const ConSanExecutionOwner> lhs,
                                          std::span<const ConSanExecutionOwner> rhs) {
-  return std::ranges::equal(lhs, rhs, [](const auto &left, const auto &right) {
-    return left.descriptor_file_offset == right.descriptor_file_offset && left.proof == right.proof;
-  });
+  return consan_execution_owners_equal(lhs, rhs);
 }
 
 [[nodiscard]] bool event_policy_semantics_equal(const SynchronizationInventoryView &inventory,
