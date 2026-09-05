@@ -58,7 +58,13 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     if (selected.size() == max_candidates)
       break;
     MoiFenceEvidenceSitePlan candidate = candidates[candidate_index];
-    const uint64_t fence_text_offset = candidate.semantic_site.physical.original_text_offset;
+    const ConSanSyncEvent *fence_event =
+        result.program_inventory.sync().find_event(candidate.event);
+    if (fence_event == nullptr) {
+      result.errors.emplace_back("ConSan MOI fence record patch lost its evidence event");
+      return;
+    }
+    const uint64_t fence_text_offset = fence_event->text_offset();
     if (candidate.patch_text_offset > old_text.size() ||
         candidate.patch_size > old_text.size() - candidate.patch_text_offset) {
       result.errors.emplace_back("ConSan MOI fence record patch site is outside .text");
@@ -85,7 +91,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
         existing_plan ? *existing_plan
                       : plan_moi_resource_site(*resource_state, options, options, operating_point,
                                                ConSanResourceSiteKind::Fence, candidate_index,
-                                               candidate.patch_text_offset, candidate.owner_site,
+                                               candidate.patch_text_offset, candidate.source_site,
                                                scratch_count, nullptr,
                                                &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
@@ -174,13 +180,19 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     fragments.push_back(ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
   uint32_t record_index = 0;
   for (const PlannedFenceRecord &planned : selected) {
+    const ConSanSyncEvent *fence_event =
+        result.program_inventory.sync().find_event(planned.candidate.event);
+    if (fence_event == nullptr) {
+      result.errors.emplace_back("ConSan MOI fence record emission lost its evidence event");
+      return;
+    }
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
     const uint64_t patch_text_offset = planned.candidate.patch_text_offset;
     const uint32_t patch_size = planned.candidate.patch_size;
     uint32_t guest_instruction_offset = 0u;
     auto cave_words = build_fence_record_cave_words(
-        active_bytes, planned.candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr,
+        active_bytes, planned.candidate, fence_event->text_offset(), planned.address_plan,
+        candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset,
         /*displaced_tail_words=*/{}, result.errors, &guest_instruction_offset);

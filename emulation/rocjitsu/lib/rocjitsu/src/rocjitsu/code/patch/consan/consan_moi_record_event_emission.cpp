@@ -487,9 +487,10 @@ using consan_moi_detail::kFenceRecordLayout;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
+    uint64_t fence_text_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t record_index,
+    uint32_t record_capacity_or_count, size_t fence_records_offset,
     std::span<const uint32_t> displaced_tail_words, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset) {
   (void)record_index;
@@ -660,7 +661,7 @@ using consan_moi_detail::kFenceRecordLayout;
       record.scalar(offsetof(ConSanMoiFenceRecord, epoch), *options.moi_persistent_sgprs.epoch());
     record
         .literal(offsetof(ConSanMoiFenceRecord, instruction_offset),
-                 static_cast<uint32_t>(candidate.semantic_site.physical.original_text_offset))
+                 static_cast<uint32_t>(fence_text_offset))
         .literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind))
         .literal(offsetof(ConSanMoiFenceRecord, scope), *report_scope)
         .literal(offsetof(ConSanMoiFenceRecord, semantics),

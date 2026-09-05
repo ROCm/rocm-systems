@@ -82,7 +82,7 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(*resources, options, options, operating_point,
                                           ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                          candidate.owner_site, /*scratch_count=*/6u);
+                                          candidate.source_site, /*scratch_count=*/6u);
     plan.intent_ids = {candidate.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);

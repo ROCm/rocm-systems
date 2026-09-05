@@ -77,7 +77,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   const auto reject = [](Reason reason) {
     return SampledAtomicSemanticsResult{.semantics = std::nullopt, .reason = reason};
   };
-  const ConSanSyncSequence *sequence = graph.find_unique_sequence(plan.association.value);
+  const ConSanSyncSequence *sequence = graph.find_sequence(plan.sequence);
   if (sequence == nullptr ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
@@ -268,9 +268,9 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     }
 
     MoiFenceEvidenceSitePlan plan;
-    plan.semantic_site = decision.semantic_site;
-    plan.owner_site = communication->source_site;
-    plan.association = *decision.association;
+    plan.event = graph.event_id(*fence_event);
+    plan.sequence = graph.sequence_id(*sequence);
+    plan.source_site = communication->source_site;
     plan.evidence_intent = evidence;
     plan.address_capture_intent = address_capture;
     plan.memory_role = association->memory_role;
@@ -335,8 +335,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plans.push_back(std::move(plan));
   }
 
-  std::ranges::sort(plans, {}, [](const MoiFenceEvidenceSitePlan &plan) {
-    return plan.semantic_site.physical.original_text_offset;
+  std::ranges::sort(plans, {}, [&](const MoiFenceEvidenceSitePlan &plan) {
+    return graph.find_event(plan.event)->text_offset();
   });
   return plans;
 }
@@ -440,9 +440,9 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     }
 
     MoiAtomicEvidenceSitePlan plan;
-    plan.semantic_site = decision.semantic_site;
-    plan.owner_site = event->source_site;
-    plan.association = *decision.association;
+    plan.event = graph.event_id(*event);
+    plan.sequence = graph.sequence_id(*sequence);
+    plan.source_site = event->source_site;
     plan.address_capture_intent = address_capture;
     plan.evidence_intent = evidence;
     plan.event_kind = *event_kind;

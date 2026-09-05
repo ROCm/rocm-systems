@@ -512,7 +512,7 @@ void try_apply_sampled_barrier_sync_patch(
   std::vector<SampledBarrierCandidate> candidates;
   for (const MoiBarrierEvidenceSitePlan &barrier_plan : barrier_plans) {
     const ConSanSyncSequence *sequence_ptr =
-        result.program_inventory.sync().find_unique_sequence(barrier_plan.association.value);
+        result.program_inventory.sync().find_sequence(barrier_plan.sequence);
     const std::vector<ConSanExecutionOwner> sequence_owners =
         sequence_ptr != nullptr ? result.program_inventory.sync().execution_owners(*sequence_ptr)
                                 : std::vector<ConSanExecutionOwner>{};
@@ -696,7 +696,7 @@ void try_apply_sampled_barrier_sync_patch(
     } else {
       plan = plan_moi_resource_site(resource_state, options, options, operating_point,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                    candidate.barrier.owner_site,
+                                    candidate.barrier.source_site,
                                     operating_point.automatic_moi_private_epoch ? 9u : 7u);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans.push_back(plan);
@@ -719,7 +719,7 @@ void try_apply_sampled_barrier_sync_patch(
     if (plan.scratch_vgpr_count != scratch_count) {
       plan = plan_moi_resource_site(resource_state, options, options, candidate_point,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                    candidate.barrier.owner_site, scratch_count);
+                                    candidate.barrier.source_site, scratch_count);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans[resource_plan_index] = plan;
     }
@@ -1005,7 +1005,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const ConSanProgramContainer *owner =
         result.program_inventory.find_kernel_by_descriptor(owner_descriptor_file_offset);
     const ConSanProgramSite *site =
-        result.program_inventory.program_site(candidate.atomic.owner_site);
+        result.program_inventory.program_site(candidate.atomic.source_site);
     return owner != nullptr && site != nullptr &&
            std::ranges::find(site->execution_owners, owner->id, &ConSanExecutionOwner::kernel) !=
                site->execution_owners.end();
@@ -1275,7 +1275,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(resource_state, options, options, operating_point,
                                           ConSanResourceSiteKind::Atomic, index, site.text_offset,
-                                          candidate.atomic.owner_site, scratch_count, nullptr,
+                                          candidate.atomic.source_site, scratch_count, nullptr,
                                           &candidate.atomic.lowering_form);
     plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)

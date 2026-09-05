@@ -249,7 +249,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         existing_plan ? *existing_plan
                       : plan_moi_resource_site(*resource_state, options, options, operating_point,
                                                ConSanResourceSiteKind::Atomic, candidate_index,
-                                               site.text_offset, candidate.owner_site,
+                                               site.text_offset, candidate.source_site,
                                                scratch_count, nullptr, &candidate.lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)

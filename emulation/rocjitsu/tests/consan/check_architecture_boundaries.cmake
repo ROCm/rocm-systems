@@ -224,10 +224,14 @@ foreach(_plan IN ITEMS
 )
     string(REGEX MATCH "struct ${_plan} [{][^}]*" _site_plan_contract
                  "${_moi_evidence_contract}")
-    if(NOT _site_plan_contract MATCHES "ConSanProgramSiteId owner_site" OR
+    if(NOT _site_plan_contract MATCHES "ConSanSyncEventId event" OR
+       NOT _site_plan_contract MATCHES "ConSanSyncSequenceId sequence" OR
+       NOT _site_plan_contract MATCHES "ConSanProgramSiteId source_site" OR
+       _site_plan_contract MATCHES "SemanticSiteId semantic_site" OR
+       _site_plan_contract MATCHES "ConSanSynchronizationAssociationId association" OR
        _site_plan_contract MATCHES "kernel_descriptor_file_offset")
         message(FATAL_ERROR
-            "ConSan ${_plan} must retain a semantic owner site, not cache a physical descriptor"
+            "ConSan ${_plan} must retain stable graph/source handles, not copied identities or descriptors"
         )
     endif()
 endforeach()

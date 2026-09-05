@@ -54,9 +54,9 @@
     }
 
     MoiBarrierEvidenceSitePlan plan;
-    plan.semantic_site = event->semantic_id;
-    plan.owner_site = event->source_site;
-    plan.association = {.value = sequence->identity};
+    plan.event = graph.event_id(*event);
+    plan.sequence = graph.sequence_id(*sequence);
+    plan.source_site = event->source_site;
     plan.evidence_intent = id;
     plan.in_kernel = graph.in_kernel(*event);
     auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*event),
@@ -72,7 +72,7 @@
     plan.container_entry_text_offset = container->entry_text_offset;
     plan.container_code_size = container->code_size;
     plan.text_file_offset = container->text_file_offset;
-    if (!plan.is_well_formed()) {
+    if (!plan.is_well_formed() || plan.site.text_offset != event->text_offset()) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
     }
@@ -407,7 +407,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       owners = plan->owner_descriptor_file_offsets;
     }
     if (owners.empty())
-      owners = result.program_inventory.execution_owner_descriptors(candidate.owner_site);
+      owners = result.program_inventory.execution_owner_descriptors(candidate.source_site);
     if ((operating_point.automatic_moi_persistent_vgprs ||
          operating_point.moi_persistent_sgprs.complete() ||
          operating_point.automatic_moi_private_epoch) &&

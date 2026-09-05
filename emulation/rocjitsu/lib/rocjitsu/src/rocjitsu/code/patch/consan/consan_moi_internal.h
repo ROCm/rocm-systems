@@ -658,11 +658,11 @@ struct MoiWorkitemOwnerDerivationRequest {
 /// contract with `is_rmw == false`; their complete ordered suffix is retained
 /// in `ordered_sequence_end_text_offset`.
 struct MoiAtomicEvidenceSitePlan {
-  /// Authoritative original-program event selected by evidence policy.
-  SemanticSiteId semantic_site;
+  /// Authoritative synchronization event selected by evidence policy.
+  ConSanSyncEventId event;
 
-  /// Stable identity of the normalized sequence that establishes ordering.
-  ConSanSynchronizationAssociationId association;
+  /// Stable inventory-local identity of the sequence that establishes ordering.
+  ConSanSyncSequenceId sequence;
 
   /// Before-guest intent that preserves the effective communication address.
   ConSanProbeIntentId address_capture_intent;
@@ -681,8 +681,8 @@ struct MoiAtomicEvidenceSitePlan {
   /// ordering mechanism. Native lowerers consume it and never re-admit `site`.
   ConSanAtomicLoweringForm lowering_form;
 
-  /// Stable source site whose canonical execution owners scope lowering.
-  ConSanProgramSiteId owner_site;
+  /// Stable decoded source whose operands and execution owners scope lowering.
+  ConSanProgramSiteId source_site;
 
   /// Normalized release/acquire role selected from the shared sequence.
   ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
@@ -705,7 +705,7 @@ struct MoiAtomicEvidenceSitePlan {
     return {address_capture_intent, evidence_intent};
   }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() && owner_site.valid() && association.valid() &&
+    return event.valid() && sequence.valid() && source_site.valid() &&
            address_capture_intent.valid() && evidence_intent.valid() &&
            address_capture_intent != evidence_intent && !container_name.empty() &&
            site.size != 0u && site.width_bits != 0u &&
@@ -726,18 +726,18 @@ struct MoiAtomicEvidenceSitePlan {
 /// lowering consumes these already-selected facts and must not rescan the
 /// synchronization graph or reinterpret cache ordering.
 struct MoiFenceEvidenceSitePlan {
-  /// Stable identity of the admitted fence event in the original code object.
-  SemanticSiteId semantic_site;
+  /// Stable inventory-local identity of the admitted fence event.
+  ConSanSyncEventId event;
 
-  /// Stable graph identity of the complete qualified communication sequence.
-  ConSanSynchronizationAssociationId association;
+  /// Stable inventory-local identity of the qualified communication sequence.
+  ConSanSyncSequenceId sequence;
 
   /// After-guest `FenceRecord` intent implemented by this lowering plan.
   ConSanProbeIntentId evidence_intent;
 
   /// Before-guest intent that preserves the communication address reported
   /// by the fence record. This intent can name the address-bearing ordinary
-  /// operation while `semantic_site` names the completing fence.
+  /// operation while `event` names the completing fence.
   ConSanProbeIntentId address_capture_intent;
 
   /// Diagnostic container spelling, including `kernel:` or `function:`.
@@ -753,8 +753,8 @@ struct MoiFenceEvidenceSitePlan {
   /// Release or acquire role already established by the graph association.
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
 
-  /// Stable communication site whose canonical execution owners scope lowering.
-  ConSanProgramSiteId owner_site;
+  /// Stable communication source whose operands and owners scope lowering.
+  ConSanProgramSiteId source_site;
 
   /// Original text entry of the containing kernel or local function.
   uint64_t container_entry_text_offset = 0;
@@ -783,11 +783,10 @@ struct MoiFenceEvidenceSitePlan {
     return {address_capture_intent, evidence_intent};
   }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() && owner_site.valid() &&
-           semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
-           association.valid() && evidence_intent.valid() && address_capture_intent.valid() &&
-           evidence_intent != address_capture_intent && !container_name.empty() &&
-           communication_site.size != 0u && communication_site.width_bits != 0u &&
+    return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
+           address_capture_intent.valid() && evidence_intent != address_capture_intent &&
+           !container_name.empty() && communication_site.size != 0u &&
+           communication_site.width_bits != 0u &&
            communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            (memory_role == ConSanSyncMemoryRole::Release ||
             memory_role == ConSanSyncMemoryRole::Acquire) &&
@@ -807,11 +806,11 @@ struct MoiFenceEvidenceSitePlan {
 /// share this selection contract even though their evidence bodies remain
 /// intentionally different.
 struct MoiBarrierEvidenceSitePlan {
-  /// Stable identity of the barrier instruction where evidence is inserted.
-  SemanticSiteId semantic_site;
+  /// Stable inventory-local identity of the completing barrier event.
+  ConSanSyncEventId event;
 
-  /// Stable identity of the normalized barrier sequence completed here.
-  ConSanSynchronizationAssociationId association;
+  /// Stable inventory-local identity of the normalized barrier sequence.
+  ConSanSyncSequenceId sequence;
 
   /// Engine-specific barrier evidence intent implemented by this plan.
   ConSanProbeIntentId evidence_intent;
@@ -825,8 +824,8 @@ struct MoiBarrierEvidenceSitePlan {
   /// Decoded completing barrier instruction used only for native lowering.
   ConSanBarrierSite site;
 
-  /// Stable source site whose canonical execution owners scope lowering.
-  ConSanProgramSiteId owner_site;
+  /// Stable decoded source whose operands and execution owners scope lowering.
+  ConSanProgramSiteId source_site;
 
   /// Original text entry of the containing kernel or local function.
   uint64_t container_entry_text_offset = 0;
@@ -841,10 +840,8 @@ struct MoiBarrierEvidenceSitePlan {
   /// form one complete barrier lowering operation.
   [[nodiscard]] std::array<ConSanProbeIntentId, 1> intent_ids() const { return {evidence_intent}; }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() && owner_site.valid() &&
-           semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
-           association.valid() && evidence_intent.valid() && !container_name.empty() &&
-           site.size != 0u && site.text_offset == semantic_site.physical.original_text_offset;
+    return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
+           !container_name.empty() && site.size != 0u;
   }
 };
 
