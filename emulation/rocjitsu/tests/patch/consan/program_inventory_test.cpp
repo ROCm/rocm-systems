@@ -590,7 +590,7 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
             nullptr);
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     for (const ConSanSyncEventId member : sequence.member_event_ids) {
-      const ConSanSyncEvent *event = result.program_inventory.sync().find_sequence_member(member);
+      const ConSanSyncEvent *event = result.program_inventory.sync().find_event(member);
       ASSERT_NE(event, nullptr);
       EXPECT_EQ(result.program_inventory.sync().find_event(member), event);
     }

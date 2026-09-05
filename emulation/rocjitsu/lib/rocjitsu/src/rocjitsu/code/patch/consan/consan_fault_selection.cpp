@@ -145,10 +145,10 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
                                       ConSanSemanticConfidence::Conservative) ||
         !sequence->basic_block_index || sequence->member_event_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
-        sync.find_sequence_member(sequence->member_event_ids.front()) != load ||
+        sync.find_event(sequence->member_event_ids.front()) != load ||
         !consan_nonempty_execution_owners_equal(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
-    const ConSanSyncEvent *cache = sync.find_sequence_member(sequence->member_event_ids.back());
+    const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_ids.back());
     const ConSanFenceSite *cache_source =
         cache == nullptr ? nullptr : sync.source_as<ConSanFenceSite>(*cache);
     if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
@@ -214,7 +214,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
 
   const ConSanFaultSite *companion = nullptr;
   for (ConSanSyncEventId member_id : sequence->member_event_ids) {
-    const ConSanSyncEvent *member = sync.find_sequence_member(member_id);
+    const ConSanSyncEvent *member = sync.find_event(member_id);
     if (member == nullptr)
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
     const auto matching_site =

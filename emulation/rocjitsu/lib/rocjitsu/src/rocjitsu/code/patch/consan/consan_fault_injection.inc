@@ -89,7 +89,7 @@ static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
   if (edge != ConSanAtomicOrderEdge::Acquire && encoding != AtomicFaultEncoding::CdnaFlat)
     result.release_wait_text_offset = result.sequence->release_wait_text_offset;
   for (ConSanSyncEventId identity : result.sequence->member_event_ids) {
-    const ConSanSyncEvent *event = sync.find_sequence_member(identity);
+    const ConSanSyncEvent *event = sync.find_event(identity);
     if (event != nullptr && event->kind == ConSanSyncEventKind::Fence &&
         (edge == ConSanAtomicOrderEdge::Any ||
          (edge == ConSanAtomicOrderEdge::Release &&
@@ -528,7 +528,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     } else {
       std::array<const ConSanFaultSite *, 2> members{};
       for (size_t i = 0; i < members.size(); ++i) {
-        const ConSanSyncEvent *event = sync.find_sequence_member(sequence->member_event_ids[i]);
+        const ConSanSyncEvent *event = sync.find_event(sequence->member_event_ids[i]);
         if (event == nullptr)
           continue;
         const auto member = std::ranges::find_if(selection.fault_sites, [&](const auto &candidate) {
@@ -956,7 +956,7 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   std::vector<const ConSanSyncEvent *> members;
   members.reserve(member_identities.size());
   for (ConSanSyncEventId identity : member_identities) {
-    const ConSanSyncEvent *event = sync.find_sequence_member(identity);
+    const ConSanSyncEvent *event = sync.find_event(identity);
     if (event == nullptr) {
       result.errors.emplace_back(
           "ConSan barrier ID/scope mutation could not resolve every logical member");

@@ -296,8 +296,8 @@ template <typename Site>
 /// analysis.
 ///
 /// Events retain physical and typed semantic identities; sequences and
-/// lifecycle groups retain ordered member identities, and fence candidates
-/// retain the bounded associations derived from those sequences.
+/// lifecycle groups retain compact arena-local event handles, and fence
+/// candidates retain the bounded associations derived from those sequences.
 /// The view owns no storage and remains valid while its `ProgramInventory`
 /// owner is alive. Fault planning and engine policy may query this projection
 /// but cannot modify or rebuild sanitizer semantics through it.
@@ -413,13 +413,6 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
-  /// Resolve a sequence-member identity through the authoritative event
-  /// arena. Sequence membership uses a distinct semantic domain so callers
-  /// cannot accidentally treat a graph edge as an event record.
-  [[nodiscard]] const ConSanSyncEvent *find_sequence_member(ConSanSyncEventId identity) const {
-    return find_event(identity);
-  }
-
   /// Materialize stable diagnostic names only at an external presentation or
   /// mutation-plan boundary. The synchronization graph itself stores one
   /// typed member vector.
@@ -428,7 +421,7 @@ struct SynchronizationInventoryView {
     std::vector<std::string> identities;
     identities.reserve(members.size());
     for (ConSanSyncEventId member : members) {
-      const ConSanSyncEvent *event = find_sequence_member(member);
+      const ConSanSyncEvent *event = find_event(member);
       if (event == nullptr)
         return std::nullopt;
       identities.push_back(event->identity);

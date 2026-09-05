@@ -95,7 +95,7 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release_perturbation.plans.size(), 1u);
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
-  const ConSanSyncEvent *release_anchor = release.program_inventory.sync().find_sequence_member(
+  const ConSanSyncEvent *release_anchor = release.program_inventory.sync().find_event(
       release.program_inventory.sync().sync_sequences[0].member_event_ids.front());
   ASSERT_NE(release_anchor, nullptr);
   EXPECT_EQ(release_perturbation.plans[0].candidate.anchor_event_identity,
@@ -108,7 +108,7 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
       test_lower_consan(make_rdna4_lds_code_object(text_words), options, &acquire_perturbation);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire_perturbation.plans.size(), 1u);
-  const ConSanSyncEvent *acquire_anchor = acquire.program_inventory.sync().find_sequence_member(
+  const ConSanSyncEvent *acquire_anchor = acquire.program_inventory.sync().find_event(
       acquire.program_inventory.sync().sync_sequences[0].member_event_ids.back());
   ASSERT_NE(acquire_anchor, nullptr);
   EXPECT_EQ(acquire_perturbation.plans[0].candidate.anchor_event_identity,
