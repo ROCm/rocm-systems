@@ -74,6 +74,17 @@ retried under a new name and makes an eventual negative result falsifiable.
   CMake source-glob assertion rejects unlisted implementations. There is no
   large unbuilt or obsolete implementation reservoir hidden by the physical
   file layout.
+- A production-link reachability audit compiled every ConSan translation unit
+  with one ELF section per function and linked the actual
+  `librocjitsu_dbi_hooks.so` entry point with section garbage collection. The
+  113 ConSan objects defined 2,815 named text symbols. Only 119 strong
+  definitions, totaling 17,659 bytes of machine code, did not survive the
+  link. The largest were functions inlined at every production call or
+  deliberately test-facing report-model operations. Source-reference review
+  found just two genuinely obsolete seams exposed by the preceding intent
+  refactoring; removing them and their stale boundary assertion deleted 40
+  governing lines. There is therefore no large compiled-but-unreachable
+  implementation reservoir.
 - Exact and identifier-normalized clone searches, including repeated regions
   within the same large source file, found no copied implementation on a
   subsystem scale. The largest meaningful normalized region was 48 lines;
@@ -89,6 +100,27 @@ retried under a new name and makes an eventual negative result falsifiable.
   formatting-heavy upper bound is 2,780 lines. A probe IR may still improve
   operand ownership and remove some operations, but syntax alone cannot
   supply the requested macro reduction.
+- A hard-pair probe-IR audit then compared the five largest Record/Replay,
+  Sampled, and InlineShadow emitters. Their 838 explicit instruction-builder
+  calls use a common vocabulary—twelve instruction primitives occur in all
+  five files—but that vocabulary is already implemented once by the shared
+  instruction builders and transactional sequence. The mode programs do not
+  share long operation subsequences: lifting those calls into another IR
+  would retain approximately one IR operation per present builder call plus a
+  new lowering pass. It could improve virtual-operand ownership, but it does
+  not currently evidence multi-thousand mechanism deletion and is rejected
+  as the bounded campaign's next shrinkage vehicle.
+- The remaining synchronization-event arena was also tested as a possible
+  unfinished large deletion from the stable-site lift. It does retain a
+  redundant source-site handle and about two hundred lookup/join references,
+  but decoded events and logical synchronization sequences are respectively
+  graph vertices and derived hyperedges with different lifetimes. Re-keying
+  the edges directly by `ConSanProgramSiteId` can remove an identity type and
+  conversions; removing the event record would have to put its independently
+  derived synchronization semantics and diagnostic identity back onto the
+  program site. The entire construction, type, index, and query envelope is
+  only a few hundred lines, so this is a worthwhile later identity cleanup,
+  not a macro shrinkage route.
 - Expected-failure plumbing has 2,355 diagnostic or early-failure markers. A
   deliberately generous seven-line neighborhood around every marker covers
   12,932 lines, but most of those lines perform the guarded work and are not
