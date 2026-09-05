@@ -4414,11 +4414,9 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_DropsNetNameBeforeDefaulti
   s.config().version = NCCL_VERSION(2, 17, 0) - 1;
   s.config().netName = ParseCfg_kNetName;
   s.config().blocking = 0;
-  ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
-  EXPECT_EQ(ncclSuccess, res);
-  EXPECT_FALSE(LogHas(log, "Comm config Net name set to")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "Comm config Blocking set to 0")) << "actual log:\n" << log;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(nullptr, s.result_config().netName);
+  EXPECT_EQ(0, s.result_config().blocking);
 }
 TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsCgaClusterSizeAndCtaBounds) {
   ParseCfg_Scene s;
@@ -4435,10 +4433,8 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsNetName) {
   ParseCfg_Scene s;
   s.config().version = NCCL_VERSION(2, 17, 0);
   s.config().netName = ParseCfg_kNetName;
-  ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
-  EXPECT_EQ(ncclSuccess, res);
-  EXPECT_TRUE(LogHas(log, "Comm config Net name set to microfake-net")) << "actual log:\n" << log;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_STREQ(ParseCfg_kNetName, s.result_config().netName);
 }
 
 TEST_F(InitMicrotest, ParseCommConfig_VersionBelow225_ResetsTrafficClassToUndefined) {
@@ -4616,9 +4612,9 @@ TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneA
 // --- computeBuffSizes: the multi-node, chunk-clamp and shared-resource arms (init.cc:1299-1315) ---
 
 namespace {
-class ParseCfg_BuffScene {
+class BuffSizes_Scene {
  public:
-  ParseCfg_BuffScene() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}) {
+  BuffSizes_Scene() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}) {
     comm_->sharedRes = sr_.get();
     sr_->owner = comm_.get();
   }
@@ -4632,21 +4628,21 @@ class ParseCfg_BuffScene {
 }  // namespace
 
 TEST_F(InitMicrotest, ComputeBuffSizes_MultiNode_UsesNetChunkSizeNotTheNvlinkOne) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 2;
   s.comm()->isAllNvlink = true;  // would yield the 512 kB NVL size if the node count were misread
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = true;
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 16}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
@@ -4655,7 +4651,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep)
   EXPECT_EQ((1 << 16) / NCCL_STEPS, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   s.comm()->nNodes = 1;
   s.comm()->isAllNvlink = false;
   SetParams({{"BUFFSIZE", 1 << 22}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
@@ -4663,7 +4659,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_ChunkFitsSimpleBuffer_IsLeftAlone) {
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   auto other = std::make_unique<ncclComm>();
   s.shared()->owner = other.get();
   s.shared()->tpP2pChunkSize = 4096;
@@ -4675,7 +4671,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwner_CapsToTheSharedChunkSiz
   EXPECT_EQ(4096, s.shared()->tpP2pChunkSize);
 }
 TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsItsOwnChunkSize) {
-  ParseCfg_BuffScene s;
+  BuffSizes_Scene s;
   auto other = std::make_unique<ncclComm>();
   s.shared()->owner = other.get();
   s.shared()->tpP2pChunkSize = 1 << 20;
@@ -4690,9 +4686,9 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
 // --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---
 
 namespace {
-constexpr uint32_t ParseCfg_kFabricDeviceIndex = 3;
+constexpr uint32_t FillInfo_kFabricDeviceIndex = 3;
 
-void ParseCfg_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
+void FillInfo_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   info->fabricSupported = true;
   info->acceleratorId = 11;
   info->bandwidth = 400000;
@@ -4703,6 +4699,11 @@ void ParseCfg_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   for (std::size_t i = 0; i < sizeof(info->clusterUuid); ++i) {
     info->clusterUuid[i] = static_cast<uint8_t>(i + 1);
   }
+}
+
+std::string FillInfo_RunCapturingInfo(FillInfoComm* c, ncclPeerInfo* info, ncclResult_t* result) {
+  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  return RcclUnitTesting::CaptureLog([&] { *result = fillInfo(c->get(), info, 0); });
 }
 }  // namespace
 
@@ -4736,7 +4737,7 @@ TEST_F(InitMicrotest, FillInfo_FabricDeviceWithoutFabricSupport_ClearsTheFlagAnd
   info.fabricInfo.fabricSupported = true;
   uint32_t handedIndex = 0;
   ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
-    *out = ParseCfg_kFabricDeviceIndex;
+    *out = FillInfo_kFabricDeviceIndex;
     return ncclSuccess;
   });
   ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
@@ -4745,13 +4746,10 @@ TEST_F(InitMicrotest, FillInfo_FabricDeviceWithoutFabricSupport_ClearsTheFlagAnd
                       return ncclSuccess;
                     });
   ncclResult_t res = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    res = fillInfo(c.get(), &info, 0);
-  });
+  const std::string log = FillInfo_RunCapturingInfo(&c, &info, &res);
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, fabric.calls);
-  EXPECT_EQ(ParseCfg_kFabricDeviceIndex, handedIndex);
+  EXPECT_EQ(FillInfo_kFabricDeviceIndex, handedIndex);
   EXPECT_FALSE(info.fabricInfo.fabricSupported);
   EXPECT_FALSE(LogHas(log, "UALoE-enabled")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "MLOPart: physical device")) << "actual log:\n" << log;
@@ -4762,19 +4760,16 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
   c.get()->busId = kPhysGpuBusId;
   ncclPeerInfo info{};
   ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
-    *out = ParseCfg_kFabricDeviceIndex;
+    *out = FillInfo_kFabricDeviceIndex;
     return ncclSuccess;
   });
   ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
                     [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
-                      ParseCfg_FillFabricInfo(out);
+                      FillInfo_FillFabricInfo(out);
                       return ncclSuccess;
                     });
   ncclResult_t res = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    res = fillInfo(c.get(), &info, 0);
-  });
+  const std::string log = FillInfo_RunCapturingInfo(&c, &info, &res);
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_TRUE(info.fabricInfo.fabricSupported);
   EXPECT_EQ(11u, info.fabricInfo.acceleratorId);
@@ -4827,7 +4822,9 @@ class Env_ConfigComm {
 
   std::string RunCapturingLog(const Env_ParamMap& params) {
     ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    return RcclUnitTesting::CaptureLog([&] { Run(params); });
+    std::string log = RcclUnitTesting::CaptureLog([&] { Run(params); });
+    EXPECT_EQ(ncclSuccess, result_) << "actual log:\n" << log;
+    return log;
   }
 
  private:
@@ -5502,4 +5499,45 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBa
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().maxCTAs);
   EXPECT_TRUE(LogHas(log, "minCTAs 7 is larger than maxCTAs -2147483648, set both to -2147483648"))
       << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_NoCheckEnv_ResetsCheckModeToDefault) {
+  Env_ConfigComm c;
+  c.comm()->checkMode = ncclCheckModeDebugGlobal;
+  c.RunCapturingLog({});
+  EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_DeprecatedCheckPointers_SelectsDebugLocal) {
+  Env_ConfigComm c;
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckPointersNotOne_LeavesCheckModeDefault) {
+  Env_ConfigComm c;
+  c.RunCapturingLog({{"CHECK_POINTERS", 2}});
+  EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugGlobal_SelectsDebugGlobalCaseInsensitively) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "debug_global");
+  const std::string log = c.RunCapturingLog({});
+  EXPECT_EQ(ncclCheckModeDebugGlobal, c.comm()->checkMode);
+  EXPECT_TRUE(LogHas(log, "NCCL_CHECK_MODE set by environment to debug_global")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugLocalOverridesCheckPointers_SelectsDebugLocal) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_LOCAL");
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
+}
+
+TEST_F(InitMicrotest, EnvConfigOverride_CheckModeUnrecognised_KeepsTheCheckPointersChoice) {
+  Env_ConfigComm c;
+  SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_GLOBALLY");
+  c.RunCapturingLog({{"CHECK_POINTERS", 1}});
+  EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
 }
