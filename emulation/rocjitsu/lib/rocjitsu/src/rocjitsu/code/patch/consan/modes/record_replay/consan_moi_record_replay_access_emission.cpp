@@ -200,6 +200,11 @@ namespace consan_moi_impl {
                 (point.moi_owner_epoch_vgprs.owner() || derived_owner_vgpr ? 9u : 0u) +
                 (point.moi_owner_epoch_vgprs.epoch() ? 9u : 0u) + derived_owner_words.size());
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success && !message.empty())
+      errors.emplace_back(message);
+    sequence.require(success);
+  };
   const auto restore_exec_label = sequence.make_label();
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
   // that effective address before executing the displaced guest instruction;
@@ -284,126 +289,110 @@ namespace consan_moi_impl {
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
     for (const ConSanAccessRange &range : access_ranges) {
-      if (!append_save_moi_special_state(words, scalar_abi.special_state, arch)) {
-        errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
-        return std::nullopt;
-      }
+      require_emission(append_save_moi_special_state(words, scalar_abi.special_state, arch),
+                       "ConSan MOI dynamic access-record probe could not save VCC/SCC");
       if (materialize_flat_address) {
-        if (!append_materialize_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
-                                                    *lds_byte_offset_vgpr, arch)) {
-          errors.emplace_back(
-              "ConSan MOI dynamic access-record probe could not materialize FLAT address");
-          return std::nullopt;
-        }
+        require_emission(
+            append_materialize_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
+                                                   *lds_byte_offset_vgpr, arch),
+            "ConSan MOI dynamic access-record probe could not materialize FLAT address");
       }
 
-      if (!append_atomic_fetch_add_one_u32(
-              words, base + offsetof(ConSanMoiReportHeader, access_record_count), slot_vgpr,
-              scratch_vgpr, arch)) {
-        errors.emplace_back(
-            "ConSan MOI dynamic access-record probe could not reserve a record slot");
-        return std::nullopt;
-      }
+      require_emission(append_atomic_fetch_add_one_u32(
+                           words, base + offsetof(ConSanMoiReportHeader, access_record_count),
+                           slot_vgpr, scratch_vgpr, arch),
+                       "ConSan MOI dynamic access-record probe could not reserve a record slot");
 
-      if (!sequence.emit_all(
-              instrumentation::build_v_mov_b32_literal(value_vgpr, access_record_capacity, arch),
-              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr,
-                                                      arch),
-              instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo,
-                                                        arch))) {
-        errors.emplace_back(
-            "ConSan MOI dynamic access-record probe could not encode capacity guard");
-        return std::nullopt;
-      }
+      require_emission(sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                                             value_vgpr, access_record_capacity, arch),
+                                         instrumentation::build_v_cmp_gt_u32_vcc(
+                                             vector_source_vgpr(value_vgpr), slot_vgpr, arch),
+                                         instrumentation::build_s_and_saveexec_b64(
+                                             *point.moi_exec_save_sgpr, kAmdGpuVccLo, arch)),
+                       "ConSan MOI dynamic access-record probe could not encode capacity guard");
 
       if (private_epoch_offset) {
-        if (!sequence.emit_all(
+        require_emission(
+            sequence.emit_all(
                 instrumentation::build_private_load_b32(value_vgpr, *private_epoch_offset, arch),
-                instrumentation::build_s_wait_private_load0(arch))) {
-          errors.emplace_back(
-              "ConSan MOI dynamic access-record probe could not load private epoch state");
-          return std::nullopt;
-        }
-        if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
-                                                  dynamic_record_base +
-                                                      offsetof(ConSanMoiAccessRecord, epoch),
-                                                  value_vgpr, slot_vgpr, scratch_vgpr, arch)) {
-          errors.emplace_back(
-              "ConSan MOI dynamic access-record probe could not store private epoch state");
-          return std::nullopt;
-        }
+                instrumentation::build_s_wait_private_load0(arch)),
+            "ConSan MOI dynamic access-record probe could not load private epoch state");
+        require_emission(
+            append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                                 dynamic_record_base +
+                                                     offsetof(ConSanMoiAccessRecord, epoch),
+                                                 value_vgpr, slot_vgpr, scratch_vgpr, arch),
+            "ConSan MOI dynamic access-record probe could not store private epoch state");
       } else if (point.moi_persistent_sgprs.epoch()) {
         words.push_back(build_v_mov_b32_e32(value_vgpr, *point.moi_persistent_sgprs.epoch(), arch));
-        if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
-                                                  dynamic_record_base +
-                                                      offsetof(ConSanMoiAccessRecord, epoch),
-                                                  value_vgpr, slot_vgpr, scratch_vgpr, arch)) {
-          errors.emplace_back(
-              "ConSan MOI dynamic access-record probe could not store scalar epoch state");
-          return std::nullopt;
-        }
+        require_emission(
+            append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                                 dynamic_record_base +
+                                                     offsetof(ConSanMoiAccessRecord, epoch),
+                                                 value_vgpr, slot_vgpr, scratch_vgpr, arch),
+            "ConSan MOI dynamic access-record probe could not store scalar epoch state");
       }
 
-      if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
-                                     words, kAccessRecordLayout,
-                                     dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-                                     *derived_owner_vgpr, slot_vgpr, scratch_vgpr, arch)) ||
-          (point.moi_persistent_sgprs.owner() &&
-           !append_dynamic_record_store_u32_scalar_src(
+      require_emission(
+          (!derived_owner_vgpr ||
+           append_dynamic_record_store_u32_vgpr(
                words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *point.moi_persistent_sgprs.owner(), slot_vgpr, scratch_vgpr, arch)) ||
-          !append_dynamic_record_store_moi_report_dispatch_id_pair(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
-              dispatch_id_sources, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_event_index_store(
-              words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
-              scratch_vgpr, arch) ||
-          !append_dynamic_record_store_workgroup_source(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
-              workgroup_sources.x, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_workgroup_source(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
-              workgroup_sources.y, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_workgroup_source(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
-              workgroup_sources.z, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_u32_scalar_src(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask),
-              *point.moi_exec_save_sgpr, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_u32_scalar_src(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
-              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u), slot_vgpr, scratch_vgpr,
-              arch) ||
-          (point.moi_owner_epoch_vgprs.owner() &&
-           !append_dynamic_record_store_u32_vgpr(
-               words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               point.moi_owner_epoch_vgprs->owner, slot_vgpr, scratch_vgpr, arch)) ||
-          (point.moi_owner_epoch_vgprs.epoch() &&
-           !append_dynamic_record_store_u32_vgpr(
-               words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
-               point.moi_owner_epoch_vgprs->epoch, slot_vgpr, scratch_vgpr, arch)) ||
-          !append_dynamic_record_store_u32_literal(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
-              static_cast<uint32_t>(candidate.anchor()), slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_u32_literal(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
-              static_cast<uint32_t>(kind), slot_vgpr, scratch_vgpr, arch)) {
-        errors.emplace_back(
-            "ConSan MOI dynamic access-record probe could not encode record stores");
-        return std::nullopt;
-      }
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id), *derived_owner_vgpr,
+               slot_vgpr, scratch_vgpr, arch)) &&
+              (!point.moi_persistent_sgprs.owner() ||
+               append_dynamic_record_store_u32_scalar_src(
+                   words, kAccessRecordLayout,
+                   dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+                   *point.moi_persistent_sgprs.owner(), slot_vgpr, scratch_vgpr, arch)) &&
+              append_dynamic_record_store_moi_report_dispatch_id_pair(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
+                  dispatch_id_sources, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_event_index_store(
+                  words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
+                  scratch_vgpr, arch) &&
+              append_dynamic_record_store_workgroup_source(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
+                  workgroup_sources.x, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_workgroup_source(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
+                  workgroup_sources.y, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_workgroup_source(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
+                  workgroup_sources.z, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_u32_scalar_src(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask),
+                  *point.moi_exec_save_sgpr, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_u32_scalar_src(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) +
+                      sizeof(uint32_t),
+                  static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u), slot_vgpr, scratch_vgpr,
+                  arch) &&
+              (!point.moi_owner_epoch_vgprs.owner() ||
+               append_dynamic_record_store_u32_vgpr(
+                   words, kAccessRecordLayout,
+                   dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+                   point.moi_owner_epoch_vgprs->owner, slot_vgpr, scratch_vgpr, arch)) &&
+              (!point.moi_owner_epoch_vgprs.epoch() ||
+               append_dynamic_record_store_u32_vgpr(
+                   words, kAccessRecordLayout,
+                   dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
+                   point.moi_owner_epoch_vgprs->epoch, slot_vgpr, scratch_vgpr, arch)) &&
+              append_dynamic_record_store_u32_literal(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
+                  static_cast<uint32_t>(candidate.anchor()), slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_u32_literal(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
+                  static_cast<uint32_t>(kind), slot_vgpr, scratch_vgpr, arch),
+          "ConSan MOI dynamic access-record probe could not encode record stores");
 
       const std::optional<uint16_t> effective_lds_byte_offset_vgpr =
           append_effective_range_offset(range, value_vgpr);
@@ -412,51 +401,45 @@ namespace consan_moi_impl {
             "ConSan MOI dynamic access-record probe could not encode LDS byte offset");
         return std::nullopt;
       }
-      if (!append_dynamic_record_store_u32_vgpr(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_offset),
-              *effective_lds_byte_offset_vgpr, slot_vgpr, scratch_vgpr, arch)) {
-        errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
-        return std::nullopt;
-      }
-      if (!sequence.emit(instrumentation::build_v_lshrrev_b32(
+      require_emission(append_dynamic_record_store_u32_vgpr(
+                           words, kAccessRecordLayout,
+                           dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_offset),
+                           *effective_lds_byte_offset_vgpr, slot_vgpr, scratch_vgpr, arch),
+                       "ConSan MOI dynamic access-record probe could not encode range fields");
+      require_emission(
+          sequence.emit(instrumentation::build_v_lshrrev_b32(
               value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
-              *effective_lds_byte_offset_vgpr, arch))) {
-        errors.emplace_back("ConSan MOI dynamic access-record probe could not encode start cell");
-        return std::nullopt;
-      }
+              *effective_lds_byte_offset_vgpr, arch)),
+          "ConSan MOI dynamic access-record probe could not encode start cell");
       const ConSanMoiLdsCellRange static_range =
           consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
-      if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
-                                                dynamic_record_base +
-                                                    offsetof(ConSanMoiAccessRecord, start_cell),
-                                                value_vgpr, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_u32_literal(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
-              range.byte_width, slot_vgpr, scratch_vgpr, arch) ||
-          !append_dynamic_record_store_u32_literal(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
-              static_range.cell_count, slot_vgpr, scratch_vgpr, arch)) {
-        errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
-        return std::nullopt;
-      }
-      if (!sequence.emit_all(
+      require_emission(
+          append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                               dynamic_record_base +
+                                                   offsetof(ConSanMoiAccessRecord, start_cell),
+                                               value_vgpr, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_u32_literal(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
+                  range.byte_width, slot_vgpr, scratch_vgpr, arch) &&
+              append_dynamic_record_store_u32_literal(
+                  words, kAccessRecordLayout,
+                  dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
+                  static_range.cell_count, slot_vgpr, scratch_vgpr, arch),
+          "ConSan MOI dynamic access-record probe could not encode range fields");
+      require_emission(
+          sequence.emit_all(
               instrumentation::build_s_wait_global_store0(arch),
-              instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch))) {
-        errors.emplace_back(
-            "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC");
-        return std::nullopt;
-      }
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch)),
+          "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC");
       // A terminal guest access can return directly to s_endpgm. Drain the
       // injected report publication while the scratch values and narrowed
       // EXEC are still intact, so wave termination cannot race those stores.
-      if (!append_restore_moi_special_state(words, scalar_abi.special_state, arch)) {
-        errors.emplace_back("ConSan MOI dynamic access-record probe could not restore VCC/SCC");
-        return std::nullopt;
-      }
+      require_emission(append_restore_moi_special_state(words, scalar_abi.special_state, arch),
+                       "ConSan MOI dynamic access-record probe could not restore VCC/SCC");
     }
+    if (!sequence.finish())
+      return std::nullopt;
     return words;
   }
 
