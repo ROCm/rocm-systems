@@ -1045,11 +1045,6 @@ public:
   /// the one rollback operation used when candidate bytes are discarded.
   void discard_instrumented_lowerings();
 
-  /// Return whether every admitted intent has been instrumented.
-  /// This deliberately makes no claim about runtime selection or retained
-  /// evidence, which are separate later ledger axes.
-  [[nodiscard]] bool all_intents_instrumented() const;
-
   bool operator==(const ConSanCoverageLedger &) const = default;
 
 private:

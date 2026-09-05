@@ -648,12 +648,6 @@ void ConSanCoverageLedger::discard_instrumented_lowerings() {
   }
 }
 
-bool ConSanCoverageLedger::all_intents_instrumented() const {
-  return std::ranges::all_of(intent_entries_, [](const ConSanIntentCoverageEntry &entry) {
-    return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;
-  });
-}
-
 ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &inventory,
                                                         const ConSanAccessPolicyRequest &request) {
   ConSanAccessPolicyResult result;

@@ -329,7 +329,7 @@ TEST(ConSanObservationPlan, CoverageLedgerSolelyOwnsPlanAndJoinedLoweringState) 
   EXPECT_EQ(ledger.intent_entries().front().intent_id, policy.plan.probe_intents.front().id);
   EXPECT_EQ(ledger.intent({0}), &ledger.observation_plan().probe_intents.front());
   EXPECT_EQ(ledger.intent_entries().front().lowering, ConSanLoweringOutcomeKind::Pending);
-  EXPECT_FALSE(ledger.all_intents_instrumented());
+  EXPECT_FALSE(all_consan_intents_instrumented(ledger));
 
   ConSanCoverageLedger copied = ledger;
   EXPECT_FALSE(publish_test_lowering_outcome(ledger, {}, ConSanLoweringOutcomeKind::Instrumented));
@@ -337,7 +337,7 @@ TEST(ConSanObservationPlan, CoverageLedgerSolelyOwnsPlanAndJoinedLoweringState) 
   EXPECT_FALSE(publish_test_lowering_outcome(ledger, {0}, ConSanLoweringOutcomeKind::Count));
   EXPECT_TRUE(publish_test_lowering_outcome(ledger, {0}, ConSanLoweringOutcomeKind::Instrumented,
                                             "placed"));
-  EXPECT_TRUE(ledger.all_intents_instrumented());
+  EXPECT_TRUE(all_consan_intents_instrumented(ledger));
   ASSERT_NE(ledger.intent_entry({0}), nullptr);
   EXPECT_EQ(ledger.intent_entry({0})->detail, "placed");
 

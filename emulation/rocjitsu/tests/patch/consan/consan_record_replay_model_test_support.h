@@ -10,6 +10,11 @@
 
 namespace rocjitsu {
 
+/// Retire old sparse-shadow epochs and compact test-model provenance. Runtime
+/// replay never retires a partially consumed report window.
+void retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
+    ConSanMoiSparseExactByteShadow &model, uint64_t generation, uint32_t first_live_epoch);
+
 /// Test convenience for releases that deliberately start without imported
 /// causal state. Production replay always supplies its current token product.
 [[nodiscard]] inline ConSanMoiAtomicSyncResult

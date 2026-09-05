@@ -1806,7 +1806,8 @@ TEST(ConSanMoi, SparseExactByteShadowRetiresOnlyProvenEpochsAndReclaimsCapacity)
   EXPECT_FALSE(model.access(boundary).capacity_exhausted);
   EXPECT_FALSE(model.access(other_generation).capacity_exhausted);
 
-  model.retire_before_epoch(/*generation=*/7, /*first_live_epoch=*/1);
+  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
+      model, /*generation=*/7, /*first_live_epoch=*/1);
 
   ConSanMoiExactByteAccess reclaimed = boundary;
   reclaimed.lds_byte_offset = 12;
@@ -1857,7 +1858,8 @@ TEST(ConSanMoi, SparseExactByteShadowRetirementKeepsSameSiteLaneGroup) {
 
   EXPECT_FALSE(model.access(retired).conflict);
   EXPECT_FALSE(model.access(boundary).conflict);
-  model.retire_before_epoch(/*generation=*/7, /*first_live_epoch=*/1);
+  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
+      model, /*generation=*/7, /*first_live_epoch=*/1);
 
   ConSanMoiExactByteAccess second_group = boundary;
   second_group.lane_mask = 0x2;

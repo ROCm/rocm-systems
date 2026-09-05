@@ -57,6 +57,13 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+[[nodiscard]] inline bool
+all_consan_intents_instrumented(const ConSanCoverageLedger &ledger) {
+  return std::ranges::all_of(ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
+    return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;
+  });
+}
+
 /// Focused-test convenience aggregate. Production constructs and carries
 /// immutable input and operating-point state as separate products.
 struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {

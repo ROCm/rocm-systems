@@ -2758,7 +2758,7 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
             ConSanLoweringOutcomeKind::Instrumented);
-  EXPECT_TRUE(result.coverage_ledger.all_intents_instrumented());
+  EXPECT_TRUE(all_consan_intents_instrumented(result.coverage_ledger));
   ASSERT_FALSE(result.replacement.empty());
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);

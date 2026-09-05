@@ -12,6 +12,80 @@
 
 namespace rocjitsu {
 
+void retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
+    ConSanMoiSparseExactByteShadow &model, uint64_t generation, uint32_t first_live_epoch) {
+  for (auto current = model.cross_owner_intervals_.begin();
+       current != model.cross_owner_intervals_.end();) {
+    if (current->first.generation == generation && current->first.epoch < first_live_epoch)
+      current = model.cross_owner_intervals_.erase(current);
+    else
+      ++current;
+  }
+  for (auto current = model.same_site_intervals_.begin();
+       current != model.same_site_intervals_.end();) {
+    if (current->first.epoch_kind.generation == generation &&
+        current->first.epoch_kind.epoch < first_live_epoch) {
+      current = model.same_site_intervals_.erase(current);
+    } else {
+      ++current;
+    }
+  }
+
+  std::vector<bool> referenced(model.provenance_.size());
+  const auto mark_referenced = [&](const ConSanMoiSparseExactByteShadow::IntervalMap &intervals) {
+    for (const auto &[begin, interval] : intervals) {
+      (void)begin;
+      if (interval.provenance_index != 0 && interval.provenance_index <= model.provenance_.size())
+        referenced[interval.provenance_index - 1u] = true;
+    }
+  };
+  for (const auto &[epoch_kind, owners] : model.cross_owner_intervals_) {
+    (void)epoch_kind;
+    for (const auto &[owner_id, intervals] : owners) {
+      (void)owner_id;
+      mark_referenced(intervals);
+    }
+  }
+  for (const auto &[same_site, lane_groups] : model.same_site_intervals_) {
+    (void)same_site;
+    for (const auto &[lane_mask, intervals] : lane_groups) {
+      (void)lane_mask;
+      mark_referenced(intervals);
+    }
+  }
+
+  std::vector<uint32_t> remapped_indices(model.provenance_.size() + 1u);
+  std::vector<ConSanMoiExactByteAccess> retained;
+  retained.reserve(model.provenance_.size());
+  for (size_t index = 0; index < model.provenance_.size(); ++index) {
+    if (!referenced[index])
+      continue;
+    remapped_indices[index + 1u] = static_cast<uint32_t>(retained.size()) + 1u;
+    retained.push_back(model.provenance_[index]);
+  }
+  const auto remap_intervals = [&](ConSanMoiSparseExactByteShadow::IntervalMap &intervals) {
+    for (auto &[begin, interval] : intervals) {
+      (void)begin;
+      interval.provenance_index = remapped_indices[interval.provenance_index];
+    }
+  };
+  for (auto &[epoch_kind, owners] : model.cross_owner_intervals_) {
+    (void)epoch_kind;
+    for (auto &[owner_id, intervals] : owners) {
+      (void)owner_id;
+      remap_intervals(intervals);
+    }
+  }
+  for (auto &[same_site, lane_groups] : model.same_site_intervals_) {
+    (void)same_site;
+    for (auto &[lane_mask, intervals] : lane_groups) {
+      (void)lane_mask;
+      remap_intervals(intervals);
+    }
+  }
+  model.provenance_ = std::move(retained);
+}
+
 ConSanMoiRecordReplayTraceHeader consan_moi_compact_record_replay_trace(
     uint64_t generation, uint64_t dispatch_id,
     std::span<const ConSanMoiAccessRecord> access_records,
