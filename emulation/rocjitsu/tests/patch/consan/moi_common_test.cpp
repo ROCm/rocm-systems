@@ -470,9 +470,6 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   plan.address_capture_intent = {.value = 6u};
   plan.evidence_intent = {.value = 7u};
   plan.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
-  plan.memory_role = ConSanSyncMemoryRole::Acquire;
-  plan.patch_text_offset = 24u;
-  plan.patch_size = 20u;
   EXPECT_TRUE(plan.is_well_formed());
 
   consan_detail::MoiFenceEvidenceSitePlan missing_source_site = plan;
@@ -496,12 +493,6 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   consan_detail::MoiFenceEvidenceSitePlan missing_lowering_form = plan;
   missing_lowering_form.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::Count;
   EXPECT_FALSE(missing_lowering_form.is_well_formed());
-  consan_detail::MoiFenceEvidenceSitePlan empty_patch = plan;
-  empty_patch.patch_size = 0u;
-  EXPECT_FALSE(empty_patch.is_well_formed());
-  consan_detail::MoiFenceEvidenceSitePlan overflowing_patch = plan;
-  overflowing_patch.patch_text_offset = std::numeric_limits<uint64_t>::max();
-  EXPECT_FALSE(overflowing_patch.is_well_formed());
 }
 
 TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {

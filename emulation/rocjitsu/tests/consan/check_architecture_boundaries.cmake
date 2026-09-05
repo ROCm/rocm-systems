@@ -233,7 +233,8 @@ foreach(_plan IN ITEMS
        (_plan STREQUAL "MoiBarrierEvidenceSitePlan" AND
         _site_plan_contract MATCHES "ConSanBarrierSite site") OR
        (_plan STREQUAL "MoiFenceEvidenceSitePlan" AND
-        _site_plan_contract MATCHES "ConSanAtomicSite communication_site") OR
+        _site_plan_contract MATCHES
+        "ConSanAtomicSite communication_site|memory_role|patch_text_offset|patch_file_offset|patch_size|capture_address_before_guest|scalar_clause_text_offset") OR
        (_plan STREQUAL "MoiAtomicEvidenceSitePlan" AND
         _site_plan_contract MATCHES
         "ConSanAtomicSite site|event_kind|is_rmw|ordered_sequence_end_text_offset|scalar_clause_text_offset") OR

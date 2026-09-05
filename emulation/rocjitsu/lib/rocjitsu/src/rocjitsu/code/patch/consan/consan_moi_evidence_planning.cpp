@@ -95,4 +95,66 @@ resolve_moi_atomic_evidence_source(const ProgramInventory &inventory,
   return MoiAtomicEvidenceSourceView{event, sequence, *site};
 }
 
+std::optional<MoiFenceEvidenceSourceView>
+resolve_moi_fence_evidence_source(const ProgramInventory &inventory,
+                                  const consan_detail::MoiFenceEvidenceSitePlan &plan) {
+  const SynchronizationInventoryView graph = inventory.sync();
+  const ConSanSyncEvent *fence_event = graph.find_event(plan.event);
+  const ConSanSyncSequence *sequence = graph.find_sequence(plan.sequence);
+  if (fence_event == nullptr || sequence == nullptr || fence_event->kind != ConSanSyncKind::Fence ||
+      resolve_moi_evidence_container(inventory, fence_event->source_site) == nullptr ||
+      resolve_moi_evidence_container(inventory, plan.source_site) == nullptr) {
+    return std::nullopt;
+  }
+
+  const ConSanMoiFenceCandidate *association = nullptr;
+  for (const ConSanMoiFenceCandidate &candidate : graph.moi_fence_candidates) {
+    if (candidate.fence_event != plan.event || candidate.sequence != plan.sequence ||
+        !candidate.communication_event || !candidate.eligible()) {
+      continue;
+    }
+    const ConSanSyncEvent *communication = graph.find_event(*candidate.communication_event);
+    if (communication == nullptr || communication->source_site != plan.source_site)
+      continue;
+    if (association != nullptr)
+      return std::nullopt;
+    association = &candidate;
+  }
+  const ConSanSyncEvent *communication_event =
+      association == nullptr ? nullptr : graph.find_event(*association->communication_event);
+  const ConSanFenceSite *fence_site =
+      inventory.program_site<ConSanFenceSite>(fence_event->source_site);
+  const std::optional<ConSanAtomicSite> communication_site =
+      materialize_moi_communication_site(inventory, plan.source_site, plan.sequence);
+  if (association == nullptr || communication_event == nullptr || fence_site == nullptr ||
+      !communication_site ||
+      (association->memory_role != ConSanSyncMemoryRole::Release &&
+       association->memory_role != ConSanSyncMemoryRole::Acquire) ||
+      (communication_event->kind != ConSanSyncKind::Atomic &&
+       communication_event->kind != ConSanSyncKind::OrdinaryMemory) ||
+      !graph.same_container(*communication_event, *fence_event) ||
+      graph.execution_owners(*communication_event).empty()) {
+    return std::nullopt;
+  }
+
+  MoiFenceEvidenceSourceView result{association, fence_event, communication_event, sequence,
+                                    fence_site, *communication_site};
+  if (result.captures_address_before_guest() &&
+      (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
+       sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
+       sequence->begin_text_offset != communication_site->text_offset ||
+       sequence->end_text_offset <= sequence->begin_text_offset ||
+       sequence->end_text_offset < fence_event->text_offset() + fence_site->size ||
+       sequence->end_text_offset - sequence->begin_text_offset >
+           std::numeric_limits<uint32_t>::max())) {
+    return std::nullopt;
+  }
+  if (result.patch_size() == 0u ||
+      result.patch_text_offset() >
+          std::numeric_limits<uint64_t>::max() - result.patch_size()) {
+    return std::nullopt;
+  }
+  return result;
+}
+
 } // namespace rocjitsu::consan_moi_impl

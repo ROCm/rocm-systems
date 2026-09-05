@@ -259,67 +259,18 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       errors.emplace_back("ConSan MOI admitted fence record lost its communication sequence");
       return {};
     }
-    const ConSanFenceSite *fence_source =
-        inventory.program_site<ConSanFenceSite>(fence_event->source_site);
-    if (fence_source == nullptr) {
-      errors.emplace_back("ConSan MOI admitted fence record lost its decoded source site");
-      return {};
-    }
-
     MoiFenceEvidenceSitePlan plan;
     plan.event = graph.event_id(*fence_event);
     plan.sequence = graph.sequence_id(*sequence);
     plan.source_site = communication->source_site;
     plan.evidence_intent = evidence;
     plan.address_capture_intent = address_capture;
-    plan.memory_role = association->memory_role;
-    plan.patch_text_offset = fence_event->text_offset();
-    plan.patch_file_offset = fence_source->file_offset;
-    plan.patch_size = fence_source->size;
-    const ConSanProgramContainer *container =
-        resolve_moi_evidence_container(inventory, fence_event->source_site);
-    if (!container || !decision.communication_lowering_form) {
+    if (!decision.communication_lowering_form) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
-    }
-    const std::optional<ConSanAtomicSite> communication_site =
-        materialize_moi_communication_site(inventory, communication->source_site,
-                                           plan.sequence);
-    if (!communication_site) {
-      errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
-      return {};
-    }
-    if (communication->kind == ConSanSyncKind::OrdinaryMemory) {
-      const ConSanOrdinaryMemorySite *site =
-          inventory.program_site<ConSanOrdinaryMemorySite>(communication->source_site);
-      if (site == nullptr ||
-          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
-           site->support_reason !=
-               ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)) {
-        errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
-        return {};
-      }
-      if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
-        if (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
-            sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
-            sequence->begin_text_offset != site->text_offset ||
-            sequence->end_text_offset <= sequence->begin_text_offset ||
-            sequence->end_text_offset < fence_event->text_offset() + fence_source->size ||
-            sequence->end_text_offset - sequence->begin_text_offset >
-                std::numeric_limits<uint32_t>::max()) {
-          errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
-          return {};
-        }
-        plan.patch_text_offset = sequence->begin_text_offset;
-        plan.patch_file_offset = site->file_offset;
-        plan.patch_size =
-            static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset);
-        plan.capture_address_before_guest = true;
-        plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-      }
     }
     plan.communication_lowering_form = *decision.communication_lowering_form;
-    if (!plan.is_well_formed()) {
+    if (!plan.is_well_formed() || !resolve_moi_fence_evidence_source(inventory, plan)) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
     }

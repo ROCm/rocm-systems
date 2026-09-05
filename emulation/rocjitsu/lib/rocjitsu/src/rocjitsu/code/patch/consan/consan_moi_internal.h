@@ -717,26 +717,8 @@ struct MoiFenceEvidenceSitePlan {
   /// Classifier-owned address form for the communication operation.
   ConSanAtomicLoweringForm communication_lowering_form;
 
-  /// Release or acquire role already established by the graph association.
-  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
-
   /// Stable communication source whose operands and owners scope lowering.
   ConSanProgramSiteId source_site;
-
-  /// Beginning of the exact original byte range replaced by the probe.
-  uint64_t patch_text_offset = 0;
-
-  /// Code-object file offset corresponding to `patch_text_offset`.
-  uint64_t patch_file_offset = 0;
-
-  /// Number of original bytes displaced by fence lowering.
-  uint32_t patch_size = 0;
-
-  /// Whether the communication address must be copied before guest execution.
-  bool capture_address_before_guest = false;
-
-  /// Scalar scheduling hint neutralized before inserting control flow.
-  std::optional<uint64_t> scalar_clause_text_offset;
 
   /// Verify that policy, graph association, decode, and replacement range all
   /// name one complete lowering operation.
@@ -746,11 +728,7 @@ struct MoiFenceEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
            address_capture_intent.valid() && evidence_intent != address_capture_intent &&
-           communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
-           (memory_role == ConSanSyncMemoryRole::Release ||
-            memory_role == ConSanSyncMemoryRole::Acquire) &&
-           patch_size != 0u &&
-           patch_text_offset <= std::numeric_limits<uint64_t>::max() - patch_size;
+           communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count;
   }
 };
 

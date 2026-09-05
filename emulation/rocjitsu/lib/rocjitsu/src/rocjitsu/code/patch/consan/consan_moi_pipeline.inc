@@ -76,18 +76,20 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiFenceEvidenceSitePlan &candidate = candidates[index];
-      const ConSanSyncEvent *event = problem.inventory().sync().find_event(candidate.event);
-      if (event == nullptr) {
-        errors.emplace_back("ConSan MOI fence resource planning lost its evidence event");
+      const std::optional<MoiFenceEvidenceSourceView> source =
+          resolve_moi_fence_evidence_source(problem.inventory(), candidate);
+      if (!source) {
+        errors.emplace_back("ConSan MOI fence resource planning lost its evidence source");
         return;
       }
-      const uint64_t fence_text_offset = event->text_offset();
+      const uint64_t fence_text_offset = source->fence_event->text_offset();
+      const uint64_t patch_text_offset = source->patch_text_offset();
       ConSanCandidateResourcePlan plan =
           plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Fence, index,
-                                 candidate.patch_text_offset, candidate.source_site,
+                                 patch_text_offset, candidate.source_site,
                                  fence_record_scratch_count(candidate.communication_lowering_form),
                                  nullptr, &candidate.communication_lowering_form);
-      if (candidate.patch_text_offset != fence_text_offset)
+      if (patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));

@@ -23,8 +23,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_detail::MoiBarrierEvidenceSitePlan;
-using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_atomic_candidate_scratch_overlap;
@@ -492,27 +490,30 @@ using consan_moi_detail::kFenceRecordLayout;
   return words;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
-    std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &communication_site, const ConSanProgramContainer &container,
-    uint64_t fence_text_offset,
+    std::span<const uint8_t> bytes, const MoiFenceEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &communication_lowering_form,
+    const ConSanProgramContainer &container,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     std::span<const uint32_t> displaced_tail_words, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset) {
   (void)record_index;
-  if (!options.scratch_vgpr) {
+  if (!source.is_resolved() || !options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
+  const ConSanAtomicSite &communication_site = source.communication_site;
+  const uint64_t fence_text_offset = source.fence_event->text_offset();
+  const uint64_t patch_file_offset = source.patch_file_offset();
+  const uint32_t patch_size = source.patch_size();
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
     errors.emplace_back("ConSan MOI fence record patch has no supported target profile");
     return std::nullopt;
   }
   if (!address_plan.supported() || !communication_site.scope ||
-      (target->requires_raw_memory_order_qualifier && !communication_site.raw_th) ||
-      !candidate.is_well_formed()) {
+      (target->requires_raw_memory_order_qualifier && !communication_site.raw_th)) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
     return std::nullopt;
   }
@@ -522,7 +523,7 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
   if (static_cast<uint32_t>(*options.scratch_vgpr) + address_plan.scratch_vgpr_count > 256u ||
-      reject_atomic_candidate_scratch_overlap(candidate.communication_lowering_form,
+      reject_atomic_candidate_scratch_overlap(communication_lowering_form,
                                               *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
       reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.owner(),
@@ -532,8 +533,7 @@ using consan_moi_detail::kFenceRecordLayout;
                                             *options.scratch_vgpr, address_plan.scratch_vgpr_count,
                                             "MOI epoch", errors))
     return std::nullopt;
-  if (candidate.patch_file_offset > bytes.size() ||
-      candidate.patch_size > bytes.size() - candidate.patch_file_offset) {
+  if (patch_file_offset > bytes.size() || patch_size > bytes.size() - patch_file_offset) {
     errors.emplace_back("ConSan MOI fence record patch site exceeds ELF bytes");
     return std::nullopt;
   }
@@ -560,9 +560,9 @@ using consan_moi_detail::kFenceRecordLayout;
   InstructionSequence sequence(words);
   const uint64_t displaced_tail_bytes =
       static_cast<uint64_t>(displaced_tail_words.size()) * sizeof(uint32_t);
-  if (displaced_tail_bytes > std::numeric_limits<uint32_t>::max() - candidate.patch_size ||
-      candidate.patch_file_offset > bytes.size() ||
-      candidate.patch_size + displaced_tail_bytes > bytes.size() - candidate.patch_file_offset) {
+  if (displaced_tail_bytes > std::numeric_limits<uint32_t>::max() - patch_size ||
+      patch_file_offset > bytes.size() ||
+      patch_size + displaced_tail_bytes > bytes.size() - patch_file_offset) {
     errors.emplace_back("ConSan MOI fence record runtime guest exceeds ELF bytes");
     return std::nullopt;
   }
@@ -570,10 +570,10 @@ using consan_moi_detail::kFenceRecordLayout;
       target->has_selectable_vgpr_bank
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
                                                 container.entry_text_offset,
-                                                candidate.patch_file_offset)
+                                                patch_file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
-  words.reserve(words.size() + candidate.patch_size / sizeof(uint32_t) + 80u +
+  words.reserve(words.size() + patch_size / sizeof(uint32_t) + 80u +
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
                 (select_low_vgpr_bank ? 2u : 0u));
   if (select_low_vgpr_bank)
@@ -603,16 +603,16 @@ using consan_moi_detail::kFenceRecordLayout;
                             vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), arch));
     return true;
   };
-  if (candidate.capture_address_before_guest && !append_address_capture())
+  if (source.captures_address_before_guest() && !append_address_capture())
     return std::nullopt;
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.patch_size; offset += sizeof(uint32_t)) {
+  for (uint64_t offset = 0; offset < patch_size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.patch_file_offset + offset, sizeof(word));
+    std::memcpy(&word, bytes.data() + patch_file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  if (!candidate.capture_address_before_guest && !append_address_capture())
+  if (!source.captures_address_before_guest() && !append_address_capture())
     return std::nullopt;
   if (!append_save_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not save VCC/SCC");
@@ -621,9 +621,10 @@ using consan_moi_detail::kFenceRecordLayout;
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t record_base = base + fence_records_offset;
-  const ConSanMoiFenceEventKind kind = candidate.memory_role == ConSanSyncMemoryRole::Release
-                                           ? ConSanMoiFenceEventKind::Release
-                                           : ConSanMoiFenceEventKind::Acquire;
+  const ConSanMoiFenceEventKind kind =
+      source.association->memory_role == ConSanSyncMemoryRole::Release
+          ? ConSanMoiFenceEventKind::Release
+          : ConSanMoiFenceEventKind::Acquire;
   if (!options.moi_exec_save_sgpr) {
     errors.emplace_back("ConSan MOI dynamic fence record requires scalar EXEC state");
     return std::nullopt;

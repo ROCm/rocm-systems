@@ -563,6 +563,41 @@ TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSe
                    .has_value());
 }
 
+TEST(ConSanAtomicFencePolicy, FenceEvidenceSourceDerivesGeometryFromCanonicalHandles) {
+  const ProgramInventory inventory = ordinary_fence_inventory();
+  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+
+  std::vector<std::string> errors;
+  const std::vector<consan_detail::MoiFenceEvidenceSitePlan> plans =
+      consan_moi_impl::build_moi_fence_evidence_site_plans(inventory, policy.plan, errors);
+  ASSERT_TRUE(errors.empty());
+  ASSERT_EQ(plans.size(), 1u);
+
+  const std::optional<consan_moi_impl::MoiFenceEvidenceSourceView> source =
+      consan_moi_impl::resolve_moi_fence_evidence_source(inventory, plans.front());
+  ASSERT_TRUE(source.has_value());
+  EXPECT_TRUE(source->is_resolved());
+  EXPECT_EQ(source->association->memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(source->communication_event, &inventory.sync().sync_events[0]);
+  EXPECT_EQ(source->fence_event, &inventory.sync().sync_events[1]);
+  EXPECT_EQ(source->sequence, &inventory.sync().sync_sequences[0]);
+  EXPECT_EQ(source->communication_site.text_offset, 32u);
+  EXPECT_FALSE(source->captures_address_before_guest());
+  EXPECT_EQ(source->patch_text_offset(), 48u);
+  EXPECT_EQ(source->patch_file_offset(), 48u);
+  EXPECT_EQ(source->patch_size(), 12u);
+  EXPECT_FALSE(source->scalar_clause_text_offset().has_value());
+
+  consan_detail::MoiFenceEvidenceSitePlan stale = plans.front();
+  stale.source_site = inventory.sync().sync_events[1].source_site;
+  EXPECT_FALSE(consan_moi_impl::resolve_moi_fence_evidence_source(inventory, stale).has_value());
+  stale = plans.front();
+  stale.sequence = {99u};
+  EXPECT_FALSE(consan_moi_impl::resolve_moi_fence_evidence_source(inventory, stale).has_value());
+}
+
 TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceCommunication) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
   ConSanSyncEvent communication = make_ordinary_store_event();

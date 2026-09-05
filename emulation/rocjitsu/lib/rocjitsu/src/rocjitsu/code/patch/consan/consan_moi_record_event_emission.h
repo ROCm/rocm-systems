@@ -54,9 +54,9 @@ struct MoiRecordEventEmissionPlan {
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiFenceEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &communication_site, const ConSanProgramContainer &container,
-    uint64_t fence_text_offset,
+    std::span<const uint8_t> bytes, const MoiFenceEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &communication_lowering_form,
+    const ConSanProgramContainer &container,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,

@@ -44,7 +44,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
   }
   struct PlannedFenceRecord : MoiPlannedRecordEvent {
     MoiFenceEvidenceSitePlan candidate;
-    ConSanAtomicSite communication_site;
+    MoiFenceEvidenceSourceView source;
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedFenceRecord> selected;
@@ -59,33 +59,27 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     if (selected.size() == max_candidates)
       break;
     MoiFenceEvidenceSitePlan candidate = candidates[candidate_index];
-    const ConSanSyncEvent *fence_event =
-        result.program_inventory.sync().find_event(candidate.event);
-    if (fence_event == nullptr) {
-      result.errors.emplace_back("ConSan MOI fence record patch lost its evidence event");
+    std::optional<MoiFenceEvidenceSourceView> source =
+        resolve_moi_fence_evidence_source(result.program_inventory, candidate);
+    if (!source) {
+      result.errors.emplace_back("ConSan MOI fence record patch lost its evidence source");
       return;
     }
-    const std::optional<ConSanAtomicSite> communication_site =
-        materialize_moi_communication_site(result.program_inventory, candidate.source_site,
-                                           candidate.sequence);
-    if (!communication_site) {
-      result.errors.emplace_back("ConSan MOI fence record patch lost its communication site");
-      return;
-    }
-    const uint64_t fence_text_offset = fence_event->text_offset();
-    if (candidate.patch_text_offset > old_text.size() ||
-        candidate.patch_size > old_text.size() - candidate.patch_text_offset) {
+    const uint64_t fence_text_offset = source->fence_event->text_offset();
+    const uint64_t patch_text_offset = source->patch_text_offset();
+    const uint32_t patch_size = source->patch_size();
+    if (patch_text_offset > old_text.size() || patch_size > old_text.size() - patch_text_offset) {
       result.errors.emplace_back("ConSan MOI fence record patch site is outside .text");
       return;
     }
     const bool incompatible_overlap =
         std::ranges::any_of(result.staged_text_fragments, [&](const ConSanTextFragment &fragment) {
           const uint64_t fragment_end = fragment.patch.anchor_offset + fragment.patch.original_size;
-          const uint64_t site_end = candidate.patch_text_offset + candidate.patch_size;
-          return candidate.patch_text_offset < fragment_end &&
+          const uint64_t site_end = patch_text_offset + patch_size;
+          return patch_text_offset < fragment_end &&
                  fragment.patch.anchor_offset < site_end &&
-                 (fragment.patch.anchor_offset != candidate.patch_text_offset ||
-                  fragment.patch.original_size != candidate.patch_size);
+                 (fragment.patch.anchor_offset != patch_text_offset ||
+                  fragment.patch.original_size != patch_size);
         });
     if (incompatible_overlap) {
       result.warnings.emplace_back("ConSan MOI fence record patch skipped an overlapping patch");
@@ -99,12 +93,12 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
         existing_plan ? *existing_plan
                       : plan_moi_resource_site(*resource_state, options, options, operating_point,
                                                ConSanResourceSiteKind::Fence, candidate_index,
-                                               candidate.patch_text_offset, candidate.source_site,
+                                               patch_text_offset, candidate.source_site,
                                                scratch_count, nullptr,
                                                &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan) {
-      if (candidate.patch_text_offset != fence_text_offset)
+      if (patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
       result.resource_plans.push_back(plan);
     }
@@ -167,8 +161,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     note_descriptor_requirements(descriptor_requirements, record_event->resources);
     note_moi_sgpr_requirements(scalar_requirements, record_event->resources, record_event->emission,
                                arch);
-    selected.push_back(
-        {std::move(*record_event), std::move(candidate), *communication_site, address_plan});
+    selected.push_back({std::move(*record_event), std::move(candidate), std::move(*source),
+                        address_plan});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -176,8 +170,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedFenceRecord &planned : selected) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.communication_site,
-                                           planned.candidate.scalar_clause_text_offset, arch,
+    if (!append_atomic_scalar_clause_patch(old_text, planned.source.communication_site,
+                                           planned.source.scalar_clause_text_offset(), arch,
                                            scalar_clause_patches, result.errors))
       return;
   }
@@ -187,22 +181,19 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     fragments.push_back(ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
   uint32_t record_index = 0;
   for (const PlannedFenceRecord &planned : selected) {
-    const ConSanSyncEvent *fence_event =
-        result.program_inventory.sync().find_event(planned.candidate.event);
     const ConSanProgramContainer *container =
         resolve_moi_evidence_container(result.program_inventory, planned.candidate.source_site);
-    if (fence_event == nullptr || container == nullptr) {
+    if (container == nullptr) {
       result.errors.emplace_back(
           "ConSan MOI fence record emission lost its evidence event or container");
       return;
     }
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
-    const uint64_t patch_text_offset = planned.candidate.patch_text_offset;
-    const uint32_t patch_size = planned.candidate.patch_size;
+    const uint64_t patch_text_offset = planned.source.patch_text_offset();
+    const uint32_t patch_size = planned.source.patch_size();
     uint32_t guest_instruction_offset = 0u;
     auto cave_words = build_fence_record_cave_words(
-        active_bytes, planned.candidate, planned.communication_site, *container,
-        fence_event->text_offset(),
+        active_bytes, planned.source, planned.candidate.communication_lowering_form, *container,
         planned.address_plan, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset,
@@ -220,7 +211,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
                                          std::move(info), result.errors, "MOI fence record patch");
     if (!fragment)
       return;
-    if (!planned.candidate.capture_address_before_guest &&
+    if (!planned.source.captures_address_before_guest() &&
         candidate_options.runtime_workgroup_gate) {
       if (!prepend_moi_runtime_workgroup_gate(*fragment, *candidate_options.runtime_workgroup_gate,
                                               candidate_options.workgroup_sources, arch,

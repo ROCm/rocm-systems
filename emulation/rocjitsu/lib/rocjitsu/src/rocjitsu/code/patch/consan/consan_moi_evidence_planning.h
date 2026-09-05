@@ -49,6 +49,48 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role);
 resolve_moi_atomic_evidence_source(const ProgramInventory &inventory,
                                    const consan_detail::MoiAtomicEvidenceSitePlan &plan);
 
+/// Short-lived Record/Replay view of one qualified fence association. All
+/// pointers refer into the immutable inventory; replacement geometry is
+/// computed from those canonical facts instead of being cached in the plan.
+struct MoiFenceEvidenceSourceView {
+  const ConSanMoiFenceCandidate *association = nullptr;
+  const ConSanSyncEvent *fence_event = nullptr;
+  const ConSanSyncEvent *communication_event = nullptr;
+  const ConSanSyncSequence *sequence = nullptr;
+  const ConSanFenceSite *fence_site = nullptr;
+  ConSanAtomicSite communication_site;
+
+  [[nodiscard]] bool is_resolved() const {
+    return association != nullptr && fence_event != nullptr && communication_event != nullptr &&
+           sequence != nullptr && fence_site != nullptr && communication_site.size != 0u &&
+           communication_site.width_bits != 0u;
+  }
+  [[nodiscard]] bool captures_address_before_guest() const {
+    return association->memory_role == ConSanSyncMemoryRole::Acquire &&
+           communication_event->kind == ConSanSyncKind::OrdinaryMemory;
+  }
+  [[nodiscard]] uint64_t patch_text_offset() const {
+    return captures_address_before_guest() ? sequence->begin_text_offset
+                                           : fence_event->text_offset();
+  }
+  [[nodiscard]] uint64_t patch_file_offset() const {
+    return captures_address_before_guest() ? communication_site.file_offset
+                                           : fence_site->file_offset;
+  }
+  [[nodiscard]] uint32_t patch_size() const {
+    return captures_address_before_guest()
+               ? static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset)
+               : fence_site->size;
+  }
+  [[nodiscard]] std::optional<uint64_t> scalar_clause_text_offset() const {
+    return captures_address_before_guest() ? sequence->scalar_clause_text_offset : std::nullopt;
+  }
+};
+
+[[nodiscard]] std::optional<MoiFenceEvidenceSourceView>
+resolve_moi_fence_evidence_source(const ProgramInventory &inventory,
+                                  const consan_detail::MoiFenceEvidenceSitePlan &plan);
+
 [[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
 build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,
                                       const ConSanObservationPlan &observation,
