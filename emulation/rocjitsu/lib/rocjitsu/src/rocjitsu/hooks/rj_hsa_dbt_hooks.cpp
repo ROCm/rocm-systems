@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/rj_hsa_dbt_test_seams.h"
 #include "rocjitsu/hooks/sidecar_registry.h"
@@ -60,7 +61,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -2108,32 +2108,12 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
     // not the original file descriptor. Copy the file bytes while we still have
     // the descriptor so HIP extension modules that use file-backed readers take
     // the same DBT path as memory-backed framework code objects.
-    struct stat statbuf{};
-    if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
-      std::shared_ptr<std::vector<uint8_t>> owned;
-      try {
-        owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
-      } catch (const std::bad_alloc &) {
-        // The HSA tools ABI cannot propagate C++ allocation failures. Fall
-        // through to the existing diagnostic and let ROCR keep the reader.
-      }
-      if (owned) {
-        size_t done = 0;
-        while (done < owned->size()) {
-          const ssize_t read =
-              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
-          if (read <= 0)
-            break;
-          done += static_cast<size_t>(read);
-        }
-        if (done == owned->size() &&
-            code_object_reader_registry().store(code_object_reader->handle, owned->data(),
-                                                owned->size(), owned)) {
-          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
-                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
-          return status;
-        }
-      }
+    const auto owned = rocjitsu::snapshot_code_object_file(file);
+    if (owned && code_object_reader_registry().store(code_object_reader->handle, owned->data(),
+                                                     owned->size(), owned)) {
+      log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                  static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+      return status;
     }
     std::fprintf(stderr,
                  "[rocjitsu-hooks] file-backed code-object reader=%llu could not be copied for "

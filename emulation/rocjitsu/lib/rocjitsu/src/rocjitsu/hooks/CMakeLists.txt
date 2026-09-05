@@ -14,7 +14,9 @@ target_link_libraries(rocjitsu_hsa_tool_lifetime PUBLIC ${CMAKE_DL_LIBS})
 
 add_library(
     rocjitsu_hsa_code_object_reader_registry
-    STATIC hsa_code_object_reader_registry.cpp
+    STATIC
+        hsa_code_object_file_snapshot.cpp
+        hsa_code_object_reader_registry.cpp
 )
 set_target_properties(
     rocjitsu_hsa_code_object_reader_registry
@@ -102,6 +104,7 @@ target_link_libraries(
     rocjitsu_waitcheck_hooks
     PRIVATE
         rocjitsu_waitcheck_objects
+        rocjitsu_hsa_code_object_reader_registry
         rocjitsu_hsa_tool_lifetime
         util
         Threads::Threads

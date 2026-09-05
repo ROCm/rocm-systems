@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 
 #include <gtest/gtest.h>
@@ -9,9 +10,47 @@
 #include <memory>
 #include <vector>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 namespace {
 
 using rocjitsu::hooks::HsaCodeObjectReaderRegistry;
+
+class ScopedFd {
+public:
+  explicit ScopedFd(int fd) : fd_(fd) {}
+  ~ScopedFd() {
+    if (fd_ >= 0)
+      close(fd_);
+  }
+  int get() const { return fd_; }
+
+private:
+  int fd_;
+};
+
+TEST(HsaCodeObjectFileSnapshotTest, ReadsWholeFileAndRanges) {
+  ScopedFd file(open("/bin/sh", O_RDONLY));
+  ASSERT_GE(file.get(), 0);
+
+  const auto whole = rocjitsu::snapshot_code_object_file(file.get());
+  ASSERT_TRUE(whole);
+  ASSERT_GE(whole->size(), 4u);
+
+  const auto range = rocjitsu::snapshot_code_object_file_range(file.get(), 1, 3);
+  ASSERT_TRUE(range);
+  EXPECT_EQ(*range, (std::vector<uint8_t>(whole->begin() + 1, whole->begin() + 4)));
+}
+
+TEST(HsaCodeObjectFileSnapshotTest, RejectsInvalidAndEmptyRanges) {
+  ScopedFd file(open("/bin/sh", O_RDONLY));
+  ASSERT_GE(file.get(), 0);
+
+  EXPECT_FALSE(rocjitsu::snapshot_code_object_file_range(file.get(), 0, 0));
+  EXPECT_FALSE(rocjitsu::snapshot_code_object_file_range(file.get(), SIZE_MAX, 1));
+  EXPECT_FALSE(rocjitsu::snapshot_code_object_file(-1));
+}
 
 TEST(HsaCodeObjectReaderRegistryTest, ReplacesAndRemovesReaderBytes) {
   HsaCodeObjectReaderRegistry registry;

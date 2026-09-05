@@ -9,28 +9,22 @@
 
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <exception>
-#include <limits>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace {
 
@@ -70,19 +64,19 @@ struct ReaderEntry {
     active = true;
     analyzed = false;
     result = {};
-    owned.clear();
+    owned.reset();
     bytes = data;
     size = data_size;
   }
 
-  void store_owned(uint64_t reader_handle, std::vector<uint8_t> data) {
+  void store_owned(uint64_t reader_handle, rocjitsu::CodeObjectFileSnapshot data) {
     handle = reader_handle;
     active = true;
     analyzed = false;
     result = {};
     owned = std::move(data);
-    bytes = owned.data();
-    size = owned.size();
+    bytes = owned->data();
+    size = owned->size();
   }
 
   void reset() {
@@ -91,7 +85,7 @@ struct ReaderEntry {
     result = {};
     bytes = nullptr;
     size = 0;
-    owned.clear();
+    owned.reset();
   }
 
   std::mutex mutex;
@@ -100,7 +94,7 @@ struct ReaderEntry {
   bool analyzed = false;
   const uint8_t *bytes = nullptr;
   size_t size = 0;
-  std::vector<uint8_t> owned;
+  rocjitsu::CodeObjectFileSnapshot owned;
   AnalysisResult result;
 };
 
@@ -322,7 +316,7 @@ public:
     entry->store_memory(reader.handle, bytes, size);
   }
 
-  void store_owned(hsa_code_object_reader_t reader, std::vector<uint8_t> bytes) {
+  void store_owned(hsa_code_object_reader_t reader, rocjitsu::CodeObjectFileSnapshot bytes) {
     std::lock_guard registry_lock(mutex_);
     ReaderEntry *entry = find_or_free_unlocked(reader.handle);
     if (entry == nullptr) {
@@ -534,62 +528,6 @@ private:
   std::vector<std::shared_ptr<LoadedCodeObjectEntry>> loaded_;
   std::unordered_map<uint64_t, std::shared_ptr<KernelCheck>> kernels_;
 };
-
-[[nodiscard]] std::optional<std::vector<uint8_t>>
-read_regular_file_range(hsa_file_t file, size_t range_offset, size_t range_size) {
-  struct stat status {};
-  if (fstat(file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0)
-    return std::nullopt;
-  if (static_cast<uintmax_t>(status.st_size) > std::numeric_limits<size_t>::max())
-    return std::nullopt;
-  const size_t file_size = static_cast<size_t>(status.st_size);
-  if (range_size == 0 || range_offset > file_size || range_size > file_size - range_offset)
-    return std::nullopt;
-  if (range_offset > static_cast<size_t>(std::numeric_limits<off_t>::max()))
-    return std::nullopt;
-
-  std::vector<uint8_t> data(range_size);
-  size_t offset = 0;
-  while (offset < data.size()) {
-    const size_t absolute_offset = range_offset + offset;
-    if (absolute_offset > static_cast<size_t>(std::numeric_limits<off_t>::max()))
-      return std::nullopt;
-    const size_t chunk =
-        std::min(data.size() - offset, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
-    const ssize_t read_size =
-        pread(file, data.data() + offset, chunk, static_cast<off_t>(absolute_offset));
-    if (read_size < 0) {
-      if (errno == EINTR)
-        continue;
-      return std::nullopt;
-    }
-    if (read_size == 0)
-      return std::nullopt;
-    offset += static_cast<size_t>(read_size);
-  }
-  return data;
-}
-
-[[nodiscard]] std::optional<std::vector<uint8_t>> read_regular_file(hsa_file_t file) {
-  struct stat status {};
-  if (fstat(file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0)
-    return std::nullopt;
-  if (static_cast<uintmax_t>(status.st_size) > std::numeric_limits<size_t>::max())
-    return std::nullopt;
-  return read_regular_file_range(file, 0, static_cast<size_t>(status.st_size));
-}
-
-template <typename ReadFn>
-[[nodiscard]] std::optional<std::vector<uint8_t>> try_read_code_object(ReadFn &&read) noexcept {
-  try {
-    return std::forward<ReadFn>(read)();
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: failed to snapshot code object: %s\n", error.what());
-  } catch (...) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: failed to snapshot code object\n");
-  }
-  return std::nullopt;
-}
 
 hsa_status_t HSA_API waitcheck_system_get_extension_table(uint16_t extension,
                                                           uint16_t version_major,
@@ -962,12 +900,12 @@ hsa_status_t HSA_API waitcheck_reader_create_from_file(hsa_file_t file,
   auto *original = layer().create_from_file();
   if (original == nullptr)
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
-  std::optional<std::vector<uint8_t>> bytes;
+  rocjitsu::CodeObjectFileSnapshot bytes;
   if (env_enabled("ROCJITSU_WAITCHECK", true))
-    bytes = try_read_code_object([&] { return read_regular_file(file); });
+    bytes = rocjitsu::snapshot_code_object_file(file);
   const hsa_status_t status = original(file, reader);
   if (status == HSA_STATUS_SUCCESS && reader != nullptr && bytes)
-    ReaderRegistry::instance().store_owned(*reader, std::move(*bytes));
+    ReaderRegistry::instance().store_owned(*reader, std::move(bytes));
   return status;
 }
 
@@ -990,12 +928,12 @@ hsa_status_t HSA_API waitcheck_reader_create_from_file_with_offset_size(
   auto *original = layer().file_range_create();
   if (original == nullptr)
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
-  std::optional<std::vector<uint8_t>> bytes;
+  rocjitsu::CodeObjectFileSnapshot bytes;
   if (env_enabled("ROCJITSU_WAITCHECK", true))
-    bytes = try_read_code_object([&] { return read_regular_file_range(file, offset, size); });
+    bytes = rocjitsu::snapshot_code_object_file_range(file, offset, size);
   const hsa_status_t status = original(file, offset, size, reader);
   if (status == HSA_STATUS_SUCCESS && reader != nullptr && bytes)
-    ReaderRegistry::instance().store_owned(*reader, std::move(*bytes));
+    ReaderRegistry::instance().store_owned(*reader, std::move(bytes));
   return status;
 }
 

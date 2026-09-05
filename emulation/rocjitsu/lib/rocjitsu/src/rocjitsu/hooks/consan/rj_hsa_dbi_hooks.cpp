@@ -25,6 +25,7 @@
 #include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
+#include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"
 #include "rocjitsu/hooks/hsa_code_object_reader_registry.h"
 #include "rocjitsu/hooks/hsa_tool_lifetime.h"
 
@@ -54,8 +55,6 @@
 #include <vector>
 
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 namespace rocjitsu::consan_hook {
 
@@ -2877,45 +2876,6 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
   return status;
 }
 
-std::shared_ptr<const std::vector<uint8_t>>
-snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
-  struct stat file_stat{};
-  if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 || size == 0 ||
-      static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max() ||
-      offset > static_cast<size_t>(file_stat.st_size) ||
-      size > static_cast<size_t>(file_stat.st_size) - offset)
-    return {};
-
-  std::shared_ptr<std::vector<uint8_t>> bytes;
-  try {
-    bytes = std::make_shared<std::vector<uint8_t>>(size);
-  } catch (const std::bad_alloc &) {
-    return {};
-  }
-
-  size_t read_size = 0;
-  while (read_size < size) {
-    const ssize_t result = pread(file, bytes->data() + read_size, size - read_size,
-                                 static_cast<off_t>(offset + read_size));
-    if (result > 0) {
-      read_size += static_cast<size_t>(result);
-      continue;
-    }
-    if (result < 0 && errno == EINTR)
-      continue;
-    return {};
-  }
-  return bytes;
-}
-
-std::shared_ptr<const std::vector<uint8_t>> snapshot_code_object_file(hsa_file_t file) {
-  struct stat file_stat{};
-  if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 ||
-      static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max())
-    return {};
-  return snapshot_code_object_file_range(file, 0, static_cast<size_t>(file_stat.st_size));
-}
-
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
     hsa_file_t file, hsa_code_object_reader_t *code_object_reader) {
   auto *original = layer().create_from_file();
@@ -2924,7 +2884,7 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
 
   const hsa_status_t status = original(file, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr) {
-    const auto bytes = snapshot_code_object_file(file);
+    const auto bytes = rocjitsu::snapshot_code_object_file(file);
     if (!bytes) {
       log_message(kLogInfo, "could not snapshot file-backed reader=%llu",
                   static_cast<unsigned long long>(code_object_reader->handle));
@@ -2953,7 +2913,7 @@ hsa_status_t HSA_API rj_dbi_loader_code_object_reader_create_from_file_with_offs
   if (status != HSA_STATUS_SUCCESS || code_object_reader == nullptr)
     return status;
 
-  const auto bytes = snapshot_code_object_file_range(file, offset, size);
+  const auto bytes = rocjitsu::snapshot_code_object_file_range(file, offset, size);
   if (!bytes) {
     log_message(kLogInfo, "could not snapshot ranged file-backed reader=%llu offset=%zu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader->handle), offset, size);
