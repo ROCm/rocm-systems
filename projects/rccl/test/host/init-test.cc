@@ -2112,7 +2112,7 @@ TEST_F(InitMicrotest, CommCleanup_TunerFinalizeFails_SkipsUnloadAndFree) {
 TEST_F(InitMicrotest, CommCleanup_TunerUnloadFails_SkipsFree) {
   CleanupComm c;
   ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
-  g_ncclTunerPluginUnloadResult = ncclSystemError;
+  ScopedHook unload(g_ncclTunerPluginUnload, [](ncclComm*) { return ncclSystemError; });
 
   EXPECT_EQ(ncclSystemError, commCleanup(c.comm));
 
@@ -4043,6 +4043,7 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
     aborted = j;
     return ncclSuccess;
   });
+  g_recorderLabels.clear();
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
@@ -4055,6 +4056,7 @@ TEST_F(InitMicrotest, CommEnsureReady_NotAborting_ReportsTheCommsAsyncError) {
   ReadyComm rc;
   rc.get()->asyncResult = ncclSystemError;
   ScopedHook abort(g_ncclGroupJobAbort, [](struct ncclGroupJob*) { return ncclSuccess; });
+  g_recorderLabels.clear();
   EXPECT_EQ(ncclSystemError, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(0, abort.calls);
   EXPECT_EQ(1, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
@@ -5658,17 +5660,59 @@ TEST_F(InitMicrotest, CommRevoke_ValidComm_RunsRevokeAsyncWhichLowersTheAbortFla
   EXPECT_EQ(0u, c.childAbortFlag());
 }
 
+namespace {
+// ncclCudaFree only reaches hipFree when the pointer is untracked and is not its allocation's base address.
+class Teardown_DeviceFreeSpy {
+ public:
+  explicit Teardown_DeviceFreeSpy(ncclComm* comm)
+      : memRange_(g_hipMemGetAddressRange,
+                  [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t) {
+                    if (base) {
+                      *base = reinterpret_cast<hipDeviceptr_t>(Dtor_kNotABaseAddress);
+                    }
+                    if (size) {
+                      *size = 0;
+                    }
+                    return hipSuccess;
+                  }),
+        deviceFree_(g_hipFree,
+                    [this](void* p) {
+                      freed_.push_back(p);
+                      return hipSuccess;
+                    }),
+        hostFree_(g_microFree, [comm](void* p) {
+          if (p != comm) {
+            ::free(p);
+          }
+        }) {
+    Teardown_AllowStreamCaptureExchange();
+  }
+  Teardown_DeviceFreeSpy(const Teardown_DeviceFreeSpy&) = delete;
+  Teardown_DeviceFreeSpy& operator=(const Teardown_DeviceFreeSpy&) = delete;
+
+  const std::vector<void*>& freed() const { return freed_; }
+
+ private:
+  std::vector<void*> freed_;
+  ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)> memRange_;
+  ScopedHook<hipError_t(void*)> deviceFree_;
+  ScopedHook<void(void*)> hostFree_;
+};
+}  // namespace
+
 // --- commFree's remaining conditional resources ---
-TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArrays) {
+TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArraysAndNullsThePointers) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->nNodes = 1;
+  // Distinct addresses: equal poisons would let a mutant storing one pointer into the other field pass both checks.
   int localSizes = 0;
-  int gatheredSizes = 0;
+  long gatheredSizes = 0;
   comm->localSizes = &localSizes;
   comm->gatheredSizes = &gatheredSizes;
+  ASSERT_NE(comm->localSizes, comm->gatheredSizes);
 
   std::vector<void*> released;
   ScopedHook memFree(g_ncclMemFree, [&](void* p) {
@@ -5676,8 +5720,12 @@ TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArrays) {
     return ncclSuccess;
   });
 
+  Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+  EXPECT_EQ(nullptr, comm->localSizes);
+  EXPECT_EQ(nullptr, comm->gatheredSizes);
+  ::free(comm);
 }
 
 TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
@@ -5694,39 +5742,6 @@ TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
   EXPECT_EQ(0, memFree.calls);
 }
 
-namespace {
-// ncclCudaFree only reaches hipFree when the pointer is untracked and is not its allocation's base address.
-class Teardown_DeviceFreeSpy {
- public:
-  explicit Teardown_DeviceFreeSpy(ncclComm* comm)
-      : memRange_(g_hipMemGetAddressRange,
-                  [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t) {
-                    if (base) *base = reinterpret_cast<hipDeviceptr_t>(Dtor_kNotABaseAddress);
-                    if (size) *size = 0;
-                    return hipSuccess;
-                  }),
-        deviceFree_(g_hipFree,
-                    [this](void* p) {
-                      freed_.push_back(p);
-                      return hipSuccess;
-                    }),
-        hostFree_(g_microFree, [comm](void* p) {
-          if (p != comm) ::free(p);
-        }) {
-    Teardown_AllowStreamCaptureExchange();
-  }
-  Teardown_DeviceFreeSpy(const Teardown_DeviceFreeSpy&) = delete;
-  Teardown_DeviceFreeSpy& operator=(const Teardown_DeviceFreeSpy&) = delete;
-
-  const std::vector<void*>& freed() const { return freed_; }
-
- private:
-  std::vector<void*> freed_;
-  ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)> memRange_;
-  ScopedHook<hipError_t(void*)> deviceFree_;
-  ScopedHook<void(void*)> hostFree_;
-};
-}  // namespace
 
 TEST_F(InitMicrotest, CommFree_TempBuff_ReleasesItThroughTheCommsMemManager) {
   ncclComm* comm = nullptr;
@@ -5822,12 +5837,55 @@ TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   EXPECT_EQ(1, symk.calls);
 }
 
+TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->symmetricSupport = false;
+  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(0, symk.calls);
+}
+
+TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  comm->symmetricSupport = true;
+  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclInternalError, commFree(comm));
+  EXPECT_EQ(1, symk.calls);
+  EXPECT_EQ(2, abortRef) << "commFree bailed before the abort-flag refcount drop";
+  ::free(comm);
+}
+
 namespace {
 // The payload records that the join really happened, not merely that the pointer was non-null.
 struct Teardown_ProxyThreads {
   std::unique_ptr<ncclProxyState> state{new ncclProxyState{}};
   bool mainRan = false;
   bool udsRan = false;
+
+  Teardown_ProxyThreads() = default;
+  Teardown_ProxyThreads(const Teardown_ProxyThreads&) = delete;
+  Teardown_ProxyThreads& operator=(const Teardown_ProxyThreads&) = delete;
+
+  // ncclProxyState holds both threads by value with no destructor, so an unjoined one terminates the binary.
+  ~Teardown_ProxyThreads() {
+    if (state == nullptr) {
+      return;
+    }
+    if (state->thread.joinable()) {
+      state->thread.join();
+    }
+    if (state->threadUDS.joinable()) {
+      state->threadUDS.join();
+    }
+  }
 
   void Attach(ncclComm* comm) {
     state->thread = std::thread([this] { mainRan = true; });

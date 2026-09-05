@@ -191,7 +191,6 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 // -------------------------------------------------------------------------
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
-extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 
 void InstallCommAllocSuccess();
