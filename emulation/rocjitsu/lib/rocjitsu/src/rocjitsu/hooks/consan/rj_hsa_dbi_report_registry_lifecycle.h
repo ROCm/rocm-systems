@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 
 namespace rocjitsu::consan_hook::detail {
@@ -58,6 +59,52 @@ inline hsa_status_t HSA_API select_auto_report_region(hsa_region_t region, void 
     search->fine_grained = false;
   }
   return HSA_STATUS_SUCCESS;
+}
+
+struct AutoReportAllocation {
+  void *data = nullptr;
+  bool fine_grained = false;
+  const char *failure_reason = "none";
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+
+  [[nodiscard]] explicit operator bool() const { return data != nullptr; }
+};
+
+[[nodiscard]] inline bool auto_report_allocation_apis_available(const CoreApiTable *core) {
+  return core != nullptr && core->hsa_agent_iterate_regions_fn != nullptr &&
+         core->hsa_region_get_info_fn != nullptr && core->hsa_memory_allocate_fn != nullptr &&
+         core->hsa_memory_free_fn != nullptr;
+}
+
+[[nodiscard]] inline AutoReportAllocation
+allocate_auto_report_memory(CoreApiTable *core, hsa_agent_t agent, size_t size) {
+  if (!auto_report_allocation_apis_available(core))
+    return {.failure_reason = "hsa_allocation_api_unavailable"};
+
+  AutoReportRegionSearch search{.core = core, .requested_size = size};
+  const hsa_status_t iterate_status =
+      core->hsa_agent_iterate_regions_fn(agent, select_auto_report_region, &search);
+  if (iterate_status != HSA_STATUS_SUCCESS && iterate_status != HSA_STATUS_INFO_BREAK) {
+    return {.failure_reason = "region_iteration", .status = iterate_status};
+  }
+  if (!search.found)
+    return {.failure_reason = "no_global_region", .status = iterate_status};
+
+  void *data = nullptr;
+  const hsa_status_t allocate_status = core->hsa_memory_allocate_fn(search.region, size, &data);
+  if (allocate_status != HSA_STATUS_SUCCESS || data == nullptr)
+    return {.failure_reason = "hsa_memory_allocate", .status = allocate_status};
+
+  std::memset(data, 0, size);
+  if (core->hsa_memory_assign_agent_fn != nullptr) {
+    const hsa_status_t assign_status =
+        core->hsa_memory_assign_agent_fn(data, agent, HSA_ACCESS_PERMISSION_RW);
+    if (assign_status != HSA_STATUS_SUCCESS) {
+      (void)core->hsa_memory_free_fn(data);
+      return {.failure_reason = "hsa_memory_assign_agent", .status = assign_status};
+    }
+  }
+  return {.data = data, .fine_grained = search.fine_grained};
 }
 
 template <typename Entry, size_t Capacity>

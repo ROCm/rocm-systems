@@ -1418,57 +1418,19 @@ public:
                   static_cast<unsigned long long>(reader));
       return false;
     }
-    if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
-        core->hsa_region_get_info_fn == nullptr || core->hsa_memory_allocate_fn == nullptr ||
-        core->hsa_memory_free_fn == nullptr) {
+    const detail::AutoReportAllocation allocation =
+        detail::allocate_auto_report_memory(core, agent, sizeof(uint32_t));
+    if (!allocation) {
       ++allocation_failure_count_;
       log_message(kLogInfo,
-                  "ConSan SC auto report allocation reader=%llu outcome=failed "
-                  "reason=hsa_allocation_api_unavailable",
-                  static_cast<unsigned long long>(reader));
+                  "ConSan SC auto report allocation reader=%llu outcome=failed reason=%s status=%d",
+                  static_cast<unsigned long long>(reader), allocation.failure_reason,
+                  static_cast<int>(allocation.status));
       return false;
     }
-
-    detail::AutoReportRegionSearch search{.core = core, .requested_size = sizeof(uint32_t)};
-    const hsa_status_t iterate_status =
-        core->hsa_agent_iterate_regions_fn(agent, detail::select_auto_report_region, &search);
-    if ((iterate_status != HSA_STATUS_SUCCESS && iterate_status != HSA_STATUS_INFO_BREAK) ||
-        !search.found) {
-      ++allocation_failure_count_;
-      log_message(kLogInfo,
-                  "ConSan SC auto report allocation reader=%llu outcome=failed "
-                  "reason=no_global_region status=%d",
-                  static_cast<unsigned long long>(reader), static_cast<int>(iterate_status));
-      return false;
-    }
-
-    void *ptr = nullptr;
-    const hsa_status_t allocate_status =
-        core->hsa_memory_allocate_fn(search.region, sizeof(uint32_t), &ptr);
-    if (allocate_status != HSA_STATUS_SUCCESS || ptr == nullptr) {
-      ++allocation_failure_count_;
-      log_message(kLogInfo,
-                  "ConSan SC auto report allocation reader=%llu outcome=failed "
-                  "reason=hsa_memory_allocate status=%d",
-                  static_cast<unsigned long long>(reader), static_cast<int>(allocate_status));
-      return false;
-    }
-    std::memset(ptr, 0, sizeof(uint32_t));
-    if (core->hsa_memory_assign_agent_fn != nullptr) {
-      const hsa_status_t assign_status =
-          core->hsa_memory_assign_agent_fn(ptr, agent, HSA_ACCESS_PERMISSION_RW);
-      if (assign_status != HSA_STATUS_SUCCESS) {
-        (void)core->hsa_memory_free_fn(ptr);
-        ++allocation_failure_count_;
-        log_message(kLogInfo,
-                    "ConSan SC auto report allocation reader=%llu outcome=failed "
-                    "reason=hsa_memory_assign_agent status=%d",
-                    static_cast<unsigned long long>(reader), static_cast<int>(assign_status));
-        return false;
-      }
-    }
+    void *ptr = allocation.data;
     const uint64_t generation = next_generation_.fetch_add(1, std::memory_order_relaxed) + 1u;
-    entries_[entry_count_++] = Entry{reader, generation, ptr, search.fine_grained};
+    entries_[entry_count_++] = Entry{reader, generation, ptr, allocation.fine_grained};
     *address = reinterpret_cast<uint64_t>(ptr);
     if (registered_generation != nullptr)
       *registered_generation = generation;
@@ -1476,7 +1438,7 @@ public:
                 "ConSan SC auto report buffer reader=%llu addr=0x%llx bytes=%zu "
                 "allocation_outcome=allocated fine_grained=%s",
                 static_cast<unsigned long long>(reader), static_cast<unsigned long long>(*address),
-                sizeof(uint32_t), search.fine_grained ? "true" : "false");
+                sizeof(uint32_t), allocation.fine_grained ? "true" : "false");
     return true;
   }
 

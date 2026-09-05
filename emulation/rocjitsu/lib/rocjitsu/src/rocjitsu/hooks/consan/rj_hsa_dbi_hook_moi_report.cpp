@@ -83,9 +83,7 @@ public:
                   static_cast<unsigned long long>(engine_ceiling));
       return false;
     }
-    if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
-        core->hsa_region_get_info_fn == nullptr || core->hsa_memory_allocate_fn == nullptr ||
-        core->hsa_memory_free_fn == nullptr) {
+    if (!detail::auto_report_allocation_apis_available(core)) {
       record_allocation_failure(required_size, /*capacity_failure=*/false);
       log_message(
           kLogInfo,
@@ -125,54 +123,19 @@ public:
     }
     const auto release_reservation = [&] { release_live_bytes(requested_size); };
 
-    detail::AutoReportRegionSearch search{.core = core, .requested_size = requested};
-    const hsa_status_t iterate_status =
-        core->hsa_agent_iterate_regions_fn(agent, detail::select_auto_report_region, &search);
-    if (iterate_status != HSA_STATUS_SUCCESS && iterate_status != HSA_STATUS_INFO_BREAK) {
+    const detail::AutoReportAllocation allocation =
+        detail::allocate_auto_report_memory(core, agent, requested);
+    if (!allocation) {
       release_reservation();
       record_allocation_failure(required_size, /*capacity_failure=*/false);
       log_message(kLogInfo,
-                  "ConSan MOI auto report buffer region iteration failed reader=%llu status=%d",
-                  static_cast<unsigned long long>(reader), static_cast<int>(iterate_status));
-      return false;
-    }
-    if (!search.found) {
-      release_reservation();
-      record_allocation_failure(required_size, /*capacity_failure=*/false);
-      log_message(kLogInfo,
-                  "ConSan MOI auto report buffer found no allocatable global HSA region "
-                  "reader=%llu bytes=%zu",
-                  static_cast<unsigned long long>(reader), requested);
-      return false;
-    }
-
-    void *ptr = nullptr;
-    const hsa_status_t status = core->hsa_memory_allocate_fn(search.region, requested, &ptr);
-    if (status != HSA_STATUS_SUCCESS) {
-      release_reservation();
-      record_allocation_failure(required_size, /*capacity_failure=*/false);
-      log_message(kLogInfo,
-                  "ConSan MOI auto report buffer hsa_memory_allocate failed reader=%llu "
+                  "ConSan MOI auto report allocation reader=%llu outcome=failed reason=%s "
                   "status=%d bytes=%zu",
-                  static_cast<unsigned long long>(reader), static_cast<int>(status), requested);
+                  static_cast<unsigned long long>(reader), allocation.failure_reason,
+                  static_cast<int>(allocation.status), requested);
       return false;
     }
-    std::memset(ptr, 0, requested);
-
-    if (core->hsa_memory_assign_agent_fn != nullptr) {
-      const hsa_status_t assign_status =
-          core->hsa_memory_assign_agent_fn(ptr, agent, HSA_ACCESS_PERMISSION_RW);
-      if (assign_status != HSA_STATUS_SUCCESS) {
-        log_message(kLogInfo,
-                    "ConSan MOI auto report buffer hsa_memory_assign_agent failed reader=%llu "
-                    "status=%d",
-                    static_cast<unsigned long long>(reader), static_cast<int>(assign_status));
-        (void)core->hsa_memory_free_fn(ptr);
-        release_reservation();
-        record_allocation_failure(required_size, /*capacity_failure=*/false);
-        return false;
-      }
-    }
+    void *ptr = allocation.data;
 
     const uint64_t generation = next_generation_.fetch_add(1, std::memory_order_relaxed) + 1u;
     auto *header = static_cast<rocjitsu::ConSanMoiReportHeader *>(ptr);
@@ -208,7 +171,7 @@ public:
           .required_size = static_cast<size_t>(required_size),
           .generation = generation,
           .layout = layout,
-          .fine_grained = search.fine_grained,
+          .fine_grained = allocation.fine_grained,
           .input_fingerprint = {},
           .static_metadata = {},
           .executable = 0,
@@ -250,7 +213,7 @@ public:
         layout.inline_acquired_epoch_token_capacity, layout.inline_causal_snapshot_capacity,
         layout.sampled_watchpoint_capacity, layout.sampled_causal_window_capacity,
         layout.sampled_sync_metadata_capacity, layout.sampled_pending_acquire_capacity,
-        static_cast<unsigned long long>(generation), search.fine_grained ? "true" : "false");
+        static_cast<unsigned long long>(generation), allocation.fine_grained ? "true" : "false");
     return true;
   }
 

@@ -48,6 +48,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_renderer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_registry_lifecycle.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "scoped_temp.h"
@@ -1635,6 +1636,25 @@ struct FakeApiTable {
     amd.hsa_amd_agent_set_async_scratch_limit_fn = fake_amd_agent_set_async_scratch_limit;
   }
 };
+
+void reset_core_memory_observations();
+
+TEST(HsaHooksUnitTest, SharedAutoReportAllocationReleasesFailedAgentAssignment) {
+  reset_core_memory_observations();
+  FakeApiTable api;
+  api.core.hsa_agent_iterate_regions_fn = fake_guest_agent_iterate_regions;
+
+  const rocjitsu::consan_hook::detail::AutoReportAllocation allocation =
+      rocjitsu::consan_hook::detail::allocate_auto_report_memory(api.table.core_, kGuestAgent,
+                                                                 sizeof(uint32_t));
+
+  EXPECT_FALSE(allocation);
+  EXPECT_STREQ(allocation.failure_reason, "hsa_memory_assign_agent");
+  EXPECT_EQ(allocation.status, HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(g_core_memory_allocate_calls, 1);
+  EXPECT_EQ(g_core_memory_free_calls, 1);
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+}
 
 void write_runtime_config_path(const std::string &runtime_dir,
                                bool create_host_topology_node = true) {
