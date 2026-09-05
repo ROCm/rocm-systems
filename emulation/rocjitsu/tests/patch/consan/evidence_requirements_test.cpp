@@ -156,7 +156,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
   kernel.declared_group_segment_bytes = declared_lds_bytes;
   kernel.has_dynamic_lds = dynamic_lds;
   if (flat) {
-    ConSanAccessInventorySite site;
+    ConSanProgramSite site;
     site.origin = ConSanAccessOrigin::Flat;
     site.kind = ConSanLdsAccessKind::Write;
     site.physical_id.original_text_offset = 16;
@@ -169,9 +169,9 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Group;
     site.mnemonic = "flat_store_b32";
     site.container = consan_program_container_ref(kernel);
-    builder.access_sites().push_back(std::move(site));
+    builder.add_access_site(std::move(site));
   } else {
-    ConSanAccessInventorySite site;
+    ConSanProgramSite site;
     site.origin = ConSanAccessOrigin::NativeLds;
     site.kind = ConSanLdsAccessKind::Write;
     site.physical_id.original_text_offset = 16;
@@ -182,7 +182,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.operands.data_vgpr = 3;
     site.mnemonic = "ds_store_b32";
     site.container = consan_program_container_ref(kernel);
-    builder.access_sites().push_back(std::move(site));
+    builder.add_access_site(std::move(site));
   }
   builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(bytes);
@@ -190,7 +190,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
 
   InlineEvidenceFixture fixture;
   fixture.inventory = builder.view();
-  const ConSanAccessInventorySite &site = fixture.inventory.access_sites().front();
+  const ConSanProgramSite &site = fixture.inventory.access_sites().front();
   fixture.plan.engine = ConSanCapabilityEngine::InlineShadow;
   ConSanProbeIntent intent;
   intent.id = {0};
@@ -1133,7 +1133,7 @@ TEST(ConSanEvidenceRequirements, EveryPlannerIsDeterministicAndPreservesTypedInp
   const InlineEvidenceFixture inline_fixture =
       make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
   const ConSanObservationPlan inline_before = inline_fixture.plan;
-  const std::vector<ConSanAccessInventorySite> inventory_before(
+  const std::vector<ConSanProgramSite> inventory_before(
       inline_fixture.inventory.access_sites().begin(),
       inline_fixture.inventory.access_sites().end());
   const ConSanInlineShadowCapacityPolicy inline_policy{.caller_ceiling_bytes = 64u * 1024u * 1024u,

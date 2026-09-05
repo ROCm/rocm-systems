@@ -406,7 +406,7 @@ struct ConSanAccessOperandFacts {
 /// builder-owned inventory collection without reviving container-owned LDS or
 /// FLAT representations. The complete type and its construction-state
 /// contract are declared by the program-inventory layer later in `consan.h`.
-struct ConSanAccessInventorySite;
+struct ConSanProgramSite;
 
 /// Immutable original-program facts for one executable symbol container.
 ///

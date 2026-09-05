@@ -86,20 +86,22 @@ struct ConSanAccessRange {
   bool operator==(const ConSanAccessRange &) const = default;
 };
 
-/// Shared decode-to-inventory access fact for one container interpretation of
-/// a physical instruction.
+/// Shared decoded-program record for one container interpretation of a
+/// physical instruction.
 ///
-/// During builder-owned decode, `origin`, instruction facts, operands, and the
-/// original text offset are populated while code-object identity, container
-/// attribution, logical ranges, exclusions, and execution owners can remain
-/// incomplete. `ProgramInventoryBuilder::publish_decoded_accesses` completes
-/// and consumes those records after bounded cross-function provenance relay.
-/// Every record reachable through immutable `ProgramInventory::access_sites()`
-/// is in that completed state. Aliasing symbol ranges can produce several
-/// completed records with the same `physical_id`; later policy canonicalizes
-/// them before placement. The record contains no selected engine,
-/// scratch-register or report address, patch kind, or lowering outcome.
-struct ConSanAccessInventorySite {
+/// An instruction can carry an access facet and one synchronization/fault
+/// facet at the same time: for example, a relaxed LDS atomic is both. The
+/// tagged payload therefore does not compete with the access fields. Records
+/// without an access facet retain `origin == Count`; records without a
+/// synchronization/fault facet retain the monostate payload. During
+/// builder-owned decode, code-object identity, logical ranges, exclusions,
+/// and execution owners can remain incomplete. Publication completes those
+/// facts. Aliasing symbol ranges can still produce several records with the
+/// same physical identity; later policy canonicalizes them before placement.
+struct ConSanProgramSite {
+  using Payload = std::variant<std::monostate, ConSanOrdinaryMemorySite, ConSanBarrierSite,
+                               ConSanFenceSite, ConSanAtomicSite>;
+
   PhysicalSiteId physical_id;
   ConSanProgramContainerRef container;
   ConSanAccessOrigin origin = ConSanAccessOrigin::Count;
@@ -117,28 +119,9 @@ struct ConSanAccessInventorySite {
   std::vector<uint64_t> execution_owner_descriptor_file_offsets;
   std::vector<ConSanAccessRange> ranges;
   std::vector<ConSanInventoryExclusion> exclusions;
-
-  /// Return whether construction found no inventory-level limitation. Engine
-  /// policy can still reject a complete semantic access for mode-specific
-  /// reasons.
-  [[nodiscard]] bool complete() const { return exclusions.empty() && !ranges.empty(); }
-
-  bool operator==(const ConSanAccessInventorySite &) const = default;
-};
-
-/// One decoded instruction fact used by synchronization and fault analysis.
-///
-/// These sites formerly lived in four vectors on every kernel and function.
-/// Keeping the container attribution beside a tagged payload gives the
-/// original program one authoritative source-site arena. Synchronization
-/// events may derive semantic facts from this record, but do not own another
-/// decoder representation of it.
-struct ConSanDecodedProgramSite {
-  using Payload =
-      std::variant<ConSanOrdinaryMemorySite, ConSanBarrierSite, ConSanFenceSite, ConSanAtomicSite>;
-
-  ConSanProgramContainerRef container;
   Payload payload;
+
+  [[nodiscard]] bool has_access() const { return origin != ConSanAccessOrigin::Count; }
 
   template <typename Site> [[nodiscard]] const Site *get_if() const {
     return std::get_if<Site>(&payload);
@@ -146,22 +129,77 @@ struct ConSanDecodedProgramSite {
   template <typename Site> [[nodiscard]] Site *get_if() { return std::get_if<Site>(&payload); }
 
   [[nodiscard]] uint64_t text_offset() const {
-    return std::visit([](const auto &site) { return site.text_offset; }, payload);
+    return std::visit(
+        [&](const auto &site) -> uint64_t {
+          using Site = std::remove_cvref_t<decltype(site)>;
+          if constexpr (std::is_same_v<Site, std::monostate>)
+            return physical_id.original_text_offset;
+          else
+            return site.text_offset;
+        },
+        payload);
   }
-  [[nodiscard]] uint64_t file_offset() const {
-    return std::visit([](const auto &site) { return site.file_offset; }, payload);
+  [[nodiscard]] uint64_t decoded_file_offset() const {
+    return std::visit(
+        [&](const auto &site) -> uint64_t {
+          using Site = std::remove_cvref_t<decltype(site)>;
+          if constexpr (std::is_same_v<Site, std::monostate>)
+            return file_offset;
+          else
+            return site.file_offset;
+        },
+        payload);
   }
   [[nodiscard]] uint32_t size() const {
-    return std::visit([](const auto &site) { return site.size; }, payload);
+    return std::visit(
+        [&](const auto &site) -> uint32_t {
+          using Site = std::remove_cvref_t<decltype(site)>;
+          if constexpr (std::is_same_v<Site, std::monostate>)
+            return instruction_size;
+          else
+            return site.size;
+        },
+        payload);
   }
-  [[nodiscard]] std::string_view mnemonic() const {
-    return std::visit([](const auto &site) -> std::string_view { return site.mnemonic; }, payload);
+  [[nodiscard]] std::string_view mnemonic_view() const {
+    return std::visit(
+        [&](const auto &site) -> std::string_view {
+          using Site = std::remove_cvref_t<decltype(site)>;
+          if constexpr (std::is_same_v<Site, std::monostate>)
+            return mnemonic;
+          else
+            return site.mnemonic;
+        },
+        payload);
   }
 
-  [[nodiscard]] bool same_payload(const ConSanDecodedProgramSite &other) const {
+  [[nodiscard]] bool same_payload(const ConSanProgramSite &other) const {
     return payload == other.payload;
   }
+
+  /// Return whether construction found no inventory-level limitation. Engine
+  /// policy can still reject a complete semantic access for mode-specific
+  /// reasons.
+  [[nodiscard]] bool complete() const { return exclusions.empty() && !ranges.empty(); }
+
+  bool operator==(const ConSanProgramSite &) const = default;
 };
+
+/// Build a program-site record from a synchronization/fault decode facet.
+/// Access decoding may later merge its independent facet into this same
+/// physical record.
+template <typename Site>
+[[nodiscard]] ConSanProgramSite make_consan_program_site(ConSanProgramContainerRef container,
+                                                         Site site) {
+  ConSanProgramSite result;
+  result.physical_id.original_text_offset = site.text_offset;
+  result.container = std::move(container);
+  result.file_offset = site.file_offset;
+  result.instruction_size = site.size;
+  result.mnemonic = site.mnemonic;
+  result.payload = std::move(site);
+  return result;
+}
 
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
@@ -173,20 +211,20 @@ struct ConSanDecodedProgramSite {
 /// owner is alive. Fault planning and engine policy may query this projection
 /// but cannot modify or rebuild sanitizer semantics through it.
 struct SynchronizationInventoryView {
-  std::span<const ConSanDecodedProgramSite> decoded_sites;
+  std::span<const ConSanProgramSite> program_sites;
   std::span<const ConSanSyncEvent> sync_events;
   std::span<const ConSanSyncSequence> sync_sequences;
   std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
 
-  [[nodiscard]] const ConSanDecodedProgramSite *source(const ConSanSyncEvent &event) const {
-    return event.source_site.valid() && event.source_site.ordinal < decoded_sites.size()
-               ? &decoded_sites[event.source_site.ordinal]
+  [[nodiscard]] const ConSanProgramSite *source(const ConSanSyncEvent &event) const {
+    return event.source_site.valid() && event.source_site.ordinal < program_sites.size()
+               ? &program_sites[event.source_site.ordinal]
                : nullptr;
   }
 
   template <typename Site> [[nodiscard]] const Site *source_as(const ConSanSyncEvent &event) const {
-    const ConSanDecodedProgramSite *decoded = source(event);
+    const ConSanProgramSite *decoded = source(event);
     return decoded == nullptr ? nullptr : decoded->get_if<Site>();
   }
 
@@ -327,7 +365,7 @@ struct SynchronizationInventoryView {
 /// view must not escape analysis; published consumers receive only
 /// `SynchronizationInventoryView`.
 struct SynchronizationInventoryBuildView {
-  const std::vector<ConSanDecodedProgramSite> &decoded_sites;
+  const std::vector<ConSanProgramSite> &program_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
@@ -361,8 +399,12 @@ struct ConSanProgramInventoryStorage {
   /// views without reviving parallel ownership.
   std::vector<ConSanProgramContainer> containers;
   size_t kernel_count = 0;
-  std::vector<ConSanAccessInventorySite> access_sites;
-  std::vector<ConSanDecodedProgramSite> decoded_sites;
+  /// One owning arena for every decoded instruction of interest. Accesses form
+  /// a contiguous prefix so the hot access-policy path keeps a zero-allocation
+  /// span; synchronization and fault analysis traverse the complete arena and
+  /// ignore records whose tagged payload is monostate.
+  std::vector<ConSanProgramSite> program_sites;
+  size_t access_site_count = 0;
   std::vector<ConSanSyncEvent> sync_events;
   std::vector<ConSanSyncSequence> sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
@@ -456,17 +498,18 @@ public:
     const auto function = std::ranges::find(records, name, &ConSanProgramContainer::name);
     return function == records.end() ? nullptr : &*function;
   }
-  [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
-    return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
-                    : std::span<const ConSanAccessInventorySite>{};
+  [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
+    return storage_ ? std::span<const ConSanProgramSite>(storage_->program_sites)
+                          .first(storage_->access_site_count)
+                    : std::span<const ConSanProgramSite>{};
   }
   /// Return every kernel descriptor that can own execution of an access,
   /// including its containing kernel when symbol-range ownership did not
   /// already publish that descriptor. Shared helper bodies can name several
   /// execution owners; callers that mutate descriptor state must update the
   /// complete returned set.
-  [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(
-      const ConSanAccessInventorySite &site) const {
+  [[nodiscard]] std::vector<uint64_t>
+  execution_owner_descriptors(const ConSanProgramSite &site) const {
     std::vector<uint64_t> owners = site.execution_owner_descriptor_file_offsets;
     if (const ConSanProgramContainer *record = container(site.container.id);
         record != nullptr && record->is_kernel())
@@ -478,20 +521,20 @@ public:
   /// Return the authoritative decoded source sites used by synchronization
   /// and fault analysis. Payloads remain decoder facts; policy and lowering
   /// products live in later phase-owned records.
-  [[nodiscard]] std::span<const ConSanDecodedProgramSite> decoded_sites() const {
-    return storage_ ? std::span<const ConSanDecodedProgramSite>(storage_->decoded_sites)
-                    : std::span<const ConSanDecodedProgramSite>{};
+  [[nodiscard]] std::span<const ConSanProgramSite> program_sites() const {
+    return storage_ ? std::span<const ConSanProgramSite>(storage_->program_sites)
+                    : std::span<const ConSanProgramSite>{};
   }
 
   /// Resolve one exact source-site handle in this inventory revision.
-  [[nodiscard]] const ConSanDecodedProgramSite *decoded_site(ConSanProgramSiteId id) const {
-    const std::span<const ConSanDecodedProgramSite> sites = decoded_sites();
+  [[nodiscard]] const ConSanProgramSite *program_site(ConSanProgramSiteId id) const {
+    const std::span<const ConSanProgramSite> sites = program_sites();
     return id.valid() && id.ordinal < sites.size() ? &sites[id.ordinal] : nullptr;
   }
 
   /// Resolve one exact source-site handle and require its typed payload.
-  template <typename Site> [[nodiscard]] const Site *decoded_site(ConSanProgramSiteId id) const {
-    const ConSanDecodedProgramSite *site = decoded_site(id);
+  template <typename Site> [[nodiscard]] const Site *program_site(ConSanProgramSiteId id) const {
+    const ConSanProgramSite *site = program_site(id);
     return site == nullptr ? nullptr : site->get_if<Site>();
   }
   /// Return the complete immutable synchronization projection as one value.
@@ -499,7 +542,7 @@ public:
     if (!storage_)
       return {};
     return {
-        .decoded_sites = storage_->decoded_sites,
+        .program_sites = storage_->program_sites,
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
@@ -578,23 +621,96 @@ public:
     storage_->containers.push_back(std::move(container));
     return storage_->containers.back();
   }
-  /// Return the normalized access facts while the inventory is being built.
+  /// Return the normalized access prefix while the inventory is being built.
   ///
   /// Access decoding creates these records before control-flow analysis.
   /// Later analysis stages may enrich fields such as execution ownership, but
   /// must not change a site's physical identity or decoded instruction facts.
   /// This mutable capability stays on the builder so published
   /// `ProgramInventory` views remain read-only.
-  [[nodiscard]] std::vector<ConSanAccessInventorySite> &access_sites() {
-    return storage_->access_sites;
+  [[nodiscard]] std::span<ConSanProgramSite> access_sites() {
+    return std::span(storage_->program_sites).first(storage_->access_site_count);
   }
-  [[nodiscard]] std::vector<ConSanDecodedProgramSite> &decoded_sites() {
-    return storage_->decoded_sites;
+  [[nodiscard]] std::vector<ConSanProgramSite> &program_sites() { return storage_->program_sites; }
+  void add_access_site(ConSanProgramSite site) {
+    const auto position = storage_->program_sites.begin() + storage_->access_site_count;
+    storage_->program_sites.insert(position, std::move(site));
+    ++storage_->access_site_count;
+  }
+  void add_semantic_site(ConSanProgramSite site) {
+    const auto same_source = [&](const ConSanProgramSite &candidate) {
+      return candidate.container == site.container &&
+             candidate.physical_id.original_text_offset == site.physical_id.original_text_offset;
+    };
+    const auto access = std::ranges::find_if(access_sites(), same_source);
+    if (access != access_sites().end() && std::holds_alternative<std::monostate>(access->payload)) {
+      access->payload = std::move(site.payload);
+      return;
+    }
+    storage_->program_sites.push_back(std::move(site));
+  }
+  void add_sites(std::vector<ConSanProgramSite> accesses,
+                 std::vector<ConSanProgramSite> semantic_sites) {
+    for (ConSanProgramSite &access : accesses)
+      add_access_site(std::move(access));
+    for (ConSanProgramSite &site : semantic_sites)
+      add_semantic_site(std::move(site));
+  }
+  template <typename Predicate> void erase_sites_if(Predicate predicate) {
+    auto access_end = storage_->program_sites.begin() + storage_->access_site_count;
+    access_end = std::remove_if(storage_->program_sites.begin(), access_end, predicate);
+    const size_t retained_access_count =
+        static_cast<size_t>(access_end - storage_->program_sites.begin());
+    storage_->program_sites.erase(access_end,
+                                  storage_->program_sites.begin() + storage_->access_site_count);
+    storage_->access_site_count = retained_access_count;
+    storage_->program_sites.erase(
+        std::remove_if(storage_->program_sites.begin() + storage_->access_site_count,
+                       storage_->program_sites.end(), predicate),
+        storage_->program_sites.end());
+  }
+  /// Transfer semantic facets in an installed code range to their final
+  /// owner without disturbing the access prefix. Symbol aliases can decode
+  /// the same semantic instruction more than once: retain one facet, but
+  /// retain every independently normalized access record.
+  void reattribute_semantic_range(uint64_t begin, uint32_t size,
+                                  const ConSanProgramContainer &owner) {
+    const uint64_t end = begin + size;
+    const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
+    std::vector<std::pair<size_t, uint64_t>> seen;
+    const auto in_range = [&](const ConSanProgramSite &site) {
+      return site.text_offset() >= begin && site.text_offset() < end;
+    };
+    const auto first_semantic_facet = [&](const ConSanProgramSite &site) {
+      const std::pair key{site.payload.index(), site.text_offset()};
+      if (std::ranges::find(seen, key) != seen.end())
+        return false;
+      seen.push_back(key);
+      return true;
+    };
+
+    for (ConSanProgramSite &site : access_sites()) {
+      if (!in_range(site))
+        continue;
+      site.container = reference;
+      if (!std::holds_alternative<std::monostate>(site.payload) && !first_semantic_facet(site))
+        site.payload = std::monostate{};
+    }
+
+    auto semantic_begin = storage_->program_sites.begin() + storage_->access_site_count;
+    storage_->program_sites.erase(std::remove_if(semantic_begin, storage_->program_sites.end(),
+                                                 [&](ConSanProgramSite &site) {
+                                                   if (!in_range(site))
+                                                     return false;
+                                                   site.container = reference;
+                                                   return !first_semantic_facet(site);
+                                                 }),
+                                  storage_->program_sites.end());
   }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
     return {
-        .decoded_sites = storage_->decoded_sites,
+        .program_sites = storage_->program_sites,
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
@@ -634,12 +750,12 @@ public:
         return;
       reference = consan_program_container_ref(*match);
     };
-    for (ConSanAccessInventorySite &access : storage_->access_sites) {
+    for (ConSanProgramSite &access : access_sites()) {
       bind_container(access.container);
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
     }
-    for (ConSanDecodedProgramSite &site : storage_->decoded_sites)
+    for (ConSanProgramSite &site : storage_->program_sites)
       bind_container(site.container);
   }
 
@@ -653,25 +769,24 @@ public:
   /// do not occur in the pristine inventory at all. This operation resolves
   /// both cases without creating a second container-owned access collection.
   void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanProgramContainer &owner,
-                                std::span<const ConSanAccessInventorySite> decoded_accesses,
+                                std::span<const ConSanProgramSite> decoded_accesses,
                                 std::span<const uint8_t> code_object_bytes) {
     const uint64_t end = begin + size;
     const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
-    for (ConSanAccessInventorySite &access : storage_->access_sites) {
+    for (ConSanProgramSite &access : access_sites()) {
       if (access.physical_id.original_text_offset >= begin &&
           access.physical_id.original_text_offset < end)
         access.container = reference;
     }
-    for (const ConSanAccessInventorySite &access : decoded_accesses) {
-      ConSanAccessInventorySite completed =
-          complete_access_site(reference, access, code_object_bytes);
-      const bool duplicate = std::ranges::any_of(storage_->access_sites, [&](const auto &existing) {
+    for (const ConSanProgramSite &access : decoded_accesses) {
+      ConSanProgramSite completed = complete_access_site(reference, access, code_object_bytes);
+      const bool duplicate = std::ranges::any_of(access_sites(), [&](const auto &existing) {
         return existing.container == reference && existing.physical_id == completed.physical_id &&
                (existing.origin == ConSanAccessOrigin::Flat) ==
                    (completed.origin == ConSanAccessOrigin::Flat);
       });
       if (!duplicate)
-        storage_->access_sites.push_back(std::move(completed));
+        add_access_site(std::move(completed));
     }
   }
 
@@ -692,7 +807,7 @@ private:
   /// displacement. Returning absence preserves unreadable pristine bytes as a
   /// typed inventory gap instead of silently treating them as offset zero.
   [[nodiscard]] std::optional<int64_t>
-  single_range_native_static_byte_offset(const ConSanAccessInventorySite &site,
+  single_range_native_static_byte_offset(const ConSanProgramSite &site,
                                          std::span<const uint8_t> bytes) const {
     if (site.origin == ConSanAccessOrigin::DirectToLds)
       return 0;
@@ -715,11 +830,10 @@ private:
     };
   }
 
-  [[nodiscard]] ConSanAccessInventorySite
-  complete_access_site(const ConSanProgramContainerRef &container,
-                       const ConSanAccessInventorySite &site,
-                       std::span<const uint8_t> bytes) const {
-    ConSanAccessInventorySite result = site;
+  [[nodiscard]] ConSanProgramSite complete_access_site(const ConSanProgramContainerRef &container,
+                                                       const ConSanProgramSite &site,
+                                                       std::span<const uint8_t> bytes) const {
+    ConSanProgramSite result = site;
     result.physical_id = {
         .code_object = storage_->code_object_id,
         .original_text_offset = site.physical_id.original_text_offset,
@@ -773,8 +887,7 @@ private:
     return result;
   }
 
-  static void append_common_exclusions(ConSanAccessInventorySite &site,
-                                       bool address_operand_not_required) {
+  static void append_common_exclusions(ConSanProgramSite &site, bool address_operand_not_required) {
     if (site.kind == ConSanLdsAccessKind::Other) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::NonAccessInstruction,

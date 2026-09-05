@@ -122,7 +122,7 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
         communication->in_kernel != sequence.in_kernel) {
       continue;
     }
-    for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
+    for (const ConSanProgramSite &access : inventory.access_sites()) {
       const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
       if (in_kernel != communication->in_kernel ||
           access.container.name != communication->container_name ||

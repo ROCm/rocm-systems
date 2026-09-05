@@ -82,23 +82,23 @@ find_first_relocatable_anchor(const AmdGpuCodeObject &code_object, rj_code_arch_
                                                              rj_code_arch_t arch,
                                                              std::string *error_out);
 
-[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanAccessInventorySite &access);
+[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanProgramSite &access);
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
                                        uint16_t rhs_count);
-[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
+[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanProgramSite &access,
                                                       uint16_t candidate);
-[[nodiscard]] uint16_t access_scratch_search_start(const ConSanAccessInventorySite &access);
-[[nodiscard]] bool lds_load_clobbers_address(const ConSanAccessInventorySite &access);
+[[nodiscard]] uint16_t access_scratch_search_start(const ConSanProgramSite &access);
+[[nodiscard]] bool lds_load_clobbers_address(const ConSanProgramSite &access);
 [[nodiscard]] std::optional<uint16_t>
-required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite &access,
+required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
                                                 uint16_t scratch_vgpr, uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOptions &options,
+choose_scratch_vgpr(const ConSanProgramSite &access, const ConSanOptions &options,
                     const Instruction *instruction, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t>
-choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
+choose_spill_scratch_vgpr(const ConSanProgramSite &access, uint16_t allocation_count,
                           uint16_t required_vgprs);
 
 [[nodiscard]] std::vector<BasicBlock *>

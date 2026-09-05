@@ -943,10 +943,10 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(std::ranges::count(result.program_inventory.access_sites(),
-                               ConSanAccessOrigin::NativeLds, &ConSanAccessInventorySite::origin),
+                               ConSanAccessOrigin::NativeLds, &ConSanProgramSite::origin),
             1u);
   EXPECT_EQ(std::ranges::count(result.program_inventory.access_sites(), ConSanAccessOrigin::Flat,
-                               &ConSanAccessInventorySite::origin),
+                               &ConSanProgramSite::origin),
             1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   ASSERT_EQ(result.patches.size(), 2u);

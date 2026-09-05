@@ -23,7 +23,7 @@ using TwoRangeShape = consan_detail::DecodedNativeLdsTwoRangeShape;
   };
 }
 
-[[nodiscard]] Reason inventory_reason(const ConSanAccessInventorySite &access) {
+[[nodiscard]] Reason inventory_reason(const ConSanProgramSite &access) {
   if (access.exclusions.empty() && !access.ranges.empty())
     return Reason::None;
   if (access.exclusions.empty())
@@ -145,7 +145,7 @@ template <typename Range>
 }
 
 [[nodiscard]] std::optional<uint16_t>
-native_data_register_count(const ConSanAccessInventorySite &access,
+native_data_register_count(const ConSanProgramSite &access,
                            const std::optional<TwoRangeShape> &two_address) {
   if (access.decoded_width_bits == 8u || access.decoded_width_bits == 16u)
     return 1u;
@@ -157,7 +157,7 @@ native_data_register_count(const ConSanAccessInventorySite &access,
   return std::nullopt;
 }
 
-[[nodiscard]] Reason native_compare_support(const ConSanAccessInventorySite &access,
+[[nodiscard]] Reason native_compare_support(const ConSanProgramSite &access,
                                             const ConSanTargetProfile &target,
                                             const std::optional<TwoRangeShape> &two_address,
                                             uint16_t data_register_count) {
@@ -267,7 +267,7 @@ native_data_register_count(const ConSanAccessInventorySite &access,
 }
 
 [[nodiscard]] std::optional<uint16_t>
-flat_data_register_count(const ConSanAccessInventorySite &access) {
+flat_data_register_count(const ConSanProgramSite &access) {
   if (consan_flat_load_subword_semantics(access.mnemonic) ||
       consan_flat_store_subword_semantics(access.mnemonic) || access.decoded_width_bits == 16u)
     return 1u;
@@ -277,7 +277,7 @@ flat_data_register_count(const ConSanAccessInventorySite &access) {
   return std::nullopt;
 }
 
-[[nodiscard]] Reason flat_compare_support(const ConSanAccessInventorySite &access,
+[[nodiscard]] Reason flat_compare_support(const ConSanProgramSite &access,
                                           uint16_t data_register_count) {
   constexpr std::array reads = {"flat_load_b32",    "flat_load_b64",     "flat_load_b128",
                                 "flat_load_dword",  "flat_load_dwordx2", "flat_load_dwordx4",
@@ -307,7 +307,7 @@ flat_data_register_count(const ConSanAccessInventorySite &access) {
 } // namespace
 
 ConSanAccessLoweringClassification
-classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code_arch_t arch) {
+classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t arch) {
   if (const Reason reason = inventory_reason(access); reason != Reason::None)
     return reject(reason);
   if (access.file_offset > access.physical_id.code_object.byte_size ||

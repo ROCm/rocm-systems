@@ -1,5 +1,5 @@
 [[nodiscard]] uint16_t
-flat_check_trap_comparison_scratch_vgprs(const ConSanAccessInventorySite &access) {
+flat_check_trap_comparison_scratch_vgprs(const ConSanProgramSite &access) {
   if (!access.lowering.form)
     return 0u;
   const ConSanAccessLoweringForm &form = *access.lowering.form;
@@ -17,8 +17,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const std::unordered_set<uint64_t> admitted_file_offsets = sc_admitted_access_file_offsets(
       result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::Flat);
-  std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
-  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
+  std::map<uint64_t, const ConSanProgramSite *> admitted_sites;
+  for (const ConSanProgramSite &access : result.program_inventory.access_sites()) {
     if (access.origin != ConSanAccessOrigin::Flat ||
         !admitted_file_offsets.contains(access.file_offset))
       continue;
@@ -40,7 +40,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                  /*restrict_to_preflight_candidates=*/false);
 
   struct FlatCheckTrapCandidate {
-    const ConSanAccessInventorySite *site = nullptr;
+    const ConSanProgramSite *site = nullptr;
     uint16_t scratch_vgpr = 0;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     uint16_t vcc_save_sgpr = 0;
@@ -56,7 +56,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   size_t mixed_stack_owner_spill_rejection_count = 0;
   size_t dynamic_stack_spill_encoding_failure_count = 0;
   size_t private_spill_encoding_failure_count = 0;
-  auto visit_site = [&](const ConSanAccessInventorySite &site, const Instruction *site_inst,
+  auto visit_site = [&](const ConSanProgramSite &site, const Instruction *site_inst,
                         std::optional<uint16_t> min_auto_scratch_vgpr,
                         std::optional<uint16_t> max_auto_scratch_vgpr,
                         std::optional<uint16_t> min_fresh_sgpr,
@@ -172,7 +172,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   for (const auto &[file_offset, access] : admitted_sites) {
     (void)file_offset;
-    const ConSanAccessInventorySite &site = *access;
+    const ConSanProgramSite &site = *access;
     std::vector<uint64_t> owners =
         result.program_inventory.execution_owner_descriptors(site);
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
@@ -263,7 +263,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   struct PlannedFlatCheckTrapPatch {
-    const ConSanAccessInventorySite *site = nullptr;
+    const ConSanProgramSite *site = nullptr;
     std::vector<ConSanProbeIntentId> intent_ids;
     std::vector<uint32_t> words;
     ConSanPatchInfo info;
@@ -282,7 +282,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       result.errors.emplace_back("ConSan flat check/trap proof selected missing site");
       return;
     }
-    const ConSanAccessInventorySite &site = *candidate.site;
+    const ConSanProgramSite &site = *candidate.site;
     const auto required_vgprs = access_dword_count(site);
     const auto compare_vgpr = flat_check_trap_compare_vgpr(site);
     if (!required_vgprs || !compare_vgpr) {
@@ -643,8 +643,8 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  std::vector<const ConSanAccessInventorySite *> candidates;
-  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
+  std::vector<const ConSanProgramSite *> candidates;
+  for (const ConSanProgramSite &access : result.program_inventory.access_sites()) {
     if (access.origin != ConSanAccessOrigin::Flat ||
         (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write) ||
         access.instruction_size != 3u * sizeof(uint32_t) ||
@@ -667,7 +667,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   std::ranges::sort(
-      candidates, [](const ConSanAccessInventorySite *lhs, const ConSanAccessInventorySite *rhs) {
+      candidates, [](const ConSanProgramSite *lhs, const ConSanProgramSite *rhs) {
         if (lhs->file_offset != rhs->file_offset)
           return lhs->file_offset < rhs->file_offset;
         return lhs->physical_id.original_text_offset < rhs->physical_id.original_text_offset;
@@ -677,7 +677,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
                             reinterpret_cast<const uint8_t *>(code_object.image_data()) +
                                 code_object.image_size());
   const std::array<uint32_t, 3> replacement = {*trap, build_s_nop(0, arch), build_s_nop(0, arch)};
-  for (const ConSanAccessInventorySite *access : candidates) {
+  for (const ConSanProgramSite *access : candidates) {
     if (access->file_offset > result.replacement.size() ||
         access->instruction_size > result.replacement.size() - access->file_offset) {
       result.errors.emplace_back("ConSan flat trap proof exceeds ELF bytes");

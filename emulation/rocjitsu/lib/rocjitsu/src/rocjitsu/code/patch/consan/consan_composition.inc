@@ -159,8 +159,8 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
         const auto event =
             std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
-              const ConSanDecodedProgramSite *source =
-                  pristine_inventory.decoded_site(item.source_site);
+              const ConSanProgramSite *source =
+                  pristine_inventory.program_site(item.source_site);
               return item.container_name == candidate->container_name &&
                      item.in_kernel == candidate->in_kernel &&
                      item.text_offset() == patch.anchor_offset && source != nullptr &&

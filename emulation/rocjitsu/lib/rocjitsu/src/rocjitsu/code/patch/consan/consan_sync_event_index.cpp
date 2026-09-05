@@ -19,7 +19,7 @@ template <typename FindEvent, typename FindSource>
     SemanticSiteId event_identity = sequence.member_semantic_ids[index];
     event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     const ConSanSyncEvent *event = find_event(event_identity);
-    const ConSanDecodedProgramSite *source = event == nullptr ? nullptr : find_source(*event);
+    const ConSanProgramSite *source = event == nullptr ? nullptr : find_source(*event);
     if (event == nullptr || event->container_name != sequence.container_name || source == nullptr ||
         event->identity != sequence.member_event_identities[index] ||
         event->in_kernel != sequence.in_kernel || event->text_offset() < prior_end ||
@@ -50,10 +50,10 @@ size_t SyncEventSemanticIdHash::operator()(const SemanticSiteId &identity) const
 
 SyncEventSemanticIndex
 build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
-                                std::span<const ConSanDecodedProgramSite> decoded_sites) {
+                                std::span<const ConSanProgramSite> program_sites) {
   SyncEventSemanticIndex index;
   index.events.reserve(sync_events.size());
-  index.decoded_sites = decoded_sites;
+  index.program_sites = program_sites;
   for (const ConSanSyncEvent &event : sync_events)
     index.events.emplace(event.semantic_id, &event);
   return index;
@@ -78,9 +78,9 @@ bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
   return sequence_has_exact_members_impl(
       sequence,
       [&](SemanticSiteId identity) { return find_sequence_member_event(events, identity); },
-      [&](const ConSanSyncEvent &event) -> const ConSanDecodedProgramSite * {
-        return event.source_site.valid() && event.source_site.ordinal < events.decoded_sites.size()
-                   ? &events.decoded_sites[event.source_site.ordinal]
+      [&](const ConSanSyncEvent &event) -> const ConSanProgramSite * {
+        return event.source_site.valid() && event.source_site.ordinal < events.program_sites.size()
+                   ? &events.program_sites[event.source_site.ordinal]
                    : nullptr;
       });
 }

@@ -11506,7 +11506,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(test_admitted_accesses(result).size(), kAccessCount);
-  for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result))
+  for (const ConSanProgramSite &candidate : test_admitted_accesses(result))
     EXPECT_EQ(test_selectable_vgpr_bank_mode(bytes, result.program_inventory, candidate),
               kGuestVgprMsbMode);
 
@@ -12668,6 +12668,11 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesAccessAndOrderingRecords) {
   ASSERT_TRUE(consan_patch_succeeded(result))
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  const ConSanProgramSite &arena_atomic = result.program_inventory.access_sites().front();
+  ASSERT_NE(arena_atomic.get_if<ConSanAtomicSite>(), nullptr);
+  EXPECT_EQ(arena_atomic.text_offset(), 16u);
+  EXPECT_EQ(&arena_atomic, &result.program_inventory.program_sites().front());
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;

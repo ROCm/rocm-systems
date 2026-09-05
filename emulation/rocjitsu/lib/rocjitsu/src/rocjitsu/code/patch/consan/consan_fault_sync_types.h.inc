@@ -1,4 +1,4 @@
-struct ConSanDecodedProgramSite;
+struct ConSanProgramSite;
 
 enum class ConSanFaultSiteKind : uint8_t {
   Barrier,
@@ -434,7 +434,7 @@ struct ConSanBarrierLifecycleGroup {
 /// corruption tests; production association additionally proves the exact
 /// intervening instruction run.
 [[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &load,
+    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
     const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
     const ConSanSyncSequence &cache_sequence);
 
@@ -442,7 +442,7 @@ struct ConSanBarrierLifecycleGroup {
 /// ordinary store may form a conservative release sequence. Production
 /// association additionally proves one exact same-block instruction run.
 [[nodiscard]] bool consan_ordinary_release_metadata_compatible(
-    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &cache,
+    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &cache,
     const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
     const ConSanSyncSequence &store_sequence);
 

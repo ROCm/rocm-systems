@@ -28,7 +28,7 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
                                             ConSanPerturbationPlanningState &planning) {
   planning.candidates.clear();
   const SyncEventSemanticIndex events = build_sync_event_semantic_index(
-      program_inventory.sync().sync_events, program_inventory.decoded_sites());
+      program_inventory.sync().sync_events, program_inventory.program_sites());
   for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
@@ -46,8 +46,8 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
                                                 ? sequence.member_semantic_ids.front()
                                                 : sequence.member_semantic_ids.back();
       const ConSanSyncEvent *anchor = find_sequence_member_event(events, anchor_member);
-      const ConSanDecodedProgramSite *anchor_source =
-          anchor == nullptr ? nullptr : program_inventory.decoded_site(anchor->source_site);
+      const ConSanProgramSite *anchor_source =
+          anchor == nullptr ? nullptr : program_inventory.program_site(anchor->source_site);
       ConSanPerturbationCandidate candidate;
       candidate.kind = kind;
       candidate.edge = edge;

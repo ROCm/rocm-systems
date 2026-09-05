@@ -26,8 +26,8 @@ constexpr std::array kTargets = {
                "ds_store_b96"},
 };
 
-ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
-  ConSanAccessInventorySite site;
+ConSanProgramSite native_store_site(std::string_view mnemonic) {
+  ConSanProgramSite site;
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
   site.physical_id.original_text_offset = 8;
@@ -40,9 +40,9 @@ ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
   return site;
 }
 
-ConSanAccessInventorySite native_access_site(std::string_view mnemonic, ConSanLdsAccessKind kind,
+ConSanProgramSite native_access_site(std::string_view mnemonic, ConSanLdsAccessKind kind,
                                              uint32_t width_bits) {
-  ConSanAccessInventorySite site = native_store_site(mnemonic);
+  ConSanProgramSite site = native_store_site(mnemonic);
   site.kind = kind;
   site.decoded_width_bits = width_bits;
   if (kind == ConSanLdsAccessKind::Read) {
@@ -52,31 +52,31 @@ ConSanAccessInventorySite native_access_site(std::string_view mnemonic, ConSanLd
   return site;
 }
 
-ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_arch_t arch,
+ConSanProgramSite complete_site(ConSanProgramSite site, rj_code_arch_t arch,
                                         rj_code_target_id_t target);
 
 TEST(ConSanAccessClassifier, NativeB96SpellingIsOwnedByTheTargetClassifier) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
-    ConSanAccessInventorySite expected = native_store_site(target.native_b96_store);
+    ConSanProgramSite expected = native_store_site(target.native_b96_store);
     expected.decoded_width_bits = 96;
-    const ConSanAccessInventorySite admitted =
+    const ConSanProgramSite admitted =
         complete_site(std::move(expected), target.arch, target.target);
     EXPECT_TRUE(admitted.lowering.replay_guest_access.available());
 
     const std::string_view other_spelling =
         target.native_b96_store == "ds_write_b96" ? "ds_store_b96" : "ds_write_b96";
-    ConSanAccessInventorySite mismatched = native_store_site(other_spelling);
+    ConSanProgramSite mismatched = native_store_site(other_spelling);
     mismatched.decoded_width_bits = 96;
-    const ConSanAccessInventorySite rejected =
+    const ConSanProgramSite rejected =
         complete_site(std::move(mismatched), target.arch, target.target);
     EXPECT_EQ(rejected.lowering.replay_guest_access.reason,
               ConSanAccessClassifierReason::UnsupportedMnemonic);
   }
 }
 
-ConSanAccessInventorySite flat_store_site(uint32_t instruction_size) {
-  ConSanAccessInventorySite site;
+ConSanProgramSite flat_store_site(uint32_t instruction_size) {
+  ConSanProgramSite site;
   site.origin = ConSanAccessOrigin::Flat;
   site.kind = ConSanLdsAccessKind::Write;
   site.physical_id.original_text_offset = 8;
@@ -92,7 +92,7 @@ ConSanAccessInventorySite flat_store_site(uint32_t instruction_size) {
   return site;
 }
 
-ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_arch_t arch,
+ConSanProgramSite complete_site(ConSanProgramSite site, rj_code_arch_t arch,
                                         rj_code_target_id_t target) {
   const std::array<uint8_t, 64> bytes = {};
   ProgramInventoryBuilder builder(bytes);
@@ -103,7 +103,7 @@ ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_
   kernel.entry_text_offset = 0;
   site.container = consan_program_container_ref(kernel);
   builder.add_kernel(kernel);
-  builder.access_sites().push_back(std::move(site));
+  builder.add_access_site(std::move(site));
   builder.publish_decoded_accesses(bytes);
   return builder.view().access_sites().front();
 }
@@ -111,7 +111,7 @@ ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_
 TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTargets) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
-    const ConSanAccessInventorySite site =
+    const ConSanProgramSite site =
         complete_site(native_store_site(target.native_store), target.arch, target.target);
     ASSERT_TRUE(site.lowering.normalized());
     ASSERT_TRUE(site.lowering.form);
@@ -132,12 +132,12 @@ TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabula
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
-    ConSanAccessInventorySite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
+    ConSanProgramSite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
     if (rdna4_or_cdna5) {
       input.operands.raw_saddr = 124;
       input.operands.raw_scale_offset = true;
     }
-    const ConSanAccessInventorySite site =
+    const ConSanProgramSite site =
         complete_site(std::move(input), target.arch, target.target);
     ASSERT_TRUE(site.lowering.normalized());
     ASSERT_TRUE(site.lowering.form);
@@ -168,7 +168,7 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
       SCOPED_TRACE(rj_code_target_name(target.target));
       SCOPED_TRACE(test.mnemonic);
       const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
-      ConSanAccessInventorySite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
+      ConSanProgramSite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
       input.mnemonic = test.mnemonic;
       input.kind = test.kind;
       input.decoded_width_bits = test.width_bits;
@@ -180,7 +180,7 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
         input.operands.raw_saddr = 124;
         input.operands.raw_scale_offset = true;
       }
-      const ConSanAccessInventorySite site =
+      const ConSanProgramSite site =
           complete_site(std::move(input), target.arch, target.target);
       EXPECT_EQ(site.lowering.replay_guest_access.available(), test.supported);
       if (test.supported && test.kind == ConSanLdsAccessKind::Read) {
@@ -197,38 +197,38 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
 }
 
 TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependent) {
-  ConSanAccessInventorySite cdna4_flat = flat_store_site(8);
+  ConSanProgramSite cdna4_flat = flat_store_site(8);
   cdna4_flat.operands.raw_ioffset = 4;
-  const ConSanAccessInventorySite nonzero =
+  const ConSanProgramSite nonzero =
       complete_site(std::move(cdna4_flat), ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
   EXPECT_EQ(nonzero.lowering.replay_guest_access.reason,
             ConSanAccessClassifierReason::NonzeroImmediateOffset);
   EXPECT_TRUE(nonzero.lowering.compare_observed_value.available());
 
-  ConSanAccessInventorySite rdna4_flat = flat_store_site(12);
+  ConSanProgramSite rdna4_flat = flat_store_site(12);
   rdna4_flat.operands.address_vgpr = 255;
   rdna4_flat.operands.raw_saddr = 124;
   rdna4_flat.operands.raw_scale_offset = true;
-  const ConSanAccessInventorySite reserved =
+  const ConSanProgramSite reserved =
       complete_site(std::move(rdna4_flat), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_EQ(reserved.lowering.replay_guest_access.reason,
             ConSanAccessClassifierReason::ReservedAddressRegister);
   EXPECT_TRUE(reserved.lowering.compare_observed_value.available());
 
-  ConSanAccessInventorySite invalid_scalar = flat_store_site(12);
+  ConSanProgramSite invalid_scalar = flat_store_site(12);
   invalid_scalar.operands.raw_saddr = 105;
   invalid_scalar.operands.scalar_address_sgpr = 105;
   invalid_scalar.operands.raw_scale_offset = true;
-  const ConSanAccessInventorySite scalar = complete_site(
+  const ConSanProgramSite scalar = complete_site(
       std::move(invalid_scalar), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_EQ(scalar.lowering.replay_guest_access.reason,
             ConSanAccessClassifierReason::OperandRegisterRange);
   EXPECT_TRUE(scalar.lowering.compare_observed_value.available());
 
-  ConSanAccessInventorySite missing_result = native_store_site("ds_load_b32");
+  ConSanProgramSite missing_result = native_store_site("ds_load_b32");
   missing_result.kind = ConSanLdsAccessKind::Read;
   missing_result.operands.data_vgpr.reset();
-  const ConSanAccessInventorySite load = complete_site(
+  const ConSanProgramSite load = complete_site(
       std::move(missing_result), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_TRUE(load.lowering.replay_guest_access.available());
   EXPECT_EQ(load.lowering.compare_observed_value.reason,
@@ -236,9 +236,9 @@ TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependen
 }
 
 TEST(ConSanAccessClassifier, CommonNormalizationFailuresRejectEveryMechanism) {
-  ConSanAccessInventorySite site = native_store_site("ds_store_b32");
+  ConSanProgramSite site = native_store_site("ds_store_b32");
   site.operands.address_vgpr.reset();
-  const ConSanAccessInventorySite missing_address =
+  const ConSanProgramSite missing_address =
       complete_site(std::move(site), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_FALSE(missing_address.lowering.form);
   EXPECT_EQ(missing_address.lowering.normalization_reason,
@@ -253,7 +253,7 @@ TEST(ConSanAccessClassifier, ComparisonOperandDetailsAreClassifierOwned) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
 
-    ConSanAccessInventorySite high_store =
+    ConSanProgramSite high_store =
         complete_site(native_access_site("ds_store_b8_d16_hi", ConSanLdsAccessKind::Write, 8u),
                       target.arch, target.target);
     ASSERT_TRUE(high_store.lowering.form);
@@ -261,7 +261,7 @@ TEST(ConSanAccessClassifier, ComparisonOperandDetailsAreClassifierOwned) {
               ConSanAccessRegisterValuePlacement::High16);
     EXPECT_FALSE(high_store.lowering.form->destination_preserves_unwritten_bits);
 
-    ConSanAccessInventorySite partial_load =
+    ConSanProgramSite partial_load =
         complete_site(native_access_site("ds_load_u16_d16", ConSanLdsAccessKind::Read, 16u),
                       target.arch, target.target);
     ASSERT_TRUE(partial_load.lowering.form);
@@ -269,7 +269,7 @@ TEST(ConSanAccessClassifier, ComparisonOperandDetailsAreClassifierOwned) {
               ConSanAccessRegisterValuePlacement::Low16);
     EXPECT_TRUE(partial_load.lowering.form->destination_preserves_unwritten_bits);
 
-    ConSanAccessInventorySite wide_load =
+    ConSanProgramSite wide_load =
         complete_site(native_access_site("ds_load_b64", ConSanLdsAccessKind::Read, 64u),
                       target.arch, target.target);
     ASSERT_TRUE(wide_load.lowering.form);

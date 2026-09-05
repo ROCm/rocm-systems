@@ -2,7 +2,7 @@
 sc_admitted_access_file_offsets(const ProgramInventory &inventory,
                                 const ConSanCoverageLedger &coverage, ConSanAccessOrigin origin) {
   std::unordered_set<uint64_t> offsets;
-  for (const ConSanAccessInventorySite &access : inventory.access_sites())
+  for (const ConSanProgramSite &access : inventory.access_sites())
     if (access.origin == origin &&
         !coverage
              .pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
@@ -142,7 +142,7 @@ public:
     return &contexts_.emplace(descriptor_file_offset, std::move(built)).first->second;
   }
 
-  [[nodiscard]] std::optional<ScSiteOwnerFacts> site_facts(const ConSanAccessInventorySite &site,
+  [[nodiscard]] std::optional<ScSiteOwnerFacts> site_facts(const ConSanProgramSite &site,
                                                            std::vector<uint64_t> owners) {
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
@@ -213,7 +213,7 @@ private:
 };
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_access_scratch_vgpr(
-    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
+    const ConSanProgramSite &access, const ConSanOptions &options, const Instruction *inst,
     std::span<const LivenessAnalysis *const> owner_liveness, uint16_t search_start,
     std::optional<uint16_t> allocation_limit, uint16_t required_vgprs, uint16_t alignment,
     uint16_t max_referenced_count = 0u) {
@@ -343,16 +343,16 @@ choose_sc_borrowed_scalar_range(uint16_t allocated_sgpr_count, uint16_t width,
   return find_free(0, limit);
 }
 
-[[nodiscard]] bool is_d16_lds_load(const ConSanAccessInventorySite &access) {
+[[nodiscard]] bool is_d16_lds_load(const ConSanProgramSite &access) {
   return access.lowering.form && access.lowering.form->destination_preserves_unwritten_bits;
 }
 
-[[nodiscard]] bool is_subdword_lds_store(const ConSanAccessInventorySite &access) {
+[[nodiscard]] bool is_subdword_lds_store(const ConSanProgramSite &access) {
   return access.lowering.form && access.lowering.form->access_kind == ConSanLdsAccessKind::Write &&
          access.lowering.form->element_width_bits < 32u;
 }
 
-[[nodiscard]] bool is_high_d16_lds_store(const ConSanAccessInventorySite &access) {
+[[nodiscard]] bool is_high_d16_lds_store(const ConSanProgramSite &access) {
   return access.lowering.form && access.lowering.form->register_value_placement ==
                                      ConSanAccessRegisterValuePlacement::High16;
 }
@@ -369,7 +369,7 @@ struct SplitTwoAddressLdsExpansionPlan {
 
 [[nodiscard]] std::optional<SplitTwoAddressLdsExpansionPlan>
 split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
-                                     const ConSanAccessInventorySite &access,
+                                     const ConSanProgramSite &access,
                                      const ConSanTargetProfile &target) {
   if (!target.requires_split_two_address_lds_relocation || !access.lowering.form ||
       access.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange)
@@ -387,7 +387,7 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
 }
 
 [[nodiscard]] uint16_t lds_check_trap_extra_scratch_vgprs(
-    const ConSanAccessInventorySite &site,
+    const ConSanProgramSite &site,
     const std::optional<SplitTwoAddressLdsExpansionPlan> &expansion) {
   return static_cast<uint16_t>(
       (is_subdword_lds_store(site) ||
@@ -470,7 +470,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
-    std::span<const uint8_t> original_bytes, const ConSanAccessInventorySite &site,
+    std::span<const uint8_t> original_bytes, const ConSanProgramSite &site,
     const ConSanTargetProfile &target, const ConSanOptions &options, uint16_t scratch_vgpr,
     uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {

@@ -17,12 +17,12 @@ struct SyncEventSemanticIdHash {
 
 struct SyncEventSemanticIndex {
   std::unordered_map<SemanticSiteId, const ConSanSyncEvent *, SyncEventSemanticIdHash> events;
-  std::span<const ConSanDecodedProgramSite> decoded_sites;
+  std::span<const ConSanProgramSite> program_sites;
 };
 
 [[nodiscard]] SyncEventSemanticIndex
 build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
-                                std::span<const ConSanDecodedProgramSite> decoded_sites);
+                                std::span<const ConSanProgramSite> program_sites);
 
 [[nodiscard]] const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
                                                                 SemanticSiteId identity);

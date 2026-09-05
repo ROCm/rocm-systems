@@ -714,9 +714,9 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
     return patch.phase == ConSanPatchPhase::Instrumentation &&
            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
   }));
-  const std::vector<ConSanAccessInventorySite> candidates = test_admitted_accesses(result);
+  const std::vector<ConSanProgramSite> candidates = test_admitted_accesses(result);
   const auto post_return_candidate =
-      std::ranges::find_if(candidates, [](const ConSanAccessInventorySite &candidate) {
+      std::ranges::find_if(candidates, [](const ConSanProgramSite &candidate) {
         return candidate.physical_id.original_text_offset == 24u;
       });
   ASSERT_NE(post_return_candidate, candidates.end());

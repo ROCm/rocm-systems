@@ -9,7 +9,7 @@ namespace rocjitsu {
 namespace {
 
 TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
-  ConSanAccessInventorySite access;
+  ConSanProgramSite access;
   ConSanAccessLoweringForm &form = access.lowering.form.emplace();
   form.data_register_count = 4u;
   form.element_register_count = 2u;

@@ -162,7 +162,7 @@ TEST_P(MoiEngineConformanceTest, MaterializesRdna4Cdna5ScalarVectorGroupFlatAddr
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors);
     ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-    const ConSanAccessInventorySite candidate = test_admitted_accesses(result).front();
+    const ConSanProgramSite candidate = test_admitted_accesses(result).front();
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
     EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
     EXPECT_EQ(candidate.operands.raw_saddr, 14u);

@@ -321,13 +321,13 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
   constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
   constexpr std::array<uint16_t, 4> expected_addresses = {7u, 9u, 11u, 13u};
   for (size_t index = 0; index < expected_widths.size(); ++index) {
-    const ConSanAccessInventorySite &site = result.program_inventory.access_sites()[index];
+    const ConSanProgramSite &site = result.program_inventory.access_sites()[index];
     EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
     EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
-    const ConSanAccessInventorySite candidate = test_admitted_accesses(result)[index];
+    const ConSanProgramSite candidate = test_admitted_accesses(result)[index];
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
     EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
@@ -379,13 +379,13 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
   constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
   constexpr std::array<uint16_t, 4> expected_addresses = {11u, 12u, 13u, 14u};
   for (size_t index = 0; index < expected_widths.size(); ++index) {
-    const ConSanAccessInventorySite &site = result.program_inventory.access_sites()[index];
+    const ConSanProgramSite &site = result.program_inventory.access_sites()[index];
     EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
     EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
-    const ConSanAccessInventorySite candidate = test_admitted_accesses(result)[index];
+    const ConSanProgramSite candidate = test_admitted_accesses(result)[index];
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
     EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
@@ -431,7 +431,7 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   EXPECT_FALSE(result.program_inventory.access_sites()[0].operands.address_vgpr.has_value());
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 128u);
   EXPECT_FALSE(result.program_inventory.access_sites()[1].operands.address_vgpr.has_value());
-  for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result)) {
+  for (const ConSanProgramSite &candidate : test_admitted_accesses(result)) {
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
   }
@@ -458,7 +458,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-  const ConSanAccessInventorySite site = result.program_inventory.access_sites().front();
+  const ConSanProgramSite site = result.program_inventory.access_sites().front();
   EXPECT_EQ(site.operands.raw_op, cdna5::kFlatStoreB128Vflat);
   EXPECT_EQ(site.operands.raw_saddr, 124u);
   ASSERT_TRUE(site.operands.raw_scale_offset);
@@ -488,7 +488,7 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [](const ConSanAccessInventorySite &site) {
+      result.program_inventory.access_sites(), [](const ConSanProgramSite &site) {
         return site.container.kind == ConSanProgramContainerKind::Function;
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
@@ -520,7 +520,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [](const ConSanAccessInventorySite &site) {
+      result.program_inventory.access_sites(), [](const ConSanProgramSite &site) {
         return site.container.kind == ConSanProgramContainerKind::Function;
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
@@ -607,15 +607,15 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const auto sites = result.program_inventory.access_sites();
   ASSERT_EQ(sites.size(), instructions.size());
-  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Write, &ConSanAccessInventorySite::kind),
+  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Write, &ConSanProgramSite::kind),
             5u);
-  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Read, &ConSanAccessInventorySite::kind),
+  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Read, &ConSanProgramSite::kind),
             5u);
   for (uint32_t width : std::array{8u, 16u, 32u, 64u, 128u}) {
-    EXPECT_EQ(std::ranges::count(sites, width, &ConSanAccessInventorySite::decoded_width_bits), 2u)
+    EXPECT_EQ(std::ranges::count(sites, width, &ConSanProgramSite::decoded_width_bits), 2u)
         << width;
   }
-  EXPECT_TRUE(std::ranges::all_of(sites, [](const ConSanAccessInventorySite &site) {
+  EXPECT_TRUE(std::ranges::all_of(sites, [](const ConSanProgramSite &site) {
     return site.lowering.replay_guest_access.available();
   }));
 }
@@ -1699,7 +1699,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
               result.program_inventory.sync().sync_events[i].identity);
     EXPECT_EQ(sequence.begin_text_offset,
               result.program_inventory.sync().sync_events[i].text_offset());
-    const ConSanDecodedProgramSite *source =
+    const ConSanProgramSite *source =
         result.program_inventory.sync().source(result.program_inventory.sync().sync_events[i]);
     ASSERT_NE(source, nullptr);
     EXPECT_EQ(sequence.end_text_offset,
@@ -1901,7 +1901,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  const ConSanAccessInventorySite group_load = result.program_inventory.access_sites()[0];
+  const ConSanProgramSite group_load = result.program_inventory.access_sites()[0];
   EXPECT_EQ(group_load.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(group_load.instruction_size, 2u * sizeof(uint32_t));
   EXPECT_EQ(group_load.operands.raw_vaddr, 0u);
@@ -1909,7 +1909,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   EXPECT_EQ(group_load.operands.raw_segment, 0u);
   EXPECT_EQ(group_load.operands.raw_ioffset, 0);
   EXPECT_TRUE(group_load.operands.raw_op.has_value());
-  const ConSanAccessInventorySite unknown_store = result.program_inventory.access_sites()[1];
+  const ConSanProgramSite unknown_store = result.program_inventory.access_sites()[1];
   EXPECT_EQ(unknown_store.flat_address_space_hint, ConSanFlatAddressSpaceHint::Unknown);
   EXPECT_EQ(unknown_store.operands.raw_vaddr, 4u);
   EXPECT_EQ(unknown_store.operands.raw_vsrc, 5u);
@@ -2332,7 +2332,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanAccessInventorySite site = result.program_inventory.access_sites().front();
+      const ConSanProgramSite site = result.program_inventory.access_sites().front();
       ASSERT_TRUE(site.operands.destination_vgpr);
       const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap,
                                            &ConSanPatchInfo::kind);
@@ -2382,7 +2382,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanAccessInventorySite site = result.program_inventory.access_sites().front();
+      const ConSanProgramSite site = result.program_inventory.access_sites().front();
       ASSERT_TRUE(site.operands.data_vgpr);
       const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatStoreCheckTrap,
                                            &ConSanPatchInfo::kind);
@@ -2443,7 +2443,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanAccessInventorySite site = result.program_inventory.access_sites().front();
+      const ConSanProgramSite site = result.program_inventory.access_sites().front();
       EXPECT_EQ(site.mnemonic, expected_mnemonic);
       EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
       EXPECT_EQ(site.decoded_width_bits, form.memory_width_bits);
@@ -2532,7 +2532,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
 
         ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
         ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-        const ConSanAccessInventorySite candidate = test_admitted_accesses(result).front();
+        const ConSanProgramSite candidate = test_admitted_accesses(result).front();
         EXPECT_EQ(candidate.mnemonic, expected_mnemonic);
         EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
         EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
@@ -2568,7 +2568,7 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanAccessInventorySite site = result.program_inventory.access_sites().front();
+      const ConSanProgramSite site = result.program_inventory.access_sites().front();
       EXPECT_EQ(site.mnemonic, expected_mnemonic);
       EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
       EXPECT_EQ(site.decoded_width_bits, form.memory_width_bits);
@@ -2668,7 +2668,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
 
         ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
         ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-        const ConSanAccessInventorySite candidate = test_admitted_accesses(result).front();
+        const ConSanProgramSite candidate = test_admitted_accesses(result).front();
         EXPECT_EQ(candidate.mnemonic, expected_mnemonic);
         EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
         EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
@@ -3140,15 +3140,15 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   EXPECT_EQ(result.program_inventory.sync()
                 .source(result.program_inventory.sync().sync_events[0])
-                ->mnemonic(),
+                ->mnemonic_view(),
             "buffer_wbl2");
   EXPECT_EQ(result.program_inventory.sync()
                 .source(result.program_inventory.sync().sync_events[1])
-                ->mnemonic(),
+                ->mnemonic_view(),
             "flat_atomic_add");
   EXPECT_EQ(result.program_inventory.sync()
                 .source(result.program_inventory.sync().sync_events[2])
-                ->mnemonic(),
+                ->mnemonic_view(),
             "buffer_inv");
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();

@@ -9,10 +9,10 @@
 namespace rocjitsu::consan_detail {
 namespace {
 
-[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access,
+[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanProgramSite &access,
                                                     ConSanProbeIntentId intent_id) {
   ConSanMoiCandidate candidate;
-  static_cast<ConSanAccessInventorySite &>(candidate) = access;
+  static_cast<ConSanProgramSite &>(candidate) = access;
   candidate.intent_ids.push_back(intent_id);
   if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
     candidate.kernel_descriptor_file_offset =

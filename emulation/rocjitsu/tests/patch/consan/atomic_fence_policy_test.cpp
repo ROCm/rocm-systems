@@ -237,13 +237,13 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
         site.cache_operation == ConSanCacheOperation::Acquire ? "global_inv" : "global_wb";
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   }
-  const std::span<const ConSanDecodedProgramSite> decoded_sites = builder.view().decoded_sites();
+  const std::span<const ConSanProgramSite> program_sites = builder.view().program_sites();
   for (ConSanSyncEvent &event : events) {
     if (event.source_site.valid())
       continue;
     std::optional<ConSanProgramSiteId> match;
-    for (size_t index = 0; index < decoded_sites.size(); ++index) {
-      const ConSanDecodedProgramSite &decoded = decoded_sites[index];
+    for (size_t index = 0; index < program_sites.size(); ++index) {
+      const ConSanProgramSite &decoded = program_sites[index];
       const bool kind_matches = (event.kind == ConSanSyncEventKind::Atomic &&
                                  decoded.get_if<ConSanAtomicSite>() != nullptr) ||
                                 (event.kind == ConSanSyncEventKind::OrdinaryMemory &&

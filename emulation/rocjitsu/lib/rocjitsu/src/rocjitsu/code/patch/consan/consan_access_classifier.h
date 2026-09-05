@@ -11,12 +11,12 @@
 
 namespace rocjitsu {
 
-struct ConSanAccessInventorySite;
+struct ConSanProgramSite;
 
 /// Normalize one completed inventory access and classify the exact target
 /// operations that can consume it. This is the sole access-form admission
 /// authority; semantic policy and emitters consume its typed result.
 [[nodiscard]] ConSanAccessLoweringClassification
-classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code_arch_t arch);
+classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t arch);
 
 } // namespace rocjitsu

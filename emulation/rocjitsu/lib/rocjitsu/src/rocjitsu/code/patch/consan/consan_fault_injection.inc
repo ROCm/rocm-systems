@@ -97,9 +97,9 @@ static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
     if (event != sync.sync_events.end() &&
         (edge == ConSanAtomicOrderEdge::Any ||
          (edge == ConSanAtomicOrderEdge::Release &&
-          is_release_cache_event(sync.decoded_sites, &*event)) ||
+          is_release_cache_event(sync.program_sites, &*event)) ||
          (edge == ConSanAtomicOrderEdge::Acquire &&
-          is_acquire_cache_event(sync.decoded_sites, &*event)))) {
+          is_acquire_cache_event(sync.program_sites, &*event)))) {
       result.fence = &*event;
       break;
     }
@@ -188,7 +188,7 @@ find_static_participant_init(const ProgramInventory &program_inventory,
   });
   if (init_event == sync.sync_events.end())
     return nullptr;
-  return program_inventory.decoded_site<ConSanBarrierSite>(init_event->source_site);
+  return program_inventory.program_site<ConSanBarrierSite>(init_event->source_site);
 }
 
 template <typename State>
@@ -1427,7 +1427,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     std::string removed_boundary;
     if (fence != nullptr) {
       const ConSanFenceSite *fence_source =
-          result.program_inventory.decoded_site<ConSanFenceSite>(fence->source_site);
+          result.program_inventory.program_site<ConSanFenceSite>(fence->source_site);
       if (fence_source == nullptr || fence_source->size == 0 ||
           fence_source->size % sizeof(uint32_t) != 0) {
         result.errors.emplace_back(
@@ -1621,9 +1621,9 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
           ? std::vector<uint8_t>(original_bytes.begin(), original_bytes.end())
           : result.replacement;
   const ConSanOrdinaryMemorySite *load_source =
-      result.program_inventory.decoded_site<ConSanOrdinaryMemorySite>(target->load->source_site);
+      result.program_inventory.program_site<ConSanOrdinaryMemorySite>(target->load->source_site);
   const ConSanFenceSite *cache_source =
-      result.program_inventory.decoded_site<ConSanFenceSite>(target->cache->source_site);
+      result.program_inventory.program_site<ConSanFenceSite>(target->cache->source_site);
   if (target->site->file_offset > candidate.size() ||
       target->site->size > candidate.size() - target->site->file_offset ||
       cache_source == nullptr || load_source == nullptr ||
@@ -1807,10 +1807,10 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
   result.patches.push_back(info);
 }
 
-[[nodiscard]] const ConSanAccessInventorySite *
+[[nodiscard]] const ConSanProgramSite *
 find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
-  const ConSanAccessInventorySite *best = nullptr;
-  for (const ConSanAccessInventorySite &site : inventory.access_sites()) {
+  const ConSanProgramSite *best = nullptr;
+  for (const ConSanProgramSite &site : inventory.access_sites()) {
     if (!site.container.is_kernel() || site.origin != ConSanAccessOrigin::NativeLds ||
         site.kind != ConSanLdsAccessKind::Read || !site.lowering.replay_guest_access.available() ||
         site.decoded_width_bits != 32)
@@ -1826,7 +1826,7 @@ find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
 
 void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                 ConSanTransformArtifacts &result) {
-  const ConSanAccessInventorySite *site =
+  const ConSanProgramSite *site =
       find_first_supported_lds_read_b32_site(result.program_inventory);
   if (site == nullptr) {
     result.warnings.emplace_back("ConSan LDS endpgm proof found no supported ds_read_b32 site");

@@ -4610,7 +4610,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       function_flat_global_hint_count += function.stats.flat_global_hint_count;
       function_flat_unknown_hint_count += function.stats.flat_unknown_hint_count;
     }
-    for (const rocjitsu::ConSanAccessInventorySite &site :
+    for (const rocjitsu::ConSanProgramSite &site :
          transform_result.program_inventory.access_sites()) {
       const bool function = site.container.kind == rocjitsu::ConSanProgramContainerKind::Function;
       if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {

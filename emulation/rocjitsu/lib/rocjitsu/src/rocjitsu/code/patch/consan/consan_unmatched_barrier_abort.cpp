@@ -25,7 +25,7 @@ struct UnmatchedBarrierWait {
   std::optional<uint64_t> owner_descriptor_file_offset;
 };
 
-void append_unmatched_barrier_wait(const ConSanDecodedProgramSite &decoded,
+void append_unmatched_barrier_wait(const ConSanProgramSite &decoded,
                                    const ConSanOptions &options, const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
   const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
@@ -66,7 +66,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
-  for (const ConSanDecodedProgramSite &site : result.program_inventory.decoded_sites())
+  for (const ConSanProgramSite &site : result.program_inventory.program_sites())
     append_unmatched_barrier_wait(site, options, result.program_inventory, waits);
   if (waits.empty())
     return;

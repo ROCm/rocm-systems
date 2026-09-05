@@ -1625,9 +1625,9 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  const ConSanAccessInventorySite &site = result.program_inventory.access_sites().front();
+  const ConSanProgramSite &site = result.program_inventory.access_sites().front();
   ConSanMoiCandidate candidate;
-  static_cast<ConSanAccessInventorySite &>(candidate) = test_admitted_accesses(result).front();
+  static_cast<ConSanProgramSite &>(candidate) = test_admitted_accesses(result).front();
   ASSERT_EQ(site.ranges.size(), 2u);
   EXPECT_EQ(candidate.ranges, site.ranges);
   for (size_t range_index = 0; range_index < site.ranges.size(); ++range_index) {
@@ -1833,6 +1833,8 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Atomic);
   EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_cmpstore_rtn_b32");
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  EXPECT_NE(result.program_inventory.access_sites().front().get_if<ConSanAtomicSite>(), nullptr);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   ASSERT_EQ(result.observation_plan().atomic_site_decisions.size(), 1u);
   EXPECT_EQ(result.observation_plan().atomic_site_decisions.front().kind,
@@ -2030,7 +2032,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  const ConSanAccessInventorySite candidate = test_admitted_accesses(result).front();
+  const ConSanProgramSite candidate = test_admitted_accesses(result).front();
   EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
@@ -3190,16 +3192,16 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
       }
     }
     std::set<uint64_t> candidate_offsets;
-    for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result)) {
+    for (const ConSanProgramSite &candidate : test_admitted_accesses(result)) {
       candidate_offsets.insert(candidate.physical_id.original_text_offset);
       const auto site = std::ranges::find_if(
-          result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &access) {
+          result.program_inventory.access_sites(), [&](const ConSanProgramSite &access) {
             return access.physical_id.original_text_offset ==
                        candidate.physical_id.original_text_offset &&
                    access.container.name == candidate.container.name;
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
-      EXPECT_EQ(static_cast<const ConSanAccessInventorySite &>(candidate), *site);
+      EXPECT_EQ(static_cast<const ConSanProgramSite &>(candidate), *site);
     }
 
     EXPECT_EQ(candidate_offsets, intended_offsets);
@@ -4130,9 +4132,8 @@ TEST(ConSanMoi, CfgBuildInputsCanonicalizeInventoryAndComposedCodeRanges) {
                                 .continuation_text_offset = kComposedContinuation},
   };
 
-  const consan_detail::ConSanCfgBuildInputs cfg =
-      consan_detail::build_consan_cfg_inputs(code_object, inventory.program_inventory.containers(),
-                                             preapplied);
+  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+      code_object, inventory.program_inventory.containers(), preapplied);
 
   EXPECT_TRUE(std::ranges::is_sorted(cfg.leaders));
   EXPECT_TRUE(std::ranges::is_sorted(cfg.kernel_entries));

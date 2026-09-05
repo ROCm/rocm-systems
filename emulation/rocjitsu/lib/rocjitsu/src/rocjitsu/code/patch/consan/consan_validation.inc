@@ -708,7 +708,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       if (patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite) {
         const ConSanFenceSite *cache_source =
-            pristine_faults.program_inventory.decoded_site<ConSanFenceSite>(
+            pristine_faults.program_inventory.program_site<ConSanFenceSite>(
                 target->cache->source_site);
         if (patch.fault_companion_identity != target->cache->identity ||
             patch.anchor_offset != target->cache->text_offset() || cache_source == nullptr ||
@@ -1463,7 +1463,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
   const SyncEventSemanticIndex pristine_events = build_sync_event_semantic_index(
-      pristine.program_inventory.sync().sync_events, pristine.program_inventory.decoded_sites());
+      pristine.program_inventory.sync().sync_events, pristine.program_inventory.program_sites());
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -1587,10 +1587,10 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       const std::string &outer_member = sequence->member_event_identities[outer_member_index];
       const ConSanSyncEvent *anchor_event = find_sequence_member_event(
           pristine_events, sequence->member_semantic_ids[outer_member_index]);
-      const ConSanDecodedProgramSite *anchor_source =
+      const ConSanProgramSite *anchor_source =
           anchor_event == nullptr
               ? nullptr
-              : pristine.program_inventory.decoded_site(anchor_event->source_site);
+              : pristine.program_inventory.program_site(anchor_event->source_site);
       if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
           anchor_source == nullptr ||
           (composite && patch.perturbation_source_anchor_identity != outer_member) ||
@@ -2112,7 +2112,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           intent == result.observation_plan().probe_intents.end()
               ? result.program_inventory.access_sites().end()
               : std::ranges::find(result.program_inventory.access_sites(), intent->physical_site,
-                                  &ConSanAccessInventorySite::physical_id);
+                                  &ConSanProgramSite::physical_id);
       const uint32_t minimum_cell_count =
           access == result.program_inventory.access_sites().end()
               ? 0u
@@ -2361,7 +2361,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
   const std::span<const uint8_t> text = environment.replacement_text.bytes;
 
   const auto atomic_site_for = [&](uint64_t text_offset) -> const ConSanAtomicSite * {
-    for (const ConSanDecodedProgramSite &decoded : result.program_inventory.decoded_sites()) {
+    for (const ConSanProgramSite &decoded : result.program_inventory.program_sites()) {
       if (decoded.text_offset() == text_offset) {
         if (const ConSanAtomicSite *site = decoded.get_if<ConSanAtomicSite>())
           return site;

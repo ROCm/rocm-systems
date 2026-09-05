@@ -79,7 +79,7 @@ reconstruct_inline_shadow_report_inventory(const ConSanMoiReportBufferLayout &ca
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] const ConSanAccessInventorySite *
+[[nodiscard]] const ConSanProgramSite *
 find_inventory_access_range(const ProgramInventory &inventory, const SemanticSiteId &range_id) {
   const auto site = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
     return std::ranges::find(candidate.ranges, range_id, &ConSanAccessRange::id) !=
@@ -159,7 +159,7 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
   uint64_t native_static_extent = 0;
   for (const ConSanEvidenceIntent *intent : retained_accesses) {
     for (const SemanticSiteId &range_id : intent->semantic_sites) {
-      const ConSanAccessInventorySite *site =
+      const ConSanProgramSite *site =
           find_inventory_access_range(context.program_inventory, range_id);
       if (!site) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;

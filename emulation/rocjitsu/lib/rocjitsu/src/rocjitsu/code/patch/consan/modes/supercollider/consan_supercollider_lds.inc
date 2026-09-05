@@ -10,8 +10,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
       result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::NativeLds);
-  std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
-  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
+  std::map<uint64_t, const ConSanProgramSite *> admitted_sites;
+  for (const ConSanProgramSite &access : result.program_inventory.access_sites())
     if (access.origin == ConSanAccessOrigin::NativeLds &&
         admitted_lds_file_offsets.contains(access.file_offset))
       admitted_sites.try_emplace(access.file_offset, &access);
@@ -56,7 +56,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                  restrict_to_preflight_candidates);
 
   struct LdsCheckTrapCandidate {
-    const ConSanAccessInventorySite *site = nullptr;
+    const ConSanProgramSite *site = nullptr;
     uint16_t scratch_vgpr = 0;
     uint16_t vcc_save_sgpr = 0;
     std::optional<uint16_t> required_vgpr_allocation_count;
@@ -81,7 +81,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   };
 
   struct LdsSitePlanningContext {
-    const ConSanAccessInventorySite *site = nullptr;
+    const ConSanProgramSite *site = nullptr;
     ScSiteOwnerFacts owners;
   };
   std::vector<LdsSitePlanningContext> site_contexts;
@@ -118,7 +118,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   // Candidate discovery records immutable requirements only. Stable private
   // slots are assigned transactionally when a concrete placement is selected,
   // so rejected candidates cannot inflate any descriptor.
-  std::unordered_map<const ConSanAccessInventorySite *, ScBracketLocalPrivateSpillPlan>
+  std::unordered_map<const ConSanProgramSite *, ScBracketLocalPrivateSpillPlan>
       private_spill_plans;
   for (const LdsSitePlanningContext &site_context : site_contexts) {
     if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
@@ -155,7 +155,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                 *site_context.owners.max_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS
             ? std::optional<uint16_t>(*site_context.owners.max_sgpr_ref + 1u)
             : std::nullopt;
-    const ConSanAccessInventorySite &site = *site_context.site;
+    const ConSanProgramSite &site = *site_context.site;
     const ConSanProgramContainer *container = result.program_inventory.container(site.container.id);
     ++supported_candidate_count;
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
@@ -375,15 +375,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
   std::vector<LdsCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
-  std::unordered_set<const ConSanAccessInventorySite *> selected_sites;
+  std::unordered_set<const ConSanProgramSite *> selected_sites;
   struct ScSelectedSpillState {
     // Within this bracket-local lifetime domain, an exact owner set shares
     // stable register-to-slot mappings while distinct sets may reuse offsets.
     std::map<std::vector<uint64_t>, SpillManager> managers;
-    std::unordered_map<const ConSanAccessInventorySite *, VgprSpillSequence> sequences;
+    std::unordered_map<const ConSanProgramSite *, VgprSpillSequence> sequences;
   };
   ScSelectedSpillState selected_spills;
-  std::unordered_set<const ConSanAccessInventorySite *> selection_spill_failure_sites;
+  std::unordered_set<const ConSanProgramSite *> selection_spill_failure_sites;
   const auto try_add_selected_spill = [&](ScSelectedSpillState &state,
                                           const LdsCheckTrapCandidate &candidate) {
     const auto plan = private_spill_plans.find(candidate.site);
@@ -423,7 +423,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     state.sequences.insert_or_assign(candidate.site, std::move(*sequence));
     return true;
   };
-  const auto note_selection_spill_failure = [&](const ConSanAccessInventorySite *site) {
+  const auto note_selection_spill_failure = [&](const ConSanProgramSite *site) {
     if (selection_spill_failure_sites.insert(site).second)
       ++private_spill_encoding_failure_count;
   };
@@ -476,7 +476,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   struct PlannedLdsCheckTrapPatch {
-    const ConSanAccessInventorySite *site = nullptr;
+    const ConSanProgramSite *site = nullptr;
     std::vector<ConSanProbeIntentId> intent_ids;
     std::vector<uint32_t> words;
     std::optional<uint32_t> guest_instruction_word_offset;
@@ -487,7 +487,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::vector<PlannedLdsCheckTrapPatch> planned_patches;
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
-    const ConSanAccessInventorySite &site = *candidate.site;
+    const ConSanProgramSite &site = *candidate.site;
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;

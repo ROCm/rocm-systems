@@ -104,7 +104,7 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
       }
     }
     site.mnemonic = "s_barrier";
-    event.source_site = {static_cast<uint32_t>(builder.decoded_sites().size())};
+    event.source_site = {static_cast<uint32_t>(builder.program_sites().size())};
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();

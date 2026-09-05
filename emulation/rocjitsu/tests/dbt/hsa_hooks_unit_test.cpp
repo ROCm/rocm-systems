@@ -5755,9 +5755,9 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   result.resource_plans.push_back(atomic_plan);
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
     builder.add_kernel().name = "auto_report_atomic";
-    builder.decoded_sites().push_back(
-        {.container = rocjitsu::consan_program_container_ref(builder.kernels().back()),
-         .payload = rocjitsu::ConSanAtomicSite{}});
+    builder.program_sites().push_back(rocjitsu::make_consan_program_site(
+        rocjitsu::consan_program_container_ref(builder.kernels().back()),
+        rocjitsu::ConSanAtomicSite{}));
   });
   const rocjitsu::PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),
@@ -5956,7 +5956,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   kernel.name = "auto_report_inline_shadow";
   kernel.descriptor_file_offset = owner_descriptor_offset;
   kernel.declared_group_segment_bytes = 256u;
-  rocjitsu::ConSanAccessInventorySite access;
+  rocjitsu::ConSanProgramSite access;
   access.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
   access.kind = rocjitsu::ConSanLdsAccessKind::Write;
   access.physical_id.original_text_offset = 0u;
@@ -5967,7 +5967,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   access.operands.data_vgpr = 1u;
   access.mnemonic = "ds_store_b32";
   access.container = rocjitsu::consan_program_container_ref(kernel);
-  inventory.access_sites().push_back(std::move(access));
+  inventory.add_access_site(std::move(access));
   inventory.add_kernel(std::move(kernel));
   inventory.publish_decoded_accesses(instruction_bytes);
   inventory.access_sites().front().execution_owner_descriptor_file_offsets = {

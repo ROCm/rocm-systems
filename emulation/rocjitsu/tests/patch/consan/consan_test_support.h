@@ -82,7 +82,7 @@ template <typename Site, typename Container>
                                                    const Container &container) {
   const ConSanProgramContainerRef reference = consan_program_container_ref(container);
   std::vector<Site> result;
-  for (const ConSanDecodedProgramSite &decoded : inventory.decoded_sites()) {
+  for (const ConSanProgramSite &decoded : inventory.program_sites()) {
     if (decoded.container == reference) {
       if (const Site *site = decoded.get_if<Site>())
         result.push_back(*site);
@@ -94,8 +94,8 @@ template <typename Site, typename Container>
 /// Seed one decoded source site in a builder-owned test inventory.
 template <typename Container, typename Site>
 void stage_decoded_site(ProgramInventoryBuilder &builder, const Container &container, Site site) {
-  builder.decoded_sites().push_back(
-      {.container = consan_program_container_ref(container), .payload = std::move(site)});
+  builder.program_sites().push_back(make_consan_program_site(
+      consan_program_container_ref(container), std::move(site)));
 }
 
 /// Focused classifier/planner tests start from decoded sites so they can
@@ -475,9 +475,9 @@ test_moi_transient_sgpr_assignment(const ConSanTransformArtifacts &result,
 /// observation plan. Production keeps the same projection only for the
 /// lifetime of lowering; tests call this helper when they specifically need
 /// to verify that policy selected the expected normalized access facts.
-[[nodiscard]] std::vector<ConSanAccessInventorySite>
+[[nodiscard]] std::vector<ConSanProgramSite>
 test_admitted_accesses(const ConSanTransformArtifacts &result) {
-  std::vector<ConSanAccessInventorySite> candidates;
+  std::vector<ConSanProgramSite> candidates;
   std::unordered_set<uint64_t> admitted_offsets;
   for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
@@ -486,7 +486,7 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
       continue;
     }
     const auto access = std::ranges::find_if(result.program_inventory.access_sites(),
-                                             [&](const ConSanAccessInventorySite &candidate) {
+                                             [&](const ConSanProgramSite &candidate) {
                                                return candidate.physical_id == intent.physical_site;
                                              });
     if (access == result.program_inventory.access_sites().end() ||
@@ -502,7 +502,7 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
 /// from pristine code bytes immediately before emission.
 [[nodiscard]] std::optional<uint16_t>
 test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
-                               const ConSanAccessInventorySite &access) {
+                               const ConSanProgramSite &access) {
   const uint64_t anchor = access.physical_id.original_text_offset;
   const ConSanProgramContainer *container = inventory.container(access.container.id);
   if (container == nullptr || anchor < container->entry_text_offset || access.file_offset < anchor)
@@ -546,7 +546,7 @@ consan_access_decision_at(const ConSanTransformArtifacts &result, uint64_t text_
 consan_access_decision_at_file_offset(const ConSanTransformArtifacts &result,
                                       uint64_t file_offset) {
   const auto access = std::ranges::find(result.program_inventory.access_sites(), file_offset,
-                                        &ConSanAccessInventorySite::file_offset);
+                                        &ConSanProgramSite::file_offset);
   if (access == result.program_inventory.access_sites().end())
     return nullptr;
   return consan_access_decision_at(result, access->physical_id.original_text_offset);

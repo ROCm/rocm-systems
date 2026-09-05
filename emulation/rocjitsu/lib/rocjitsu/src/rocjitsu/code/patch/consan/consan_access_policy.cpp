@@ -88,7 +88,7 @@ namespace {
   return std::ranges::find(sites, site) != sites.end();
 }
 
-[[nodiscard]] bool contains_substring(std::span<const ConSanAccessInventorySite *const> aliases,
+[[nodiscard]] bool contains_substring(std::span<const ConSanProgramSite *const> aliases,
                                       std::string_view filter) {
   return filter.empty() || std::ranges::any_of(aliases, [&](const auto *access) {
            return access->container.name.find(filter) != std::string::npos;
@@ -96,9 +96,9 @@ namespace {
 }
 
 [[nodiscard]] bool access_alias_semantics_equal(const ProgramInventory &inventory,
-                                                const ConSanAccessInventorySite &lhs,
-                                                const ConSanAccessInventorySite &rhs) {
-  const auto container_entry = [&](const ConSanAccessInventorySite &site) {
+                                                const ConSanProgramSite &lhs,
+                                                const ConSanProgramSite &rhs) {
+  const auto container_entry = [&](const ConSanProgramSite &site) {
     const ConSanProgramContainer *container = inventory.container(site.container.id);
     return container == nullptr ? std::optional<uint64_t>{}
                                 : std::optional{container->entry_text_offset};
@@ -151,12 +151,12 @@ namespace {
 }
 
 [[nodiscard]] ConSanAccessPolicyReason
-classified_operation_reason(const ConSanAccessInventorySite &access,
+classified_operation_reason(const ConSanProgramSite &access,
                             ConSanAccessLoweringOperation operation) {
   return access_classifier_reason(access.lowering.operation(operation).reason, access.origin);
 }
 
-[[nodiscard]] SemanticSiteId fallback_access_id(const ConSanAccessInventorySite &access) {
+[[nodiscard]] SemanticSiteId fallback_access_id(const ConSanProgramSite &access) {
   return {
       .physical = access.physical_id,
       .domain = ConSanSemanticSiteDomain::Access,
@@ -165,7 +165,7 @@ classified_operation_reason(const ConSanAccessInventorySite &access,
   };
 }
 
-[[nodiscard]] std::vector<SemanticSiteId> semantic_ids(const ConSanAccessInventorySite &access) {
+[[nodiscard]] std::vector<SemanticSiteId> semantic_ids(const ConSanProgramSite &access) {
   std::vector<SemanticSiteId> result;
   result.reserve(std::max<size_t>(access.ranges.size(), 1u));
   for (const ConSanAccessRange &range : access.ranges)
@@ -176,10 +176,10 @@ classified_operation_reason(const ConSanAccessInventorySite &access,
 }
 
 [[nodiscard]] std::vector<std::string>
-container_names(std::span<const ConSanAccessInventorySite *const> aliases) {
+container_names(std::span<const ConSanProgramSite *const> aliases) {
   std::vector<std::string> result;
   result.reserve(aliases.size());
-  for (const ConSanAccessInventorySite *access : aliases) {
+  for (const ConSanProgramSite *access : aliases) {
     if (std::ranges::find(result, access->container.name) == result.end())
       result.push_back(access->container.name);
   }
@@ -723,13 +723,13 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
   if (vocabulary == nullptr || inventory.empty())
     return result;
 
-  std::map<uint64_t, std::vector<const ConSanAccessInventorySite *>> aliases_by_offset;
-  for (const ConSanAccessInventorySite &access : inventory.access_sites())
+  std::map<uint64_t, std::vector<const ConSanProgramSite *>> aliases_by_offset;
+  for (const ConSanProgramSite &access : inventory.access_sites())
     aliases_by_offset[access.physical_id.original_text_offset].push_back(&access);
 
   for (const auto &[offset, aliases] : aliases_by_offset) {
     (void)offset;
-    const ConSanAccessInventorySite &access = *aliases.front();
+    const ConSanProgramSite &access = *aliases.front();
     const std::vector<SemanticSiteId> ids = semantic_ids(access);
     const std::vector<std::string> names = container_names(aliases);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
@@ -743,7 +743,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
         flat ? ConSanCapabilityForm::GroupFlatAccess : ConSanCapabilityForm::NativeLdsAccess;
     const bool enabled = flat ? request.group_flat_enabled : request.native_lds_enabled;
     std::vector<uint64_t> owner_descriptors;
-    for (const ConSanAccessInventorySite *alias : aliases) {
+    for (const ConSanProgramSite *alias : aliases) {
       for (uint64_t owner : alias->execution_owner_descriptor_file_offsets) {
         if (std::ranges::find(owner_descriptors, owner) == owner_descriptors.end())
           owner_descriptors.push_back(owner);

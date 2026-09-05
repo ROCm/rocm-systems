@@ -36,6 +36,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -50,7 +51,18 @@
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] bool lds_address_fault_site_supported(const ConSanAccessInventorySite &site,
+[[nodiscard]] std::vector<size_t>
+ordered_program_site_indices(std::span<const ConSanProgramSite> sites) {
+  std::vector<size_t> order(sites.size());
+  std::iota(order.begin(), order.end(), 0u);
+  std::ranges::stable_sort(order, [&](size_t lhs, size_t rhs) {
+    return std::pair{sites[lhs].container.id, sites[lhs].text_offset()} <
+           std::pair{sites[rhs].container.id, sites[rhs].text_offset()};
+  });
+  return order;
+}
+
+[[nodiscard]] bool lds_address_fault_site_supported(const ConSanProgramSite &site,
                                                     rj_code_arch_t arch) {
   if (site.origin != ConSanAccessOrigin::NativeLds ||
       !consan_lds_address_fault_arch_supported(arch) ||
@@ -69,10 +81,11 @@ namespace {
 
 void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                 rj_code_arch_t arch,
-                                std::span<const ConSanDecodedProgramSite> decoded_sites,
+                                std::span<const ConSanProgramSite> program_sites,
                                 std::vector<ConSanFaultSite> &sites) {
   std::map<std::pair<ConSanProgramContainerId, ConSanFaultSiteKind>, uint32_t> occurrences;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
+  for (size_t decoded_index : ordered_program_site_indices(program_sites)) {
+    const ConSanProgramSite &decoded = program_sites[decoded_index];
     if (decoded.container.is_kernel() && is_rocclr_runtime_kernel_name(decoded.container.name))
       continue;
 
@@ -145,11 +158,11 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
 
 void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                     rj_code_arch_t arch, const ProgramInventory &inventory,
-                                    std::span<const ConSanAccessInventorySite> accesses,
+                                    std::span<const ConSanProgramSite> accesses,
                                     std::vector<ConSanFaultSite> &sites) {
   std::optional<ConSanProgramContainerRef> previous_container;
   uint32_t occurrence = 0;
-  for (const ConSanAccessInventorySite &access : accesses) {
+  for (const ConSanProgramSite &access : accesses) {
     if (!lds_address_fault_site_supported(access, arch) ||
         (access.container.is_kernel() && is_rocclr_runtime_kernel_name(access.container.name)))
       continue;
@@ -191,7 +204,7 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                                 ConSanProgramAnalysisResult &result) {
   const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
-  append_decoded_fault_sites(bytes, fingerprint, arch, result.program_inventory.decoded_sites(),
+  append_decoded_fault_sites(bytes, fingerprint, arch, result.program_inventory.program_sites(),
                              result.fault_sites);
   std::ranges::stable_sort(
       result.fault_sites, [&](const ConSanFaultSite &lhs, const ConSanFaultSite &rhs) {
@@ -262,12 +275,12 @@ void classify_atomic_sync_confidence(const ConSanAtomicSite &site, ConSanSyncEve
 }
 
 void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t arch,
-                       std::span<const ConSanDecodedProgramSite> decoded_sites,
+                       std::span<const ConSanProgramSite> program_sites,
                        std::vector<ConSanSyncEvent> &events) {
   const std::string_view fingerprint = code_object_id.fingerprint;
   const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind, uint32_t occurrence,
                                 ConSanProgramSiteId source_site) {
-    const ConSanDecodedProgramSite &source = decoded_sites[source_site.ordinal];
+    const ConSanProgramSite &source = program_sites[source_site.ordinal];
     const bool in_kernel = source.container.kind == ConSanProgramContainerKind::Kernel;
     const std::string_view container_kind = in_kernel ? "kernel" : "function";
     event.semantic_id.physical.code_object = code_object_id;
@@ -280,13 +293,14 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     event.identity =
         std::string(fingerprint) + "|" + std::string(container_kind) + "=" + source.container.name +
         "|event=" + std::string(kind) + "|pc=0x" + consan_fixed_hex(event.text_offset(), 16) +
-        "|mnemonic=" + std::string(source.mnemonic()) + "|occurrence=" + std::to_string(occurrence);
+        "|mnemonic=" + std::string(source.mnemonic_view()) +
+        "|occurrence=" + std::to_string(occurrence);
     events.push_back(std::move(event));
   };
 
   std::map<std::pair<ConSanProgramContainerId, size_t>, uint32_t> occurrences;
-  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
-    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
+  for (size_t decoded_index : ordered_program_site_indices(program_sites)) {
+    const ConSanProgramSite &decoded = program_sites[decoded_index];
     if (decoded.container.kind == ConSanProgramContainerKind::Kernel &&
         is_rocclr_runtime_kernel_name(decoded.container.name))
       continue;
@@ -431,31 +445,31 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 const ProgramInventory &program_inventory, rj_code_arch_t arch) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
-  build_sync_events(code_object_id, arch, program_inventory.decoded_sites(), inventory.sync_events);
+  build_sync_events(code_object_id, arch, program_inventory.program_sites(), inventory.sync_events);
 
   std::ranges::stable_sort(
       inventory.sync_events, [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
         const ConSanProgramContainerId lhs_container =
-            program_inventory.decoded_sites()[lhs.source_site.ordinal].container.id;
+            program_inventory.program_sites()[lhs.source_site.ordinal].container.id;
         const ConSanProgramContainerId rhs_container =
-            program_inventory.decoded_sites()[rhs.source_site.ordinal].container.id;
+            program_inventory.program_sites()[rhs.source_site.ordinal].container.id;
         return std::pair{lhs_container, lhs.text_offset()} <
                std::pair{rhs_container, rhs.text_offset()};
       });
 }
 
-[[nodiscard]] const ConSanDecodedProgramSite *
-source_site(std::span<const ConSanDecodedProgramSite> sites, const ConSanSyncEvent &event) {
+[[nodiscard]] const ConSanProgramSite *
+source_site(std::span<const ConSanProgramSite> sites, const ConSanSyncEvent &event) {
   return event.source_site.valid() && event.source_site.ordinal < sites.size()
              ? &sites[event.source_site.ordinal]
              : nullptr;
 }
 
-[[nodiscard]] bool sync_event_semantics_equal(std::span<const ConSanDecodedProgramSite> sites,
+[[nodiscard]] bool sync_event_semantics_equal(std::span<const ConSanProgramSite> sites,
                                               const ConSanSyncEvent &lhs,
                                               const ConSanSyncEvent &rhs) {
-  const ConSanDecodedProgramSite *lhs_source = source_site(sites, lhs);
-  const ConSanDecodedProgramSite *rhs_source = source_site(sites, rhs);
+  const ConSanProgramSite *lhs_source = source_site(sites, lhs);
+  const ConSanProgramSite *rhs_source = source_site(sites, rhs);
   if (lhs_source == nullptr || rhs_source == nullptr || !lhs_source->same_payload(*rhs_source))
     return false;
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
@@ -469,9 +483,9 @@ source_site(std::span<const ConSanDecodedProgramSite> sites, const ConSanSyncEve
 [[nodiscard]] bool
 canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inventory,
                                           ConSanProgramAnalysisResult &result) {
-  const std::span<const ConSanDecodedProgramSite> decoded_sites = inventory.decoded_sites;
+  const std::span<const ConSanProgramSite> program_sites = inventory.program_sites;
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
-    const ConSanDecodedProgramSite *source = source_site(decoded_sites, event);
+    const ConSanProgramSite *source = source_site(program_sites, event);
     const ConSanProgramContainer *container =
         source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
     return container == nullptr ? std::nullopt
@@ -481,13 +495,13 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
   return consan_detail::canonicalize_physical_site_aliases(
       inventory.sync_events, result.errors, "ConSan synchronization site",
       [&](const ConSanSyncEvent &event) {
-        const ConSanDecodedProgramSite *source = source_site(decoded_sites, event);
-        return source == nullptr ? uint64_t{0} : source->file_offset();
+        const ConSanProgramSite *source = source_site(program_sites, event);
+        return source == nullptr ? uint64_t{0} : source->decoded_file_offset();
       },
       [](const ConSanSyncEvent &event) -> std::string_view { return event.container_name; },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
         return container_entry(lhs) == container_entry(rhs) &&
-               sync_event_semantics_equal(decoded_sites, lhs, rhs);
+               sync_event_semantics_equal(program_sites, lhs, rhs);
       },
       [](ConSanSyncEvent &retained, const ConSanSyncEvent &alias) {
         retained.source_containers.insert(retained.source_containers.end(),
@@ -571,9 +585,9 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
   inventory.sync_sequences.clear();
   inventory.sync_sequences.reserve(inventory.sync_events.size());
   for (const ConSanSyncEvent &event : inventory.sync_events) {
-    if (!event.source_site.valid() || event.source_site.ordinal >= inventory.decoded_sites.size())
+    if (!event.source_site.valid() || event.source_site.ordinal >= inventory.program_sites.size())
       continue;
-    const ConSanDecodedProgramSite &source = inventory.decoded_sites[event.source_site.ordinal];
+    const ConSanProgramSite &source = inventory.program_sites[event.source_site.ordinal];
     ConSanSyncSequence sequence;
     sequence.kind = sync_sequence_kind(event.kind);
     sequence.operation = event.operation;
@@ -1004,8 +1018,8 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     // Therefore the matching static join, rather than the fixed encoding,
     // supplies the leave association for this lifecycle.
     const ConSanSyncEvent *leave_event = first_sequence_event(events, leave);
-    const ConSanDecodedProgramSite *leave_decoded =
-        leave_event == nullptr ? nullptr : source_site(inventory.decoded_sites, *leave_event);
+    const ConSanProgramSite *leave_decoded =
+        leave_event == nullptr ? nullptr : source_site(inventory.program_sites, *leave_event);
     const ConSanBarrierSite *leave_source =
         leave_decoded == nullptr ? nullptr : leave_decoded->get_if<ConSanBarrierSite>();
     if (leave_source == nullptr || leave_source->size != sizeof(uint32_t) ||
@@ -1154,12 +1168,12 @@ void build_barrier_move_destination_inventory(
 [[nodiscard]] bool has_exact_group_flat_communication_site(const ProgramInventory &inventory,
                                                            const ConSanSyncEvent &event) {
   if (event.kind == ConSanSyncEventKind::Atomic) {
-    const ConSanAtomicSite *site = inventory.decoded_site<ConSanAtomicSite>(event.source_site);
+    const ConSanAtomicSite *site = inventory.program_site<ConSanAtomicSite>(event.source_site);
     return site != nullptr && site->address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup;
   }
   if (event.kind == ConSanSyncEventKind::OrdinaryMemory) {
     const ConSanOrdinaryMemorySite *site =
-        inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
+        inventory.program_site<ConSanOrdinaryMemorySite>(event.source_site);
     return site != nullptr && site->flat_address_space_hint == ConSanFlatAddressSpaceHint::Group;
   }
   return false;
@@ -1182,7 +1196,7 @@ void build_barrier_move_destination_inventory(
   if (event.kind != ConSanSyncEventKind::OrdinaryMemory)
     return false;
   const ConSanOrdinaryMemorySite *site =
-      program_inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
+      program_inventory.program_site<ConSanOrdinaryMemorySite>(event.source_site);
   if (site == nullptr || site->operation != ConSanOrdinaryMemoryOperation::Load ||
       site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
     return false;
@@ -1315,10 +1329,10 @@ is_exact_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSeq
                             const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
-  const ConSanDecodedProgramSite *first_decoded =
-      first_event == nullptr ? nullptr : source_site(events.decoded_sites, *first_event);
-  const ConSanDecodedProgramSite *second_decoded =
-      second_event == nullptr ? nullptr : source_site(events.decoded_sites, *second_event);
+  const ConSanProgramSite *first_decoded =
+      first_event == nullptr ? nullptr : source_site(events.program_sites, *first_event);
+  const ConSanProgramSite *second_decoded =
+      second_event == nullptr ? nullptr : source_site(events.program_sites, *second_event);
   const ConSanFenceSite *first_source =
       first_decoded == nullptr ? nullptr : first_decoded->get_if<ConSanFenceSite>();
   const ConSanFenceSite *second_source =
@@ -1545,7 +1559,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   for (size_t i = 0; i < sync_sequences.size();) {
     const ConSanSyncSequence &current = sync_sequences[i];
     if (current.kind == ConSanSyncSequenceKind::Fence &&
-        is_release_cache_event(inventory.decoded_sites, first_sequence_event(events, current)) &&
+        is_release_cache_event(inventory.program_sites, first_sequence_event(events, current)) &&
         i + 1 < sync_sequences.size()) {
       const ConSanSyncSequence &atomic = sync_sequences[i + 1];
       if (atomic.kind == ConSanSyncSequenceKind::Atomic &&
@@ -1555,7 +1569,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         if (i + 2 < sync_sequences.size()) {
           const ConSanSyncSequence &candidate = sync_sequences[i + 2];
           if (candidate.kind == ConSanSyncSequenceKind::Fence &&
-              is_acquire_cache_event(inventory.decoded_sites,
+              is_acquire_cache_event(inventory.program_sites,
                                      first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
@@ -1578,7 +1592,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     if (current.kind == ConSanSyncSequenceKind::Atomic && i + 1 < sync_sequences.size()) {
       const ConSanSyncSequence &acquire = sync_sequences[i + 1];
       if (acquire.kind == ConSanSyncSequenceKind::Fence &&
-          is_acquire_cache_event(inventory.decoded_sites, first_sequence_event(events, acquire)) &&
+          is_acquire_cache_event(inventory.program_sites, first_sequence_event(events, acquire)) &&
           prove_bounded_acquire_path(current, acquire, blocks)) {
         associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire));
         i += 2;
@@ -1670,7 +1684,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
   std::vector<ConSanMoiFenceCandidate> &candidates = inventory.moi_fence_candidates;
   candidates.clear();
   const auto fence_source = [&](const ConSanSyncEvent &event) -> const ConSanFenceSite * {
-    const ConSanDecodedProgramSite *source = source_site(inventory.decoded_sites, event);
+    const ConSanProgramSite *source = source_site(inventory.program_sites, event);
     return source == nullptr ? nullptr : source->get_if<ConSanFenceSite>();
   };
 
@@ -1774,9 +1788,9 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       candidates.push_back(std::move(candidate));
       continue;
     }
-    if (is_release_cache_event(inventory.decoded_sites, &fence))
+    if (is_release_cache_event(inventory.program_sites, &fence))
       candidate.memory_role = ConSanSyncMemoryRole::Release;
-    else if (is_acquire_cache_event(inventory.decoded_sites, &fence) || acquire_pair_completion)
+    else if (is_acquire_cache_event(inventory.program_sites, &fence) || acquire_pair_completion)
       candidate.memory_role = ConSanSyncMemoryRole::Acquire;
     else {
       candidate.association = ConSanFenceAssociation::UnsupportedCacheOperation;
@@ -1975,7 +1989,7 @@ void associate_ordinary_release_sync_sequences(
         break;
       const ConSanSyncEvent *cache = first_sequence_event(events, cache_sequence);
       if (cache != nullptr &&
-          consan_ordinary_release_metadata_compatible(inventory.decoded_sites, *cache,
+          consan_ordinary_release_metadata_compatible(inventory.program_sites, *cache,
                                                       cache_sequence, *store, store_sequence)) {
         cache_matches.push_back(cache_index);
       }
@@ -2032,8 +2046,8 @@ void associate_ordinary_release_sync_sequences(
       continue;
     }
     const ConSanSyncEvent *store = first_sequence_event(events, sequence);
-    const ConSanDecodedProgramSite *store_decoded =
-        store == nullptr ? nullptr : source_site(inventory.decoded_sites, *store);
+    const ConSanProgramSite *store_decoded =
+        store == nullptr ? nullptr : source_site(inventory.program_sites, *store);
     const ConSanOrdinaryMemorySite *store_source =
         store_decoded == nullptr ? nullptr : store_decoded->get_if<ConSanOrdinaryMemorySite>();
     if (store_source == nullptr || store_source->width_bits != 32u || !store->scope ||
@@ -2103,7 +2117,7 @@ void associate_ordinary_acquire_sync_sequences(
       const ConSanSyncEvent *cache = first_sequence_event(events, cache_sequence);
       if (cache == nullptr ||
           !consan_ordinary_acquire_metadata_compatible(
-              inventory.decoded_sites, *load, load_sequence, *cache, cache_sequence,
+              inventory.program_sites, *load, load_sequence, *cache, cache_sequence,
               ConSanOrdinaryAcquireMetadataPolicy::BoundedPathSingleFence) ||
           load_sequence.end_text_offset > cache_sequence.begin_text_offset ||
           cache_sequence.begin_text_offset - load_sequence.end_text_offset > 64u) {
@@ -2118,7 +2132,7 @@ void associate_ordinary_acquire_sync_sequences(
       const auto metadata_policy =
           same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence
                      : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathSingleFence;
-      if (consan_ordinary_acquire_metadata_compatible(inventory.decoded_sites, *load, load_sequence,
+      if (consan_ordinary_acquire_metadata_compatible(inventory.program_sites, *load, load_sequence,
                                                       *cache, cache_sequence, metadata_policy))
         cache_matches.push_back(cache_index);
     }
@@ -2140,10 +2154,10 @@ void associate_ordinary_acquire_sync_sequences(
         const ConSanSyncEvent *tail_event = first_sequence_event(events, tail);
         if (first_event == nullptr || tail_event == nullptr ||
             !consan_ordinary_acquire_metadata_compatible(
-                inventory.decoded_sites, *load, load_sequence, *first_event, first,
+                inventory.program_sites, *load, load_sequence, *first_event, first,
                 ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember) ||
             !consan_ordinary_acquire_metadata_compatible(
-                inventory.decoded_sites, *load, load_sequence, *tail_event, tail,
+                inventory.program_sites, *load, load_sequence, *tail_event, tail,
                 ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember) ||
             !is_exact_acquire_cache_pair(first, tail, events, blocks)) {
           continue;
@@ -2156,10 +2170,10 @@ void associate_ordinary_acquire_sync_sequences(
         const auto metadata_policy =
             same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockCachePairMember
                        : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember;
-        if (!consan_ordinary_acquire_metadata_compatible(inventory.decoded_sites, *load,
+        if (!consan_ordinary_acquire_metadata_compatible(inventory.program_sites, *load,
                                                          load_sequence, *first_event, first,
                                                          metadata_policy) ||
-            !consan_ordinary_acquire_metadata_compatible(inventory.decoded_sites, *load,
+            !consan_ordinary_acquire_metadata_compatible(inventory.program_sites, *load,
                                                          load_sequence, *tail_event, tail,
                                                          metadata_policy)) {
           continue;
@@ -2249,7 +2263,7 @@ void associate_ordinary_acquire_sync_sequences(
     const ConSanOrdinaryMemorySite *load_source =
         load == nullptr
             ? nullptr
-            : program_inventory.decoded_site<ConSanOrdinaryMemorySite>(load->source_site);
+            : program_inventory.program_site<ConSanOrdinaryMemorySite>(load->source_site);
     if (load_source == nullptr || load_source->width_bits != 32u ||
         load->execution_owners.empty() ||
         !is_workgroup_flat_communication(program_inventory, *load))
@@ -2470,7 +2484,7 @@ intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                rj_code_arch_t arch,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
-                               std::span<ConSanAccessInventorySite> access_sites,
+                               std::span<ConSanProgramSite> access_sites,
                                SynchronizationInventoryBuildView inventory,
                                ConSanProgramAnalysisResult &result) {
   const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
@@ -2524,7 +2538,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     destination.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, destination.text_offset);
   }
-  for (ConSanAccessInventorySite &site : access_sites) {
+  for (ConSanProgramSite &site : access_sites) {
     const auto owners = execution_owners_for_offset(owners_by_block, block_index,
                                                     site.physical_id.original_text_offset);
     site.execution_owner_descriptor_file_offsets.clear();
@@ -2575,7 +2589,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
                                         options.abort_unmatched_barrier_wait;
   if (!needs_semantic_inventory) {
     if (std::ranges::any_of(result.program_inventory.access_sites(),
-                            [](const ConSanAccessInventorySite &site) {
+                            [](const ConSanProgramSite &site) {
                               return site.container.kind == ConSanProgramContainerKind::Function;
                             })) {
       // SuperCollider's ordinary clean transform does not consume
@@ -2599,7 +2613,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
   }
 
   const SyncEventSemanticIndex sync_events = build_sync_event_semantic_index(
-      synchronization_inventory.sync_events, synchronization_inventory.decoded_sites);
+      synchronization_inventory.sync_events, synchronization_inventory.program_sites);
   const auto sync_blocks =
       build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory);
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);

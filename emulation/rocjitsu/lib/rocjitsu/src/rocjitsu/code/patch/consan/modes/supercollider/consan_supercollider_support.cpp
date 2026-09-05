@@ -15,7 +15,7 @@ bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
           hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
-std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access) {
+std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanProgramSite &access) {
   if (access.kind == ConSanLdsAccessKind::Read)
     return access.operands.destination_vgpr;
   if (access.kind == ConSanLdsAccessKind::Write)
@@ -23,7 +23,7 @@ std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanAccessInventory
   return std::nullopt;
 }
 
-std::optional<uint16_t> check_trap_compare_vgpr(const ConSanAccessInventorySite &access,
+std::optional<uint16_t> check_trap_compare_vgpr(const ConSanProgramSite &access,
                                                 uint16_t chunk_index, rj_code_arch_t arch,
                                                 uint16_t selectable_vgpr_bank_mode) {
   if (access.kind == ConSanLdsAccessKind::Read) {

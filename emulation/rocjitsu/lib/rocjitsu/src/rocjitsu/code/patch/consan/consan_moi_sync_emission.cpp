@@ -292,7 +292,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       return {};
     }
     const ConSanFenceSite *fence_source =
-        inventory.decoded_site<ConSanFenceSite>(fence_event->source_site);
+        inventory.program_site<ConSanFenceSite>(fence_event->source_site);
     if (fence_source == nullptr) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded source site");
       return {};
@@ -316,7 +316,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     }
     if (communication->kind == ConSanSyncEventKind::Atomic) {
       const ConSanAtomicSite *site =
-          inventory.decoded_site<ConSanAtomicSite>(communication->source_site);
+          inventory.program_site<ConSanAtomicSite>(communication->source_site);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
         return {};
@@ -324,7 +324,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       plan.communication_site = *site;
     } else {
       const ConSanOrdinaryMemorySite *site =
-          inventory.decoded_site<ConSanOrdinaryMemorySite>(communication->source_site);
+          inventory.program_site<ConSanOrdinaryMemorySite>(communication->source_site);
       if (site == nullptr ||
           (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
            site->support_reason !=
@@ -487,7 +487,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       return {};
     }
     if (event->kind == ConSanSyncEventKind::Atomic) {
-      const ConSanAtomicSite *site = inventory.decoded_site<ConSanAtomicSite>(event->source_site);
+      const ConSanAtomicSite *site = inventory.program_site<ConSanAtomicSite>(event->source_site);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
         return {};
@@ -495,7 +495,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       plan.site = *site;
     } else {
       const ConSanOrdinaryMemorySite *site =
-          inventory.decoded_site<ConSanOrdinaryMemorySite>(event->source_site);
+          inventory.program_site<ConSanOrdinaryMemorySite>(event->source_site);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
         return {};

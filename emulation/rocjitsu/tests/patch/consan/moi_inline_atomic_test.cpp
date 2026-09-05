@@ -3658,7 +3658,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     EXPECT_EQ(candidate_sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
     EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset());
-    const ConSanDecodedProgramSite *fence_source =
+    const ConSanProgramSite *fence_source =
         result.program_inventory.sync().source(*fence_event);
     ASSERT_NE(fence_source, nullptr);
     EXPECT_GE(candidate_sequence->end_text_offset,

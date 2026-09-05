@@ -11,10 +11,10 @@ namespace rocjitsu {
 namespace {
 
 template <typename Site>
-[[nodiscard]] const Site *source_as(std::span<const ConSanDecodedProgramSite> decoded_sites,
+[[nodiscard]] const Site *source_as(std::span<const ConSanProgramSite> program_sites,
                                     const ConSanSyncEvent &event) {
-  return event.source_site.valid() && event.source_site.ordinal < decoded_sites.size()
-             ? decoded_sites[event.source_site.ordinal].get_if<Site>()
+  return event.source_site.valid() && event.source_site.ordinal < program_sites.size()
+             ? program_sites[event.source_site.ordinal].get_if<Site>()
              : nullptr;
 }
 
@@ -30,30 +30,30 @@ template <typename Site>
 
 } // namespace
 
-bool is_release_cache_event(std::span<const ConSanDecodedProgramSite> decoded_sites,
+bool is_release_cache_event(std::span<const ConSanProgramSite> program_sites,
                             const ConSanSyncEvent *event) {
   const ConSanFenceSite *fence =
-      event == nullptr ? nullptr : source_as<ConSanFenceSite>(decoded_sites, *event);
+      event == nullptr ? nullptr : source_as<ConSanFenceSite>(program_sites, *event);
   return fence != nullptr && fence->cache_operation == ConSanCacheOperation::Release;
 }
 
-bool is_acquire_cache_event(std::span<const ConSanDecodedProgramSite> decoded_sites,
+bool is_acquire_cache_event(std::span<const ConSanProgramSite> program_sites,
                             const ConSanSyncEvent *event) {
   // A split cache acquire is admitted only by the exact ordered-pair matcher
   // in semantic association. A lone completion operation is workgroup-local
   // cache maintenance, not a complete addressed acquire.
   const ConSanFenceSite *fence =
-      event == nullptr ? nullptr : source_as<ConSanFenceSite>(decoded_sites, *event);
+      event == nullptr ? nullptr : source_as<ConSanFenceSite>(program_sites, *event);
   return fence != nullptr && fence->cache_operation == ConSanCacheOperation::Acquire;
 }
 
 bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &load,
+    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
     const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
     const ConSanSyncSequence &cache_sequence, ConSanOrdinaryAcquireMetadataPolicy policy) {
   const ConSanOrdinaryMemorySite *load_source =
-      source_as<ConSanOrdinaryMemorySite>(decoded_sites, load);
-  const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(decoded_sites, cache);
+      source_as<ConSanOrdinaryMemorySite>(program_sites, load);
+  const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(program_sites, cache);
   if (load_source == nullptr || cache_source == nullptr)
     return false;
   const bool require_same_block =
@@ -90,21 +90,21 @@ bool consan_ordinary_acquire_metadata_compatible(
 }
 
 bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &load,
+    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
     const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
     const ConSanSyncSequence &cache_sequence) {
   return consan_ordinary_acquire_metadata_compatible(
-      decoded_sites, load, load_sequence, cache, cache_sequence,
+      program_sites, load, load_sequence, cache, cache_sequence,
       ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence);
 }
 
 bool consan_ordinary_release_metadata_compatible(
-    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &cache,
+    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &cache,
     const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
     const ConSanSyncSequence &store_sequence) {
-  const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(decoded_sites, cache);
+  const ConSanFenceSite *cache_source = source_as<ConSanFenceSite>(program_sites, cache);
   const ConSanOrdinaryMemorySite *store_source =
-      source_as<ConSanOrdinaryMemorySite>(decoded_sites, store);
+      source_as<ConSanOrdinaryMemorySite>(program_sites, store);
   return cache_source != nullptr && store_source != nullptr &&
          cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&

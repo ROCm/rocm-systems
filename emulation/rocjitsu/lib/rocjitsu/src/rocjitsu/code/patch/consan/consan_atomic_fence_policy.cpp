@@ -67,8 +67,8 @@ build_event_index(std::span<const ConSanSyncEvent> events) {
 [[nodiscard]] bool event_policy_semantics_equal(const SynchronizationInventoryView &inventory,
                                                 const ConSanSyncEvent &lhs,
                                                 const ConSanSyncEvent &rhs) {
-  const ConSanDecodedProgramSite *lhs_source = inventory.source(lhs);
-  const ConSanDecodedProgramSite *rhs_source = inventory.source(rhs);
+  const ConSanProgramSite *lhs_source = inventory.source(lhs);
+  const ConSanProgramSite *rhs_source = inventory.source(rhs);
   return lhs_source != nullptr && rhs_source != nullptr && lhs_source->same_payload(*rhs_source) &&
          lhs.semantic_id.physical == rhs.semantic_id.physical &&
          std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
@@ -126,12 +126,12 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
 
 [[nodiscard]] const ConSanAtomicSite *find_atomic_site(const ProgramInventory &inventory,
                                                        const ConSanSyncEvent &event) {
-  return inventory.decoded_site<ConSanAtomicSite>(event.source_site);
+  return inventory.program_site<ConSanAtomicSite>(event.source_site);
 }
 
 [[nodiscard]] const ConSanOrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
                                                                  const ConSanSyncEvent &event) {
-  return inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
+  return inventory.program_site<ConSanOrdinaryMemorySite>(event.source_site);
 }
 
 [[nodiscard]] ConSanAtomicSite normalize_ordinary_site(const ConSanOrdinaryMemorySite &site) {
@@ -175,9 +175,9 @@ atomic_capability_form(const SynchronizationInventoryView &inventory,
     return ConSanCapabilityForm::AddressedOrdinaryFence;
   if (event.kind != ConSanSyncEventKind::Atomic)
     return std::nullopt;
-  const ConSanDecodedProgramSite *source = inventory.source(event);
+  const ConSanProgramSite *source = inventory.source(event);
   if (event.address_source == ConSanSyncAddressSource::LdsVector ||
-      (source != nullptr && source->mnemonic().starts_with("ds_"))) {
+      (source != nullptr && source->mnemonic_view().starts_with("ds_"))) {
     return ConSanCapabilityForm::OrderedLdsAtomic;
   }
   if (event.address_source == ConSanSyncAddressSource::FlatVector)

@@ -17,8 +17,8 @@ namespace {
 
 [[nodiscard]] bool event_semantics_equal(const SynchronizationInventoryView &inventory,
                                          const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
-  const ConSanDecodedProgramSite *lhs_source = inventory.source(lhs);
-  const ConSanDecodedProgramSite *rhs_source = inventory.source(rhs);
+  const ConSanProgramSite *lhs_source = inventory.source(lhs);
+  const ConSanProgramSite *rhs_source = inventory.source(rhs);
   if (lhs_source == nullptr || rhs_source == nullptr || !lhs_source->same_payload(*rhs_source))
     return false;
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
@@ -84,7 +84,7 @@ completion_event(const ConSanSyncSequence &sequence,
     if (found == events_by_offset.end() || found->second.empty())
       continue;
     const ConSanSyncEvent *event = found->second.front();
-    const ConSanDecodedProgramSite *source = inventory.source(*event);
+    const ConSanProgramSite *source = inventory.source(*event);
     if (source == nullptr)
       continue;
     if (event->text_offset() <= sequence.end_text_offset &&

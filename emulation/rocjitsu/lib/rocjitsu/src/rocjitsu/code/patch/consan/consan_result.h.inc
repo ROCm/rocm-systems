@@ -1,13 +1,13 @@
 /// Temporary lowering state for one access admitted by semantic policy.
 ///
-/// Its `ConSanAccessInventorySite` base is the exact normalized record selected
+/// Its `ConSanProgramSite` base is the exact normalized record selected
 /// by the observation plan. Lowering reads that snapshot without re-decoding
 /// or reclassifying it. The remaining members are facts created only after
 /// admission: target execution state, the selected execution owner, and the
 /// compact nonnegative ranges consumed by current emitters. Extending the
 /// inventory value keeps its established field vocabulary without maintaining
 /// an independent access identity, operand, or decode schema.
-struct ConSanMoiCandidate : ConSanAccessInventorySite {
+struct ConSanMoiCandidate : ConSanProgramSite {
   /// Every observation intent coalesced onto this physical access.
   std::vector<ConSanProbeIntentId> intent_ids;
   /// Return the original-text instruction offset used as this lowering
