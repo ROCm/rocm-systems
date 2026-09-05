@@ -182,9 +182,9 @@ struct AtomicEncodingDecision {
          sequence.kind == ConSanSyncKind::OrdinaryMemory;
 }
 
-[[nodiscard]] ConSanAtomicPolicyReason
-classify_atomic_semantics(const ConSanSyncEvent &event, const ConSanSyncSequence *sequence,
-                          bool ambiguous_membership) {
+[[nodiscard]] ConSanAtomicPolicyReason classify_atomic_semantics(const ConSanSyncEvent &event,
+                                                                 const ConSanSyncSequence *sequence,
+                                                                 bool ambiguous_membership) {
   if (ambiguous_membership)
     return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
   if (sequence == nullptr || !sequence_is_atomic_contract(event, *sequence) ||
@@ -217,14 +217,16 @@ classify_atomic_semantics(const ConSanSyncEvent &event, const ConSanSyncSequence
 }
 
 [[nodiscard]] ConSanProbeIntentId
-add_intent(ConSanObservationPlan &plan, const PhysicalSiteId &physical_site,
-           std::vector<SemanticSiteId> covered_sites, ConSanProbeIntentKind kind,
-           ConSanProbePosition position, const ConSanSynchronizationAssociationId &association,
+add_intent(ConSanObservationPlan &plan, ConSanProgramSiteId source_site,
+           const PhysicalSiteId &physical_site, std::vector<SemanticSiteId> covered_sites,
+           ConSanProbeIntentKind kind, ConSanProbePosition position,
+           const ConSanSynchronizationAssociationId &association,
            ConSanDynamicResultRequirement dynamic_result) {
   const ConSanProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
   plan.probe_intents.push_back({
       .id = id,
       .engine = plan.engine,
+      .source_site = source_site,
       .physical_site = physical_site,
       .covered_semantic_sites = std::move(covered_sites),
       .kind = kind,
@@ -365,7 +367,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
 
     if (decision.kind == ConSanSiteDecisionKind::Admitted && decision.association) {
       const ConSanProbeIntentId capture =
-          add_intent(result.plan, semantic_id.physical, {semantic_id},
+          add_intent(result.plan, event.source_site, semantic_id.physical, {semantic_id},
                      ConSanProbeIntentKind::AtomicAddressCapture, ConSanProbePosition::Before,
                      *decision.association, ConSanDynamicResultRequirement::None);
       decision.intent_ids.push_back(capture);
@@ -374,9 +376,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
           event.kind == ConSanSyncKind::OrdinaryMemory &&
           has_qualified_fence_for(synchronization, synchronization.event_id(event));
       if (!independent_fence_owns_ordinary) {
-        decision.intent_ids.push_back(add_intent(result.plan, semantic_id.physical, {semantic_id},
-                                                 vocabulary->atomic, ConSanProbePosition::After,
-                                                 *decision.association, decision.dynamic_result));
+        decision.intent_ids.push_back(add_intent(
+            result.plan, event.source_site, semantic_id.physical, {semantic_id}, vocabulary->atomic,
+            ConSanProbePosition::After, *decision.association, decision.dynamic_result));
       }
     }
     result.plan.atomic_site_decisions.push_back(std::move(decision));
@@ -432,8 +434,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
     } else if (!filter_matches(names, request.container_filter) ||
-               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors,
-                                                     names,
+               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
                                                      request.kernel_name_allowlist)) {
       decision.reason = ConSanFencePolicyReason::ContainerFilterExcluded;
     } else if (conflicting_alias) {
@@ -479,8 +480,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
             decision.intent_ids.push_back(capture);
           }
           const ConSanProbeIntentId record =
-              add_intent(result.plan, fence_id.physical, {atomic_decision->semantic_site, fence_id},
-                         vocabulary->fence, ConSanProbePosition::After, *decision.association,
+              add_intent(result.plan, fence_event->source_site, fence_id.physical,
+                         {atomic_decision->semantic_site, fence_id}, vocabulary->fence,
+                         ConSanProbePosition::After, *decision.association,
                          ConSanDynamicResultRequirement::None);
           decision.intent_ids.push_back(record);
           atomic_decision->intent_ids.push_back(record);
@@ -504,10 +506,13 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       if (decision.kind != ConSanSiteDecisionKind::Admitted || !decision.association ||
           decision.intent_ids.size() != 1u)
         continue;
-      decision.intent_ids.push_back(add_intent(result.plan, decision.semantic_site.physical,
-                                               {decision.semantic_site}, vocabulary->atomic,
-                                               ConSanProbePosition::After, *decision.association,
-                                               decision.dynamic_result));
+      const ConSanProbeIntent *capture = result.plan.intent(decision.intent_ids.front());
+      if (capture != nullptr) {
+        decision.intent_ids.push_back(
+            add_intent(result.plan, capture->source_site, decision.semantic_site.physical,
+                       {decision.semantic_site}, vocabulary->atomic, ConSanProbePosition::After,
+                       *decision.association, decision.dynamic_result));
+      }
     }
   }
 

@@ -614,6 +614,11 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_EQ(revised_inventory.kernels().front().name, "revision");
   ASSERT_EQ(revised_inventory.functions().size(), 1u);
   ASSERT_EQ(revised_inventory.access_sites().size(), 2u);
+  for (size_t index = 0; index < revised_inventory.program_sites().size(); ++index) {
+    const ConSanProgramSite &site = revised_inventory.program_sites()[index];
+    EXPECT_EQ(site.id, ConSanProgramSiteId{static_cast<uint32_t>(index)});
+    EXPECT_EQ(revised_inventory.program_site(site.id), &site);
+  }
   EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[0].container)->kind,
             ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[1].container)->kind,
@@ -622,6 +627,12 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_TRUE(revised_inventory.sync().sync_sequences.empty());
   EXPECT_TRUE(revised_inventory.sync().barrier_lifecycle_groups.empty());
   EXPECT_TRUE(revised_inventory.sync().moi_fence_candidates.front().eligible());
+  EXPECT_TRUE(revised_inventory.program_site_ids_well_formed());
+
+  ProgramInventoryBuilder stale_site_id(revised_inventory);
+  stale_site_id.program_sites().front().id = {99};
+  EXPECT_FALSE(stale_site_id.view().program_site_ids_well_formed());
+  EXPECT_EQ(stale_site_id.view().program_site({0}), nullptr);
 }
 
 TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberIdentities) {
@@ -649,6 +660,7 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
     EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset());
     const ConSanProgramSite *source = result.program_inventory.program_site(event.source_site);
     ASSERT_NE(source, nullptr);
+    EXPECT_EQ(source->id, event.source_site);
     EXPECT_EQ(source->text_offset(), event.text_offset());
     EXPECT_NE(source->get_if<ConSanBarrierSite>(), nullptr);
   }

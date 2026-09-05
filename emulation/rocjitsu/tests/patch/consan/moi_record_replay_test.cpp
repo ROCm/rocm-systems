@@ -12123,7 +12123,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
     auto &sync_events = unowned_inventory.synchronization().sync_events;
     ASSERT_LT(candidate.communication_event->ordinal, sync_events.size());
     const ConSanSyncEvent *event = &sync_events[candidate.communication_event->ordinal];
-    auto &program_sites = unowned_inventory.synchronization().program_sites;
+    auto program_sites = unowned_inventory.synchronization().program_sites;
     ASSERT_LT(event->source_site.ordinal, program_sites.size());
     program_sites[event->source_site.ordinal].execution_owners.clear();
   }

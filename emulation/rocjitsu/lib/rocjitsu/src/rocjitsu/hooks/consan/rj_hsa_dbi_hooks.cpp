@@ -4179,7 +4179,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
       const std::vector<rocjitsu::ConSanExecutionOwner> sequence_owners =
           sync.execution_owners(sequence);
-      const rocjitsu::ConSanProgramContainerRef *sequence_container = sync.container(sequence);
+      const rocjitsu::ConSanProgramContainer *sequence_container = sync.container(sequence);
       const OwnerLogFields owners =
           owner_log_fields(sequence_owners, transform_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
@@ -4396,7 +4396,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     for (const rocjitsu::ConSanProgramSite &site :
          transform_result.program_inventory.access_sites()) {
-      const bool function = site.container.kind == rocjitsu::ConSanProgramContainerKind::Function;
+      const rocjitsu::ConSanProgramContainer *container =
+          transform_result.program_inventory.container(site.container);
+      const bool function =
+          container != nullptr && container->kind == rocjitsu::ConSanProgramContainerKind::Function;
       if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
         ++(function ? function_flat_site_count : flat_site_count);
       } else {

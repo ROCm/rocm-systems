@@ -2080,13 +2080,12 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
             return candidate.kind == ConSanProbeIntentKind::ExactShadowAccess &&
                    candidate.physical_site.original_text_offset == patch.anchor_offset;
           });
-      const auto access =
+      const ConSanProgramSite *access =
           intent == result.observation_plan().probe_intents.end()
-              ? result.program_inventory.access_sites().end()
-              : std::ranges::find(result.program_inventory.access_sites(), intent->physical_site,
-                                  &ConSanProgramSite::physical_id);
+              ? nullptr
+              : result.program_inventory.program_site(intent->source_site);
       const uint32_t minimum_cell_count =
-          access == result.program_inventory.access_sites().end()
+          access == nullptr || !access->has_access()
               ? 0u
               : consan_moi_maximum_cell_count_for_unaligned_bytes(access->decoded_width_bits / 8u);
       const size_t decoded_local_exchange_cell_count = decoded_local_exchange_b64_count;
@@ -2118,8 +2117,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           /*scope=*/2, arch);
       if (!expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
           decoded_cas_count != decoded_local_exchange_cell_count ||
-          decoded_local_exchange_count == 0u ||
-          access == result.program_inventory.access_sites().end() ||
+          decoded_local_exchange_count == 0u || access == nullptr || !access->has_access() ||
           decoded_backward_local_loop_count < minimum_backward_loop_count ||
           decoded_nonbackward_local_loop || decoded_local_exchange_b32_count != 0u ||
           count_pattern(*expected_local_exchange_b64) != decoded_local_exchange_b64_count ||

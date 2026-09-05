@@ -102,6 +102,8 @@ struct ConSanProgramSite {
   using Payload = std::variant<ConSanAccessSite, ConSanOrdinaryMemorySite, ConSanBarrierSite,
                                ConSanFenceSite, ConSanAtomicSite>;
 
+  /// Stable identity assigned by the owning program-site arena.
+  ConSanProgramSiteId id;
   PhysicalSiteId physical_id;
   ConSanProgramContainerId container;
   ConSanAccessOrigin origin = ConSanAccessOrigin::Count;
@@ -179,8 +181,8 @@ template <typename Site>
 /// access and semantic ownership.
 class ConSanProgramSiteArena {
 public:
-  [[nodiscard]] const std::vector<ConSanProgramSite> &sites() const { return sites_; }
-  [[nodiscard]] std::vector<ConSanProgramSite> &sites() { return sites_; }
+  [[nodiscard]] std::span<const ConSanProgramSite> sites() const { return sites_; }
+  [[nodiscard]] std::span<ConSanProgramSite> sites() { return sites_; }
   [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
     return std::span<const ConSanProgramSite>(sites_).first(access_site_count_);
   }
@@ -191,6 +193,7 @@ public:
   void add_access(ConSanProgramSite site) {
     sites_.insert(sites_.begin() + access_site_count_, std::move(site));
     ++access_site_count_;
+    reindex();
   }
 
   void add_semantic(ConSanProgramSite site) {
@@ -205,6 +208,7 @@ public:
       return;
     }
     sites_.push_back(std::move(site));
+    reindex();
   }
 
   void append(ConSanProgramSiteArena batch) {
@@ -223,6 +227,7 @@ public:
     access_site_count_ = retained_access_count;
     sites_.erase(std::remove_if(sites_.begin() + access_site_count_, sites_.end(), predicate),
                  sites_.end());
+    reindex();
   }
 
   /// Transfer semantic facets in an installed code range to their final
@@ -261,9 +266,15 @@ public:
                                   return !first_semantic_facet(site);
                                 }),
                  sites_.end());
+    reindex();
   }
 
 private:
+  void reindex() {
+    for (size_t index = 0; index < sites_.size(); ++index)
+      sites_[index].id = {static_cast<uint32_t>(index)};
+  }
+
   std::vector<ConSanProgramSite> sites_;
   size_t access_site_count_ = 0;
 };
@@ -501,15 +512,10 @@ struct SynchronizationInventoryView {
   }
 
   /// Resolve the synchronization event derived from one exact decoded site.
-  /// Physical aliases intentionally converge on the canonical event; callers
-  /// retain the source handle when symbol attribution must also be checked.
+  /// Unlike semantic or physical lookup, this preserves symbol-alias identity.
   [[nodiscard]] const ConSanSyncEvent *find_event(ConSanProgramSiteId source_site) const {
-    if (!source_site.valid() || source_site.ordinal >= program_sites.size())
-      return nullptr;
-    return find_event(SemanticSiteId{
-        .physical = program_sites[source_site.ordinal].physical_id,
-        .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
-    });
+    const auto event = std::ranges::find(sync_events, source_site, &ConSanSyncEvent::source_site);
+    return event == sync_events.end() ? nullptr : &*event;
   }
 
   /// Resolve one decoded event name to its sole published record. Event names
@@ -649,7 +655,7 @@ struct SynchronizationInventoryView {
 /// `SynchronizationInventoryView`.
 struct SynchronizationInventoryBuildView {
   const std::vector<ConSanProgramContainer> &program_containers;
-  std::vector<ConSanProgramSite> &program_sites;
+  std::span<ConSanProgramSite> program_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanSyncSequenceMembership> &sequence_membership_by_event;
@@ -830,6 +836,15 @@ public:
       });
     });
   }
+  /// Return whether every decoded record owns its exact arena handle.
+  [[nodiscard]] bool program_site_ids_well_formed() const {
+    const std::span<const ConSanProgramSite> records = program_sites();
+    for (size_t index = 0; index < records.size(); ++index) {
+      if (records[index].id != ConSanProgramSiteId{static_cast<uint32_t>(index)})
+        return false;
+    }
+    return true;
+  }
   [[nodiscard]] std::span<const ConSanProgramContainer> functions() const {
     return containers().subspan(storage_ ? storage_->kernel_count : 0);
   }
@@ -890,7 +905,8 @@ public:
 
   /// Resolve one exact source-site handle in this inventory revision.
   [[nodiscard]] const ConSanProgramSite *program_site(ConSanProgramSiteId id) const {
-    return consan_program_site(program_sites(), id);
+    const ConSanProgramSite *site = consan_program_site(program_sites(), id);
+    return site != nullptr && site->id == id ? site : nullptr;
   }
 
   /// Resolve the authoritative decoded source of a fault-planning facet.
@@ -1004,7 +1020,7 @@ public:
   [[nodiscard]] std::span<ConSanProgramSite> access_sites() {
     return storage_->program_sites.access_sites();
   }
-  [[nodiscard]] std::vector<ConSanProgramSite> &program_sites() {
+  [[nodiscard]] std::span<ConSanProgramSite> program_sites() {
     return storage_->program_sites.sites();
   }
   void add_access_site(ConSanProgramSite site) {

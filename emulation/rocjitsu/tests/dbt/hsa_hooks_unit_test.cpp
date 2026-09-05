@@ -1989,6 +1989,7 @@ void install_test_access_coverage(
       plan.probe_intents.push_back({
           .id = id,
           .engine = engine,
+          .source_site = {static_cast<uint32_t>(index)},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
           .kind = intent_kind,
@@ -5378,10 +5379,13 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
   const rocjitsu::ConSanSynchronizationAssociationId fence_association{"test-fence"};
   install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
     const auto add_source = [&](uint64_t offset, std::string name) {
+      rocjitsu::ConSanProgramContainer container{rocjitsu::ConSanProgramContainerKind::Kernel};
+      container.name = std::move(name);
+      const rocjitsu::ConSanProgramContainerId container_id =
+          builder.add_kernel(std::move(container)).id;
       rocjitsu::ConSanProgramSite site;
       site.physical_id.original_text_offset = offset;
-      site.container = {
-          .id = {}, .kind = rocjitsu::ConSanProgramContainerKind::Kernel, .name = std::move(name)};
+      site.container = container_id;
       builder.add_semantic_site(std::move(site));
     };
     add_source(0x10u, "unsupported_kernel");
@@ -5430,6 +5434,7 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           {
               {.id = {0u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .source_site = {0u},
                .physical_site = barrier.physical,
                .covered_semantic_sites = {barrier},
                .kind = rocjitsu::ConSanProbeIntentKind::BarrierRecord,
@@ -5438,6 +5443,7 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
                .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None},
               {.id = {1u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .source_site = {1u},
                .physical_site = atomic.physical,
                .covered_semantic_sites = {atomic},
                .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
@@ -5445,6 +5451,7 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
                .synchronization_association = atomic_association},
               {.id = {2u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .source_site = {2u},
                .physical_site = fence.physical,
                .covered_semantic_sites = {fence},
                .kind = rocjitsu::ConSanProbeIntentKind::FenceRecord,
@@ -5481,10 +5488,13 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
       .range_ordinal = 0u,
   };
   install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+    rocjitsu::ConSanProgramContainer container{rocjitsu::ConSanProgramContainerKind::Kernel};
+    container.name = "typed_kernel";
+    const rocjitsu::ConSanProgramContainerId container_id =
+        builder.add_kernel(std::move(container)).id;
     rocjitsu::ConSanProgramSite site;
     site.physical_id.original_text_offset = 0x10u;
-    site.container = {
-        .id = {}, .kind = rocjitsu::ConSanProgramContainerKind::Kernel, .name = "typed_kernel"};
+    site.container = container_id;
     builder.add_semantic_site(std::move(site));
   });
   rocjitsu::ConSanObservationPlan plan = {
@@ -5502,6 +5512,7 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
       .probe_intents = {{
           .id = {0u},
           .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .source_site = {0u},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
           .kind = rocjitsu::ConSanProbeIntentKind::AccessRecord,
@@ -5646,7 +5657,7 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   atomic_plan.max_referenced_vgpr_count = 61;
   atomic_plan.ordinary_vgpr_limit = 256;
   atomic_plan.required_vgpr_count = 64;
-  atomic_plan.owner_descriptor_file_offsets = {0x100};
+  atomic_plan.owner_kernel_ids = {{0}};
   atomic_plan.alternatives = {
       {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
        .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
@@ -5666,7 +5677,7 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   fence_plan.max_referenced_vgpr_count = 256;
   fence_plan.ordinary_vgpr_limit = 256;
   fence_plan.required_vgpr_count = 256;
-  fence_plan.owner_descriptor_file_offsets = {0x200, 0x300};
+  fence_plan.owner_kernel_ids = {{1}, {2}};
   fence_plan.has_indirect_vgpr_access = true;
   fence_plan.alternatives = {
       {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
@@ -5788,9 +5799,8 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   result.resource_plans.push_back(atomic_plan);
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
     builder.add_kernel().name = "auto_report_atomic";
-    builder.program_sites().push_back(rocjitsu::make_consan_program_site(
-        rocjitsu::consan_program_container_ref(builder.kernels().back()),
-        rocjitsu::ConSanAtomicSite{}));
+    builder.add_semantic_site(rocjitsu::make_consan_program_site(builder.kernels().back().id,
+                                                                 rocjitsu::ConSanAtomicSite{}));
   });
   const rocjitsu::PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),
@@ -5809,6 +5819,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
       .probe_intents = {{
           .id = {0u},
           .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .source_site = {0u},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
           .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
@@ -5857,6 +5868,7 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
     plan.probe_intents.push_back({
         .id = intent_id,
         .engine = engine,
+        .source_site = {intent_id.value},
         .physical_site = physical,
         .covered_semantic_sites = {semantic},
         .kind = intent_kind,
@@ -5999,9 +6011,8 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   access.operands.address_vgpr = 0u;
   access.operands.data_vgpr = 1u;
   access.decoded_site().mnemonic = "ds_store_b32";
-  access.container = rocjitsu::consan_program_container_ref(kernel);
+  access.container = inventory.add_kernel(std::move(kernel)).id;
   inventory.add_access_site(std::move(access));
-  inventory.add_kernel(std::move(kernel));
   inventory.publish_decoded_accesses(instruction_bytes);
   inventory.access_sites().front().execution_owners = {{.kernel = inventory.kernels().front().id}};
   result.program_inventory = inventory.view();

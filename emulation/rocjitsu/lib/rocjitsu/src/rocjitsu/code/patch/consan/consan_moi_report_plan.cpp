@@ -267,8 +267,8 @@ bool ConSanEvidenceIntentPlan::well_formed() const {
     return false;
   for (size_t index = 0; index < intents.size(); ++index) {
     const ConSanEvidenceIntent &intent = intents[index];
-    if (intent.source_intent.value != index || !accepts_evidence_intent(*vocabulary, intent.kind) ||
-        intent.semantic_sites.empty() ||
+    if (intent.source_intent.value != index || !intent.source_site.valid() ||
+        !accepts_evidence_intent(*vocabulary, intent.kind) || intent.semantic_sites.empty() ||
         std::ranges::any_of(intent.semantic_sites,
                             [](const SemanticSiteId &site) { return !site.valid(); }) ||
         std::ranges::any_of(intent.semantic_sites,
@@ -308,6 +308,7 @@ plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan) {
     }
     ConSanEvidenceIntent intent{
         .source_intent = probe.id,
+        .source_site = probe.source_site,
         .kind = *kind,
         .semantic_sites = probe.covered_semantic_sites,
     };

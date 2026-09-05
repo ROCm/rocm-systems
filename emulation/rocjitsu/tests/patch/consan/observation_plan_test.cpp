@@ -157,6 +157,7 @@ ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site)
       .probe_intents = {{
           .id = {0},
           .engine = ConSanCapabilityEngine::RecordReplay,
+          .source_site = {0},
           .physical_site = physical_site,
           .covered_semantic_sites = {semantic_site},
           .kind = ConSanProbeIntentKind::BarrierRecord,
@@ -210,6 +211,9 @@ TEST(ConSanObservationPlan, PlanValidationRejectsEveryBrokenTypedRelationship) {
   broken.probe_intents.front().id = {7};
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
+  broken.probe_intents.front().source_site = {};
+  EXPECT_FALSE(broken.valid());
+  broken = policy.plan;
   broken.probe_intents.front().kind = ConSanProbeIntentKind::Count;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
@@ -250,7 +254,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   source.operand_source = ConSanBarrierSite::OperandSource::Immediate;
   source.scope = ConSanBarrierSite::Scope::Workgroup;
   source.mnemonic = "s_barrier";
-  builder.program_sites().push_back(
+  builder.add_semantic_site(
       make_consan_program_site(builder.kernels().front().id, std::move(source)));
   builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;

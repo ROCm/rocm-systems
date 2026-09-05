@@ -334,6 +334,8 @@ enum class ConSanEvidenceIntentKind : uint8_t {
 struct ConSanEvidenceIntent {
   /// Plan-local observation intent from which this evidence was derived.
   ConSanProbeIntentId source_intent;
+  /// Exact decoded site supplying immutable sizing facts for this evidence.
+  ConSanProgramSiteId source_site;
   /// Flavor-neutral role consumed by report sizing and interpretation.
   ConSanEvidenceIntentKind kind = ConSanEvidenceIntentKind::Count;
   /// Stable semantic identities whose behavior this evidence represents.

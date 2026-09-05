@@ -554,6 +554,8 @@ struct ConSanProbeIntent {
   ConSanProbeIntentId id;
   /// Engine whose evidence semantics this intent implements.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Exact decoded site at which lowering must place this probe.
+  ConSanProgramSiteId source_site;
   /// Physical instruction at which lowering must place the coalesced probe.
   PhysicalSiteId physical_site;
   /// All logical access ranges or synchronization events observed by the probe.

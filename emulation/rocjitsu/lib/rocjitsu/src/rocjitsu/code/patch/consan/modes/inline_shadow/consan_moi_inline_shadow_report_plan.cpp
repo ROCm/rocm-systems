@@ -77,18 +77,6 @@ reconstruct_inline_shadow_report_inventory(const ConSanMoiReportBufferLayout &ca
 } // namespace rocjitsu::consan_moi_impl
 
 namespace rocjitsu {
-namespace {
-
-[[nodiscard]] const ConSanProgramSite *
-find_inventory_access_range(const ProgramInventory &inventory, const SemanticSiteId &range_id) {
-  const auto site = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
-    return std::ranges::find(candidate.ranges, range_id, &ConSanAccessRange::id) !=
-           candidate.ranges.end();
-  });
-  return site == inventory.access_sites().end() ? nullptr : &*site;
-}
-
-} // namespace
 
 ConSanMoiAutoReportInventory
 fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
@@ -159,16 +147,18 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
   uint64_t native_static_extent = 0;
   for (const ConSanEvidenceIntent *intent : retained_accesses) {
     for (const SemanticSiteId &range_id : intent->semantic_sites) {
-      const ConSanProgramSite *site =
-          find_inventory_access_range(context.program_inventory, range_id);
-      if (!site) {
+      const ConSanProgramSite *site = context.program_inventory.program_site(intent->source_site);
+      if (site == nullptr || !site->has_access()) {
+        requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
+        return requirements;
+      }
+      const auto range = std::ranges::find(site->ranges, range_id, &ConSanAccessRange::id);
+      if (range == site->ranges.end()) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
         return requirements;
       }
       requires_full_lds_aperture |= site->origin == ConSanAccessOrigin::Flat;
-      if (const auto range = std::ranges::find(site->ranges, range_id, &ConSanAccessRange::id);
-          range != site->ranges.end() && range->static_byte_offset &&
-          *range->static_byte_offset >= 0) {
+      if (range->static_byte_offset && *range->static_byte_offset >= 0) {
         native_static_extent =
             std::max(native_static_extent,
                      util::saturating_add(static_cast<uint64_t>(*range->static_byte_offset),
@@ -182,8 +172,7 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
       if (site->origin == ConSanAccessOrigin::Flat)
         continue;
 
-      std::vector<uint64_t> owners =
-          context.program_inventory.execution_owner_descriptors(*site);
+      std::vector<uint64_t> owners = context.program_inventory.execution_owner_descriptors(*site);
       if (owners.empty()) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
         return requirements;

@@ -96,7 +96,7 @@ template <typename Site, typename Container>
 /// Seed one decoded source site in a builder-owned test inventory.
 template <typename Container, typename Site>
 void stage_decoded_site(ProgramInventoryBuilder &builder, const Container &container, Site site) {
-  builder.program_sites().push_back(make_consan_program_site(container.id, std::move(site)));
+  builder.add_semantic_site(make_consan_program_site(container.id, std::move(site)));
 }
 
 /// Focused classifier/planner tests start from decoded sites so they can

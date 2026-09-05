@@ -505,6 +505,7 @@ bool TransformResult::well_formed() const {
     return false;
   }
   if (!program_inventory.empty() && (program_inventory.code_object_id() != code_object ||
+                                     !program_inventory.program_site_ids_well_formed() ||
                                      !program_inventory.execution_owners_well_formed()))
     return false;
   if (std::ranges::any_of(private_lowering_.fault_sites, [&](const ConSanFaultSite &site) {

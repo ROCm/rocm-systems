@@ -255,6 +255,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
           result.plan.probe_intents.push_back({
               .id = *intent_id,
               .engine = request.engine,
+              .source_site = placement->source_site,
               .physical_site = placement->semantic_id.physical,
               .covered_semantic_sites = std::move(covered),
               .kind = vocabulary->barrier,

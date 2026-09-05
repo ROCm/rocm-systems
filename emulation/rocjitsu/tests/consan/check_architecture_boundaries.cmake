@@ -386,10 +386,32 @@ _consan_assert_no_match(
 )
 file(READ "${_consan_dir}/consan_program_inventory.h.inc" _program_site_contracts)
 if(NOT _program_site_contracts MATCHES
+       "struct ConSanProgramSite[^{]*[{][^}]*ConSanProgramSiteId[ \t]+id" OR
+   NOT _program_site_contracts MATCHES
        "struct ConSanProgramSite[^{]*[{][^}]*ConSanProgramContainerId[ \t]+container" OR
    _program_site_contracts MATCHES "ConSanProgramContainerRef|consan_program_container_ref")
     message(FATAL_ERROR
         "ConSan program sites must retain the authoritative container handle directly, not an attribution wrapper"
+    )
+endif()
+if(_program_site_contracts MATCHES
+   "vector<ConSanProgramSite>[ \t]*&[ \t]*program_sites[(][)]" OR
+   _program_site_contracts MATCHES
+   "vector<ConSanProgramSite>[ \t]*&[ \t]*sites[(][)]")
+    message(FATAL_ERROR
+        "ConSan program-site structural mutation must stay behind the arena API"
+    )
+endif()
+file(READ "${_consan_dir}/consan_observation_plan.h.inc" _observation_plan_contracts)
+file(READ "${_consan_dir}/consan_moi_candidate_projection.cpp" _candidate_projection)
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp"
+     _inline_report_plan)
+if(NOT _observation_plan_contracts MATCHES
+       "struct ConSanProbeIntent[^{]*[{][^}]*ConSanProgramSiteId[ \t]+source_site" OR
+   _candidate_projection MATCHES "find_if[(]inventory[.]access_sites" OR
+   _inline_report_plan MATCHES "find_inventory_access_range")
+    message(FATAL_ERROR
+        "ConSan observation intents must retain authoritative program-site handles without physical reverse joins"
     )
 endif()
 _consan_assert_no_match(

@@ -400,6 +400,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   plan.probe_intents.push_back({
       .id = {0u},
       .engine = ConSanCapabilityEngine::RecordReplay,
+      .source_site = inventory.access_sites().front().id,
       .physical_site = semantic.physical,
       .covered_semantic_sites = {semantic},
       .kind = ConSanProbeIntentKind::AccessRecord,
@@ -417,6 +418,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   plan.probe_intents.push_back({
       .id = {1u},
       .engine = ConSanCapabilityEngine::RecordReplay,
+      .source_site = barrier.source_site,
       .physical_site = barrier.semantic_id.physical,
       .covered_semantic_sites = {barrier.semantic_id},
       .kind = ConSanProbeIntentKind::BarrierRecord,

@@ -29,10 +29,8 @@ std::vector<ConSanMoiCandidate> build_moi_candidates(const ProgramInventory &inv
         intent.kind != ConSanProbeIntentKind::ExactShadowAccess) {
       continue;
     }
-    const auto access = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
-      return candidate.physical_id == intent.physical_site;
-    });
-    if (access == inventory.access_sites().end()) {
+    const ConSanProgramSite *access = inventory.program_site(intent.source_site);
+    if (access == nullptr || !access->has_access() || access->physical_id != intent.physical_site) {
       errors.emplace_back("ConSan MOI access intent lost its inventory site");
       return {};
     }

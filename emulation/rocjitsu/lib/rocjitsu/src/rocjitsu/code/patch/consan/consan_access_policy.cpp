@@ -197,9 +197,10 @@ bool ConSanObservationPlan::valid() const {
     return false;
   for (size_t index = 0; index < probe_intents.size(); ++index) {
     const ConSanProbeIntent &probe = probe_intents[index];
-    if (probe.id.value != index || probe.engine != engine || !probe.physical_site.valid() ||
-        probe.covered_semantic_sites.empty() || !valid_intent_kind(probe.kind) ||
-        !valid_position(probe.position) || !valid_dynamic_result(probe.dynamic_result) ||
+    if (probe.id.value != index || probe.engine != engine || !probe.source_site.valid() ||
+        !probe.physical_site.valid() || probe.covered_semantic_sites.empty() ||
+        !valid_intent_kind(probe.kind) || !valid_position(probe.position) ||
+        !valid_dynamic_result(probe.dynamic_result) ||
         std::ranges::any_of(probe.covered_semantic_sites,
                             [](const SemanticSiteId &site) { return !site.valid(); })) {
       return false;
@@ -784,6 +785,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
       result.plan.probe_intents.push_back({
           .id = *intent_id,
           .engine = request.engine,
+          .source_site = access.id,
           .physical_site = access.physical_id,
           .covered_semantic_sites = ids,
           .kind = vocabulary->access,

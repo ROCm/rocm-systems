@@ -29,8 +29,7 @@
   for (ConSanProbeIntentId id : admitted_intents) {
     const ConSanProbeIntent *intent = observation.intent(id);
     const ConSanSyncEvent *event =
-        intent == nullptr ? nullptr
-                          : graph.find_unique_event(ConSanSyncKind::Barrier, intent->physical_site);
+        intent == nullptr ? nullptr : graph.find_event(intent->source_site);
     const ConSanSyncSequence *sequence =
         event == nullptr ? nullptr : graph.find_unique_sequence_containing(event->semantic_id);
     if (intent == nullptr || event == nullptr || sequence == nullptr ||

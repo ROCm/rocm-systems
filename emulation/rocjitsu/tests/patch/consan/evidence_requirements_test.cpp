@@ -69,6 +69,7 @@ private:
     ConSanProbeIntent intent;
     intent.id = {static_cast<uint32_t>(plan_.probe_intents.size())};
     intent.engine = plan_.engine;
+    intent.source_site = {intent.id.value};
     intent.physical_site = physical;
     intent.kind = kind;
     intent.position = kind == ConSanProbeIntentKind::AccessRecord ? ConSanProbePosition::Before
@@ -105,6 +106,7 @@ public:
     ConSanProbeIntent intent;
     intent.id = {static_cast<uint32_t>(plan_.probe_intents.size())};
     intent.engine = plan_.engine;
+    intent.source_site = {intent.id.value};
     intent.physical_site = physical;
     intent.kind = kind;
     intent.position = kind == ConSanProbeIntentKind::AtomicAddressCapture
@@ -197,6 +199,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
   ConSanProbeIntent intent;
   intent.id = {0};
   intent.engine = fixture.plan.engine;
+  intent.source_site = site.id;
   intent.physical_site = site.physical_id;
   intent.kind = ConSanProbeIntentKind::ExactShadowAccess;
   intent.position = ConSanProbePosition::Before;
@@ -302,6 +305,9 @@ TEST(ConSanEvidenceRequirements, EvidenceIntentPlanRejectsPartialOrCrossEngineSc
 
   ConSanEvidenceIntentPlan malformed = canonical;
   malformed.intents.front().source_intent = {1};
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = canonical;
+  malformed.intents.front().source_site = {};
   EXPECT_FALSE(malformed.well_formed());
   malformed = canonical;
   malformed.intents.front().kind = ConSanEvidenceIntentKind::Count;
