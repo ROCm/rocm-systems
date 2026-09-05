@@ -76,9 +76,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint64_t report_base = plan.report_buffer_address;
   const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
 
-  if (!special_state_already_saved &&
-      !append_save_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return false;
+  if (!special_state_already_saved)
+    sequence.require(append_save_moi_special_state(words, plan.scalar_abi.special_state, arch));
 
   const uint16_t workgroup_key = static_cast<uint16_t>(plan.scratch_vgpr + 19u);
   if (plan.track_atomics) {
@@ -97,11 +96,10 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       } else {
         return false;
       }
-    } else if (!append_extract_exact_shadow_generation(
-                   words, workgroup_key, current_value_vgpr,
-                   static_cast<uint16_t>(current_value_vgpr + 1u), tmp_vgpr, arch)) {
-      return false;
-    }
+    } else
+      sequence.require(append_extract_exact_shadow_generation(
+          words, workgroup_key, current_value_vgpr, static_cast<uint16_t>(current_value_vgpr + 1u),
+          tmp_vgpr, arch));
   }
 
   // Conflict diagnostics are the cold path. Each predicate below can empty
@@ -112,17 +110,15 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // remains, preserving identical behavior for every actual conflict.
   const InstructionSequence::Label diagnostic_restore = sequence.make_label();
   const auto skip_diagnostic_if_empty = [&]() {
-    return sequence.emit_branch(diagnostic_restore, InstructionSequence::BranchKind::ExecZero);
+    sequence.branch(diagnostic_restore, InstructionSequence::BranchKind::ExecZero);
   };
 
-  if (!sequence.emit_all(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch),
-                         instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr),
-                                                                 tmp_vgpr, arch),
-                         instrumentation::build_s_and_saveexec_b64(
-                             *plan.scalar_state.exec_save_sgpr, kAmdGpuVccLo, arch)))
-    return false;
-  if (!skip_diagnostic_if_empty())
-    return false;
+  sequence.append(
+      build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch),
+      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr), tmp_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(*plan.scalar_state.exec_save_sgpr, kAmdGpuVccLo,
+                                                arch));
+  skip_diagnostic_if_empty();
 
   const uint16_t address_lo_vgpr = plan.scratch_vgpr;
   // Predicate save destinations are scratch: after each empty-mask branch,
@@ -131,40 +127,33 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t predicate_exec_save_sgpr =
       static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
   if (!workgroup_local_shadow) {
-    if (!append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr, old_value_hi_vgpr,
-                                                address_lo_vgpr, arch) ||
-        !append_extract_exact_shadow_generation(words, current_field_vgpr, current_value_vgpr,
-                                                static_cast<uint16_t>(current_value_vgpr + 1u),
-                                                address_lo_vgpr, arch)) {
-      return false;
-    }
-    if (!sequence.emit_all(instrumentation::build_v_cmp_eq_u32_vcc(
-                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
-                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
-                                                                     kAmdGpuVccLo, arch)))
-      return false;
-    if (!skip_diagnostic_if_empty())
-      return false;
+    sequence
+        .require(append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
+                                                        old_value_hi_vgpr, address_lo_vgpr, arch))
+        .require(append_extract_exact_shadow_generation(
+            words, current_field_vgpr, current_value_vgpr,
+            static_cast<uint16_t>(current_value_vgpr + 1u), address_lo_vgpr, arch))
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                        tmp_vgpr, arch),
+                instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
+                                                          arch));
+    skip_diagnostic_if_empty();
   }
 
   if (prior_byte_provenance_vgpr) {
-    if (!sequence.emit_all(
-            instrumentation::build_v_and_b32_literal(tmp_vgpr,
-                                                     consan_moi_exact_byte_cell::byte_mask_mask,
-                                                     *prior_byte_provenance_vgpr, arch),
-            instrumentation::build_v_and_b32_literal(current_field_vgpr,
-                                                     consan_moi_exact_byte_cell::byte_mask_mask,
-                                                     *current_byte_provenance_vgpr, arch),
-            instrumentation::build_v_and_b32(current_field_vgpr, vector_source_vgpr(tmp_vgpr),
-                                             current_field_vgpr, arch),
-            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
-                                                    current_field_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
-                                                      arch))) {
-      return false;
-    }
-    if (!skip_diagnostic_if_empty())
-      return false;
+    sequence.append(
+        instrumentation::build_v_and_b32_literal(tmp_vgpr,
+                                                 consan_moi_exact_byte_cell::byte_mask_mask,
+                                                 *prior_byte_provenance_vgpr, arch),
+        instrumentation::build_v_and_b32_literal(current_field_vgpr,
+                                                 consan_moi_exact_byte_cell::byte_mask_mask,
+                                                 *current_byte_provenance_vgpr, arch),
+        instrumentation::build_v_and_b32(current_field_vgpr, vector_source_vgpr(tmp_vgpr),
+                                         current_field_vgpr, arch),
+        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), current_field_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch));
+    skip_diagnostic_if_empty();
   }
 
   // Reject read/read traffic before extracting either owner or epoch. Preserve
@@ -173,94 +162,81 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // different physical lane still represents a distinct participant.
   const auto current_kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   if (current_kind != ConSanMoiShadowAccessKind::Write) {
-    if (!sequence.emit_all(
-            instrumentation::build_v_and_b32_literal(
-                tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
-                old_value_vgpr, arch),
-            instrumentation::build_v_cmp_ne_u32_vcc(
-                scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
-                                                      arch)))
-      return false;
-    if (!skip_diagnostic_if_empty())
-      return false;
+    sequence.append(
+        instrumentation::build_v_and_b32_literal(
+            tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
+            old_value_vgpr, arch),
+        instrumentation::build_v_cmp_ne_u32_vcc(
+            scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch));
+    skip_diagnostic_if_empty();
   }
 
-  if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
-                                         consan_moi_exact_shadow::owner_shift,
-                                         consan_moi_exact_shadow::max_owner, arch) ||
-      !append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
-                                         consan_moi_exact_shadow::owner_shift,
-                                         consan_moi_exact_shadow::max_owner, arch)) {
-    return false;
-  }
+  sequence
+      .require(append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
+                                                 consan_moi_exact_shadow::owner_shift,
+                                                 consan_moi_exact_shadow::max_owner, arch))
+      .require(append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
+                                                 consan_moi_exact_shadow::owner_shift,
+                                                 consan_moi_exact_shadow::max_owner, arch));
   if (prior_byte_provenance_vgpr) {
     const uint16_t candidate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
     const uint16_t different_owner_exec =
         static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u);
     const uint16_t predicate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 6u);
-    if (!sequence.emit_all(
-            instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch),
-            instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr),
-                                                    tmp_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
-            instrumentation::build_s_mov_b64(different_owner_exec, kAmdGpuExecLo, arch),
-            instrumentation::build_s_mov_b64(kAmdGpuExecLo, candidate_exec, arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
-                                                    tmp_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
-            instrumentation::build_v_lshrrev_b32(
-                tmp_vgpr,
-                scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
-                old_value_hi_vgpr, arch),
-            instrumentation::build_v_mov_b32_literal(
-                current_field_vgpr, static_cast<uint32_t>(candidate.anchor()), arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
-                                                    tmp_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
-            instrumentation::build_v_lshrrev_b32(
-                tmp_vgpr,
-                scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-                *prior_byte_provenance_vgpr, arch),
-            instrumentation::build_v_lshrrev_b32(
-                current_field_vgpr,
-                scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-                *current_byte_provenance_vgpr, arch),
-            instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr),
-                                                    tmp_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
-            instrumentation::build_s_xor_b64(kAmdGpuExecLo, different_owner_exec, kAmdGpuExecLo,
-                                             arch))) {
-      return false;
-    }
+    sequence.append(
+        instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch),
+        instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+        instrumentation::build_s_mov_b64(different_owner_exec, kAmdGpuExecLo, arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, candidate_exec, arch),
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+        instrumentation::build_v_lshrrev_b32(
+            tmp_vgpr,
+            scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+            old_value_hi_vgpr, arch),
+        instrumentation::build_v_mov_b32_literal(current_field_vgpr,
+                                                 static_cast<uint32_t>(candidate.anchor()), arch),
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+        instrumentation::build_v_lshrrev_b32(
+            tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+            *prior_byte_provenance_vgpr, arch),
+        instrumentation::build_v_lshrrev_b32(
+            current_field_vgpr,
+            scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+            *current_byte_provenance_vgpr, arch),
+        instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+        instrumentation::build_s_xor_b64(kAmdGpuExecLo, different_owner_exec, kAmdGpuExecLo, arch));
   } else {
-    if (!sequence.emit_all(instrumentation::build_v_cmp_ne_u32_vcc(
-                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
-                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
-                                                                     kAmdGpuVccLo, arch)))
-      return false;
+    sequence.append(
+        instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr,
+                                                arch),
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch));
   }
-  if (!skip_diagnostic_if_empty())
-    return false;
+  skip_diagnostic_if_empty();
 
   const bool has_epoch = plan.epoch_field.epoch_vgpr || plan.epoch_field.persistent_epoch_sgpr ||
                          plan.epoch_field.automatic_private_epoch;
   if (has_epoch) {
-    if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
-                                           consan_moi_exact_shadow::epoch_shift,
-                                           consan_moi_exact_shadow::max_epoch, arch) ||
-        !append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
-                                           consan_moi_exact_shadow::epoch_shift,
-                                           consan_moi_exact_shadow::max_epoch, arch)) {
-      return false;
-    }
-    if (!sequence.emit_all(instrumentation::build_v_cmp_eq_u32_vcc(
-                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
-                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
-                                                                     kAmdGpuVccLo, arch)))
-      return false;
-    if (!skip_diagnostic_if_empty())
-      return false;
+    sequence
+        .require(append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
+                                                   consan_moi_exact_shadow::epoch_shift,
+                                                   consan_moi_exact_shadow::max_epoch, arch))
+        .require(append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
+                                                   consan_moi_exact_shadow::epoch_shift,
+                                                   consan_moi_exact_shadow::max_epoch, arch))
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                        tmp_vgpr, arch),
+                instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
+                                                          arch));
+    skip_diagnostic_if_empty();
   }
 
   if (plan.track_atomics) {
@@ -285,64 +261,58 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     // candidate's persistent owner source immediately before publication.
     // Extracting that value below also supports owner-private state without
     // requiring a second persistent VGPR or SGPR solely for diagnostics.
-    if (!append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
-                                           consan_moi_exact_shadow::owner_shift,
-                                           consan_moi_exact_shadow::max_owner, arch) ||
-        !append_extract_exact_shadow_field(words, prior_owner, old_value_vgpr,
-                                           consan_moi_exact_shadow::owner_shift,
-                                           consan_moi_exact_shadow::max_owner, arch))
-      return false;
+    sequence
+        .require(append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
+                                                   consan_moi_exact_shadow::owner_shift,
+                                                   consan_moi_exact_shadow::max_owner, arch))
+        .require(append_extract_exact_shadow_field(words, prior_owner, old_value_vgpr,
+                                                   consan_moi_exact_shadow::owner_shift,
+                                                   consan_moi_exact_shadow::max_owner, arch));
 
     const auto filter_ordered_pair = [&](uint16_t token_consumer_owner,
                                          uint16_t token_producer_owner,
                                          uint16_t consumer_packed_value,
                                          uint16_t producer_packed_value) {
-      const auto save_conflict =
-          instrumentation::build_s_mov_b64(conflict_exec, kAmdGpuExecLo, arch);
-      if (!save_conflict)
-        return false;
-      words.push_back(*save_conflict);
+      sequence.append(instrumentation::build_s_mov_b64(conflict_exec, kAmdGpuExecLo, arch));
       // Acquired-edge history is keyed by consumer segment so reuse of an
       // atomic barrier cannot overwrite evidence for an earlier generation.
       // The packed access supplies the same raw segment epoch used by the
       // acquire publisher when it derived this destination.
-      if (!append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
-                                             consan_moi_exact_shadow::epoch_shift,
-                                             consan_moi_exact_shadow::max_epoch, arch))
-        return false;
-      if (!append_inline_acquired_token_slot_address(
+      sequence
+          .require(append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
+                                                     consan_moi_exact_shadow::epoch_shift,
+                                                     consan_moi_exact_shadow::max_epoch, arch))
+          .require(append_inline_acquired_token_slot_address(
               words, plan.report_buffer_address + layout.inline_acquired_epoch_token_slots_offset,
               layout.inline_acquired_epoch_token_capacity, workgroup_key, token_consumer_owner,
               token_producer_owner, source_version, address_lo_vgpr, token_hash,
               static_cast<uint16_t>(address_lo_vgpr + 1u),
-              /*release_sequence=*/false, arch))
-        return false;
+              /*release_sequence=*/false, arch));
 
       const auto narrow = [&]() {
-        return sequence.emit(
+        sequence.append(
             instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch));
       };
       const auto require_equal = [&](size_t offset, uint16_t expected) {
-        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
-          return false;
-        return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected),
-                                                                     tmp_vgpr, arch)) &&
-               narrow();
+        sequence
+            .require(append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+            .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), tmp_vgpr,
+                                                            arch));
+        narrow();
       };
       const auto require_dispatch_equal = [&](size_t offset, bool high_word) {
-        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch) ||
-            !append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, tmp_vgpr,
-                                                        source_version, high_word, arch)) {
-          return false;
-        }
-        return narrow();
+        sequence
+            .require(append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+            .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, tmp_vgpr,
+                                                                source_version, high_word, arch));
+        narrow();
       };
       const auto require_zero = [&](size_t offset) {
-        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
-          return false;
-        return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                     tmp_vgpr, arch)) &&
-               narrow();
+        sequence
+            .require(append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+            .append(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr,
+                                                            arch));
+        narrow();
       };
 
       // The acquiring atomic can populate this direct-mapped slot immediately
@@ -350,107 +320,100 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       // device-scope version read at both ends of the snapshot; an ordinary
       // flat load may otherwise reuse the zero observed while reserving the
       // slot and miss the completed token publication.
-      if (!append_atomic_load_u32(words, address_lo_vgpr, token_version, arch))
-        return false;
-      if (!sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
-                                                                 token_version, arch)) ||
-          !narrow() ||
-          !sequence.emit(
-              instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch)) ||
-          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                 tmp_vgpr, arch)) ||
-          !narrow() ||
-          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-                         workgroup_key) ||
-          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-                         token_consumer_owner) ||
-          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-                         token_producer_owner))
-        return false;
-      if (!append_load_u32_vgpr_at_offset(
+      sequence.require(append_atomic_load_u32(words, address_lo_vgpr, token_version, arch));
+      sequence.append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                              token_version, arch));
+      narrow();
+      sequence.append(
+          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch));
+      narrow();
+      require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), workgroup_key);
+      require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
+                    token_consumer_owner);
+      require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
+                    token_producer_owner);
+      sequence
+          .require(append_load_u32_vgpr_at_offset(
               words, address_lo_vgpr,
               offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one), token_epoch,
-              arch) ||
-          !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
-                                          token_kind, arch) ||
-          !require_dispatch_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
-                                  /*high_word=*/false) ||
-          !require_dispatch_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) +
-                                      sizeof(uint32_t),
-                                  /*high_word=*/true) ||
-          !append_load_u32_vgpr_at_offset(
+              arch))
+          .require(append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
+              token_kind, arch));
+      require_dispatch_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
+                             /*high_word=*/false);
+      require_dispatch_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) +
+                                 sizeof(uint32_t),
+                             /*high_word=*/true);
+      sequence
+          .require(append_load_u32_vgpr_at_offset(
               words, address_lo_vgpr,
               offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-              source_address, arch) ||
-          !append_load_u32_vgpr_at_offset(
+              source_address, arch))
+          .require(append_load_u32_vgpr_at_offset(
               words, address_lo_vgpr,
               offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
                   sizeof(uint32_t),
-              static_cast<uint16_t>(source_address + 1u), arch) ||
-          !append_load_u32_vgpr_at_offset(
+              static_cast<uint16_t>(source_address + 1u), arch))
+          .require(append_load_u32_vgpr_at_offset(
               words, address_lo_vgpr,
               offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-              source_version, arch) ||
-          !append_load_u32_vgpr_at_offset(
+              source_version, arch))
+          .require(append_load_u32_vgpr_at_offset(
               words, address_lo_vgpr,
               offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one), token_hash,
-              arch) ||
-          !require_zero(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version)) ||
-          !append_atomic_load_u32(words, address_lo_vgpr, static_cast<uint16_t>(base + 14u), arch))
-        return false;
-      if (!sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
-                                                                 source_address, arch)) ||
-          !narrow() ||
-          !sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
-                                                                 source_version, arch)) ||
-          !narrow() ||
-          !sequence.emit(
-              instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch)) ||
-          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                 tmp_vgpr, arch)) ||
-          !narrow() ||
-          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-              vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch)) ||
-          !narrow() ||
-          !append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
-                                             consan_moi_exact_shadow::epoch_shift,
-                                             consan_moi_exact_shadow::max_epoch, arch))
-        return false;
-      if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                                 tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch),
-                             instrumentation::build_v_cmp_ne_u32_vcc(
-                                 vector_source_vgpr(source_version), tmp_vgpr, arch)) ||
-          !narrow() ||
-          !sequence.emit_all(
-              instrumentation::build_v_add_u32(source_version, scalar_positive_inline_u32(1),
-                                               source_version, arch),
-              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash),
-                                                      source_version, arch),
-              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)))
-        return false;
-      if (!append_extract_exact_shadow_field(words, token_hash, producer_packed_value,
-                                             consan_moi_exact_shadow::epoch_shift,
-                                             consan_moi_exact_shadow::max_epoch, arch))
-        return false;
-      if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                                 tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch),
-                             instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(token_hash),
-                                                                     tmp_vgpr, arch)) ||
-          !narrow() ||
-          !sequence.emit_all(
-              instrumentation::build_v_add_u32(token_hash, scalar_positive_inline_u32(1),
-                                               token_hash, arch),
-              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash), token_epoch,
-                                                      arch),
-              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)))
-        return false;
+              arch));
+      require_zero(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version));
+      sequence.require(
+          append_atomic_load_u32(words, address_lo_vgpr, static_cast<uint16_t>(base + 14u), arch));
+      sequence.append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                              source_address, arch));
+      narrow();
+      sequence.append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                              source_version, arch));
+      narrow();
+      sequence.append(
+          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch));
+      narrow();
+      sequence.append(instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch));
+      narrow();
+      sequence.require(append_extract_exact_shadow_field(
+          words, source_version, consumer_packed_value, consan_moi_exact_shadow::epoch_shift,
+          consan_moi_exact_shadow::max_epoch, arch));
+      sequence.append(instrumentation::build_v_mov_b32_literal(
+                          tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch),
+                      instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(source_version),
+                                                              tmp_vgpr, arch));
+      narrow();
+      sequence.append(
+          instrumentation::build_v_add_u32(source_version, scalar_positive_inline_u32(1),
+                                           source_version, arch),
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash), source_version,
+                                                  arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch));
+      sequence.require(append_extract_exact_shadow_field(words, token_hash, producer_packed_value,
+                                                         consan_moi_exact_shadow::epoch_shift,
+                                                         consan_moi_exact_shadow::max_epoch, arch));
+      sequence.append(
+          instrumentation::build_v_mov_b32_literal(tmp_vgpr, consan_moi_exact_shadow::max_epoch,
+                                                   arch),
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(token_hash), tmp_vgpr, arch));
+      narrow();
+      sequence.append(
+          instrumentation::build_v_add_u32(token_hash, scalar_positive_inline_u32(1), token_hash,
+                                           arch),
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash), token_epoch,
+                                                  arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch));
 
       // Direct and inherited tokens are committed only after a stable source
       // release has been acquired and the guest RMW has completed. The token
       // is therefore the durable causal fact. Release-sequence tokens carry
       // ancestry between releases and never authorize an ordinary access.
-      return sequence.emit_all(
+      sequence.append(
           instrumentation::build_v_cmp_gt_u32_vcc(
               scalar_positive_inline_u32(
                   static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
@@ -463,16 +426,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     // model's clock: a logically later access can become the stored
     // representative before an earlier wave finishes its own exchange.
     // Check both directed acquired-token identities before reporting.
-    if (!filter_ordered_pair(current_field_vgpr, prior_owner, current_value_vgpr, old_value_vgpr) ||
-        !filter_ordered_pair(prior_owner, current_field_vgpr, old_value_vgpr, current_value_vgpr))
-      return false;
+    filter_ordered_pair(current_field_vgpr, prior_owner, current_value_vgpr, old_value_vgpr);
+    filter_ordered_pair(prior_owner, current_field_vgpr, old_value_vgpr, current_value_vgpr);
   }
 
   // Writes do not have the read/read kind predicate, and atomic ordering can
   // remove the last candidate after all of the common filters. Cover both
   // cases with one final gate before constructing a diagnostic record.
-  if (!skip_diagnostic_if_empty())
-    return false;
+  skip_diagnostic_if_empty();
 
   // The first-diagnostic claim uses SLOT as both the returned value and the
   // low half of the compare-swap data tuple. Keep it in the dead tail of the
@@ -489,20 +450,19 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
   const uint16_t slot_vgpr =
       consan_arch_is_cdna3_or_cdna4(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
-  if (!sequence.emit_all(
-          instrumentation::build_s_mov_b64(
-              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch),
-          instrumentation::build_salu_to_valu_dependency_wait(arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(
-              tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
-              scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(
-              tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
-              vector_source_vgpr(tmp_vgpr), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(
-              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
-    return false;
+  sequence.append(
+      instrumentation::build_s_mov_b64(
+          static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch),
+      instrumentation::build_salu_to_valu_dependency_wait(arch),
+      instrumentation::build_v_mbcnt_lo_u32_b32(
+          tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
+          scalar_positive_inline_u32(0), arch),
+      instrumentation::build_v_mbcnt_hi_u32_b32(
+          tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
+          vector_source_vgpr(tmp_vgpr), arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(
+          static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
 
   if (capture_first_diagnostic_only) {
     // A concurrency fault can make the same static conflict execute in every
@@ -515,34 +475,31 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         build_v_mov_b32_e32(slot_vgpr, scalar_positive_inline_u32(1), arch);
     const uint32_t mov_unclaimed = build_v_mov_b32_e32(static_cast<uint16_t>(slot_vgpr + 1u),
                                                        scalar_positive_inline_u32(0), arch);
-    if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                               plan.scratch_vgpr, static_cast<uint32_t>(count_address), arch),
-                           instrumentation::build_v_mov_b32_literal(
-                               static_cast<uint16_t>(plan.scratch_vgpr + 1u),
-                               static_cast<uint32_t>(count_address >> 32u), arch),
-                           mov_claimed, mov_unclaimed,
-                           instrumentation::build_flat_atomic_cmpswap_b32(
-                               plan.scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true,
-                               kAmdGpuScopeDevice, arch)))
-      return false;
-    if (!append_moi_global_atomic_wait(words, arch))
-      return false;
-    if (!sequence.emit_all(
+    sequence
+        .append(instrumentation::build_v_mov_b32_literal(
+                    plan.scratch_vgpr, static_cast<uint32_t>(count_address), arch),
+                instrumentation::build_v_mov_b32_literal(
+                    static_cast<uint16_t>(plan.scratch_vgpr + 1u),
+                    static_cast<uint32_t>(count_address >> 32u), arch),
+                mov_claimed, mov_unclaimed,
+                instrumentation::build_flat_atomic_cmpswap_b32(plan.scratch_vgpr, slot_vgpr,
+                                                               slot_vgpr, /*return_old_value=*/true,
+                                                               kAmdGpuScopeDevice, arch))
+        .require(append_moi_global_atomic_wait(words, arch))
+        .append(
             instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), slot_vgpr, arch),
             instrumentation::build_s_and_saveexec_b64(
-                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
-      return false;
+                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
   } else {
-    if (!append_atomic_fetch_add_one_u32(
+    sequence
+        .require(append_atomic_fetch_add_one_u32(
             words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), slot_vgpr,
             plan.scratch_vgpr, arch))
-      return false;
-    if (!sequence.emit_all(
+        .append(
             instrumentation::build_v_mov_b32_literal(tmp_vgpr, layout.diagnostic_capacity, arch),
             instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch),
             instrumentation::build_s_and_saveexec_b64(
-                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
-      return false;
+                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
   }
 
   // SLOT is dead once capacity admission has selected this record. Form its
@@ -552,265 +509,216 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // arithmetic in every access probe even though all stores target one cold
   // diagnostic record.
   const uint16_t diagnostic_address_vgpr = plan.scratch_vgpr;
-  if (!append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
-                                                diagnostic_address_vgpr, arch)) {
-    return false;
-  }
+  sequence.require(append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
+                                                            diagnostic_address_vgpr, arch));
 
   const auto store_literal = [&](size_t offset, uint32_t value) {
     if (value <= 64u) {
-      if (!sequence.emit(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch)))
-        return false;
+      sequence.append(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch));
     } else {
-      if (!sequence.emit(instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch)))
-        return false;
+      sequence.append(instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch));
     }
-    return sequence.emit(instrumentation::build_flat_store_b32(
-        diagnostic_address_vgpr, tmp_vgpr, arch, static_cast<uint32_t>(offset)));
+    sequence.append(instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr, arch,
+                                                          static_cast<uint32_t>(offset)));
   };
   const auto store_vgpr = [&](size_t offset, uint16_t value_vgpr) {
-    return sequence.emit(instrumentation::build_flat_store_b32(
-        diagnostic_address_vgpr, value_vgpr, arch, static_cast<uint32_t>(offset)));
+    sequence.append(instrumentation::build_flat_store_b32(diagnostic_address_vgpr, value_vgpr, arch,
+                                                          static_cast<uint32_t>(offset)));
   };
   const auto store_scalar = [&](size_t offset, uint16_t scalar_src) {
-    return sequence.emit_all(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch),
-                             instrumentation::build_flat_store_b32(diagnostic_address_vgpr,
-                                                                   tmp_vgpr, arch,
-                                                                   static_cast<uint32_t>(offset)));
+    sequence.append(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch),
+                    instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr, arch,
+                                                          static_cast<uint32_t>(offset)));
   };
-  bool stored_generation = false;
   if (plan.track_atomics && plan.dispatch_id.sgpr) {
-    stored_generation =
-        store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.sgpr) &&
-        store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                     static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u));
+    store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.sgpr);
+    store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+                 static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u));
   } else if (plan.track_atomics && plan.dispatch_id.vgpr) {
-    stored_generation =
-        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.vgpr) &&
-        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                   static_cast<uint16_t>(*plan.dispatch_id.vgpr + 1u));
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.vgpr);
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+               static_cast<uint16_t>(*plan.dispatch_id.vgpr + 1u));
   } else {
     const uint64_t generation =
         plan.track_atomics ? plan.report_dispatch_id : plan.report_generation;
-    stored_generation =
-        store_literal(offsetof(ConSanMoiDiagnosticRecord, generation),
-                      static_cast<uint32_t>(generation)) &&
-        store_literal(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                      static_cast<uint32_t>(generation >> 32u));
+    store_literal(offsetof(ConSanMoiDiagnosticRecord, generation),
+                  static_cast<uint32_t>(generation));
+    store_literal(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+                  static_cast<uint32_t>(generation >> 32u));
   }
-  if (!stored_generation ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, kind),
-                     static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict)) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, backend),
-                     static_cast<uint32_t>(ConSanMoiEngine::InlineShadow)) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
-                     static_cast<uint32_t>(candidate.anchor())) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
-                     static_cast<uint32_t>(current_kind)) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask), 0u) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask) + sizeof(uint32_t), 0u) ||
-      !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask),
-                    diagnostic_lane_mask_sgpr.value_or(
-                        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u))) ||
-      !store_scalar(
-          offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
-          static_cast<uint16_t>(
-              diagnostic_lane_mask_sgpr.value_or(*plan.scalar_state.exec_save_sgpr + 2u) + 1u)))
-    return false;
-  if (plan.track_atomics &&
-      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, reserved), workgroup_key))
-    return false;
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, kind),
+                static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, backend),
+                static_cast<uint32_t>(ConSanMoiEngine::InlineShadow));
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
+                static_cast<uint32_t>(candidate.anchor()));
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
+                static_cast<uint32_t>(current_kind));
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask), 0u);
+  store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask) + sizeof(uint32_t), 0u);
+  store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask),
+               diagnostic_lane_mask_sgpr.value_or(
+                   static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u)));
+  store_scalar(
+      offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
+      static_cast<uint16_t>(
+          diagnostic_lane_mask_sgpr.value_or(*plan.scalar_state.exec_save_sgpr + 2u) + 1u));
+  if (plan.track_atomics)
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, reserved), workgroup_key);
 
-  if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
-                                         consan_moi_exact_shadow::owner_shift,
-                                         consan_moi_exact_shadow::max_owner, arch) ||
-      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_owner_id), tmp_vgpr) ||
-      !append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
-                                         consan_moi_exact_shadow::owner_shift,
-                                         consan_moi_exact_shadow::max_owner, arch) ||
-      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_owner_id), tmp_vgpr)) {
-    return false;
-  }
+  sequence.require(append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
+                                                     consan_moi_exact_shadow::owner_shift,
+                                                     consan_moi_exact_shadow::max_owner, arch));
+  store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_owner_id), tmp_vgpr);
+  sequence.require(append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
+                                                     consan_moi_exact_shadow::owner_shift,
+                                                     consan_moi_exact_shadow::max_owner, arch));
+  store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_owner_id), tmp_vgpr);
 
-  if (!sequence.emit(instrumentation::build_v_lshrrev_b32(
-          tmp_vgpr,
-          scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
-          old_value_hi_vgpr, arch)))
-    return false;
-  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset), tmp_vgpr)) {
-    return false;
-  }
-  if (!sequence.emit(instrumentation::build_v_and_b32_literal(
-          tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
-          old_value_vgpr, arch)))
-    return false;
-  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_access_kind), tmp_vgpr)) {
-    return false;
-  }
+  sequence.append(instrumentation::build_v_lshrrev_b32(
+      tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+      old_value_hi_vgpr, arch));
+  store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset), tmp_vgpr);
+  sequence.append(instrumentation::build_v_and_b32_literal(
+      tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
+      arch));
+  store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_access_kind), tmp_vgpr);
   if (has_epoch) {
-    if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
-                                           consan_moi_exact_shadow::epoch_shift,
-                                           consan_moi_exact_shadow::max_epoch, arch) ||
-        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_epoch), tmp_vgpr) ||
-        !append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
-                                           consan_moi_exact_shadow::epoch_shift,
-                                           consan_moi_exact_shadow::max_epoch, arch) ||
-        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, epoch), tmp_vgpr)) {
-      return false;
-    }
+    sequence.require(append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
+                                                       consan_moi_exact_shadow::epoch_shift,
+                                                       consan_moi_exact_shadow::max_epoch, arch));
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_epoch), tmp_vgpr);
+    sequence.require(append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
+                                                       consan_moi_exact_shadow::epoch_shift,
+                                                       consan_moi_exact_shadow::max_epoch, arch));
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, epoch), tmp_vgpr);
   }
 
   if (prior_byte_provenance_vgpr) {
     if (static_byte_offset != 0u) {
-      if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
-                                                    static_byte_offset, arch)) {
-        return false;
-      }
+      sequence.require(append_compute_effective_lds_byte_offset(
+          words, current_value_vgpr, lds_byte_offset_vgpr, static_byte_offset, arch));
     } else {
       words.push_back(
           build_v_mov_b32_e32(current_value_vgpr, vector_source_vgpr(lds_byte_offset_vgpr), arch));
     }
-    if (!sequence.emit(instrumentation::build_v_and_b32_literal(
-            current_value_vgpr, ~(shadow_granule_bytes - 1u), current_value_vgpr, arch)))
-      return false;
+    sequence.append(instrumentation::build_v_and_b32_literal(
+        current_value_vgpr, ~(shadow_granule_bytes - 1u), current_value_vgpr, arch));
     if (relative_cell_index_vgpr) {
       // CDNA materializes the scale literal in the supplied helper VGPR. The
       // The record address was formed once above, so SLOT is dead and can
       // materialize CDNA's scale literal without clobbering that address pair.
       const uint16_t scale_literal_vgpr = slot_vgpr;
-      if (!sequence.emit_all(
-              instrumentation::build_v_mul_lo_u32_literal(tmp_vgpr, scale_literal_vgpr,
-                                                          shadow_granule_bytes,
-                                                          *relative_cell_index_vgpr, arch),
-              instrumentation::build_v_add_u32(current_value_vgpr, vector_source_vgpr(tmp_vgpr),
-                                               current_value_vgpr, arch)))
-        return false;
+      sequence.append(
+          instrumentation::build_v_mul_lo_u32_literal(
+              tmp_vgpr, scale_literal_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr, arch),
+          instrumentation::build_v_add_u32(current_value_vgpr, vector_source_vgpr(tmp_vgpr),
+                                           current_value_vgpr, arch));
     } else if (relative_cell_index != 0u) {
-      if (relative_cell_index > std::numeric_limits<uint32_t>::max() / shadow_granule_bytes)
-        return false;
-      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
-              current_value_vgpr, tmp_vgpr, relative_cell_index * shadow_granule_bytes,
-              current_value_vgpr, arch)))
-        return false;
+      if (relative_cell_index > std::numeric_limits<uint32_t>::max() / shadow_granule_bytes) {
+        sequence.require(false);
+      } else {
+        sequence.append(instrumentation::build_v_add_u32_literal(
+            current_value_vgpr, tmp_vgpr, relative_cell_index * shadow_granule_bytes,
+            current_value_vgpr, arch));
+      }
     }
 
     const auto store_exact_range = [&](uint16_t provenance_vgpr, size_t offset_field,
                                        size_t count_field) {
-      if (!append_extract_exact_shadow_field(
+      sequence
+          .require(append_extract_exact_shadow_field(
               words, current_field_vgpr, provenance_vgpr,
               consan_moi_exact_byte_cell::byte_offset_shift,
-              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
-        return false;
-      }
-      if (!sequence.emit(instrumentation::build_v_add_u32(current_field_vgpr,
-                                                          vector_source_vgpr(current_value_vgpr),
-                                                          current_field_vgpr, arch)))
-        return false;
-      if (!store_vgpr(offset_field, current_field_vgpr) ||
-          !append_extract_exact_shadow_field(
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch))
+          .append(instrumentation::build_v_add_u32(current_field_vgpr,
+                                                   vector_source_vgpr(current_value_vgpr),
+                                                   current_field_vgpr, arch));
+      store_vgpr(offset_field, current_field_vgpr);
+      sequence
+          .require(append_extract_exact_shadow_field(
               words, tmp_vgpr, provenance_vgpr,
               consan_moi_exact_byte_cell::byte_end_minus_one_shift,
-              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_end_minus_one_bits), arch)) {
-        return false;
-      }
-      if (!sequence.emit(instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
-                                                          tmp_vgpr, arch)) ||
-          !append_extract_exact_shadow_field(
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_end_minus_one_bits), arch))
+          .append(instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
+                                                   tmp_vgpr, arch))
+          .require(append_extract_exact_shadow_field(
               words, current_field_vgpr, provenance_vgpr,
               consan_moi_exact_byte_cell::byte_offset_shift,
-              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
-        return false;
-      }
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch));
       // CDNA4 materializes this literal in the supplied helper VGPR. The
       // already-consumed slot index is dead while the precomputed diagnostic
       // address pair must remain intact for all following field stores.
       const uint16_t negative_start_literal_vgpr = slot_vgpr;
-      if (!sequence.emit_all(instrumentation::build_v_mul_lo_u32_literal(
-                                 current_field_vgpr, negative_start_literal_vgpr,
-                                 std::numeric_limits<uint32_t>::max(), current_field_vgpr, arch),
-                             instrumentation::build_v_add_u32(
-                                 tmp_vgpr, vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch)))
-        return false;
-      return store_vgpr(count_field, tmp_vgpr);
+      sequence.append(instrumentation::build_v_mul_lo_u32_literal(
+                          current_field_vgpr, negative_start_literal_vgpr,
+                          std::numeric_limits<uint32_t>::max(), current_field_vgpr, arch),
+                      instrumentation::build_v_add_u32(
+                          tmp_vgpr, vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch));
+      store_vgpr(count_field, tmp_vgpr);
     };
     if (shadow_granule_bytes == 1u) {
       const auto store_prior_original_range = [&]() {
-        if (!append_extract_exact_shadow_field(
+        sequence
+            .require(append_extract_exact_shadow_field(
                 words, current_field_vgpr, *prior_byte_provenance_vgpr,
                 consan_moi_exact_byte_cell::relative_cell_index_shift,
                 consan_moi_low_bit_mask(consan_moi_exact_byte_cell::relative_cell_index_bits),
-                arch)) {
-          return false;
-        }
-        if (!sequence.emit_all(
+                arch))
+            .append(
                 instrumentation::build_v_mul_lo_u32_literal(tmp_vgpr, slot_vgpr,
                                                             std::numeric_limits<uint32_t>::max(),
                                                             current_field_vgpr, arch),
                 instrumentation::build_v_add_u32(current_value_vgpr, vector_source_vgpr(tmp_vgpr),
-                                                 current_value_vgpr, arch)))
-          return false;
-        if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
-                        current_value_vgpr) ||
-            !append_extract_exact_shadow_field(
+                                                 current_value_vgpr, arch));
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset), current_value_vgpr);
+        sequence
+            .require(append_extract_exact_shadow_field(
                 words, tmp_vgpr, *prior_byte_provenance_vgpr,
                 consan_moi_exact_byte_cell::access_byte_count_minus_one_shift,
                 consan_moi_low_bit_mask(
                     consan_moi_exact_byte_cell::access_byte_count_minus_one_bits),
-                arch)) {
-          return false;
-        }
-        if (!sequence.emit(instrumentation::build_v_add_u32(
-                tmp_vgpr, scalar_positive_inline_u32(1u), tmp_vgpr, arch)))
-          return false;
-        return store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), tmp_vgpr);
+                arch))
+            .append(instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
+                                                     tmp_vgpr, arch));
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), tmp_vgpr);
       };
-      if (!store_prior_original_range())
-        return false;
+      store_prior_original_range();
       if (static_byte_offset != 0u) {
-        if (!append_compute_effective_lds_byte_offset(
-                words, current_value_vgpr, lds_byte_offset_vgpr, static_byte_offset, arch)) {
-          return false;
-        }
+        sequence.require(append_compute_effective_lds_byte_offset(
+            words, current_value_vgpr, lds_byte_offset_vgpr, static_byte_offset, arch));
       } else {
         words.push_back(build_v_mov_b32_e32(current_value_vgpr,
                                             vector_source_vgpr(lds_byte_offset_vgpr), arch));
       }
-      if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
-                      current_value_vgpr) ||
-          !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count)) {
-        return false;
-      }
+      store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset), current_value_vgpr);
+      store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count);
     } else {
-      if (!store_exact_range(*prior_byte_provenance_vgpr,
-                             offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
-                             offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count)) ||
-          !store_exact_range(*current_byte_provenance_vgpr,
-                             offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
-                             offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count))) {
-        return false;
-      }
+      store_exact_range(*prior_byte_provenance_vgpr,
+                        offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
+                        offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count));
+      store_exact_range(*current_byte_provenance_vgpr,
+                        offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
+                        offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count));
     }
   } else {
     uint16_t diagnostic_offset_vgpr = lds_byte_offset_vgpr;
     if (static_byte_offset != 0) {
-      if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
-                                                    static_byte_offset, arch))
-        return false;
+      sequence.require(append_compute_effective_lds_byte_offset(
+          words, current_value_vgpr, lds_byte_offset_vgpr, static_byte_offset, arch));
       diagnostic_offset_vgpr = current_value_vgpr;
     }
-    if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
-                    diagnostic_offset_vgpr) ||
-        !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), byte_count) ||
-        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
-                    diagnostic_offset_vgpr) ||
-        !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count))
-      return false;
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset), diagnostic_offset_vgpr);
+    store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), byte_count);
+    store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset), diagnostic_offset_vgpr);
+    store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count);
   }
 
-  return sequence.bind(diagnostic_restore) && sequence.resolve_branches(arch) &&
-         sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo,
-                                                        *plan.scalar_state.exec_save_sgpr, arch)) &&
-         append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch);
+  sequence.bind_label(diagnostic_restore)
+      .append(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, *plan.scalar_state.exec_save_sgpr, arch))
+      .require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
+  return sequence.finish(arch);
 }
 
 // Publish one exact slot through an odd-version reservation. EXEC on entry is
