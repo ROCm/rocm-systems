@@ -82,8 +82,10 @@ TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
-  const auto source = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &item) {
-    return item.kind == ConSanFaultSiteKind::Barrier && item.container_name == "shared_lds_helper";
+  const auto source = std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &item) {
+    const auto diagnostic = consan_fault_site_diagnostic(inventory.program_inventory, item);
+    return item.kind == ConSanFaultSiteKind::Barrier && diagnostic.has_value() &&
+           diagnostic->container_name == "shared_lds_helper";
   });
   ASSERT_NE(source, inventory.fault_sites.end());
   const ConSanSyncSequence *source_sequence = test_sync_sequence(inventory, *source);
@@ -131,8 +133,8 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
       perturbation.candidates, [&](const ConSanPerturbationCandidate &candidate) {
         const ConSanSyncEvent *anchor = test_perturbation_anchor(inventory, candidate);
         return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
-               candidate.edge == ConSanPerturbationEdge::Release &&
-               anchor != nullptr && anchor->text_offset() == 2u * sizeof(uint32_t);
+               candidate.edge == ConSanPerturbationEdge::Release && anchor != nullptr &&
+               anchor->text_offset() == 2u * sizeof(uint32_t);
       });
   ASSERT_NE(perturb, perturbation.candidates.end());
 
@@ -665,7 +667,9 @@ TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
   ASSERT_EQ(allowed.outcome, ConSanTransformOutcome::ModifiedValid)
       << (allowed.errors.empty() ? "" : allowed.errors.front());
   ASSERT_EQ(allowed.patches.size(), 1u);
-  EXPECT_EQ(allowed.patches.front().anchor_offset, inventory.fault_sites.front().text_offset);
+  const ConSanProgramSite *source = test_fault_source(inventory, inventory.fault_sites.front());
+  ASSERT_NE(source, nullptr);
+  EXPECT_EQ(allowed.patches.front().anchor_offset, source->text_offset());
   EXPECT_EQ(allowed.mutation.fault.applied, 1u);
 }
 
@@ -877,7 +881,9 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   EXPECT_NE(sequence->confidence_reason.find("no intervening barrier"), std::string::npos);
 
   const auto primary = std::ranges::find_if(inventory.fault_sites, [&](const auto &site) {
-    return test_sync_sequence(inventory, site) == &*sequence && site.mnemonic == "s_barrier_signal";
+    const ConSanProgramSite *source = test_fault_source(inventory, site);
+    return test_sync_sequence(inventory, site) == &*sequence && source != nullptr &&
+           source->mnemonic_view() == "s_barrier_signal";
   });
   ASSERT_NE(primary, inventory.fault_sites.end());
   ConSanOptions execution_options = inventory_options;
@@ -1095,14 +1101,18 @@ TEST(ConSan, FaultInventoryAssignsStableBarrierIdentities) {
   EXPECT_EQ(first.fault_sites[1].identity, second.fault_sites[1].identity);
   EXPECT_NE(first.fault_sites[0].identity, first.fault_sites[1].identity);
   EXPECT_EQ(first.fault_sites[0].kind, ConSanFaultSiteKind::Barrier);
-  EXPECT_EQ(first.fault_sites[0].container_name, "stable_barriers");
-  EXPECT_TRUE(first.fault_sites[0].in_kernel);
+  const ConSanFaultSiteDiagnostic first_diagnostic =
+      test_fault_diagnostic(first, first.fault_sites[0]);
+  const ConSanFaultSiteDiagnostic second_diagnostic =
+      test_fault_diagnostic(first, first.fault_sites[1]);
+  EXPECT_EQ(first_diagnostic.container_name, "stable_barriers");
+  EXPECT_TRUE(first_diagnostic.in_kernel);
   EXPECT_EQ(first.fault_sites[0].occurrence, 0u);
   EXPECT_EQ(first.fault_sites[1].occurrence, 1u);
-  EXPECT_EQ(first.fault_sites[0].text_offset, 0u);
-  EXPECT_EQ(first.fault_sites[1].text_offset, 4u);
-  EXPECT_EQ(first.fault_sites[0].semantic_role, "barrier-wait");
-  EXPECT_EQ(first.fault_sites[0].decoded_operands,
+  EXPECT_EQ(first_diagnostic.text_offset, 0u);
+  EXPECT_EQ(second_diagnostic.text_offset, 4u);
+  EXPECT_EQ(first_diagnostic.semantic_role, "barrier-wait");
+  EXPECT_EQ(first_diagnostic.decoded_operands,
             "encoding=0xbf940000,barrier_id=0,operand_source=immediate,scope=unknown,"
             "raw_selector=-,literal_width_bits=-,literal_value=-,raw_simm16=0");
   EXPECT_NE(first.fault_sites[0].identity.find("|kernel=stable_barriers|kind=barrier|"),
@@ -1131,7 +1141,9 @@ TEST(ConSan, FaultDropBarrierExactIdentitySupersedesGlobalIndex) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().anchor_offset, inventory.fault_sites[1].text_offset);
+  const ConSanProgramSite *source = test_fault_source(inventory, inventory.fault_sites[1]);
+  ASSERT_NE(source, nullptr);
+  EXPECT_EQ(result.patches.front().anchor_offset, source->text_offset());
   EXPECT_EQ(result.patches.front().anchor_offset, 4u);
 }
 

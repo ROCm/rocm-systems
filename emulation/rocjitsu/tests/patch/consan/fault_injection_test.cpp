@@ -196,12 +196,15 @@ TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch
   inventory_options.flavor = ConSanFlavor::Moi;
   inventory_options.fault_dry_run = true;
   const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-  const auto site = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &item) {
-    return item.kind == ConSanFaultSiteKind::Atomic && item.container_name == "shared_lds_helper";
+  const auto site = std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &item) {
+    const ConSanProgramSite *source = test_fault_source(inventory, item);
+    return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
+           source->container.name == "shared_lds_helper";
   });
   ASSERT_NE(site, inventory.fault_sites.end());
-  ASSERT_EQ(site->execution_owners.size(), 2u);
-  for (const ConSanExecutionOwner &owner : site->execution_owners)
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
+  ASSERT_EQ(diagnostic.execution_owners.size(), 2u);
+  for (const ConSanExecutionOwner &owner : diagnostic.execution_owners)
     EXPECT_EQ(owner.proof, ConSanOwnerProofKind::DirectCall);
 
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
@@ -232,12 +235,15 @@ TEST(ConSan, FaultInventoryProvesRecoveredIndirectSharedHelperOwners) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  const auto site = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &item) {
-    return item.kind == ConSanFaultSiteKind::Atomic && item.container_name == "shared_lds_helper";
+  const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &item) {
+    const ConSanProgramSite *source = test_fault_source(result, item);
+    return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
+           source->container.name == "shared_lds_helper";
   });
   ASSERT_NE(site, result.fault_sites.end());
-  ASSERT_EQ(site->execution_owners.size(), 2u);
-  for (const ConSanExecutionOwner &owner : site->execution_owners)
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
+  ASSERT_EQ(diagnostic.execution_owners.size(), 2u);
+  for (const ConSanExecutionOwner &owner : diagnostic.execution_owners)
     EXPECT_EQ(owner.proof, ConSanOwnerProofKind::RecoveredIndirectCall);
 }
 
@@ -247,9 +253,10 @@ TEST(ConSan, FaultInventoryMarksKernelLocalOwner) {
   options.fault_dry_run = true;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.fault_sites.size(), 1u);
-  ASSERT_EQ(result.fault_sites.front().execution_owners.size(), 1u);
-  EXPECT_EQ(result.fault_sites.front().execution_owners.front().proof,
-            ConSanOwnerProofKind::KernelLocal);
+  const ConSanFaultSiteDiagnostic diagnostic =
+      test_fault_diagnostic(result, result.fault_sites.front());
+  ASSERT_EQ(diagnostic.execution_owners.size(), 1u);
+  EXPECT_EQ(diagnostic.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
 }
 
 TEST(ConSan, FaultLoadSelectorSelectsOneStableOneBasedOccurrence) {
@@ -347,9 +354,12 @@ TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
     const auto site = std::ranges::find(inventory.fault_sites, ConSanFaultSiteKind::LdsAccess,
                                         &ConSanFaultSite::kind);
     ASSERT_NE(site, inventory.fault_sites.end());
-    EXPECT_EQ(site->address_vgpr, 2u);
-    EXPECT_EQ(site->semantic_role, "lds-write");
-    ASSERT_EQ(site->execution_owners.size(), 1u);
+    const ConSanProgramSite *source = test_fault_source(inventory, *site);
+    ASSERT_NE(source, nullptr);
+    EXPECT_EQ(source->operands.address_vgpr, 2u);
+    const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
+    EXPECT_EQ(diagnostic.semantic_role, "lds-write");
+    ASSERT_EQ(diagnostic.execution_owners.size(), 1u);
     ASSERT_EQ(inventory.fault_plans.size(), 1u);
     EXPECT_EQ(inventory.fault_plans.front().kind, ConSanFaultMutationKind::LdsWrongAddress);
     EXPECT_EQ(inventory.fault_plans.front().primary_identity, site->identity);

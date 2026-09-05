@@ -93,6 +93,11 @@ struct ConSanTransformDiagnosticReport {
   std::vector<ConSanPatchDiagnostic> patches;
 };
 
+/// Materialize one owned presentation snapshot from the authoritative
+/// program and synchronization inventories.
+[[nodiscard]] std::optional<ConSanFaultSiteDiagnostic>
+consan_fault_site_diagnostic(const ProgramInventory &inventory, const ConSanFaultSite &site);
+
 [[nodiscard]] ConSanTransformDiagnosticReport
 consan_transform_diagnostic_report(const TransformResult &result);
 

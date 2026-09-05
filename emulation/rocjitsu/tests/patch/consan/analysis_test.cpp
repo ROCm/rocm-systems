@@ -4184,12 +4184,13 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
     EXPECT_EQ(barrier.member_event_ids[index], ConSanSyncEventId{static_cast<uint32_t>(index)});
   }
   ASSERT_EQ(paired.fault_sites.size(), 2u);
+  const ConSanFaultSiteDiagnostic first_fault =
+      test_fault_diagnostic(paired, paired.fault_sites[0]);
   EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[0]), &barrier);
   EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[1]), &barrier);
-  EXPECT_NE(paired.fault_sites[0].decoded_operands.find("barrier_id=-1"), std::string::npos);
-  EXPECT_NE(paired.fault_sites[0].decoded_operands.find("operand_source=immediate"),
-            std::string::npos);
-  EXPECT_NE(paired.fault_sites[0].decoded_operands.find("scope=workgroup"), std::string::npos);
+  EXPECT_NE(first_fault.decoded_operands.find("barrier_id=-1"), std::string::npos);
+  EXPECT_NE(first_fault.decoded_operands.find("operand_source=immediate"), std::string::npos);
+  EXPECT_NE(first_fault.decoded_operands.find("scope=workgroup"), std::string::npos);
   const auto repeated = test_semantic_inventory(make_rdna4_lds_code_object(paired_words), options);
   ASSERT_EQ(repeated.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(repeated.program_inventory.sync().sync_sequences.front().identity, barrier.identity);
@@ -4517,7 +4518,8 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
             ConSanSemanticConfidence::Ambiguous);
   ASSERT_FALSE(result.fault_sites.empty());
-  EXPECT_NE(result.fault_sites[0].decoded_operands.find("operand_source=dynamic-m0"),
+  EXPECT_NE(test_fault_diagnostic(result, result.fault_sites[0])
+                .decoded_operands.find("operand_source=dynamic-m0"),
             std::string::npos);
 }
 

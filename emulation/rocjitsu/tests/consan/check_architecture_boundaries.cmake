@@ -184,28 +184,61 @@ if(_consan_build_graph MATCHES "target_sources[(][ \n]*rocjitsu_code")
     )
 endif()
 
-# Completed analysis products expose one immutable presentation facet. Runtime
-# diagnostics copy that facet and may not maintain parallel schemas or
-# field-by-field projection maps that can drift from the producing contract.
+# Fault selection is a narrow facet over the authoritative program-site arena;
+# it may not regain copied location, ownership, decode, or synchronization
+# presentation state. Runtime diagnostics materialize their owned snapshot at
+# the publication boundary. Other completed analysis products still expose
+# their immutable presentation facet directly.
 file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
 file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
 file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
-foreach(_product IN ITEMS FaultSite FaultMutationPlan)
-    string(REPLACE "Plan" "" _presentation "${_product}")
-    if(NOT _fault_presentation_contract MATCHES
-       "struct ConSan${_product} : ConSan${_presentation}Presentation")
+string(REGEX MATCH "struct ConSanFaultSite [{][^}]*[}];" _fault_site_contract
+             "${_fault_presentation_contract}")
+if(NOT _fault_site_contract MATCHES "ConSanProgramSiteId source_site")
+    message(FATAL_ERROR
+        "ConSan FaultSite lost its authoritative program-site binding"
+    )
+endif()
+foreach(
+    _copied_field
+    IN ITEMS
+        container_name
+        in_kernel
+        text_offset
+        file_offset
+        mnemonic
+        semantic_role
+        decoded_operands
+        execution_owners
+        sync_confidence
+        sync_memory_role
+)
+    if(_fault_site_contract MATCHES "${_copied_field}")
         message(FATAL_ERROR
-            "ConSan ${_product} lost its immutable presentation facet"
+            "ConSan FaultSite regained copied ${_copied_field} state"
         )
     endif()
 endforeach()
+if(NOT _fault_presentation_contract MATCHES
+   "struct ConSanFaultMutationPlan : ConSanFaultMutationPresentation")
+    message(FATAL_ERROR
+        "ConSan FaultMutationPlan lost its immutable presentation facet"
+    )
+endif()
 if(NOT _fault_presentation_contract MATCHES
    "using ConSanBarrierMoveDestination = ConSanBarrierMoveDestinationPresentation")
     message(FATAL_ERROR
         "ConSan BarrierMoveDestination regained a redundant private wrapper"
     )
 endif()
-foreach(_diagnostic IN ITEMS FaultSite FaultMutation BarrierMoveDestination)
+if(NOT _transform_diagnostics_contract MATCHES
+   "struct ConSanFaultSiteDiagnostic : ConSanFaultSitePresentation" OR
+   NOT _consan_pipeline MATCHES "consan_fault_site_diagnostic")
+    message(FATAL_ERROR
+        "ConSan FaultSite diagnostics lost publication-time materialization"
+    )
+endif()
+foreach(_diagnostic IN ITEMS FaultMutation BarrierMoveDestination)
     if(NOT _transform_diagnostics_contract MATCHES
        "using ConSan${_diagnostic}Diagnostic = ConSan${_diagnostic}Presentation")
         message(FATAL_ERROR
@@ -3139,19 +3172,20 @@ _consan_assert_no_match(
     "independent validation inventory must expose only immutable proof facts"
 )
 file(READ "${_consan_dir}/consan_validation_inventory.h" _validation_inventory_contract)
-if(NOT _validation_inventory_contract MATCHES "ConSanMutationValidationInventory" OR
-   NOT _validation_inventory_contract MATCHES "ConSanPerturbationValidationInventory" OR
+if(NOT _validation_inventory_contract MATCHES "ConSanPristineValidationInventory" OR
    NOT _validation_inventory_contract MATCHES "ConSanFaultSelectionView" OR
-   NOT _validation_inventory_contract MATCHES "candidates")
-    message(FATAL_ERROR "ConSan pristine validation lost its narrow proof inventories")
+   NOT _validation_inventory_contract MATCHES "fault_sites" OR
+   NOT _validation_inventory_contract MATCHES "perturbation_candidates")
+    message(FATAL_ERROR "ConSan pristine validation lost its unified narrow proof inventory")
 endif()
 file(READ "${_consan_dir}/consan_validation_inventory.cpp" _validation_inventory_owner)
 if(_validation_inventory_owner MATCHES "consan_composition[.]h|compose_consan_lowering" OR
    NOT _validation_inventory_owner MATCHES "analyze_consan_program_inventory" OR
-   NOT _validation_inventory_owner MATCHES "fault_drop_barrier = true")
+   NOT _validation_inventory_owner MATCHES
+       "fault_drop_barrier = require_mutation_semantics")
     message(
         FATAL_ERROR
-        "ConSan validation must rederive its two semantic inventories below composition"
+        "ConSan validation must rederive its unified semantic inventory below composition"
     )
 endif()
 foreach(_file IN LISTS _consan_sources)

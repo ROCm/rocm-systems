@@ -55,13 +55,14 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
   }));
 
   for (size_t i = 0; i < first_sites.size(); ++i) {
+    const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(first, *first_sites[i]);
     EXPECT_EQ(first_sites[i]->identity, second_sites[i]->identity);
-    EXPECT_EQ(first_sites[i]->ordinary_memory_support_reason,
+    EXPECT_EQ(diagnostic.ordinary_memory_support_reason,
               ConSanOrdinaryMemorySupportReason::Supported);
-    EXPECT_EQ(first_sites[i]->width_bits, 32u);
+    EXPECT_EQ(diagnostic.width_bits, 32u);
     EXPECT_EQ(first_sites[i]->occurrence, i);
-    ASSERT_EQ(first_sites[i]->execution_owners.size(), 1u);
-    EXPECT_EQ(first_sites[i]->execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
+    ASSERT_EQ(diagnostic.execution_owners.size(), 1u);
+    EXPECT_EQ(diagnostic.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
     EXPECT_NE(first_sites[i]->identity.find("|kernel=ordinary_memory_kernel|"
                                             "kind=ordinary-memory|"),
               std::string::npos);
@@ -75,27 +76,31 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
                                              : ConSanSyncOperation::OrdinaryStore);
     EXPECT_EQ(event->rmw_outcome, ConSanSyncRmwOutcome::NotApplicable);
     const auto event_owners = first.program_inventory.sync().execution_owners(*event);
-    ASSERT_EQ(event_owners.size(), first_sites[i]->execution_owners.size());
+    ASSERT_EQ(event_owners.size(), diagnostic.execution_owners.size());
     EXPECT_EQ(event_owners.front().descriptor_file_offset,
-              first_sites[i]->execution_owners.front().descriptor_file_offset);
-    EXPECT_EQ(event_owners.front().proof, first_sites[i]->execution_owners.front().proof);
+              diagnostic.execution_owners.front().descriptor_file_offset);
+    EXPECT_EQ(event_owners.front().proof, diagnostic.execution_owners.front().proof);
   }
 
-  EXPECT_EQ(first_sites[0]->mnemonic, "global_load_b32");
-  EXPECT_EQ(first_sites[0]->semantic_role, "ordinary-load");
-  EXPECT_NE(first_sites[0]->decoded_operands.find("dst_vgpr=7"), std::string::npos);
-  EXPECT_NE(first_sites[0]->decoded_operands.find("addr_vgpr=10"), std::string::npos);
-  EXPECT_NE(first_sites[0]->decoded_operands.find("addr_sgpr=4"), std::string::npos);
-  EXPECT_NE(first_sites[0]->decoded_operands.find("raw_ioffset=-16"), std::string::npos);
-  EXPECT_NE(first_sites[0]->decoded_operands.find("raw_scope=2"), std::string::npos);
-  EXPECT_EQ(first_sites[1]->semantic_role, "ordinary-store");
-  EXPECT_NE(first_sites[1]->decoded_operands.find("value_vgpr=9"), std::string::npos);
-  EXPECT_NE(first_sites[1]->decoded_operands.find("addr_sgpr=6"), std::string::npos);
-  EXPECT_EQ(first_sites[2]->mnemonic, "flat_load_b32");
-  EXPECT_EQ(first_sites[2]->decoded_operands.find("addr_sgpr="), std::string::npos);
-  EXPECT_NE(first_sites[2]->decoded_operands.find("raw_saddr=124"), std::string::npos);
-  EXPECT_EQ(first_sites[3]->mnemonic, "flat_store_b32");
-  EXPECT_NE(first_sites[3]->decoded_operands.find("addr_sgpr=8"), std::string::npos);
+  const ConSanFaultSiteDiagnostic first_load = test_fault_diagnostic(first, *first_sites[0]);
+  const ConSanFaultSiteDiagnostic first_store = test_fault_diagnostic(first, *first_sites[1]);
+  const ConSanFaultSiteDiagnostic flat_load = test_fault_diagnostic(first, *first_sites[2]);
+  const ConSanFaultSiteDiagnostic flat_store = test_fault_diagnostic(first, *first_sites[3]);
+  EXPECT_EQ(first_load.mnemonic, "global_load_b32");
+  EXPECT_EQ(first_load.semantic_role, "ordinary-load");
+  EXPECT_NE(first_load.decoded_operands.find("dst_vgpr=7"), std::string::npos);
+  EXPECT_NE(first_load.decoded_operands.find("addr_vgpr=10"), std::string::npos);
+  EXPECT_NE(first_load.decoded_operands.find("addr_sgpr=4"), std::string::npos);
+  EXPECT_NE(first_load.decoded_operands.find("raw_ioffset=-16"), std::string::npos);
+  EXPECT_NE(first_load.decoded_operands.find("raw_scope=2"), std::string::npos);
+  EXPECT_EQ(first_store.semantic_role, "ordinary-store");
+  EXPECT_NE(first_store.decoded_operands.find("value_vgpr=9"), std::string::npos);
+  EXPECT_NE(first_store.decoded_operands.find("addr_sgpr=6"), std::string::npos);
+  EXPECT_EQ(flat_load.mnemonic, "flat_load_b32");
+  EXPECT_EQ(flat_load.decoded_operands.find("addr_sgpr="), std::string::npos);
+  EXPECT_NE(flat_load.decoded_operands.find("raw_saddr=124"), std::string::npos);
+  EXPECT_EQ(flat_store.mnemonic, "flat_store_b32");
+  EXPECT_NE(flat_store.decoded_operands.find("addr_sgpr=8"), std::string::npos);
 
   EXPECT_EQ(std::count_if(first.fault_sites.begin(), first.fault_sites.end(),
                           [](const ConSanFaultSite &site) {
@@ -122,8 +127,9 @@ TEST(ConSan, FaultInventoryRetainsMalformedOrdinaryMemoryAsTypedUnsupported) {
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(site, result.fault_sites.end());
-  EXPECT_EQ(site->mnemonic, "global_load_b32");
-  EXPECT_EQ(site->ordinary_memory_support_reason,
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
+  EXPECT_EQ(diagnostic.mnemonic, "global_load_b32");
+  EXPECT_EQ(diagnostic.ordinary_memory_support_reason,
             ConSanOrdinaryMemorySupportReason::MalformedEncoding);
   EXPECT_EQ(test_sync_event(result, *site), nullptr);
   EXPECT_EQ(test_sync_sequence(result, *site), nullptr);
@@ -148,13 +154,14 @@ TEST(ConSan, FaultInventoryDecodesGfx1250VglobalMemoryForSynchronization) {
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(site, result.fault_sites.end());
-  EXPECT_EQ(site->ordinary_memory_support_reason,
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
+  EXPECT_EQ(diagnostic.ordinary_memory_support_reason,
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
-  EXPECT_EQ(site->size, 3u * sizeof(uint32_t));
-  EXPECT_EQ(site->width_bits, 32u);
-  EXPECT_NE(site->decoded_operands.find("dst_vgpr=1"), std::string::npos);
-  EXPECT_NE(site->decoded_operands.find("addr_vgpr=0"), std::string::npos);
-  EXPECT_NE(site->decoded_operands.find("raw_scope=2"), std::string::npos);
+  EXPECT_EQ(diagnostic.size, 3u * sizeof(uint32_t));
+  EXPECT_EQ(diagnostic.width_bits, 32u);
+  EXPECT_NE(diagnostic.decoded_operands.find("dst_vgpr=1"), std::string::npos);
+  EXPECT_NE(diagnostic.decoded_operands.find("addr_vgpr=0"), std::string::npos);
+  EXPECT_NE(diagnostic.decoded_operands.find("raw_scope=2"), std::string::npos);
 }
 
 TEST(ConSan, FaultInventoryDecodesGfx1250BufferMemoryForSynchronization) {
@@ -176,18 +183,20 @@ TEST(ConSan, FaultInventoryDecodesGfx1250BufferMemoryForSynchronization) {
       sites.push_back(&site);
   }
   ASSERT_EQ(sites.size(), 2u);
-  EXPECT_EQ(sites[0]->ordinary_memory_support_reason,
+  const ConSanFaultSiteDiagnostic load = test_fault_diagnostic(result, *sites[0]);
+  const ConSanFaultSiteDiagnostic store = test_fault_diagnostic(result, *sites[1]);
+  EXPECT_EQ(load.ordinary_memory_support_reason,
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
-  EXPECT_EQ(sites[0]->width_bits, 32u);
-  EXPECT_NE(sites[0]->decoded_operands.find("dst_vgpr=4"), std::string::npos);
-  EXPECT_NE(sites[0]->decoded_operands.find("addr_vgpr=5"), std::string::npos);
-  EXPECT_NE(sites[0]->decoded_operands.find("addr_sgpr=28"), std::string::npos);
-  EXPECT_NE(sites[0]->decoded_operands.find("raw_scope=2"), std::string::npos);
-  EXPECT_EQ(sites[1]->ordinary_memory_support_reason,
+  EXPECT_EQ(load.width_bits, 32u);
+  EXPECT_NE(load.decoded_operands.find("dst_vgpr=4"), std::string::npos);
+  EXPECT_NE(load.decoded_operands.find("addr_vgpr=5"), std::string::npos);
+  EXPECT_NE(load.decoded_operands.find("addr_sgpr=28"), std::string::npos);
+  EXPECT_NE(load.decoded_operands.find("raw_scope=2"), std::string::npos);
+  EXPECT_EQ(store.ordinary_memory_support_reason,
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
-  EXPECT_EQ(sites[1]->width_bits, 128u);
-  EXPECT_NE(sites[1]->decoded_operands.find("value_vgpr=24"), std::string::npos);
-  EXPECT_NE(sites[1]->decoded_operands.find("addr_sgpr=72"), std::string::npos);
+  EXPECT_EQ(store.width_bits, 128u);
+  EXPECT_NE(store.decoded_operands.find("value_vgpr=24"), std::string::npos);
+  EXPECT_NE(store.decoded_operands.find("addr_sgpr=72"), std::string::npos);
 }
 
 TEST(ConSan, FaultInventoryCarriesDirectOwnersForOrdinaryMemoryInSharedHelper) {
@@ -199,14 +208,16 @@ TEST(ConSan, FaultInventoryCarriesDirectOwnersForOrdinaryMemoryInSharedHelper) {
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
-  const auto site = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &item) {
-    return item.kind == ConSanFaultSiteKind::OrdinaryMemory &&
-           item.container_name == "shared_lds_helper";
+  const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &item) {
+    const ConSanProgramSite *source = test_fault_source(result, item);
+    return item.kind == ConSanFaultSiteKind::OrdinaryMemory && source != nullptr &&
+           source->container.name == "shared_lds_helper";
   });
   ASSERT_NE(site, result.fault_sites.end());
-  EXPECT_FALSE(site->in_kernel);
-  ASSERT_EQ(site->execution_owners.size(), 2u);
-  for (const ConSanExecutionOwner &owner : site->execution_owners)
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
+  EXPECT_FALSE(diagnostic.in_kernel);
+  ASSERT_EQ(diagnostic.execution_owners.size(), 2u);
+  for (const ConSanExecutionOwner &owner : diagnostic.execution_owners)
     EXPECT_EQ(owner.proof, ConSanOwnerProofKind::DirectCall);
 }
 
@@ -232,9 +243,10 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
   });
   ASSERT_NE(load, result.fault_sites.end());
   ASSERT_NE(test_sync_event(result, *load), nullptr);
-  EXPECT_EQ(load->semantic_role, "ordinary-acquire-load");
-  EXPECT_EQ(load->sync_memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(load->sync_confidence, ConSanSemanticConfidence::Conservative);
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *load);
+  EXPECT_EQ(diagnostic.semantic_role, "ordinary-acquire-load");
+  EXPECT_EQ(diagnostic.sync_memory_role, ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(diagnostic.sync_confidence, ConSanSemanticConfidence::Conservative);
 
   const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
   ASSERT_NE(sequence, nullptr);
@@ -253,9 +265,10 @@ TEST(ConSan, AssociatesRetainedOrdinaryLoadSelfLoopExitAcquireSequence) {
       test_lower_consan(make_rdna4_flag_self_loop_acquire_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  const auto load = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
-    return site.kind == ConSanFaultSiteKind::OrdinaryMemory &&
-           site.semantic_role == "ordinary-acquire-load";
+  const auto load = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &site) {
+    const auto diagnostic = consan_fault_site_diagnostic(result.program_inventory, site);
+    return site.kind == ConSanFaultSiteKind::OrdinaryMemory && diagnostic.has_value() &&
+           diagnostic->semantic_role == "ordinary-acquire-load";
   });
   ASSERT_NE(load, result.fault_sites.end());
   const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
@@ -456,9 +469,10 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
   });
   ASSERT_NE(store, result.fault_sites.end());
   ASSERT_NE(test_sync_event(result, *store), nullptr);
-  EXPECT_EQ(store->semantic_role, "ordinary-release-store");
-  EXPECT_EQ(store->sync_memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(store->sync_confidence, ConSanSemanticConfidence::Conservative);
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *store);
+  EXPECT_EQ(diagnostic.semantic_role, "ordinary-release-store");
+  EXPECT_EQ(diagnostic.sync_memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(diagnostic.sync_confidence, ConSanSemanticConfidence::Conservative);
 
   const ConSanSyncSequence *sequence = test_sync_sequence(result, *store);
   ASSERT_NE(sequence, nullptr);
@@ -545,8 +559,9 @@ TEST(ConSan, AssociatesExactScopedOrdinaryReleaseWaitTail) {
   });
   ASSERT_NE(store, result.fault_sites.end());
   ASSERT_NE(test_sync_event(result, *store), nullptr);
-  EXPECT_EQ(store->semantic_role, "ordinary-release-store");
-  EXPECT_EQ(store->sync_memory_role, ConSanSyncMemoryRole::Release);
+  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *store);
+  EXPECT_EQ(diagnostic.semantic_role, "ordinary-release-store");
+  EXPECT_EQ(diagnostic.sync_memory_role, ConSanSyncMemoryRole::Release);
   const ConSanSyncSequence *sequence = test_sync_sequence(result, *store);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
@@ -654,8 +669,9 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
-  const auto load = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &site) {
-    return site.semantic_role == "ordinary-acquire-load";
+  const auto load = std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
+    const auto diagnostic = consan_fault_site_diagnostic(inventory.program_inventory, site);
+    return diagnostic.has_value() && diagnostic->semantic_role == "ordinary-acquire-load";
   });
   ASSERT_NE(load, inventory.fault_sites.end());
   const ConSanSyncSequence *load_sequence = test_sync_sequence(inventory, *load);

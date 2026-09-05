@@ -672,13 +672,18 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           .ordinal = 0,
       };
       const auto target = select_ordinary_acquire_mutation_target(pristine_faults, selection);
+      const ConSanProgramSite *target_source =
+          target ? pristine_faults.source(*target->site) : nullptr;
+      const std::span<const ConSanExecutionOwner> target_owners =
+          target ? pristine_faults.execution_owners(*target->site)
+                 : std::span<const ConSanExecutionOwner>{};
       const bool identities_match =
-          target && !patch.fault_primary_identity.empty() &&
+          target && target_source != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_sequence_identity == target->sequence->identity &&
           result.mutation.applied_fault_logical_identity == patch.fault_sequence_identity &&
-          patch.owner_descriptor_file_offsets.size() == target->site->execution_owners.size() &&
-          std::ranges::equal(patch.owner_descriptor_file_offsets, target->site->execution_owners,
-                             {}, std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
+          patch.owner_descriptor_file_offsets.size() == target_owners.size() &&
+          std::ranges::equal(patch.owner_descriptor_file_offsets, target_owners, {},
+                             std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
       if (!identities_match) {
         errors.emplace_back(
             "ConSan mutation proof could not rederive the exact ordinary acquire identity and "
@@ -687,7 +692,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       if (patch.kind == ConSanPatchKind::InlineOrdinaryAddressRewrite) {
         if (!patch.fault_companion_identity.empty() ||
-            patch.anchor_offset != target->site->text_offset) {
+            patch.anchor_offset != target_source->text_offset()) {
           errors.emplace_back(
               "ConSan mutation proof found stale ordinary acquire address metadata");
           continue;
@@ -731,7 +736,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
 
       if (!patch.fault_companion_identity.empty() ||
-          patch.anchor_offset != target->site->text_offset) {
+          patch.anchor_offset != target_source->text_offset()) {
         errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
         continue;
       }
@@ -759,12 +764,19 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       };
       const ConSanFaultSite *target =
           select_fault_site_for_plan(pristine_faults, selection, ConSanFaultSiteKind::LdsAccess);
+      const ConSanProgramSite *target_source =
+          target == nullptr ? nullptr : pristine_faults.source(*target);
+      const std::span<const ConSanExecutionOwner> target_owners =
+          target == nullptr ? std::span<const ConSanExecutionOwner>{}
+                            : pristine_faults.execution_owners(*target);
+      const std::optional<uint16_t> target_address_vgpr =
+          target_source == nullptr ? std::nullopt : target_source->operands.address_vgpr;
       const bool identities_match =
-          target != nullptr && !patch.fault_primary_identity.empty() &&
+          target != nullptr && target_source != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_primary_identity == target->identity &&
           result.mutation.applied_fault_logical_identity == patch.fault_primary_identity &&
-          patch.owner_descriptor_file_offsets.size() == target->execution_owners.size() &&
-          std::ranges::equal(patch.owner_descriptor_file_offsets, target->execution_owners, {},
+          patch.owner_descriptor_file_offsets.size() == target_owners.size() &&
+          std::ranges::equal(patch.owner_descriptor_file_offsets, target_owners, {},
                              std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
       if (!identities_match) {
         errors.emplace_back(
@@ -772,11 +784,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         continue;
       }
       if (!patch.fault_companion_identity.empty() || !patch.fault_sequence_identity.empty() ||
-          patch.anchor_offset != target->text_offset || patch.original_size != target->size ||
-          patch.original_size != 2u * sizeof(uint32_t) || !target->address_vgpr ||
-          patch.fault_original_address_vgpr != target->address_vgpr ||
+          patch.anchor_offset != target_source->text_offset() ||
+          patch.original_size != target_source->size() ||
+          patch.original_size != 2u * sizeof(uint32_t) || !target_address_vgpr ||
+          patch.fault_original_address_vgpr != target_address_vgpr ||
           !patch.fault_target_address_vgpr ||
-          *patch.fault_target_address_vgpr == *target->address_vgpr) {
+          *patch.fault_target_address_vgpr == *target_address_vgpr) {
         errors.emplace_back("ConSan mutation proof found stale LDS address metadata");
         continue;
       }
@@ -796,7 +809,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         after_bytes = replacement_text.subspan(patch.anchor_offset, patch.original_size);
       }
       std::memcpy(after.data(), after_bytes.data(), patch.original_size);
-      const bool exact_operand_rewrite = (before[1] & 0xffu) == *target->address_vgpr &&
+      const bool exact_operand_rewrite = (before[1] & 0xffu) == *target_address_vgpr &&
                                          before[0] == after[0] &&
                                          (before[1] & ~0xffu) == (after[1] & ~0xffu) &&
                                          (after[1] & 0xffu) == *patch.fault_target_address_vgpr;
@@ -1179,6 +1192,11 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       metadata_matches &= pair.has_value() && member_count == 2u;
       if (!pair)
         continue;
+      const ConSanProgramSite *primary_source = pristine_faults.source(*pair->primary);
+      const ConSanProgramSite *companion_source = pristine_faults.source(*pair->companion);
+      metadata_matches &= primary_source != nullptr && companion_source != nullptr;
+      if (primary_source == nullptr || companion_source == nullptr)
+        continue;
       bool found_primary = false;
       bool found_companion = false;
       for (const ConSanPatchInfo *patch : exact_barrier_drop_patches) {
@@ -1187,8 +1205,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         metadata_matches &= patch->fault_primary_identity == pair->primary->identity &&
                             patch->fault_companion_identity == pair->companion->identity &&
                             patch->original_size == sizeof(uint32_t);
-        found_primary |= patch->anchor_offset == pair->primary->text_offset;
-        found_companion |= patch->anchor_offset == pair->companion->text_offset;
+        found_primary |= patch->anchor_offset == primary_source->text_offset();
+        found_companion |= patch->anchor_offset == companion_source->text_offset();
       }
       metadata_matches &= found_primary && found_companion;
       pairs.push_back(*pair);
@@ -1554,8 +1572,7 @@ void validate_sc_perturbation_semantics(const FinalValidationEnvironment &enviro
             ? nullptr
             : pristine->program_inventory.program_site(anchor_event->source_site);
     if (candidate->anchor_event != sequence->member_event_ids[outer_member_index] ||
-        anchor_event == nullptr ||
-        anchor_source == nullptr ||
+        anchor_event == nullptr || anchor_source == nullptr ||
         anchor_source->container != *sequence_container ||
         anchor_event->text_offset() > original_text.size() ||
         anchor_source->size() > original_text.size() - anchor_event->text_offset() ||
@@ -3058,10 +3075,9 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes,
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
   FinalValidationEnvironment environment(original, replacement);
-  const bool validates_mutation =
-      has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
-  const bool validates_perturbation = std::ranges::any_of(
-      result.patches, [](const ConSanPatchInfo &patch) {
+  const bool validates_mutation = has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
+  const bool validates_perturbation =
+      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
       });
   std::optional<ConSanPristineValidationInventory> pristine_inventory;

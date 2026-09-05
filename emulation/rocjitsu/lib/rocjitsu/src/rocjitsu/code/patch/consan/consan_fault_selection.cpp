@@ -32,10 +32,15 @@ requested_kernel_owner(const ProgramInventory &inventory, std::string_view filte
 }
 
 [[nodiscard]] std::pair<uint64_t, uint64_t>
-exact_barrier_drop_pair_range(const ExactBarrierDropPair &pair) {
-  const uint64_t begin = std::min(pair.primary->text_offset, pair.companion->text_offset);
-  const uint64_t end = std::max(pair.primary->text_offset + pair.primary->size,
-                                pair.companion->text_offset + pair.companion->size);
+exact_barrier_drop_pair_range(const ConSanFaultSelectionView &inventory,
+                              const ExactBarrierDropPair &pair) {
+  const ConSanProgramSite *primary = inventory.source(*pair.primary);
+  const ConSanProgramSite *companion = inventory.source(*pair.companion);
+  if (primary == nullptr || companion == nullptr)
+    return {};
+  const uint64_t begin = std::min(primary->text_offset(), companion->text_offset());
+  const uint64_t end = std::max(primary->text_offset() + primary->size(),
+                                companion->text_offset() + companion->size());
   return {begin, end};
 }
 
@@ -104,15 +109,17 @@ const ConSanFaultSite *select_fault_site_for_plan(const ConSanFaultSelectionView
   if (!selection.primary_site_identity.empty()) {
     const ConSanFaultSite *site =
         find_fault_site_by_identity(inventory, selection.primary_site_identity, kind);
-    return site != nullptr && consan_execution_owners_include_requested_kernel(
-                                  site->execution_owners, inventory, selection.kernel_name_filter)
+    return site != nullptr &&
+                   consan_execution_owners_include_requested_kernel(
+                       inventory.execution_owners(*site), inventory, selection.kernel_name_filter)
                ? site
                : nullptr;
   }
   uint32_t index = 0;
   for (const ConSanFaultSite &site : inventory.fault_sites) {
-    if (site.kind != kind || !consan_execution_owners_include_requested_kernel(
-                                 site.execution_owners, inventory, selection.kernel_name_filter))
+    if (site.kind != kind ||
+        !consan_execution_owners_include_requested_kernel(inventory.execution_owners(site),
+                                                          inventory, selection.kernel_name_filter))
       continue;
     if (index++ == selection.ordinal)
       return &site;
@@ -126,11 +133,14 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
   const SynchronizationInventoryView sync = inventory.program_inventory.sync();
   const auto qualify =
       [&](const ConSanFaultSite &site) -> std::optional<OrdinaryAcquireMutationTarget> {
-    if (site.kind != ConSanFaultSiteKind::OrdinaryMemory ||
-        site.ordinary_memory_support_reason != ConSanOrdinaryMemorySupportReason::Supported ||
-        site.mnemonic != "global_load_b32" ||
-        !consan_execution_owners_include_requested_kernel(site.execution_owners, inventory,
-                                                          selection.kernel_name_filter))
+    const ConSanProgramSite *source = inventory.source(site);
+    const ConSanOrdinaryMemorySite *memory =
+        source == nullptr ? nullptr : source->get_if<ConSanOrdinaryMemorySite>();
+    if (site.kind != ConSanFaultSiteKind::OrdinaryMemory || memory == nullptr ||
+        memory->support_reason != ConSanOrdinaryMemorySupportReason::Supported ||
+        memory->mnemonic != "global_load_b32" ||
+        !consan_execution_owners_include_requested_kernel(inventory.execution_owners(site),
+                                                          inventory, selection.kernel_name_filter))
       return std::nullopt;
     const ConSanSyncEvent *load = sync.find_event(site.source_site);
     const ConSanSyncSequence *sequence = sync.find_unique_sequence_containing(site.source_site);
@@ -147,7 +157,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         !sequence->basic_block_index || sequence->member_event_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
         sync.find_event(sequence->member_event_ids.front()) != load ||
-        !consan_nonempty_execution_owners_equal(sequence_owners, site.execution_owners))
+        !consan_nonempty_execution_owners_equal(sequence_owners, inventory.execution_owners(site)))
       return std::nullopt;
     const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_ids.back());
     const ConSanFenceSite *cache_source =
@@ -209,8 +219,8 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   if (primary == nullptr || primary_event == nullptr ||
       std::ranges::find(sequence->member_event_ids, primary_member_id) ==
           sequence->member_event_ids.end() ||
-      !consan_execution_owners_include_requested_kernel(primary->execution_owners, inventory,
-                                                        selection.kernel_name_filter)) {
+      !consan_execution_owners_include_requested_kernel(inventory.execution_owners(*primary),
+                                                        inventory, selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::PrimaryNotMember};
   }
 
@@ -224,12 +234,13 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
     const auto matching_site =
         std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
+          const ConSanProgramSite *candidate_source = inventory.source(candidate);
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
-                 sync.find_event(candidate.source_site) == member &&
-                 candidate.container_name == sequence_container->name &&
-                 candidate.in_kernel == sequence_container->is_kernel() &&
+                 sync.find_event(candidate.source_site) == member && candidate_source != nullptr &&
+                 candidate_source->container == *sequence_container &&
                  consan_execution_owners_include_requested_kernel(
-                     candidate.execution_owners, inventory, selection.kernel_name_filter);
+                     inventory.execution_owners(candidate), inventory,
+                     selection.kernel_name_filter);
         });
     if (matching_site == inventory.fault_sites.end()) {
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
@@ -246,8 +257,12 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
     if (matching_site->identity != primary->identity)
       companion = &*matching_site;
   }
-  if (companion == nullptr || primary->size != sizeof(uint32_t) ||
-      companion->size != sizeof(uint32_t) || primary->file_offset == companion->file_offset) {
+  const ConSanProgramSite *primary_source = inventory.source(*primary);
+  const ConSanProgramSite *companion_source =
+      companion == nullptr ? nullptr : inventory.source(*companion);
+  if (primary_source == nullptr || companion_source == nullptr ||
+      primary_source->size() != sizeof(uint32_t) || companion_source->size() != sizeof(uint32_t) ||
+      primary_source->decoded_file_offset() == companion_source->decoded_file_offset()) {
     return {.pair = std::nullopt, .issue = Issue::InvalidPairGeometry};
   }
   return {.pair = ExactBarrierDropPair{&*sequence, primary, companion}, .issue = Issue::None};
@@ -277,8 +292,8 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
   if (!second.pair)
     return {
         .group = std::nullopt, .issue = Issue::SecondPairRejected, .member_issue = second.issue};
-  const auto first_range = exact_barrier_drop_pair_range(*first.pair);
-  const auto second_range = exact_barrier_drop_pair_range(*second.pair);
+  const auto first_range = exact_barrier_drop_pair_range(inventory, *first.pair);
+  const auto second_range = exact_barrier_drop_pair_range(inventory, *second.pair);
   const SynchronizationInventoryView sync = inventory.program_inventory.sync();
   const std::vector<ConSanExecutionOwner> first_owners =
       sync.execution_owners(*first.pair->sequence);

@@ -368,16 +368,27 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   barrier.kind = ConSanSyncKind::Barrier;
   barrier.operation = ConSanSyncOperation::BarrierFull;
   barrier.identity = "event:24";
-  ConSanProgramSite barrier_source;
-  barrier_source.physical_id = barrier.semantic_id.physical;
-  barrier_source.container = consan_program_container_ref(inventory_builder.kernels().back());
-  barrier_source.execution_owners.push_back({.descriptor_file_offset = 192u});
+  ConSanProgramSite fault_source;
+  fault_source.physical_id = barrier.semantic_id.physical;
+  fault_source.container = consan_program_container_ref(inventory_builder.kernels().back());
+  fault_source.execution_owners.push_back({.descriptor_file_offset = 192u});
+  ConSanAtomicSite atomic_source;
+  atomic_source.text_offset = 16u;
+  atomic_source.file_offset = 16u;
+  atomic_source.size = 8u;
+  atomic_source.width_bits = 64u;
+  atomic_source.mnemonic = "flat_atomic_add_u64";
+  atomic_source.address_vgpr = 2u;
+  fault_source.payload = std::move(atomic_source);
   barrier.source_site = {static_cast<uint32_t>(inventory_builder.program_sites().size())};
-  inventory_builder.add_semantic_site(std::move(barrier_source));
+  inventory_builder.add_semantic_site(std::move(fault_source));
   inventory_builder.synchronization().sync_events.push_back(barrier);
   ConSanSyncSequence barrier_sequence;
   barrier_sequence.identity = "sequence:24";
   barrier_sequence.member_event_ids = {{0}};
+  barrier_sequence.operation = ConSanSyncOperation::BarrierFull;
+  barrier_sequence.confidence = ConSanSemanticConfidence::Exact;
+  barrier_sequence.memory_role = ConSanSyncMemoryRole::Release;
   inventory_builder.synchronization().sync_sequences.push_back(std::move(barrier_sequence));
   const ProgramInventory inventory = inventory_builder.view();
   ASSERT_EQ(inventory.access_sites().size(), 1u);
@@ -435,26 +446,9 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ConSanFaultSite published_fault_site;
   published_fault_site.kind = ConSanFaultSiteKind::Atomic;
   published_fault_site.identity = "published-fault-site";
-  published_fault_site.container_name = "shared_access";
-  published_fault_site.in_kernel = false;
   published_fault_site.occurrence = 3u;
-  published_fault_site.text_offset = 24u;
-  published_fault_site.file_offset = 40u;
-  published_fault_site.size = 8u;
-  published_fault_site.width_bits = 64u;
-  published_fault_site.mnemonic = "flat_atomic_add_u64";
-  published_fault_site.semantic_role = "release";
-  published_fault_site.decoded_operands = "v[0:1], v[2:3]";
-  published_fault_site.ordinary_memory_support_reason =
-      ConSanOrdinaryMemorySupportReason::Supported;
-  published_fault_site.sync_confidence = ConSanSemanticConfidence::Exact;
-  published_fault_site.sync_memory_role = ConSanSyncMemoryRole::Release;
-  published_fault_site.execution_owners = {
-      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::DirectCall}};
   published_fault_site.source_site = barrier.source_site;
-  published_fault_site.address_vgpr = 2u;
   published_fault_site.selectable_vgpr_bank_mode = 1u;
-  const ConSanFaultSitePresentation expected_fault_site = published_fault_site;
   mechanism.fault_sites.push_back(std::move(published_fault_site));
 
   ConSanBarrierMoveDestination published_destination;
@@ -503,6 +497,8 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   publication_resources.scope = ConSanRuntimeResourceScope::Executable;
   publication_resources.moi_report_buffer_address = 0x123456780000ull;
   publication_resources.moi_report_buffer_size = 128u * 1024u * 1024u;
+  ConSanTransformArtifacts invalid_fault_source = mechanism;
+  invalid_fault_source.fault_sites.front().source_site = {};
   const TransformResult published = TransformResultTestAccess::publish(
       bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
@@ -513,9 +509,30 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   const ConSanTransformDiagnosticReport published_diagnostics =
       TransformResultTestAccess::diagnostic_report(published);
   ASSERT_EQ(published_diagnostics.fault_sites.size(), 1u);
-  EXPECT_EQ(published_diagnostics.fault_sites.front(), expected_fault_site);
-  EXPECT_EQ(published_diagnostics.fault_sites.front().sync_event_identity, "event:24");
-  EXPECT_EQ(published_diagnostics.fault_sites.front().sync_sequence_identity, "sequence:24");
+  const ConSanFaultSiteDiagnostic &fault_diagnostic = published_diagnostics.fault_sites.front();
+  EXPECT_EQ(fault_diagnostic.kind, ConSanFaultSiteKind::Atomic);
+  EXPECT_EQ(fault_diagnostic.identity, "published-fault-site");
+  EXPECT_EQ(fault_diagnostic.container_name, "kernel_c");
+  EXPECT_TRUE(fault_diagnostic.in_kernel);
+  EXPECT_EQ(fault_diagnostic.occurrence, 3u);
+  EXPECT_EQ(fault_diagnostic.text_offset, 16u);
+  EXPECT_EQ(fault_diagnostic.file_offset, 16u);
+  EXPECT_EQ(fault_diagnostic.size, 8u);
+  EXPECT_EQ(fault_diagnostic.width_bits, 64u);
+  EXPECT_EQ(fault_diagnostic.mnemonic, "flat_atomic_add_u64");
+  EXPECT_EQ(fault_diagnostic.semantic_role, "workgroup-barrier");
+  EXPECT_EQ(fault_diagnostic.decoded_operands, "addr_vgpr=2");
+  EXPECT_EQ(fault_diagnostic.sync_confidence, ConSanSemanticConfidence::Exact);
+  EXPECT_EQ(fault_diagnostic.sync_memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(fault_diagnostic.execution_owners,
+            std::vector<ConSanExecutionOwner>{{.descriptor_file_offset = 192u}});
+  EXPECT_EQ(fault_diagnostic.sync_event_identity, "event:24");
+  EXPECT_EQ(fault_diagnostic.sync_sequence_identity, "sequence:24");
+  const TransformResult malformed_fault_source = TransformResultTestAccess::publish(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
+      complete_runtime_capabilities(), publication_resources, std::move(invalid_fault_source));
+  EXPECT_FALSE(malformed_fault_source.well_formed());
   ASSERT_EQ(published_diagnostics.barrier_move_destinations.size(), 1u);
   EXPECT_EQ(published_diagnostics.barrier_move_destinations.front(), expected_destination);
   ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);

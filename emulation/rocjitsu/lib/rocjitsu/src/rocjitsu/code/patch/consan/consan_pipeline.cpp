@@ -6,6 +6,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 
+#include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 
@@ -20,6 +21,65 @@ namespace {
 
 [[nodiscard]] constexpr bool valid_contract_issue(ConSanContractIssue issue) {
   return static_cast<uint8_t>(issue) < static_cast<uint8_t>(ConSanContractIssue::Count);
+}
+
+[[nodiscard]] std::string fault_semantic_role(const ConSanProgramSite &source,
+                                              const ConSanSyncSequence *sequence) {
+  if (sequence == nullptr) {
+    if (const ConSanBarrierSite *barrier = source.get_if<ConSanBarrierSite>())
+      return barrier->mnemonic.find("signal") != std::string::npos ? "barrier-signal"
+             : barrier->mnemonic.find("wait") != std::string::npos ? "barrier-wait"
+                                                                   : "workgroup-barrier";
+    if (const ConSanAtomicSite *atomic = source.get_if<ConSanAtomicSite>())
+      return consan_atomic_semantic_role(*atomic);
+    if (const ConSanOrdinaryMemorySite *memory = source.get_if<ConSanOrdinaryMemorySite>())
+      return memory->operation == ConSanOrdinaryMemoryOperation::Load ? "ordinary-load"
+                                                                      : "ordinary-store";
+    return source.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
+  }
+  switch (sequence->operation) {
+  case ConSanSyncOperation::BarrierSignal:
+    return "barrier-signal";
+  case ConSanSyncOperation::BarrierWait:
+    return "barrier-wait";
+  case ConSanSyncOperation::BarrierFull:
+    return "workgroup-barrier";
+  case ConSanSyncOperation::BarrierInit:
+    return "barrier-init-unsupported";
+  case ConSanSyncOperation::BarrierJoin:
+    return "barrier-join-unsupported";
+  case ConSanSyncOperation::BarrierLeave:
+    return "barrier-leave-unsupported";
+  case ConSanSyncOperation::BarrierWakeup:
+    return "barrier-wakeup-unsupported";
+  case ConSanSyncOperation::BarrierStateQuery:
+    return "barrier-state-query-unsupported";
+  case ConSanSyncOperation::AtomicRmw:
+  case ConSanSyncOperation::AtomicCompareExchange:
+    switch (sequence->memory_role) {
+    case ConSanSyncMemoryRole::Acquire:
+      return "atomic-acquire";
+    case ConSanSyncMemoryRole::Release:
+      return "atomic-release";
+    case ConSanSyncMemoryRole::AcquireRelease:
+      return "atomic-acquire-release";
+    case ConSanSyncMemoryRole::SequentiallyConsistent:
+      return "atomic-sequentially-consistent";
+    case ConSanSyncMemoryRole::Unknown:
+    case ConSanSyncMemoryRole::None:
+      return "atomic-order-unknown";
+    }
+  case ConSanSyncOperation::OrdinaryLoad:
+    return sequence->memory_role == ConSanSyncMemoryRole::Acquire ? "ordinary-acquire-load"
+                                                                  : "ordinary-load";
+  case ConSanSyncOperation::OrdinaryStore:
+    return sequence->memory_role == ConSanSyncMemoryRole::Release ? "ordinary-release-store"
+                                                                  : "ordinary-store";
+  case ConSanSyncOperation::Unknown:
+  case ConSanSyncOperation::Fence:
+    return fault_semantic_role(source, nullptr);
+  }
+  return {};
 }
 
 [[nodiscard]] constexpr const char *patch_diagnostic_kind_name(ConSanPatchKind kind) {
@@ -213,6 +273,46 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
 
 } // namespace
 
+std::optional<ConSanFaultSiteDiagnostic>
+consan_fault_site_diagnostic(const ProgramInventory &inventory, const ConSanFaultSite &site) {
+  const ConSanProgramSite *source = inventory.program_site(site);
+  if (source == nullptr)
+    return std::nullopt;
+  ConSanFaultSiteDiagnostic diagnostic;
+  static_cast<ConSanDecodedSite &>(diagnostic) = source->decoded_site();
+  diagnostic.kind = site.kind;
+  diagnostic.identity = site.identity;
+  diagnostic.container_name = source->container.name;
+  diagnostic.in_kernel = source->container.is_kernel();
+  diagnostic.occurrence = site.occurrence;
+  diagnostic.execution_owners = source->execution_owners;
+  if (const ConSanBarrierSite *barrier = source->get_if<ConSanBarrierSite>()) {
+    diagnostic.decoded_operands = consan_barrier_decoded_operands(*barrier, barrier->raw_encoding);
+  } else if (const ConSanAtomicSite *atomic = source->get_if<ConSanAtomicSite>()) {
+    diagnostic.width_bits = atomic->width_bits;
+    diagnostic.decoded_operands = consan_atomic_decoded_operands(*atomic);
+  } else if (const ConSanOrdinaryMemorySite *memory = source->get_if<ConSanOrdinaryMemorySite>()) {
+    diagnostic.width_bits = memory->width_bits;
+    diagnostic.decoded_operands = consan_ordinary_memory_decoded_operands(*memory);
+    diagnostic.ordinary_memory_support_reason = memory->support_reason;
+  } else {
+    diagnostic.width_bits = source->decoded_width_bits;
+    diagnostic.decoded_operands = consan_lds_decoded_operands(source->operands);
+  }
+  const SynchronizationInventoryView synchronization = inventory.sync();
+  if (const ConSanSyncEvent *event = synchronization.find_event(site.source_site))
+    diagnostic.sync_event_identity = event->identity;
+  const ConSanSyncSequence *sequence =
+      synchronization.find_unique_sequence_containing(site.source_site);
+  if (sequence != nullptr) {
+    diagnostic.sync_sequence_identity = sequence->identity;
+    diagnostic.sync_confidence = sequence->confidence;
+    diagnostic.sync_memory_role = sequence->memory_role;
+  }
+  diagnostic.semantic_role = fault_semantic_role(*source, sequence);
+  return diagnostic;
+}
+
 /// Authoritative owner of one ConSan transform attempt.
 ///
 /// The transaction validates each public contract, consumes the native
@@ -270,16 +370,9 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
   report.resource_summary = resource_summary;
 
   report.fault_sites.reserve(result.private_lowering_.fault_sites.size());
-  const SynchronizationInventoryView synchronization = result.program_inventory.sync();
   for (const ConSanFaultSite &site : result.private_lowering_.fault_sites) {
-    ConSanFaultSiteDiagnostic diagnostic;
-    static_cast<ConSanFaultSitePresentation &>(diagnostic) = site;
-    if (const ConSanSyncEvent *event = synchronization.find_event(site.source_site))
-      diagnostic.sync_event_identity = event->identity;
-    if (const ConSanSyncSequence *sequence =
-            synchronization.find_unique_sequence_containing(site.source_site))
-      diagnostic.sync_sequence_identity = sequence->identity;
-    report.fault_sites.push_back(std::move(diagnostic));
+    if (auto diagnostic = consan_fault_site_diagnostic(result.program_inventory, site))
+      report.fault_sites.push_back(std::move(*diagnostic));
   }
 
   report.barrier_move_destinations.reserve(
@@ -330,8 +423,7 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
                 plan.max_referenced_vgpr_count);
         include(failure->min_ordinary_vgpr_limit, failure->max_ordinary_vgpr_limit,
                 plan.ordinary_vgpr_limit);
-        include(failure->min_required_vgprs, failure->max_required_vgprs,
-                plan.required_vgpr_count);
+        include(failure->min_required_vgprs, failure->max_required_vgprs, plan.required_vgpr_count);
         include(failure->min_owners, failure->max_owners,
                 plan.owner_descriptor_file_offsets.size());
         failure->has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
@@ -411,6 +503,11 @@ bool TransformResult::well_formed() const {
   }
   if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
     return false;
+  if (std::ranges::any_of(private_lowering_.fault_sites, [&](const ConSanFaultSite &site) {
+        return program_inventory.program_site(site) == nullptr;
+      })) {
+    return false;
+  }
   if (mutation.fault.planned != private_lowering_.fault_plans.size() ||
       mutation.fault.applied > mutation.fault.planned) {
     return false;

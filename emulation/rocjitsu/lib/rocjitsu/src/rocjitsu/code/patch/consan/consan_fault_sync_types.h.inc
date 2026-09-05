@@ -78,11 +78,11 @@ consan_nonempty_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs
   return !lhs.empty() && consan_execution_owners_equal(lhs, rhs);
 }
 
-/// Stable presentation facts for one currently injectable instruction.
+/// Owned presentation snapshot for one currently injectable instruction.
 ///
-/// Completed analysis products inherit this value and add only application-
-/// private identity and operands. Runtime diagnostics copy this facet without
-/// maintaining a second field-by-field schema.
+/// This is a diagnostic product, not the analysis representation. The live
+/// fault inventory retains a source-site handle and derives these facts from
+/// ProgramInventory when diagnostics are published.
 struct ConSanFaultSitePresentation : ConSanDecodedSite {
   ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
   std::string identity;
@@ -101,16 +101,23 @@ struct ConSanFaultSitePresentation : ConSanDecodedSite {
   bool operator==(const ConSanFaultSitePresentation &) const = default;
 };
 
-/// A currently injectable instruction with its application-private proof
-/// identity and target operand state.
-struct ConSanFaultSite : ConSanFaultSitePresentation {
+/// A currently injectable facet of one authoritative program site.
+///
+/// Location, container, decoded operands, execution owners, and
+/// synchronization semantics remain owned by ProgramInventory. Keeping only
+/// selection identity and irreducible target state here prevents the fault
+/// planner from becoming a second program representation.
+struct ConSanFaultSite {
+  ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
+  std::string identity;
+  uint32_t occurrence = 0;
   /// Exact decoded instruction from which this injectable projection was
-  /// derived. Synchronization annotation follows this handle instead of
-  /// reconstructing source identity from copied names and offsets.
+  /// derived.
   ConSanProgramSiteId source_site;
-  std::optional<uint16_t> address_vgpr;
   /// Target-defined selectable-bank state at this instruction.
   std::optional<uint16_t> selectable_vgpr_bank_mode;
+
+  bool operator==(const ConSanFaultSite &) const = default;
 };
 
 /// Stable presentation facts for one selected validation-only corruption.

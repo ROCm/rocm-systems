@@ -37,6 +37,17 @@ struct ConSanFaultSelection {
 struct ConSanFaultSelectionView {
   const ProgramInventory &program_inventory;
   std::span<const ConSanFaultSite> fault_sites;
+
+  [[nodiscard]] const ConSanProgramSite *source(const ConSanFaultSite &site) const {
+    return program_inventory.program_site(site);
+  }
+  [[nodiscard]] std::span<const ConSanExecutionOwner>
+  execution_owners(const ConSanFaultSite &site) const {
+    const ConSanProgramSite *program_site = source(site);
+    return program_site == nullptr
+               ? std::span<const ConSanExecutionOwner>{}
+               : std::span<const ConSanExecutionOwner>(program_site->execution_owners);
+  }
 };
 
 /// Fully rederived ordinary-acquire mutation target. Every pointer refers into

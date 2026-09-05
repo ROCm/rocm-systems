@@ -1125,6 +1125,8 @@ void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.mnemonic = std::string(inst.mnemonic());
+  if (instruction_bytes.size() >= sizeof(site.raw_encoding))
+    std::memcpy(&site.raw_encoding, instruction_bytes.data(), sizeof(site.raw_encoding));
   if (site.mnemonic == "s_barrier_signal" || site.mnemonic == "s_barrier_signal_isfirst")
     site.operation = ConSanBarrierSite::Operation::Signal;
   else if (site.mnemonic == "s_barrier_wait")
@@ -1463,12 +1465,12 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
-void decode_container_stats(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                            rj_code_arch_t arch, ConSanProgramContainer &kernel,
-                            ConSanProgramSiteArena &sites, std::vector<std::string> &warnings,
-                            const FlatPointerTracker *entry_tracker = nullptr,
-                            const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
-                            std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
+void decode_container_stats(
+    std::span<const uint8_t> code_object_bytes, Decoder &decoder, rj_code_arch_t arch,
+    ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
+    std::vector<std::string> &warnings, const FlatPointerTracker *entry_tracker = nullptr,
+    const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
+    std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
   const size_t first_access_site = sites.access_sites().size();
   if (!kernel.has_text_range) {
     warnings.emplace_back("ConSan cannot decode kernel '" + kernel.name +
@@ -1627,8 +1629,7 @@ void decode_container_stats(std::span<const uint8_t> code_object_bytes, Decoder 
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
-        sites.access_sites().rbegin(), sites.access_sites().rend(),
-        [&](const auto &site) {
+        sites.access_sites().rbegin(), sites.access_sites().rend(), [&](const auto &site) {
           return site.container.id == kernel.id && site.origin == ConSanAccessOrigin::Flat &&
                  site.kind == expected_kind;
         });

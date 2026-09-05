@@ -79,8 +79,7 @@ ordered_program_site_indices(std::span<const ConSanProgramSite> sites) {
           site.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange);
 }
 
-void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
-                                rj_code_arch_t arch,
+void append_decoded_fault_sites(std::string_view fingerprint, rj_code_arch_t arch,
                                 std::span<const ConSanProgramSite> program_sites,
                                 std::vector<ConSanFaultSite> &sites) {
   std::map<std::pair<ConSanProgramContainerId, ConSanFaultSiteKind>, uint32_t> occurrences;
@@ -95,61 +94,27 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
       if (barrier->size != sizeof(uint32_t))
         continue;
       site.kind = ConSanFaultSiteKind::Barrier;
-      site.text_offset = barrier->text_offset;
-      site.file_offset = barrier->file_offset;
-      site.size = barrier->size;
-      site.mnemonic = barrier->mnemonic;
-      site.semantic_role = barrier->mnemonic.find("signal") != std::string::npos ? "barrier-signal"
-                           : barrier->mnemonic.find("wait") != std::string::npos
-                               ? "barrier-wait"
-                               : "workgroup-barrier";
-      uint32_t encoding = 0;
-      if (barrier->file_offset <= bytes.size() &&
-          sizeof(encoding) <= bytes.size() - barrier->file_offset) {
-        std::memcpy(&encoding, bytes.data() + barrier->file_offset, sizeof(encoding));
-        site.decoded_operands = consan_barrier_decoded_operands(*barrier, encoding);
-      } else {
-        site.decoded_operands = "-";
-      }
       site_kind = "barrier";
     } else if (const ConSanAtomicSite *atomic = decoded.get_if<ConSanAtomicSite>()) {
       if (classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch) ==
           AtomicFaultEncoding::Unsupported)
         continue;
       site.kind = ConSanFaultSiteKind::Atomic;
-      site.text_offset = atomic->text_offset;
-      site.file_offset = atomic->file_offset;
-      site.size = atomic->size;
-      site.width_bits = atomic->width_bits;
-      site.mnemonic = atomic->mnemonic;
-      site.semantic_role = consan_atomic_semantic_role(*atomic);
-      site.decoded_operands = consan_atomic_decoded_operands(*atomic);
       site_kind = "atomic";
-    } else if (const ConSanOrdinaryMemorySite *memory =
-                   decoded.get_if<ConSanOrdinaryMemorySite>()) {
+    } else if (decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr) {
       site.kind = ConSanFaultSiteKind::OrdinaryMemory;
-      site.text_offset = memory->text_offset;
-      site.file_offset = memory->file_offset;
-      site.size = memory->size;
-      site.width_bits = memory->width_bits;
-      site.mnemonic = memory->mnemonic;
-      site.semantic_role = memory->operation == ConSanOrdinaryMemoryOperation::Load
-                               ? "ordinary-load"
-                               : "ordinary-store";
-      site.decoded_operands = consan_ordinary_memory_decoded_operands(*memory);
-      site.ordinary_memory_support_reason = memory->support_reason;
       site_kind = "ordinary-memory";
     } else {
       continue;
     }
 
     site.source_site = {static_cast<uint32_t>(decoded_index)};
-    site.container_name = decoded.container.name;
-    site.in_kernel = decoded.container.is_kernel();
     site.occurrence = occurrences[{decoded.container.id, site.kind}]++;
-    site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +
-                    site.container_name + "|kind=" + std::string(site_kind) + "|pc=0x" +
-                    consan_fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
+    site.identity = std::string(fingerprint) +
+                    (decoded.container.is_kernel() ? "|kernel=" : "|function=") +
+                    decoded.container.name + "|kind=" + std::string(site_kind) + "|pc=0x" +
+                    consan_fixed_hex(decoded.text_offset(), 16) +
+                    "|mnemonic=" + std::string(decoded.mnemonic_view()) +
                     "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -173,27 +138,19 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     ConSanFaultSite site;
     site.kind = ConSanFaultSiteKind::LdsAccess;
     site.source_site = {static_cast<uint32_t>(source_index)};
-    site.container_name = access.container.name;
-    site.in_kernel = access.container.is_kernel();
     site.occurrence = occurrence++;
-    site.text_offset = access.physical_id.original_text_offset;
-    site.file_offset = access.decoded_file_offset();
-    site.size = access.size();
-    site.width_bits = access.decoded_width_bits;
-    site.address_vgpr = access.operands.address_vgpr;
     const ConSanProgramContainer *container = inventory.container(access.container.id);
     if (container != nullptr && consan_arch_has_selectable_vgpr_bank(arch) &&
-        access.decoded_file_offset() >= site.text_offset) {
+        access.decoded_file_offset() >= access.text_offset()) {
       site.selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
           arch, bytes, container->text_file_offset, container->entry_text_offset,
           access.decoded_file_offset());
     }
-    site.mnemonic = access.mnemonic_view();
-    site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
-    site.decoded_operands = consan_lds_decoded_operands(access.operands);
-    site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +
-                    site.container_name + "|kind=lds-access|pc=0x" +
-                    consan_fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
+    site.identity = std::string(fingerprint) +
+                    (access.container.is_kernel() ? "|kernel=" : "|function=") +
+                    access.container.name + "|kind=lds-access|pc=0x" +
+                    consan_fixed_hex(access.text_offset(), 16) +
+                    "|mnemonic=" + std::string(access.mnemonic_view()) +
                     "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -203,7 +160,7 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                                 ConSanProgramAnalysisResult &result) {
   const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
-  append_decoded_fault_sites(bytes, fingerprint, arch, result.program_inventory.program_sites(),
+  append_decoded_fault_sites(fingerprint, arch, result.program_inventory.program_sites(),
                              result.fault_sites);
   std::ranges::stable_sort(result.fault_sites, [&](const ConSanFaultSite &lhs,
                                                    const ConSanFaultSite &rhs) {
@@ -214,8 +171,8 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
     };
     const ConSanProgramSite *lhs_source = result.program_inventory.program_site(lhs.source_site);
     const ConSanProgramSite *rhs_source = result.program_inventory.program_site(rhs.source_site);
-    return std::tuple{lhs_source->container.id, kind_order(lhs.kind), lhs.text_offset} <
-           std::tuple{rhs_source->container.id, kind_order(rhs.kind), rhs.text_offset};
+    return std::tuple{lhs_source->container.id, kind_order(lhs.kind), lhs_source->text_offset()} <
+           std::tuple{rhs_source->container.id, kind_order(rhs.kind), rhs_source->text_offset()};
   });
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory,
                                  result.program_inventory.program_sites(), result.fault_sites);
@@ -644,8 +601,8 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
   return signal.kind == ConSanSyncKind::Barrier &&
          signal.operation == ConSanSyncOperation::BarrierSignal &&
          wait.kind == ConSanSyncKind::Barrier &&
-         wait.operation == ConSanSyncOperation::BarrierWait && events.same_container(signal, wait) &&
-         signal.basic_block_index &&
+         wait.operation == ConSanSyncOperation::BarrierWait &&
+         events.same_container(signal, wait) && signal.basic_block_index &&
          wait.basic_block_index && !signal.inside_scalar_clause && !wait.inside_scalar_clause &&
          compatible_barrier_participants(signal, wait);
 }
@@ -1039,12 +996,12 @@ void build_barrier_move_destination_inventory(
         destination.size = static_cast<uint32_t>(instruction.size());
         destination.mnemonic = std::string(instruction.mnemonic());
         destination.memory_operation = instruction.is_memory_op();
-        destination.identity =
-            event->semantic_id.physical.code_object.fingerprint + "|" +
-            std::string(destination.in_kernel ? "kernel=" : "function=") +
-            destination.container_name +
-            "|destination=instruction|pc=0x" + consan_fixed_hex(destination.text_offset, 16) +
-            "|mnemonic=" + destination.mnemonic + "|size=" + std::to_string(destination.size);
+        destination.identity = event->semantic_id.physical.code_object.fingerprint + "|" +
+                               std::string(destination.in_kernel ? "kernel=" : "function=") +
+                               destination.container_name + "|destination=instruction|pc=0x" +
+                               consan_fixed_hex(destination.text_offset, 16) +
+                               "|mnemonic=" + destination.mnemonic +
+                               "|size=" + std::to_string(destination.size);
         if (!seen.insert(destination.identity).second)
           continue;
 
@@ -1234,8 +1191,7 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
                                           const ConSanSyncSequence &after,
                                           const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   if (!before.basic_block_index || before.basic_block_index != after.basic_block_index ||
-      !events.same_container(before, after) ||
-      before.end_text_offset > after.begin_text_offset ||
+      !events.same_container(before, after) || before.end_text_offset > after.begin_text_offset ||
       *before.basic_block_index >= blocks.size()) {
     return false;
   }
@@ -1313,8 +1269,7 @@ prove_bounded_acquire_path(const ConSanSyncSequence &before, const ConSanSyncSeq
   constexpr uint64_t kMaximumBookkeepingBytes = 64u;
   constexpr uint64_t kMaximumPollingLoopPrefixBytes = 128u;
   if (!before.basic_block_index || !after.basic_block_index ||
-      !events.same_container(before, after) ||
-      before.end_text_offset > after.begin_text_offset ||
+      !events.same_container(before, after) || before.end_text_offset > after.begin_text_offset ||
       after.begin_text_offset - before.end_text_offset > kMaximumBookkeepingBytes ||
       before.inside_scalar_clause || after.inside_scalar_clause ||
       *before.basic_block_index >= blocks.size() || *after.basic_block_index >= blocks.size()) {
@@ -2155,82 +2110,6 @@ void associate_ordinary_acquire_sync_sequences(
   }
 }
 
-void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &result) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
-  for (ConSanFaultSite &site : result.fault_sites) {
-    const ConSanProgramSite *source = result.program_inventory.program_site(site.source_site);
-    const ConSanSyncEvent *event = source == nullptr ? nullptr : sync.find_event(site.source_site);
-    if (event == nullptr)
-      continue;
-    const ConSanSyncSequence *sequence =
-        sync.find_unique_sequence_containing(sync.event_id(*event));
-    if (sequence == nullptr)
-      continue;
-    site.sync_confidence = sequence->confidence;
-    site.sync_memory_role = sequence->memory_role;
-    switch (sequence->operation) {
-    case ConSanSyncOperation::BarrierSignal:
-      site.semantic_role = "barrier-signal";
-      break;
-    case ConSanSyncOperation::BarrierWait:
-      site.semantic_role = "barrier-wait";
-      break;
-    case ConSanSyncOperation::BarrierFull:
-      site.semantic_role = "workgroup-barrier";
-      break;
-    case ConSanSyncOperation::BarrierInit:
-      site.semantic_role = "barrier-init-unsupported";
-      break;
-    case ConSanSyncOperation::BarrierJoin:
-      site.semantic_role = "barrier-join-unsupported";
-      break;
-    case ConSanSyncOperation::BarrierLeave:
-      site.semantic_role = "barrier-leave-unsupported";
-      break;
-    case ConSanSyncOperation::BarrierWakeup:
-      site.semantic_role = "barrier-wakeup-unsupported";
-      break;
-    case ConSanSyncOperation::BarrierStateQuery:
-      site.semantic_role = "barrier-state-query-unsupported";
-      break;
-    case ConSanSyncOperation::AtomicRmw:
-    case ConSanSyncOperation::AtomicCompareExchange:
-      switch (sequence->memory_role) {
-      case ConSanSyncMemoryRole::Acquire:
-        site.semantic_role = "atomic-acquire";
-        break;
-      case ConSanSyncMemoryRole::Release:
-        site.semantic_role = "atomic-release";
-        break;
-      case ConSanSyncMemoryRole::AcquireRelease:
-        site.semantic_role = "atomic-acquire-release";
-        break;
-      case ConSanSyncMemoryRole::SequentiallyConsistent:
-        site.semantic_role = "atomic-sequentially-consistent";
-        break;
-      case ConSanSyncMemoryRole::Unknown:
-      case ConSanSyncMemoryRole::None:
-        site.semantic_role = "atomic-order-unknown";
-        break;
-      }
-      break;
-    case ConSanSyncOperation::OrdinaryLoad:
-      site.semantic_role = sequence->memory_role == ConSanSyncMemoryRole::Acquire
-                               ? "ordinary-acquire-load"
-                               : "ordinary-load";
-      break;
-    case ConSanSyncOperation::OrdinaryStore:
-      site.semantic_role = sequence->memory_role == ConSanSyncMemoryRole::Release
-                               ? "ordinary-release-store"
-                               : "ordinary-store";
-      break;
-    case ConSanSyncOperation::Unknown:
-    case ConSanSyncOperation::Fence:
-      break;
-    }
-  }
-}
-
 [[nodiscard]] ConSanOwnerProofKind owner_proof_kind(KernelCfgOwnerProofKind kind) {
   switch (kind) {
   case KernelCfgOwnerProofKind::KernelLocal:
@@ -2300,9 +2179,6 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     }
   }
 
-  for (ConSanFaultSite &site : result.fault_sites)
-    site.execution_owners =
-        execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
   for (ConSanBarrierMoveDestination &destination : result.barrier_move_destinations) {
     destination.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, destination.text_offset);
@@ -2376,7 +2252,6 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
   build_moi_fence_candidate_inventory(synchronization_inventory);
   result.program_inventory = inventory_builder.view();
   build_perturbation_candidate_inventory(result.program_inventory, perturbation);
-  annotate_fault_sites_with_sync_sequences(result);
   return true;
 }
 

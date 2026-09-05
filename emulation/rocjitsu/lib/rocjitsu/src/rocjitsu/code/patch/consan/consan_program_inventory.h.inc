@@ -473,8 +473,7 @@ struct SynchronizationInventoryView {
   /// Return the published membership fact when this inventory has completed
   /// graph construction. Mutable test/build views without an index fall back
   /// to the authoritative sequence scan in higher-level queries.
-  [[nodiscard]] ConSanSyncSequenceMembership
-  sequence_membership(ConSanSyncEventId event) const {
+  [[nodiscard]] ConSanSyncSequenceMembership sequence_membership(ConSanSyncEventId event) const {
     if (!event.valid() || event.ordinal >= sync_events.size())
       return {};
     if (sequence_membership_by_event.size() == sync_events.size())
@@ -646,8 +645,12 @@ struct SynchronizationInventoryBuildView {
   std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
 
   [[nodiscard]] SynchronizationInventoryView view() const {
-    return {program_sites, sync_events, sync_sequences, sequence_membership_by_event,
-            barrier_lifecycle_groups, moi_fence_candidates};
+    return {program_sites,
+            sync_events,
+            sync_sequences,
+            sequence_membership_by_event,
+            barrier_lifecycle_groups,
+            moi_fence_candidates};
   }
 };
 
@@ -798,8 +801,8 @@ public:
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
     return owners;
   }
-  [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(
-      std::span<const ConSanProgramSite *const> aliases) const {
+  [[nodiscard]] std::vector<uint64_t>
+  execution_owner_descriptors(std::span<const ConSanProgramSite *const> aliases) const {
     std::vector<uint64_t> owners;
     for (const ConSanProgramSite *site : aliases) {
       for (const ConSanExecutionOwner &owner : site->execution_owners)
@@ -820,6 +823,11 @@ public:
   /// Resolve one exact source-site handle in this inventory revision.
   [[nodiscard]] const ConSanProgramSite *program_site(ConSanProgramSiteId id) const {
     return consan_program_site(program_sites(), id);
+  }
+
+  /// Resolve the authoritative decoded source of a fault-planning facet.
+  [[nodiscard]] const ConSanProgramSite *program_site(const ConSanFaultSite &site) const {
+    return program_site(site.source_site);
   }
 
   [[nodiscard]] std::vector<std::string>

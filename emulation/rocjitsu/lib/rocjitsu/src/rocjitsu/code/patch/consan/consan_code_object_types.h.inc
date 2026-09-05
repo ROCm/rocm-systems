@@ -222,6 +222,7 @@ struct ConSanOrdinaryMemorySite : ConSanDecodedMemorySite {
 };
 
 struct ConSanBarrierSite : ConSanDecodedSite {
+  uint32_t raw_encoding = 0;
   enum class Operation : uint8_t {
     Unknown,
     Signal,

@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_perturbation.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
+#include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
@@ -3346,6 +3347,18 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   return result.program_inventory.sync().find_event(site.source_site);
 }
 
+[[nodiscard]] const ConSanProgramSite *test_fault_source(const ConSanTransformArtifacts &result,
+                                                         const ConSanFaultSite &site) {
+  return result.program_inventory.program_site(site);
+}
+
+[[nodiscard]] ConSanFaultSiteDiagnostic
+test_fault_diagnostic(const ConSanTransformArtifacts &result, const ConSanFaultSite &site) {
+  auto diagnostic = consan_fault_site_diagnostic(result.program_inventory, site);
+  EXPECT_TRUE(diagnostic.has_value());
+  return diagnostic.value_or(ConSanFaultSiteDiagnostic{});
+}
+
 [[nodiscard]] const ConSanSyncSequence *test_sync_sequence(const ConSanTransformArtifacts &result,
                                                            const ConSanFaultSite &site) {
   return result.program_inventory.sync().find_unique_sequence_containing(site.source_site);
@@ -3363,9 +3376,8 @@ test_perturbation_anchor(const ConSanTransformArtifacts &result,
   return result.program_inventory.sync().find_event(candidate.anchor_event);
 }
 
-[[nodiscard]] std::string
-test_perturbation_identity(const ConSanTransformArtifacts &result,
-                           const ConSanPerturbationCandidate &candidate) {
+[[nodiscard]] std::string test_perturbation_identity(const ConSanTransformArtifacts &result,
+                                                     const ConSanPerturbationCandidate &candidate) {
   return consan_perturbation_candidate_identity(result.program_inventory, candidate);
 }
 

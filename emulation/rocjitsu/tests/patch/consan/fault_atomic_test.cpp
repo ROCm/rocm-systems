@@ -185,20 +185,22 @@ TEST(ConSan, FaultInventoryIncludesAtomicOperandsAndRoles) {
   ASSERT_TRUE(source->container.id.valid());
   ASSERT_NE(result.program_inventory.container(source->container.id), nullptr);
   EXPECT_EQ(result.program_inventory.container(source->container.id)->name,
-            result.fault_sites[0].container_name);
+            test_fault_diagnostic(result, result.fault_sites[0]).container_name);
   EXPECT_EQ(result.fault_sites[0].kind, ConSanFaultSiteKind::Atomic);
   EXPECT_EQ(result.fault_sites[0].occurrence, 0u);
   EXPECT_EQ(result.fault_sites[1].occurrence, 1u);
-  EXPECT_EQ(result.fault_sites[0].semantic_role, "atomic-order-unknown");
-  EXPECT_EQ(result.fault_sites[1].semantic_role, "atomic-order-unknown");
+  const ConSanFaultSiteDiagnostic first = test_fault_diagnostic(result, result.fault_sites[0]);
+  const ConSanFaultSiteDiagnostic second = test_fault_diagnostic(result, result.fault_sites[1]);
+  EXPECT_EQ(first.semantic_role, "atomic-order-unknown");
+  EXPECT_EQ(second.semantic_role, "atomic-order-unknown");
   ASSERT_NE(test_sync_event(result, result.fault_sites[0]), nullptr);
   ASSERT_NE(test_sync_sequence(result, result.fault_sites[0]), nullptr);
-  EXPECT_EQ(result.fault_sites[0].sync_confidence, ConSanSemanticConfidence::Unsupported);
-  EXPECT_EQ(result.fault_sites[0].sync_memory_role, ConSanSyncMemoryRole::Unknown);
-  EXPECT_NE(result.fault_sites[1].decoded_operands.find("raw_ioffset=0"), std::string::npos);
-  EXPECT_NE(result.fault_sites[1].decoded_operands.find("raw_scope=2"), std::string::npos);
-  EXPECT_NE(result.fault_sites[1].decoded_operands.find("raw_th=1"), std::string::npos);
-  EXPECT_NE(result.fault_sites[1].decoded_operands.find("returns_old=1"), std::string::npos);
+  EXPECT_EQ(first.sync_confidence, ConSanSemanticConfidence::Unsupported);
+  EXPECT_EQ(first.sync_memory_role, ConSanSyncMemoryRole::Unknown);
+  EXPECT_NE(second.decoded_operands.find("raw_ioffset=0"), std::string::npos);
+  EXPECT_NE(second.decoded_operands.find("raw_scope=2"), std::string::npos);
+  EXPECT_NE(second.decoded_operands.find("raw_th=1"), std::string::npos);
+  EXPECT_NE(second.decoded_operands.find("returns_old=1"), std::string::npos);
 }
 
 TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
@@ -217,7 +219,8 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().anchor_offset, inventory.fault_sites[1].text_offset);
+  EXPECT_EQ(result.patches.front().anchor_offset,
+            test_fault_source(inventory, inventory.fault_sites[1])->text_offset());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
                                                  result.program_inventory.kernels().front())
@@ -437,7 +440,8 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
   ASSERT_TRUE(consan_patch_succeeded(inventory));
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
   EXPECT_EQ(inventory.fault_sites.front().kind, ConSanFaultSiteKind::Atomic);
-  EXPECT_EQ(inventory.fault_sites.front().mnemonic, "global_atomic_add");
+  EXPECT_EQ(test_fault_source(inventory, inventory.fault_sites.front())->mnemonic_view(),
+            "global_atomic_add");
 
   ConSanOptions options = inventory_options;
   options.fault_atomic_weaken_order = true;
@@ -856,21 +860,24 @@ TEST(ConSan, FaultInventoryIncludesBufferAndDsAtomicEncodings) {
       test_semantic_inventory(make_rdna4_buffer_atomic_code_object(), options);
   ASSERT_TRUE(buffer.errors.empty()) << testing::PrintToString(buffer.errors);
   ASSERT_EQ(buffer.fault_sites.size(), 1u);
-  EXPECT_EQ(buffer.fault_sites.front().mnemonic, "buffer_atomic_add_u32");
-  EXPECT_EQ(buffer.fault_sites.front().size, 12u);
+  const ConSanFaultSiteDiagnostic buffer_diagnostic =
+      test_fault_diagnostic(buffer, buffer.fault_sites.front());
+  EXPECT_EQ(buffer_diagnostic.mnemonic, "buffer_atomic_add_u32");
+  EXPECT_EQ(buffer_diagnostic.size, 12u);
   EXPECT_EQ(buffer.fault_sites.front().occurrence, 0u);
-  EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("raw_ioffset=0"), std::string::npos);
-  EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("raw_scope=2"), std::string::npos);
-  EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("returns_old=1"), std::string::npos);
+  EXPECT_NE(buffer_diagnostic.decoded_operands.find("raw_ioffset=0"), std::string::npos);
+  EXPECT_NE(buffer_diagnostic.decoded_operands.find("raw_scope=2"), std::string::npos);
+  EXPECT_NE(buffer_diagnostic.decoded_operands.find("returns_old=1"), std::string::npos);
 
   const ConSanTransformArtifacts ds =
       test_semantic_inventory(make_rdna4_ds_atomic_code_object(), options);
   ASSERT_TRUE(ds.errors.empty()) << testing::PrintToString(ds.errors);
   ASSERT_EQ(ds.fault_sites.size(), 1u);
-  EXPECT_EQ(ds.fault_sites.front().mnemonic, "ds_add_u32");
-  EXPECT_EQ(ds.fault_sites.front().size, 8u);
+  const ConSanFaultSiteDiagnostic ds_diagnostic = test_fault_diagnostic(ds, ds.fault_sites.front());
+  EXPECT_EQ(ds_diagnostic.mnemonic, "ds_add_u32");
+  EXPECT_EQ(ds_diagnostic.size, 8u);
   EXPECT_EQ(ds.fault_sites.front().occurrence, 0u);
-  EXPECT_NE(ds.fault_sites.front().decoded_operands.find("raw_addr=0"), std::string::npos);
+  EXPECT_NE(ds_diagnostic.decoded_operands.find("raw_addr=0"), std::string::npos);
 }
 
 TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
