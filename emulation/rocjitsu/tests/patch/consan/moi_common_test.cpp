@@ -3409,7 +3409,7 @@ TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
     const ConSanSiteDecision &decision = result.observation_plan().site_decisions.front();
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Unsupported);
     EXPECT_EQ(decision.reason, ConSanAccessPolicyReason::MissingAddressOperand);
-    EXPECT_TRUE(decision.intent_ids.empty());
+    EXPECT_TRUE(result.observation_plan().probe_intents.empty());
   }
 }
 

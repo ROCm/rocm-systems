@@ -5340,17 +5340,6 @@ TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable)
   EXPECT_TRUE(g_transform_override_abort_unmatched_waits.front());
 }
 
-rocjitsu::ConSanAtomicLoweringForm diagnostic_atomic_lowering_form() {
-  rocjitsu::ConSanAtomicLoweringForm form;
-  form.kind = rocjitsu::ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress;
-  form.instruction_size = 12u;
-  form.value_width_bits = 32u;
-  form.value_register_count = 1u;
-  form.data_register_count = 1u;
-  form.address_vgpr_count = 1u;
-  return form;
-}
-
 rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
   rocjitsu::ConSanTransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
@@ -5396,39 +5385,27 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = access,
           .kind = rocjitsu::ConSanSiteDecisionKind::Unsupported,
           .reason = rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic,
-          .intent_ids = {},
       }},
       .barrier_site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = barrier,
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .reason = rocjitsu::ConSanBarrierPolicyReason::None,
-          .intent_ids = {{0u}},
       }},
       .atomic_site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = atomic,
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
           .reason = rocjitsu::ConSanAtomicPolicyReason::None,
-          .association = atomic_association,
-          .lowering_form = diagnostic_atomic_lowering_form(),
-          .intent_ids = {{1u}},
       }},
       .fence_site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = fence,
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
           .reason = rocjitsu::ConSanFencePolicyReason::None,
           .inventory_association = rocjitsu::ConSanFenceAssociation::Qualified,
-          .association = fence_association,
-          .communication_lowering_form = diagnostic_atomic_lowering_form(),
-          .intent_ids = {{2u}},
       }},
       .probe_intents =
           {
@@ -5500,11 +5477,9 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = semantic,
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .reason = rocjitsu::ConSanAccessPolicyReason::None,
-          .intent_ids = {{0u}},
       }},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {},
@@ -5753,15 +5728,10 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
       .site_decisions = {},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {{
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
           .semantic_site = atomic_site,
           .kind = rocjitsu::ConSanSiteDecisionKind::NotApplicable,
           .capability = rocjitsu::ConSanCapabilityDisposition::OutOfContract,
           .reason = rocjitsu::ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
-          .association = std::nullopt,
-          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
-          .lowering_form = std::nullopt,
-          .intent_ids = {},
       }},
       .fence_site_decisions = {},
       .probe_intents = {},

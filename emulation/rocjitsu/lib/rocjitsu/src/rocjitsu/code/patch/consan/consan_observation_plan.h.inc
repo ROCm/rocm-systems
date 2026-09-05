@@ -439,41 +439,31 @@ enum class ConSanProbePosition : uint8_t {
 /// One engine-policy decision for one normalized semantic access range.
 ///
 /// Container aliases are attribution only and are retained as names for
-/// diagnostics. The semantic identity is authoritative. An admitted decision
-/// normally cites one coalesced physical intent; unsupported and not-applicable
-/// decisions cite none.
+/// diagnostics. The semantic identity is authoritative. Probe intents are the
+/// independent, authoritative lowering contract.
 struct ConSanSiteDecision {
-  /// Engine whose contract made this decision.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Stable identity of the logical access range being decided.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
   ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
   /// Typed explanation; `None` is reserved for admitted decisions.
   ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
-  /// Target-neutral intents requested for this semantic range.
-  std::vector<ConSanProbeIntentId> intent_ids;
   bool operator==(const ConSanSiteDecision &) const = default;
 };
 
 /// One engine-policy decision for one decoded barrier event.
 ///
 /// The decision is about original-program meaning, not a patch. A paired
-/// signal and wait may therefore both cite one completion intent, while a
-/// Record/Replay decision normally cites the per-event intent at its own
-/// instruction. `semantic_site` remains the authoritative identity; source
-/// aliases are derived from the program inventory when diagnostics need them.
+/// signal and wait may therefore share one completion intent. `semantic_site`
+/// remains the authoritative diagnostic identity; source aliases are derived
+/// from the program inventory when diagnostics need them.
 struct ConSanBarrierSiteDecision {
-  /// Engine whose barrier contract made this decision.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Stable identity of the original synchronization event being decided.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
   ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
   /// Typed explanation; `None` is reserved for admitted decisions.
   ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
-  /// Target-neutral intents that collectively observe this event.
-  std::vector<ConSanProbeIntentId> intent_ids;
   bool operator==(const ConSanBarrierSiteDecision &) const = default;
 };
 
@@ -482,12 +472,9 @@ struct ConSanBarrierSiteDecision {
 /// The event may be a target-native RMW or the address-bearing load/store in a
 /// qualified language-level atomic sequence. `capability` preserves the public
 /// target/engine contract, while `reason` records the more specific decoded
-/// decision. Admitted operations cite a before-address intent and an
-/// after-operation evidence intent, except when Record/Replay deliberately
-/// covers an ordinary sequence through its associated fence intents.
+/// decision. The corresponding before-address and after-operation contracts
+/// live only in the plan's probe intents.
 struct ConSanAtomicSiteDecision {
-  /// Engine whose atomic contract made this decision.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Stable identity of the address-bearing synchronization event.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
@@ -496,29 +483,16 @@ struct ConSanAtomicSiteDecision {
   ConSanCapabilityDisposition capability = ConSanCapabilityDisposition::OutOfContract;
   /// Typed explanation; `None` is reserved for admitted decisions.
   ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
-  /// Qualified complete sequence, when inventory established one.
-  std::optional<ConSanSynchronizationAssociationId> association;
-  /// Dynamic post-guest value required by the atomic semantics.
-  ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
-  /// Exact target lowering form accepted by the sole atomic classifier.
-  /// Present exactly for admitted decisions; downstream planners consume this
-  /// value and must not reclassify the raw instruction.
-  std::optional<ConSanAtomicLoweringForm> lowering_form;
-  /// Target-neutral intents that collectively observe this operation.
-  std::vector<ConSanProbeIntentId> intent_ids;
   bool operator==(const ConSanAtomicSiteDecision &) const = default;
 };
 
 /// One engine-policy decision for a decoded cache/fence event.
 ///
 /// `inventory_association` is the engine-independent analysis result and is
-/// retained even when policy excludes the event. Record/Replay normally admits
-/// a fence-record intent. Sampled and Inline may instead cite the atomic
-/// intents for the same association, making `AssociatedOnly` explicit rather
-/// than pretending that they emit an independent fence probe.
+/// retained even when policy excludes the event. `AssociatedOnly` makes modes
+/// without an independent fence probe explicit without copying intent links
+/// into diagnostic decisions.
 struct ConSanFenceSiteDecision {
-  /// Engine whose fence contract made this decision.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Stable identity of the original cache/fence instruction.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
@@ -529,13 +503,6 @@ struct ConSanFenceSiteDecision {
   ConSanFencePolicyReason reason = ConSanFencePolicyReason::TrackingDisabled;
   /// Detailed shared-analysis association outcome, never inferred from prose.
   ConSanFenceAssociation inventory_association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
-  /// Qualified complete sequence, when inventory established one.
-  std::optional<ConSanSynchronizationAssociationId> association;
-  /// Exact target lowering form of the associated address-bearing operation.
-  /// Present exactly for admitted decisions, including associated-only modes.
-  std::optional<ConSanAtomicLoweringForm> communication_lowering_form;
-  /// Target-neutral intents that collectively represent this fence.
-  std::vector<ConSanProbeIntentId> intent_ids;
   bool operator==(const ConSanFenceSiteDecision &) const = default;
 };
 
@@ -570,6 +537,11 @@ struct ConSanProbeIntent {
   std::optional<ConSanSynchronizationAssociationId> synchronization_association;
   /// Dynamic post-guest value the lowerer must preserve or derive.
   ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
+  /// Exact target-normalized address-bearing form selected by policy. This is
+  /// present only on `AtomicAddressCapture`: every after-operation intent for
+  /// the same association consumes that one captured address contract instead
+  /// of retaining a second copy on atomic and fence decisions.
+  std::optional<ConSanAtomicLoweringForm> atomic_lowering_form;
 
   bool operator==(const ConSanProbeIntent &) const = default;
 };

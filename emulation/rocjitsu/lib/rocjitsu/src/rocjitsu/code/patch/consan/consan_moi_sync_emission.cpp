@@ -121,8 +121,7 @@ sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source) {
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwReturnsOld;
     break;
   case ConSanSyncRmwOutcome::CompareExchange:
-    if (!site.returns_old_value.value_or(false) || !site.data_vgpr ||
-        !site.destination_vgpr) {
+    if (!site.returns_old_value.value_or(false) || !site.data_vgpr || !site.destination_vgpr) {
       return reject(Reason::CompareExchangeDynamicOutcomeUnavailable);
     }
     semantics.outcome = ConSanMoiSampledSyncOutcome::CasSuccess;
@@ -184,9 +183,9 @@ std::string_view sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReas
 /// Project admitted Record/Replay fence evidence directly into the common MOI
 /// lowering contract.
 ///
-/// The observation decision is the only starting point. This join verifies
-/// its explicit `FenceRecord` intent against the immutable graph association,
-/// resolves the one address-bearing instruction, and computes the exact guest
+/// The `FenceRecord` intent is the only starting point. This join verifies it
+/// against the immutable graph association, resolves the one address-bearing
+/// instruction and its paired capture intent, and computes the exact guest
 /// replacement range. Lowering therefore receives no candidate that still
 /// needs semantic filtering.
 [[nodiscard]] std::vector<MoiFenceEvidenceSitePlan>
@@ -196,36 +195,12 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
   std::vector<MoiFenceEvidenceSitePlan> plans;
   const SynchronizationInventoryView graph = inventory.sync();
 
-  for (const ConSanFenceSiteDecision &decision : observation.fence_site_decisions) {
-    if (decision.kind != ConSanSiteDecisionKind::Admitted)
+  for (const ConSanProbeIntent &intent : observation.probe_intents) {
+    if (intent.kind != ConSanProbeIntentKind::FenceRecord)
       continue;
-
-    ConSanProbeIntentId address_capture;
-    ConSanProbeIntentId evidence;
-    for (ConSanProbeIntentId id : decision.intent_ids) {
-      const ConSanProbeIntent *intent = observation.intent(id);
-      if (intent == nullptr)
-        continue;
-      if (intent->kind == ConSanProbeIntentKind::AtomicAddressCapture)
-        address_capture = id;
-      if (intent->kind != ConSanProbeIntentKind::FenceRecord)
-        continue;
-      if (evidence.valid()) {
-        errors.emplace_back("ConSan MOI admitted fence has multiple record intents");
-        return {};
-      }
-      evidence = id;
-    }
-    if (!evidence.valid())
-      continue;
-    if (!address_capture.valid() || !decision.association) {
-      errors.emplace_back("ConSan MOI admitted fence record lost its capture or graph association");
-      return {};
-    }
-    const ConSanProbeIntent *intent = observation.intent(evidence);
-    const ConSanSyncEvent *fence_event = graph.find_event(decision.semantic_site);
-    if (intent == nullptr || intent->physical_site != decision.semantic_site.physical ||
-        intent->synchronization_association != decision.association || fence_event == nullptr ||
+    const ConSanSyncEvent *fence_event = graph.find_event(intent.source_site);
+    if (!intent.synchronization_association || fence_event == nullptr ||
+        intent.physical_site != fence_event->semantic_id.physical ||
         fence_event->kind != ConSanSyncKind::Fence) {
       errors.emplace_back("ConSan MOI admitted fence record lost its synchronization event");
       return {};
@@ -235,9 +210,9 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     for (const ConSanMoiFenceCandidate &candidate : graph.moi_fence_candidates) {
       const ConSanSyncEvent *candidate_event = graph.find_event(candidate.fence_event);
       const ConSanSyncSequence *candidate_sequence = graph.find_sequence(candidate.sequence);
-      if (candidate_event == nullptr || candidate_event->semantic_id != decision.semantic_site ||
+      if (candidate_event == nullptr || candidate_event->semantic_id != fence_event->semantic_id ||
           candidate_sequence == nullptr || !candidate.eligible() ||
-          candidate_sequence->identity != decision.association->value)
+          candidate_sequence->identity != intent.synchronization_association->value)
         continue;
       if (association != nullptr) {
         errors.emplace_back("ConSan MOI admitted fence record has ambiguous graph associations");
@@ -259,17 +234,30 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       errors.emplace_back("ConSan MOI admitted fence record lost its communication sequence");
       return {};
     }
+    const ConSanProbeIntent *capture = nullptr;
+    for (const ConSanProbeIntent &candidate : observation.probe_intents) {
+      if (candidate.kind != ConSanProbeIntentKind::AtomicAddressCapture ||
+          candidate.synchronization_association != intent.synchronization_association ||
+          std::ranges::find(candidate.covered_semantic_sites, communication->semantic_id) ==
+              candidate.covered_semantic_sites.end())
+        continue;
+      if (capture != nullptr) {
+        errors.emplace_back("ConSan MOI admitted fence record has ambiguous capture intents");
+        return {};
+      }
+      capture = &candidate;
+    }
+    if (capture == nullptr || !capture->atomic_lowering_form) {
+      errors.emplace_back("ConSan MOI admitted fence record lost its capture or lowering form");
+      return {};
+    }
     MoiFenceEvidenceSitePlan plan;
     plan.event = graph.event_id(*fence_event);
     plan.sequence = graph.sequence_id(*sequence);
     plan.source_site = communication->source_site;
-    plan.evidence_intent = evidence;
-    plan.address_capture_intent = address_capture;
-    if (!decision.communication_lowering_form) {
-      errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
-      return {};
-    }
-    plan.communication_lowering_form = *decision.communication_lowering_form;
+    plan.evidence_intent = intent.id;
+    plan.address_capture_intent = capture->id;
+    plan.communication_lowering_form = *capture->atomic_lowering_form;
     if (!plan.is_well_formed() || !resolve_moi_fence_evidence_source(inventory, plan)) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
@@ -317,9 +305,9 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
 /// contract.
 ///
 /// This is the sole join between synchronization inventory, flavor policy,
-/// and operand-rich guest decode. It intentionally starts from admitted
-/// decisions rather than rediscovering candidates and filtering them after
-/// the fact. Record/Replay ordinary sequences owned by a fence have no
+/// and operand-rich guest decode. It starts directly from admitted evidence
+/// intents and their paired address-capture intent. Record/Replay ordinary
+/// sequences owned by a fence have no
 /// `AtomicRecord` intent and therefore do not enter the atomic-record path;
 /// Sampled and InlineShadow select their own explicit evidence intent kinds.
 [[nodiscard]] std::vector<MoiAtomicEvidenceSitePlan> build_moi_atomic_evidence_site_plans(
@@ -328,47 +316,46 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
   std::vector<MoiAtomicEvidenceSitePlan> plans;
   const SynchronizationInventoryView graph = inventory.sync();
 
-  for (const ConSanAtomicSiteDecision &decision : observation.atomic_site_decisions) {
-    if (decision.kind != ConSanSiteDecisionKind::Admitted)
+  for (const ConSanProbeIntent &intent : observation.probe_intents) {
+    if (intent.kind != evidence_kind)
       continue;
-
-    ConSanProbeIntentId address_capture;
-    ConSanProbeIntentId evidence;
-    for (ConSanProbeIntentId id : decision.intent_ids) {
-      const ConSanProbeIntent *intent = observation.intent(id);
-      if (intent == nullptr)
-        continue;
-      if (intent->kind == ConSanProbeIntentKind::AtomicAddressCapture)
-        address_capture = id;
-      if (intent->kind == evidence_kind)
-        evidence = id;
-    }
-    if (!evidence.valid())
-      continue;
-    if (!address_capture.valid() || !decision.association) {
+    if (!intent.synchronization_association) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its capture or association");
       return {};
     }
-
-    const ConSanSyncEvent *event = graph.find_event(decision.semantic_site);
-    const ConSanSyncSequence *sequence = graph.find_unique_sequence(decision.association->value);
+    const ConSanSyncEvent *event = graph.find_event(intent.source_site);
+    const ConSanSyncSequence *sequence =
+        graph.find_unique_sequence(intent.synchronization_association->value);
     if (event == nullptr || sequence == nullptr ||
         graph.find_unique_sequence_containing(event->semantic_id) != sequence ||
         (event->kind != ConSanSyncKind::Atomic && event->kind != ConSanSyncKind::OrdinaryMemory)) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its synchronization graph");
       return {};
     }
+    const ConSanProbeIntent *capture = nullptr;
+    for (const ConSanProbeIntent &candidate : observation.probe_intents) {
+      if (candidate.kind != ConSanProbeIntentKind::AtomicAddressCapture ||
+          candidate.synchronization_association != intent.synchronization_association ||
+          std::ranges::find(candidate.covered_semantic_sites, event->semantic_id) ==
+              candidate.covered_semantic_sites.end())
+        continue;
+      if (capture != nullptr) {
+        errors.emplace_back("ConSan MOI admitted atomic evidence has ambiguous capture intents");
+        return {};
+      }
+      capture = &candidate;
+    }
+    if (capture == nullptr || !capture->atomic_lowering_form) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
+      return {};
+    }
     MoiAtomicEvidenceSitePlan plan;
     plan.event = graph.event_id(*event);
     plan.sequence = graph.sequence_id(*sequence);
     plan.source_site = event->source_site;
-    plan.address_capture_intent = address_capture;
-    plan.evidence_intent = evidence;
-    if (!decision.lowering_form) {
-      errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
-      return {};
-    }
-    plan.lowering_form = *decision.lowering_form;
+    plan.address_capture_intent = capture->id;
+    plan.evidence_intent = intent.id;
+    plan.lowering_form = *capture->atomic_lowering_form;
     if (!resolve_moi_atomic_evidence_source(inventory, plan) || !plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};

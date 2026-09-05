@@ -407,13 +407,12 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .position = ConSanProbePosition::Before,
       .synchronization_association = std::nullopt,
       .dynamic_result = ConSanDynamicResultRequirement::None,
+      .atomic_lowering_form = std::nullopt,
   });
   plan.site_decisions.push_back({
-      .engine = ConSanCapabilityEngine::RecordReplay,
       .semantic_site = semantic,
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanAccessPolicyReason::None,
-      .intent_ids = {{0u}},
   });
   plan.probe_intents.push_back({
       .id = {1u},
@@ -425,13 +424,12 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .position = ConSanProbePosition::Before,
       .synchronization_association = std::nullopt,
       .dynamic_result = ConSanDynamicResultRequirement::None,
+      .atomic_lowering_form = std::nullopt,
   });
   plan.barrier_site_decisions.push_back({
-      .engine = ConSanCapabilityEngine::RecordReplay,
       .semantic_site = barrier.semantic_id,
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanBarrierPolicyReason::None,
-      .intent_ids = {{1u}},
   });
   ASSERT_TRUE(plan.valid());
   ConSanCoverageLedger coverage(plan);

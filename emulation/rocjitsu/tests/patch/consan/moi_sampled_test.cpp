@@ -7640,8 +7640,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
                                   [](const ConSanBarrierSiteDecision &decision) {
                                     return decision.kind == ConSanSiteDecisionKind::Admitted &&
-                                           decision.reason == ConSanBarrierPolicyReason::None &&
-                                           decision.intent_ids.size() == 1u;
+                                           decision.reason == ConSanBarrierPolicyReason::None;
                                   }));
   ASSERT_EQ(result.observation_plan().probe_intents.size(), 2u * kSiteCount);
   EXPECT_EQ(std::ranges::count(result.observation_plan().probe_intents,

@@ -146,11 +146,9 @@ ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site)
       .engine = ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {},
       .barrier_site_decisions = {{
-          .engine = ConSanCapabilityEngine::RecordReplay,
           .semantic_site = semantic_site,
           .kind = ConSanSiteDecisionKind::Admitted,
           .reason = ConSanBarrierPolicyReason::None,
-          .intent_ids = {{0}},
       }},
       .atomic_site_decisions = {},
       .fence_site_decisions = {},
@@ -164,6 +162,7 @@ ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site)
           .position = ConSanProbePosition::After,
           .synchronization_association = std::nullopt,
           .dynamic_result = ConSanDynamicResultRequirement::None,
+          .atomic_lowering_form = std::nullopt,
       }},
   };
 }
@@ -221,9 +220,6 @@ TEST(ConSanObservationPlan, PlanValidationRejectsEveryBrokenTypedRelationship) {
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
   broken.site_decisions.front().reason = ConSanAccessPolicyReason::UnsupportedMnemonic;
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.site_decisions.front().intent_ids = {{99}};
   EXPECT_FALSE(broken.valid());
 }
 
@@ -287,12 +283,9 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   broken = policy.plan;
   broken.barrier_site_decisions.front().semantic_site.domain = ConSanSemanticSiteDomain::Count;
   EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.barrier_site_decisions.front().intent_ids = {{99}};
-  EXPECT_FALSE(broken.valid());
 }
 
-TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional) {
+TEST(ConSanObservationPlan, AppendRebasesIntentsAndOwnsDecisionsTransactionally) {
   const ConSanAccessPolicyResult access = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(access.valid());
@@ -304,11 +297,9 @@ TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional)
   fragment.probe_intents.front().kind = ConSanProbeIntentKind::BarrierRecord;
   fragment.probe_intents.front().position = ConSanProbePosition::After;
   fragment.barrier_site_decisions.push_back({
-      .engine = ConSanCapabilityEngine::RecordReplay,
       .semantic_site = fragment.probe_intents.front().covered_semantic_sites.front(),
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanBarrierPolicyReason::None,
-      .intent_ids = {{0}},
   });
   ASSERT_TRUE(fragment.valid());
   ASSERT_TRUE(combined.append(fragment));
@@ -316,8 +307,6 @@ TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional)
   ASSERT_EQ(combined.probe_intents.size(), 2u);
   ASSERT_EQ(combined.barrier_site_decisions.size(), 1u);
   EXPECT_EQ(combined.probe_intents[1].id, ConSanProbeIntentId{1});
-  EXPECT_EQ(combined.barrier_site_decisions.front().intent_ids,
-            (std::vector{ConSanProbeIntentId{1}}));
 
   const ConSanObservationPlan before = combined;
   fragment.engine = ConSanCapabilityEngine::Sampled;
@@ -884,7 +873,6 @@ TEST(ConSanAccessPolicy, TwoRangeAccessHasTwoDecisionsAndOnePhysicalIntent) {
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.site_decisions.size(), 2u);
   ASSERT_EQ(policy.plan.probe_intents.size(), 1u);
-  EXPECT_EQ(policy.plan.site_decisions[0].intent_ids, policy.plan.site_decisions[1].intent_ids);
   EXPECT_EQ(policy.plan.site_decisions[0].semantic_site.range_ordinal, 0u);
   EXPECT_EQ(policy.plan.site_decisions[1].semantic_site.range_ordinal, 1u);
   EXPECT_EQ(policy.plan.probe_intents.front().covered_semantic_sites.size(), 2u);
@@ -949,7 +937,7 @@ TEST(ConSanAccessPolicy, InventoryLimitationsBecomeTypedUnsupportedDecisions) {
   EXPECT_EQ(policy.plan.site_decisions[3].reason,
             ConSanAccessPolicyReason::RangeEncodingUnavailable);
   EXPECT_TRUE(std::ranges::all_of(policy.plan.site_decisions, [](const auto &decision) {
-    return decision.kind == ConSanSiteDecisionKind::Unsupported && decision.intent_ids.empty();
+    return decision.kind == ConSanSiteDecisionKind::Unsupported;
   }));
 }
 

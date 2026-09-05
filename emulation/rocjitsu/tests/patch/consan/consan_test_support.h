@@ -673,16 +673,25 @@ template <typename Decision>
 [[nodiscard]] bool consan_decision_has_lowering(const ConSanTransformArtifacts &result,
                                                 const Decision &decision,
                                                 ConSanLoweringOutcomeKind outcome) {
-  if (decision.kind != ConSanSiteDecisionKind::Admitted || decision.intent_ids.empty())
+  if (decision.kind != ConSanSiteDecisionKind::Admitted)
+    return false;
+  std::vector<ConSanProbeIntentId> intent_ids;
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
+    if (std::ranges::find(intent.covered_semantic_sites, decision.semantic_site) !=
+        intent.covered_semantic_sites.end()) {
+      intent_ids.push_back(intent.id);
+    }
+  }
+  if (intent_ids.empty())
     return false;
   const auto has = [&](ConSanLoweringOutcomeKind candidate) {
-    return std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+    return std::ranges::any_of(intent_ids, [&](ConSanProbeIntentId id) {
       const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
       return entry != nullptr && entry->lowering == candidate;
     });
   };
   ConSanLoweringOutcomeKind aggregate = ConSanLoweringOutcomeKind::Pending;
-  if (std::ranges::all_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+  if (std::ranges::all_of(intent_ids, [&](ConSanProbeIntentId id) {
         const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
         return entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Instrumented;
       })) {

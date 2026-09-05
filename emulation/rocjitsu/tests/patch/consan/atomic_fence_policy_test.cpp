@@ -360,11 +360,10 @@ TEST(ConSanAtomicFencePolicy, AllEnginesExpressTheirAtomicObservationContract) {
     const ConSanAtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Admitted);
     EXPECT_EQ(decision.reason, ConSanAtomicPolicyReason::None);
-    ASSERT_TRUE(decision.association.has_value());
-    ASSERT_TRUE(decision.lowering_form.has_value());
-    EXPECT_EQ(decision.lowering_form->kind,
+    ASSERT_TRUE(policy.plan.probe_intents[0].synchronization_association.has_value());
+    ASSERT_TRUE(policy.plan.probe_intents[0].atomic_lowering_form.has_value());
+    EXPECT_EQ(policy.plan.probe_intents[0].atomic_lowering_form->kind,
               ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress);
-    EXPECT_EQ(decision.intent_ids, (std::vector{ConSanProbeIntentId{0}, ConSanProbeIntentId{1}}));
     EXPECT_EQ(policy.plan.probe_intents[0].kind, ConSanProbeIntentKind::AtomicAddressCapture);
     EXPECT_EQ(policy.plan.probe_intents[0].position, ConSanProbePosition::Before);
     EXPECT_EQ(policy.plan.probe_intents[0].dynamic_result, ConSanDynamicResultRequirement::None);
@@ -393,7 +392,6 @@ TEST(ConSanAtomicFencePolicy, DynamicAtomicOutcomesBecomeExplicitAfterIntentRequ
                                              atomic_request(ConSanCapabilityEngine::InlineShadow));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-    EXPECT_EQ(policy.plan.atomic_site_decisions.front().dynamic_result, expected);
     EXPECT_EQ(policy.plan.probe_intents[1].dynamic_result, expected);
   }
 }
@@ -445,8 +443,8 @@ TEST(ConSanAtomicFencePolicy, GlobalAtomicContractTransportsAcrossEverySupported
     const ConSanAtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Admitted);
     EXPECT_EQ(decision.capability, ConSanCapabilityDisposition::Supported);
-    ASSERT_TRUE(decision.lowering_form.has_value());
-    EXPECT_EQ(decision.lowering_form->kind,
+    ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
+    EXPECT_EQ(policy.plan.probe_intents.front().atomic_lowering_form->kind,
               ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress);
   }
 }
@@ -472,8 +470,8 @@ TEST(ConSanAtomicFencePolicy, OrderedLdsAtomicIsTargetGatedToGfx1250) {
   EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
   EXPECT_EQ(supported.plan.atomic_site_decisions.front().capability,
             ConSanCapabilityDisposition::Supported);
-  ASSERT_TRUE(supported.plan.atomic_site_decisions.front().lowering_form.has_value());
-  EXPECT_EQ(supported.plan.atomic_site_decisions.front().lowering_form->kind,
+  ASSERT_TRUE(supported.plan.probe_intents.front().atomic_lowering_form.has_value());
+  EXPECT_EQ(supported.plan.probe_intents.front().atomic_lowering_form->kind,
             ConSanAtomicLoweringFormKind::LdsVectorOffset);
 }
 
@@ -769,38 +767,20 @@ TEST(ConSanAtomicFencePolicy, PlanValidationEnforcesAtomicAndFenceTypeRelationsh
   broken.probe_intents.back().position = ConSanProbePosition::Before;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.atomic_site_decisions.front().association.reset();
+  broken.probe_intents.front().atomic_lowering_form.reset();
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.atomic_site_decisions.front().dynamic_result = ConSanDynamicResultRequirement::Count;
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.atomic_site_decisions.front().lowering_form.reset();
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.atomic_site_decisions.front().lowering_form->kind = ConSanAtomicLoweringFormKind::Count;
+  broken.probe_intents.front().atomic_lowering_form->kind = ConSanAtomicLoweringFormKind::Count;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
   broken.atomic_site_decisions.front().capability = static_cast<ConSanCapabilityDisposition>(255);
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.atomic_site_decisions.front().intent_ids = {{99}};
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
   broken.fence_site_decisions.front().inventory_association = ConSanFenceAssociation::Count;
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.fence_site_decisions.front().association.reset();
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.fence_site_decisions.front().communication_lowering_form.reset();
-  EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.fence_site_decisions.front().intent_ids = {{99}};
   EXPECT_FALSE(broken.valid());
 }
 
-TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnAndRebaseBothDecisionFamilies) {
+TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnDecisionsAndRebaseIntents) {
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
       ordinary_fence_inventory(), atomic_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(policy.valid());
@@ -810,10 +790,8 @@ TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnAndRebaseBothDecisionFam
   ASSERT_EQ(combined.probe_intents.size(), 4u);
   ASSERT_EQ(combined.atomic_site_decisions.size(), 2u);
   ASSERT_EQ(combined.fence_site_decisions.size(), 2u);
-  EXPECT_EQ(combined.atomic_site_decisions[1].intent_ids,
-            (std::vector{ConSanProbeIntentId{2}, ConSanProbeIntentId{3}}));
-  EXPECT_EQ(combined.fence_site_decisions[1].intent_ids,
-            (std::vector{ConSanProbeIntentId{2}, ConSanProbeIntentId{3}}));
+  EXPECT_EQ(combined.probe_intents[2].id, ConSanProbeIntentId{2});
+  EXPECT_EQ(combined.probe_intents[3].id, ConSanProbeIntentId{3});
 
   ConSanCoverageLedger ledger(combined);
   EXPECT_TRUE(std::ranges::equal(ledger.atomic_site_decisions(), combined.atomic_site_decisions));
@@ -839,13 +817,13 @@ TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachEngineEvidenceC
     const ConSanFenceSiteDecision &fence = policy.plan.fence_site_decisions.front();
     EXPECT_EQ(atomic.kind, ConSanSiteDecisionKind::Admitted);
     EXPECT_EQ(fence.kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(atomic.association, fence.association);
-    EXPECT_EQ(atomic.lowering_form, fence.communication_lowering_form);
+    EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
+              policy.plan.probe_intents[1].synchronization_association);
+    ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
     EXPECT_EQ(fence.inventory_association, ConSanFenceAssociation::Qualified);
     EXPECT_EQ(fence.capability, engine == ConSanCapabilityEngine::RecordReplay
                                     ? ConSanCapabilityDisposition::Supported
                                     : ConSanCapabilityDisposition::AssociatedOnly);
-    EXPECT_EQ(atomic.intent_ids, fence.intent_ids);
     ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
     EXPECT_EQ(policy.plan.probe_intents[0].kind, ConSanProbeIntentKind::AtomicAddressCapture);
     EXPECT_EQ(policy.plan.probe_intents[1].kind, engine == ConSanCapabilityEngine::RecordReplay

@@ -196,8 +196,7 @@ TEST(ConSanBarrierPolicy, PairedSequenceHasPerEventRecordsButOneEpochIntent) {
   ASSERT_TRUE(record.valid());
   ASSERT_EQ(record.plan.barrier_site_decisions.size(), 2u);
   ASSERT_EQ(record.plan.probe_intents.size(), 2u);
-  EXPECT_NE(record.plan.barrier_site_decisions[0].intent_ids,
-            record.plan.barrier_site_decisions[1].intent_ids);
+  EXPECT_NE(record.plan.probe_intents[0].physical_site, record.plan.probe_intents[1].physical_site);
 
   for (ConSanCapabilityEngine engine :
        {ConSanCapabilityEngine::Sampled, ConSanCapabilityEngine::InlineShadow}) {
@@ -207,8 +206,6 @@ TEST(ConSanBarrierPolicy, PairedSequenceHasPerEventRecordsButOneEpochIntent) {
     ASSERT_TRUE(epoch.valid());
     ASSERT_EQ(epoch.plan.barrier_site_decisions.size(), 2u);
     ASSERT_EQ(epoch.plan.probe_intents.size(), 1u);
-    EXPECT_EQ(epoch.plan.barrier_site_decisions[0].intent_ids,
-              epoch.plan.barrier_site_decisions[1].intent_ids);
     EXPECT_EQ(epoch.plan.probe_intents.front().physical_site.original_text_offset, 48u);
     EXPECT_EQ(epoch.plan.probe_intents.front().covered_semantic_sites.size(), 2u);
   }

@@ -331,6 +331,19 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   return WaitcheckPreflightOutcome::AnalysisFailed;
 }
 
+[[nodiscard]] std::vector<rocjitsu::ConSanProbeIntentId>
+intent_ids_covering(const rocjitsu::TransformResult &result,
+                    const rocjitsu::SemanticSiteId &semantic_site) {
+  std::vector<rocjitsu::ConSanProbeIntentId> ids;
+  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
+    if (std::ranges::find(intent.covered_semantic_sites, semantic_site) !=
+        intent.covered_semantic_sites.end()) {
+      ids.push_back(intent.id);
+    }
+  }
+  return ids;
+}
+
 [[nodiscard]] bool require_patch_applies_to(const rocjitsu::TransformResult &result,
                                             const HookConfig &config) {
   const bool has_selected_access = config.probe_lds_check_trap || config.probe_flat_check_trap;
@@ -340,10 +353,10 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
     return !result.observation_plan().valid();
   return std::ranges::any_of(
       result.coverage_ledger.site_decisions(), [&](const rocjitsu::ConSanSiteDecision &decision) {
-        if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted ||
-            decision.intent_ids.empty())
+        if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
           return false;
-        return std::ranges::any_of(decision.intent_ids, [&](rocjitsu::ConSanProbeIntentId id) {
+        const auto intent_ids = intent_ids_covering(result, decision.semantic_site);
+        return std::ranges::any_of(intent_ids, [&](rocjitsu::ConSanProbeIntentId id) {
           const rocjitsu::ConSanIntentCoverageEntry *entry =
               result.coverage_ledger.intent_entry(id);
           return entry == nullptr ||
@@ -450,7 +463,11 @@ compute_consan_static_coverage(const rocjitsu::ConSanCoverageLedger &ledger,
       if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
         continue;
       site->supported = true;
-      for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+      for (const rocjitsu::ConSanProbeIntent &intent : ledger.observation_plan().probe_intents) {
+        if (std::ranges::find(intent.covered_semantic_sites, decision.semantic_site) ==
+            intent.covered_semantic_sites.end())
+          continue;
+        const rocjitsu::ConSanProbeIntentId id = intent.id;
         if (std::ranges::find(site->intents, id) == site->intents.end())
           site->intents.push_back(id);
       }
@@ -4506,10 +4523,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           lowering_reason = "semantic_unsupported";
         } else if (decision.kind == rocjitsu::ConSanSiteDecisionKind::Admitted) {
           disposition = "supported";
-          bool all_instrumented = !decision.intent_ids.empty();
+          const auto intent_ids = intent_ids_covering(transform_result, decision.semantic_site);
+          bool all_instrumented = !intent_ids.empty();
           bool resource_rejected = false;
           bool placement_rejected = false;
-          for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+          for (rocjitsu::ConSanProbeIntentId id : intent_ids) {
             const rocjitsu::ConSanIntentCoverageEntry *entry =
                 transform_result.coverage_ledger.intent_entry(id);
             all_instrumented &=
@@ -4529,7 +4547,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             outcome = "resource_failed";
             lowering_reason = "unsupported_resource_plan";
             resource_reason = "invalid_request";
-            for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+            for (rocjitsu::ConSanProbeIntentId id : intent_ids) {
               const rocjitsu::ConSanIntentCoverageEntry *entry =
                   transform_result.coverage_ledger.intent_entry(id);
               if (entry != nullptr && entry->resource_rejection_reason) {

@@ -262,6 +262,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
               .position = ConSanProbePosition::After,
               .synchronization_association = std::nullopt,
               .dynamic_result = ConSanDynamicResultRequirement::None,
+              .atomic_lowering_form = std::nullopt,
           });
           if (sequence_intent)
             intent_by_sequence.emplace(std::move(sequence_key), *intent_id);
@@ -272,14 +273,10 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
     }
 
     ConSanBarrierSiteDecision decision{
-        .engine = request.engine,
         .semantic_site = event.semantic_id,
         .kind = decision_kind,
         .reason = reason,
-        .intent_ids = {},
     };
-    if (intent_id)
-      decision.intent_ids.push_back(*intent_id);
     result.plan.barrier_site_decisions.push_back(std::move(decision));
   }
   return result;

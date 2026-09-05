@@ -716,10 +716,9 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
                                   ConSanSiteDecisionKind::Admitted),
             2u);
   ASSERT_EQ(retried.observation_plan().barrier_site_decisions.size(), 2u);
-  ASSERT_EQ(retried.observation_plan().barrier_site_decisions.front().intent_ids.size(), 1u);
-  ASSERT_EQ(retried.observation_plan().barrier_site_decisions.back().intent_ids.size(), 1u);
-  EXPECT_NE(retried.observation_plan().barrier_site_decisions.front().intent_ids,
-            retried.observation_plan().barrier_site_decisions.back().intent_ids);
+  EXPECT_EQ(std::ranges::count(retried.observation_plan().probe_intents,
+                               ConSanProbeIntentKind::BarrierRecord, &ConSanProbeIntent::kind),
+            2u);
   EXPECT_EQ(retried.coverage_ledger, fresh.coverage_ledger);
   EXPECT_TRUE(std::ranges::none_of(retried.coverage_ledger.intent_entries(), [](const auto &entry) {
     return entry.lowering == ConSanLoweringOutcomeKind::Pending;

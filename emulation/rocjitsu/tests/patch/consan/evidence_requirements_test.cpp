@@ -112,6 +112,15 @@ public:
     intent.position = kind == ConSanProbeIntentKind::AtomicAddressCapture
                           ? ConSanProbePosition::Before
                           : ConSanProbePosition::After;
+    if (kind == ConSanProbeIntentKind::AtomicAddressCapture) {
+      ConSanAtomicLoweringForm &form = intent.atomic_lowering_form.emplace();
+      form.kind = ConSanAtomicLoweringFormKind::GlobalVectorAddress;
+      form.instruction_size = 8;
+      form.value_width_bits = 32;
+      form.value_register_count = 1;
+      form.data_register_count = 1;
+      form.address_vgpr_count = 2;
+    }
     if (associated)
       intent.synchronization_association = {"evidence-sequence-" + std::to_string(intent.id.value)};
     for (size_t ordinal = 0; ordinal < semantic_count; ++ordinal) {
