@@ -109,11 +109,11 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   if (!sampled_scope)
     return reject(Reason::UnsupportedQualifiedScope);
   semantics.scope = *sampled_scope;
-  if (sequence->width_bits == 0 || sequence->width_bits % 8u != 0 ||
-      sequence->width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
+  if (plan.site.width_bits == 0 || plan.site.width_bits % 8u != 0 ||
+      plan.site.width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
     return reject(Reason::UnsupportedQualifiedByteRange);
   }
-  semantics.byte_count = sequence->width_bits / 8u;
+  semantics.byte_count = plan.site.width_bits / 8u;
   switch (sequence->rmw_outcome) {
   case ConSanSyncRmwOutcome::NoReturn:
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwNoReturn;

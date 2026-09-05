@@ -307,8 +307,6 @@ classify_atomic_semantics(const ConSanSyncEvent &event, const SequenceMembership
   if (!consan_memory_scope_is_supported(*semantic_scope) ||
       *semantic_scope == ConSanMemoryScope::Wavefront)
     return ConSanAtomicPolicyReason::UnsupportedScope;
-  if (sequence->width_bits == 0u || sequence->width_bits % 8u != 0u)
-    return ConSanAtomicPolicyReason::InvalidAccessWidth;
   if (event.kind == ConSanSyncEventKind::Atomic &&
       dynamic_requirement(event) == ConSanDynamicResultRequirement::Count) {
     return ConSanAtomicPolicyReason::UnsupportedDynamicOutcome;

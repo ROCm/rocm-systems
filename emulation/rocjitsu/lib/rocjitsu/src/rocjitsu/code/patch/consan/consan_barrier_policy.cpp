@@ -41,18 +41,15 @@ namespace {
          std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.begin_text_offset,
                   lhs.end_text_offset, lhs.basic_block_index, lhs.in_cyclic_cfg_component,
-                  lhs.inside_scalar_clause, lhs.width_bits, lhs.static_byte_offset, lhs.scope,
-                  lhs.barrier_id, lhs.barrier_operand_source, lhs.barrier_raw_operand_selector,
-                  lhs.barrier_literal_width_bits, lhs.barrier_literal_value, lhs.barrier_raw_simm16,
-                  lhs.barrier_scope, lhs.participant_count, lhs.participant_mask) ==
+                  lhs.inside_scalar_clause, lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
+                  lhs.barrier_raw_simm16, lhs.barrier_scope, lhs.participant_count,
+                  lhs.participant_mask) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                       rhs.confidence, rhs.memory_role_confidence, rhs.begin_text_offset,
                       rhs.end_text_offset, rhs.basic_block_index, rhs.in_cyclic_cfg_component,
-                      rhs.inside_scalar_clause, rhs.width_bits, rhs.static_byte_offset, rhs.scope,
-                      rhs.barrier_id, rhs.barrier_operand_source, rhs.barrier_raw_operand_selector,
-                      rhs.barrier_literal_width_bits, rhs.barrier_literal_value,
-                      rhs.barrier_raw_simm16, rhs.barrier_scope, rhs.participant_count,
-                      rhs.participant_mask);
+                      rhs.inside_scalar_clause, rhs.scope, rhs.barrier_id,
+                      rhs.barrier_operand_source, rhs.barrier_raw_simm16, rhs.barrier_scope,
+                      rhs.participant_count, rhs.participant_mask);
 }
 
 [[nodiscard]] std::vector<std::string>

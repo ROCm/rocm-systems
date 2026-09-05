@@ -311,15 +311,10 @@ struct ConSanSyncSequence {
   /// selection names exposed by the existing fault-control surface.
   std::vector<SemanticSiteId> member_semantic_ids;
   std::vector<std::string> member_event_identities;
-  uint32_t width_bits = 0;
-  std::optional<int64_t> static_byte_offset;
   std::optional<ConSanMemoryScope> scope;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;
-  std::optional<uint32_t> barrier_raw_operand_selector;
-  std::optional<uint32_t> barrier_literal_width_bits;
-  std::optional<uint64_t> barrier_literal_value;
   std::optional<uint16_t> barrier_raw_simm16;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
   std::optional<uint32_t> participant_count;

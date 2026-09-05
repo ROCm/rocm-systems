@@ -306,168 +306,144 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     events.push_back(std::move(event));
   };
 
-  uint32_t barrier_occurrence = 0;
+  std::array<uint32_t, 4> occurrences{};
   for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
     const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
-    const ConSanBarrierSite *site_ptr = decoded.get_if<ConSanBarrierSite>();
-    if (decoded.container != container_ref || site_ptr == nullptr)
+    if (decoded.container != container_ref)
       continue;
-    const ConSanBarrierSite &site = *site_ptr;
+
     ConSanSyncEvent event;
-    event.kind = ConSanSyncEventKind::Barrier;
-    event.address_source = ConSanSyncAddressSource::NotApplicable;
-    event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-    const bool lifecycle_operation = site.operation == ConSanBarrierSite::Operation::Init ||
-                                     site.operation == ConSanBarrierSite::Operation::Join ||
-                                     site.operation == ConSanBarrierSite::Operation::Leave ||
-                                     site.operation == ConSanBarrierSite::Operation::Wakeup ||
-                                     site.operation == ConSanBarrierSite::Operation::StateQuery;
-    if (lifecycle_operation) {
-      event.confidence = ConSanSemanticConfidence::Unsupported;
-      event.confidence_reason =
-          "barrier lifecycle operation is inventoried but participant semantics are unavailable";
-    } else if ((site.operand_source == ConSanBarrierSite::OperandSource::Immediate ||
-                site.operand_source == ConSanBarrierSite::OperandSource::Literal32) &&
-               site.barrier_id && site.scope != ConSanBarrierSite::Scope::Unknown) {
+    std::string_view event_kind;
+    size_t occurrence_kind = 0;
+    if (const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>()) {
+      event.kind = ConSanSyncEventKind::Barrier;
+      event.address_source = ConSanSyncAddressSource::NotApplicable;
+      event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
+      const bool lifecycle_operation = site->operation == ConSanBarrierSite::Operation::Init ||
+                                       site->operation == ConSanBarrierSite::Operation::Join ||
+                                       site->operation == ConSanBarrierSite::Operation::Leave ||
+                                       site->operation == ConSanBarrierSite::Operation::Wakeup ||
+                                       site->operation == ConSanBarrierSite::Operation::StateQuery;
+      if (lifecycle_operation) {
+        event.confidence = ConSanSemanticConfidence::Unsupported;
+        event.confidence_reason =
+            "barrier lifecycle operation is inventoried but participant semantics are unavailable";
+      } else if ((site->operand_source == ConSanBarrierSite::OperandSource::Immediate ||
+                  site->operand_source == ConSanBarrierSite::OperandSource::Literal32) &&
+                 site->barrier_id && site->scope != ConSanBarrierSite::Scope::Unknown) {
+        event.confidence = ConSanSemanticConfidence::Conservative;
+        event.confidence_reason =
+            "barrier ID and scope are decoded but participant set is unavailable";
+      } else if (site->operand_source == ConSanBarrierSite::OperandSource::DynamicM0) {
+        event.confidence = ConSanSemanticConfidence::Unsupported;
+        event.confidence_reason = "dynamic M0 barrier ID and participant state are unavailable";
+      } else {
+        event.confidence = ConSanSemanticConfidence::Unsupported;
+        event.confidence_reason = "barrier ID or scope is not a supported decoded form";
+      }
+      switch (site->operation) {
+      case ConSanBarrierSite::Operation::Signal:
+        event.operation = ConSanSyncOperation::BarrierSignal;
+        event.memory_role = ConSanSyncMemoryRole::Release;
+        event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+        break;
+      case ConSanBarrierSite::Operation::Wait:
+        event.operation = ConSanSyncOperation::BarrierWait;
+        event.memory_role = ConSanSyncMemoryRole::Acquire;
+        event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+        break;
+      case ConSanBarrierSite::Operation::Full:
+        event.operation = ConSanSyncOperation::BarrierFull;
+        event.memory_role = ConSanSyncMemoryRole::AcquireRelease;
+        event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+        break;
+      case ConSanBarrierSite::Operation::Init:
+        event.operation = ConSanSyncOperation::BarrierInit;
+        break;
+      case ConSanBarrierSite::Operation::Join:
+        event.operation = ConSanSyncOperation::BarrierJoin;
+        break;
+      case ConSanBarrierSite::Operation::Leave:
+        event.operation = ConSanSyncOperation::BarrierLeave;
+        break;
+      case ConSanBarrierSite::Operation::Wakeup:
+        event.operation = ConSanSyncOperation::BarrierWakeup;
+        break;
+      case ConSanBarrierSite::Operation::StateQuery:
+        event.operation = ConSanSyncOperation::BarrierStateQuery;
+        break;
+      case ConSanBarrierSite::Operation::Unknown:
+        event.operation = ConSanSyncOperation::Unknown;
+        break;
+      }
+      if (lifecycle_operation || site->operation == ConSanBarrierSite::Operation::Unknown) {
+        event.memory_role = ConSanSyncMemoryRole::Unknown;
+        event.memory_role_confidence = ConSanSemanticConfidence::Unsupported;
+      }
+      event_kind = "barrier";
+      occurrence_kind = 0;
+    } else if (decoded.get_if<ConSanFenceSite>() != nullptr) {
+      event.kind = ConSanSyncEventKind::Fence;
+      event.operation = ConSanSyncOperation::Fence;
+      event.address_source = ConSanSyncAddressSource::NotApplicable;
+      event.memory_role = ConSanSyncMemoryRole::Unknown;
+      event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
       event.confidence = ConSanSemanticConfidence::Conservative;
       event.confidence_reason =
-          "barrier ID and scope are decoded but participant set is unavailable";
-    } else if (site.operand_source == ConSanBarrierSite::OperandSource::DynamicM0) {
-      event.confidence = ConSanSemanticConfidence::Unsupported;
-      event.confidence_reason = "dynamic M0 barrier ID and participant state are unavailable";
-    } else {
-      event.confidence = ConSanSemanticConfidence::Unsupported;
-      event.confidence_reason = "barrier ID or scope is not a supported decoded form";
-    }
-    switch (site.operation) {
-    case ConSanBarrierSite::Operation::Signal:
-      event.operation = ConSanSyncOperation::BarrierSignal;
-      event.memory_role = ConSanSyncMemoryRole::Release;
-      event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
-      break;
-    case ConSanBarrierSite::Operation::Wait:
-      event.operation = ConSanSyncOperation::BarrierWait;
-      event.memory_role = ConSanSyncMemoryRole::Acquire;
-      event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
-      break;
-    case ConSanBarrierSite::Operation::Full:
-      event.operation = ConSanSyncOperation::BarrierFull;
-      event.memory_role = ConSanSyncMemoryRole::AcquireRelease;
-      event.memory_role_confidence = ConSanSemanticConfidence::Conservative;
-      break;
-    case ConSanBarrierSite::Operation::Init:
-      event.operation = ConSanSyncOperation::BarrierInit;
-      break;
-    case ConSanBarrierSite::Operation::Join:
-      event.operation = ConSanSyncOperation::BarrierJoin;
-      break;
-    case ConSanBarrierSite::Operation::Leave:
-      event.operation = ConSanSyncOperation::BarrierLeave;
-      break;
-    case ConSanBarrierSite::Operation::Wakeup:
-      event.operation = ConSanSyncOperation::BarrierWakeup;
-      break;
-    case ConSanBarrierSite::Operation::StateQuery:
-      event.operation = ConSanSyncOperation::BarrierStateQuery;
-      break;
-    case ConSanBarrierSite::Operation::Unknown:
-      event.operation = ConSanSyncOperation::Unknown;
-      break;
-    }
-    if (lifecycle_operation || site.operation == ConSanBarrierSite::Operation::Unknown) {
+          "cache operation is decoded but its high-level memory role requires "
+          "sequence association";
+      event_kind = "fence";
+      occurrence_kind = 1;
+    } else if (const ConSanOrdinaryMemorySite *site = decoded.get_if<ConSanOrdinaryMemorySite>()) {
+      if (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+          site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)
+        continue;
+      event.kind = ConSanSyncEventKind::OrdinaryMemory;
+      event.operation = site->operation == ConSanOrdinaryMemoryOperation::Load
+                            ? ConSanSyncOperation::OrdinaryLoad
+                            : ConSanSyncOperation::OrdinaryStore;
+      event.address_source =
+          site->mnemonic.starts_with("global_")
+              ? ConSanSyncAddressSource::GlobalScalarVector
+              : (site->mnemonic.starts_with("buffer_") ? ConSanSyncAddressSource::BufferResource
+                                                       : ConSanSyncAddressSource::FlatVector);
       event.memory_role = ConSanSyncMemoryRole::Unknown;
-      event.memory_role_confidence = ConSanSemanticConfidence::Unsupported;
-    }
-    finish_event(event, "barrier", barrier_occurrence++,
-                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
-  }
-
-  uint32_t fence_occurrence = 0;
-  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
-    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
-    const ConSanFenceSite *site_ptr = decoded.get_if<ConSanFenceSite>();
-    if (decoded.container != container_ref || site_ptr == nullptr)
-      continue;
-    ConSanSyncEvent event;
-    event.kind = ConSanSyncEventKind::Fence;
-    event.operation = ConSanSyncOperation::Fence;
-    event.address_source = ConSanSyncAddressSource::NotApplicable;
-    event.memory_role = ConSanSyncMemoryRole::Unknown;
-    event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-    event.confidence = ConSanSemanticConfidence::Conservative;
-    event.confidence_reason =
-        "cache operation is decoded but its high-level memory role requires sequence association";
-    finish_event(event, "fence", fence_occurrence++,
-                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
-  }
-
-  uint32_t ordinary_memory_occurrence = 0;
-  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
-    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
-    const ConSanOrdinaryMemorySite *site_ptr = decoded.get_if<ConSanOrdinaryMemorySite>();
-    if (decoded.container != container_ref || site_ptr == nullptr)
-      continue;
-    const ConSanOrdinaryMemorySite &site = *site_ptr;
-    // Unsupported ordinary-memory records remain available through the fault
-    // inventory, but cannot become synchronization events or sequences.
-    if (site.support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
-        site.support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)
-      continue;
-    ConSanSyncEvent event;
-    event.kind = ConSanSyncEventKind::OrdinaryMemory;
-    event.operation = site.operation == ConSanOrdinaryMemoryOperation::Load
-                          ? ConSanSyncOperation::OrdinaryLoad
-                          : ConSanSyncOperation::OrdinaryStore;
-    event.address_source =
-        site.mnemonic.starts_with("global_")
-            ? ConSanSyncAddressSource::GlobalScalarVector
-            : (site.mnemonic.starts_with("buffer_") ? ConSanSyncAddressSource::BufferResource
-                                                    : ConSanSyncAddressSource::FlatVector);
-    event.memory_role = ConSanSyncMemoryRole::Unknown;
-    event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-    event.confidence = ConSanSemanticConfidence::Conservative;
-    event.confidence_reason = "bounded ordinary-memory encoding is decoded; ordering requires "
-                              "same-block cache-sequence association";
-    event.scope = site.scope;
-    finish_event(event, "ordinary-memory", ordinary_memory_occurrence++,
-                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
-  }
-
-  uint32_t atomic_occurrence = 0;
-  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
-    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
-    const ConSanAtomicSite *site_ptr = decoded.get_if<ConSanAtomicSite>();
-    if (decoded.container != container_ref || site_ptr == nullptr)
-      continue;
-    const ConSanAtomicSite &site = *site_ptr;
-    ConSanSyncEvent event;
-    event.kind = ConSanSyncEventKind::Atomic;
-    const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
-    event.operation = is_compare_exchange ? ConSanSyncOperation::AtomicCompareExchange
-                                          : ConSanSyncOperation::AtomicRmw;
-    event.address_source = sync_address_source(site.address_space_hint);
-    event.memory_role = ConSanSyncMemoryRole::Unknown;
-    if (is_compare_exchange) {
-      event.rmw_outcome = ConSanSyncRmwOutcome::CompareExchange;
-    } else if (site.returns_old_value) {
-      event.rmw_outcome = *site.returns_old_value ? ConSanSyncRmwOutcome::ReturnsOldValue
-                                                  : ConSanSyncRmwOutcome::NoReturn;
+      event.rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
+      event.confidence = ConSanSemanticConfidence::Conservative;
+      event.confidence_reason = "bounded ordinary-memory encoding is decoded; ordering requires "
+                                "same-block cache-sequence association";
+      event.scope = site->scope;
+      event_kind = "ordinary-memory";
+      occurrence_kind = 2;
+    } else if (const ConSanAtomicSite *site = decoded.get_if<ConSanAtomicSite>()) {
+      event.kind = ConSanSyncEventKind::Atomic;
+      const bool is_compare_exchange = consan_atomic_is_compare_exchange(*site);
+      event.operation = is_compare_exchange ? ConSanSyncOperation::AtomicCompareExchange
+                                            : ConSanSyncOperation::AtomicRmw;
+      event.address_source = sync_address_source(site->address_space_hint);
+      event.memory_role = ConSanSyncMemoryRole::Unknown;
+      if (is_compare_exchange) {
+        event.rmw_outcome = ConSanSyncRmwOutcome::CompareExchange;
+      } else if (site->returns_old_value) {
+        event.rmw_outcome = *site->returns_old_value ? ConSanSyncRmwOutcome::ReturnsOldValue
+                                                     : ConSanSyncRmwOutcome::NoReturn;
+      } else {
+        event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
+      }
+      classify_atomic_sync_confidence(*site, event);
+      const bool implicit_workgroup_scope =
+          site->address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup ||
+          (site->mnemonic.starts_with("ds_") &&
+           consan_arch_supports_capability_form(arch, ConSanCapabilityForm::OrderedLdsAtomic));
+      event.scope =
+          implicit_workgroup_scope ? std::optional{ConSanMemoryScope::Workgroup} : site->scope;
+      event_kind = "atomic";
+      occurrence_kind = 3;
     } else {
-      event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
+      continue;
     }
-    classify_atomic_sync_confidence(site, event);
-    // Some target-native encodings omit a field whose semantic value follows
-    // from the address space. Publish that normalized fact in the graph once,
-    // so policy and every engine consume the same scope instead of repairing
-    // raw decoder output independently.
-    const bool implicit_workgroup_scope =
-        site.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup ||
-        (site.mnemonic.starts_with("ds_") &&
-         consan_arch_supports_capability_form(arch, ConSanCapabilityForm::OrderedLdsAtomic));
-    event.scope =
-        implicit_workgroup_scope ? std::optional{ConSanMemoryScope::Workgroup} : site.scope;
-    finish_event(event, "atomic", atomic_occurrence++,
-                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
+    finish_event(event, event_kind, occurrences[occurrence_kind]++,
+                 {static_cast<uint32_t>(decoded_index)});
   }
 
   std::stable_sort(events.begin() + static_cast<std::ptrdiff_t>(container_begin), events.end(),
@@ -646,18 +622,9 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.member_semantic_ids.push_back(std::move(member_id));
     sequence.member_event_identities.push_back(event.identity);
     sequence.scope = event.scope;
-    if (const ConSanOrdinaryMemorySite *site = source.get_if<ConSanOrdinaryMemorySite>()) {
-      sequence.width_bits = site->width_bits;
-      sequence.static_byte_offset = site->raw_ioffset;
-    } else if (const ConSanAtomicSite *site = source.get_if<ConSanAtomicSite>()) {
-      sequence.width_bits = site->width_bits;
-      sequence.static_byte_offset = site->raw_ioffset;
-    } else if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
+    if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
       sequence.barrier_id = site->barrier_id;
       sequence.barrier_operand_source = site->operand_source;
-      sequence.barrier_raw_operand_selector = site->raw_operand_selector;
-      sequence.barrier_literal_width_bits = site->literal_width_bits;
-      sequence.barrier_literal_value = site->literal_value;
       sequence.barrier_raw_simm16 = site->raw_simm16;
       sequence.barrier_scope = site->scope;
       sequence.participant_count = site->participant_count;

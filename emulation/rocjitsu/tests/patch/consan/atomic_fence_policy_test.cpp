@@ -188,7 +188,6 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   sequence.member_semantic_ids.push_back(member);
   sequence.member_event_identities.push_back(event.identity);
-  sequence.width_bits = event.kind == ConSanSyncEventKind::Fence ? 0u : 32u;
   sequence.scope = event.scope;
   sequence.execution_owners = event.execution_owners;
   return sequence;
@@ -566,10 +565,6 @@ TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTyped
        ConSanAtomicPolicyReason::MissingScope},
       {"scope", [](auto &, auto &sequence) { sequence.scope = ConSanMemoryScope::Wavefront; },
        ConSanAtomicPolicyReason::UnsupportedScope},
-      {"width-zero", [](auto &, auto &sequence) { sequence.width_bits = 0; },
-       ConSanAtomicPolicyReason::InvalidAccessWidth},
-      {"width-bits", [](auto &, auto &sequence) { sequence.width_bits = 31; },
-       ConSanAtomicPolicyReason::InvalidAccessWidth},
       {"outcome",
        [](auto &event, auto &sequence) {
          event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
@@ -617,7 +612,9 @@ TEST(ConSanAtomicFencePolicy, EncodingAndOperandFailuresRemainPolicyNotLoweringF
   const std::vector<std::tuple<std::string_view, Mutation, ConSanAtomicPolicyReason>> cases = {
       {"address-source", [](auto &site) { site.mnemonic = "buffer_atomic_add_u32"; },
        ConSanAtomicPolicyReason::UnsupportedAddressSource},
-      {"width", [](auto &site) { site.width_bits = 64; },
+      {"width-zero", [](auto &site) { site.width_bits = 0; },
+       ConSanAtomicPolicyReason::InvalidAccessWidth},
+      {"width-bits", [](auto &site) { site.width_bits = 31; },
        ConSanAtomicPolicyReason::InvalidAccessWidth},
       {"size", [](auto &site) { site.size = 4; }, ConSanAtomicPolicyReason::UnsupportedEncoding},
       {"offset", [](auto &site) { site.raw_ioffset.reset(); },
