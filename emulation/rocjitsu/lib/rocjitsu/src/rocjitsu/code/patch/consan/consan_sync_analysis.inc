@@ -625,7 +625,6 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
       sequence.barrier_id = site->barrier_id;
       sequence.barrier_operand_source = site->operand_source;
-      sequence.barrier_raw_simm16 = site->raw_simm16;
       sequence.barrier_scope = site->scope;
       sequence.participant_count = site->participant_count;
       sequence.participant_mask = site->participant_mask;
@@ -918,7 +917,11 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
   sync_sequences = std::move(associated);
 }
 
-void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView inventory) {
+[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
+                                                          const ConSanSyncSequence &sequence);
+
+void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView inventory,
+                                             const SyncEventSemanticIndex &events) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &groups = inventory.barrier_lifecycle_groups;
   groups.clear();
@@ -1029,8 +1032,13 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     // defines it as dropping the last named barrier joined by this thread.
     // Therefore the matching static join, rather than the fixed encoding,
     // supplies the leave association for this lifecycle.
-    if (leave.end_text_offset - leave.begin_text_offset != sizeof(uint32_t) ||
-        leave.barrier_raw_simm16 != 0u) {
+    const ConSanSyncEvent *leave_event = first_sequence_event(events, leave);
+    const ConSanDecodedProgramSite *leave_decoded =
+        leave_event == nullptr ? nullptr : source_site(inventory.decoded_sites, *leave_event);
+    const ConSanBarrierSite *leave_source =
+        leave_decoded == nullptr ? nullptr : leave_decoded->get_if<ConSanBarrierSite>();
+    if (leave_source == nullptr || leave_source->size != sizeof(uint32_t) ||
+        leave_source->raw_simm16 != 0u) {
       group.issue = ConSanBarrierLifecycleIssue::InvalidLeaveEncoding;
       groups.push_back(std::move(group));
       continue;
@@ -1039,9 +1047,6 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     groups.push_back(std::move(group));
   }
 }
-
-[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
-                                                          const ConSanSyncSequence &sequence);
 
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -2636,7 +2641,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
       synchronization_inventory);
   associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
                                   result.program_inventory);
-  build_barrier_lifecycle_group_inventory(synchronization_inventory);
+  build_barrier_lifecycle_group_inventory(synchronization_inventory, sync_events);
   if (options.fault_move_barrier) {
     build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
                                              synchronization_inventory.sync_sequences, result);

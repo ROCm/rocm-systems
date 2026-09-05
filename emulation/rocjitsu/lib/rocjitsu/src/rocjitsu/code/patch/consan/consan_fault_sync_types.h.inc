@@ -315,7 +315,6 @@ struct ConSanSyncSequence {
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;
-  std::optional<uint16_t> barrier_raw_simm16;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
   std::optional<uint32_t> participant_count;
   std::optional<uint64_t> participant_mask;

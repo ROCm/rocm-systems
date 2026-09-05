@@ -42,14 +42,13 @@ namespace {
                   lhs.confidence, lhs.memory_role_confidence, lhs.begin_text_offset,
                   lhs.end_text_offset, lhs.basic_block_index, lhs.in_cyclic_cfg_component,
                   lhs.inside_scalar_clause, lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
-                  lhs.barrier_raw_simm16, lhs.barrier_scope, lhs.participant_count,
-                  lhs.participant_mask) ==
+                  lhs.barrier_scope, lhs.participant_count, lhs.participant_mask) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                       rhs.confidence, rhs.memory_role_confidence, rhs.begin_text_offset,
                       rhs.end_text_offset, rhs.basic_block_index, rhs.in_cyclic_cfg_component,
                       rhs.inside_scalar_clause, rhs.scope, rhs.barrier_id,
-                      rhs.barrier_operand_source, rhs.barrier_raw_simm16, rhs.barrier_scope,
-                      rhs.participant_count, rhs.participant_mask);
+                      rhs.barrier_operand_source, rhs.barrier_scope, rhs.participant_count,
+                      rhs.participant_mask);
 }
 
 [[nodiscard]] std::vector<std::string>
