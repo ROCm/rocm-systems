@@ -50,6 +50,7 @@ __device__ __forceinline__ bool ginAlltoAllFabricLLEligible(struct ncclDevComm c
   if (perChunkBytes % 16 != 0) return false;
   if (perChunkBytes * 2 > kDdaLLMaxBytes) return false;
   if (ddaLLA2AScratchSize(devComm.nRanks) > devComm.ginFabricScratchBytes) return false;
+  // Total-size gate (RCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL, else RCCL_DDA_LL_THRESHOLD).
   if (devComm.ginFabricLLThreshold > 0 &&
       (size_t)devComm.nRanks * perChunkBytes > devComm.ginFabricLLThreshold) {
     return false;
