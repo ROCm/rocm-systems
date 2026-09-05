@@ -93,13 +93,6 @@ enum class ConSanCapabilityForm : uint8_t {
   Count,
 };
 
-/// Identifies the architectural product lineage to which a supported target
-/// belongs.
-enum class ConSanArchitectureFamily : uint8_t {
-  Cdna,
-  Rdna,
-};
-
 /// Describes how accumulator registers participate in a kernel's physical
 /// vector-register allocation.
 ///
@@ -410,7 +403,6 @@ enum class ConSanCapabilityDisposition : uint8_t {
 struct ConSanTargetProfile {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
-  ConSanArchitectureFamily architecture_family = ConSanArchitectureFamily::Cdna;
   ConSanAccumulatorModel accumulator_model = ConSanAccumulatorModel::None;
   ConSanScalarPlacementModel scalar_placement_model = ConSanScalarPlacementModel::Unsupported;
   /// Target-owned decoder facet. Keeping this registration beside the target
@@ -702,22 +694,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
 
 [[nodiscard]] constexpr bool consan_is_capability_arch(rj_code_arch_t arch) {
   return consan_target_profile(arch) != nullptr;
-}
-
-/// Return whether an admitted target uses the compute-oriented CDNA execution
-/// architecture.
-[[nodiscard]] constexpr bool consan_arch_is_cdna(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->architecture_family == ConSanArchitectureFamily::Cdna;
-}
-
-/// Return whether an admitted target uses the graphics-oriented RDNA
-/// execution architecture. Callers use this target fact for execution-model
-/// choices that apply across encoding generations; they must not enumerate the
-/// currently supported RDNA products.
-[[nodiscard]] constexpr bool consan_arch_is_rdna(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->architecture_family == ConSanArchitectureFamily::Rdna;
 }
 
 /// Return whether a target can recover system-SGPR payload that overflows the

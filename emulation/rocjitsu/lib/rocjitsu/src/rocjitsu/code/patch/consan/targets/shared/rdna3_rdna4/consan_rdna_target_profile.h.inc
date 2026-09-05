@@ -4,7 +4,6 @@
 /// Target-profile facts shared by RDNA3 and RDNA4.
 [[nodiscard]] constexpr ConSanTargetProfile consan_rdna_target_profile_defaults() {
   ConSanTargetProfile profile;
-  profile.architecture_family = ConSanArchitectureFamily::Rdna;
   profile.dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral;
   profile.resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10};
   profile.moi_dispatch_identity_placement =

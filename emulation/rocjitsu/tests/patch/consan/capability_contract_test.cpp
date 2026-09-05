@@ -26,7 +26,6 @@ namespace {
 struct ExpectedTargetProfile {
   rj_code_target_id_t target;
   rj_code_arch_t arch;
-  ConSanArchitectureFamily architecture_family;
   ConSanAccumulatorModel accumulator_model;
   ConSanScalarPlacementModel scalar_placement_model;
   ConSanDispatchIdentitySource dispatch_identity;
@@ -78,7 +77,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
     {
         .target = ROCJITSU_CODE_TARGET_GFX942,
         .arch = ROCJITSU_CODE_ARCH_CDNA3,
-        .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
@@ -156,7 +154,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
     {
         .target = ROCJITSU_CODE_TARGET_GFX950,
         .arch = ROCJITSU_CODE_ARCH_CDNA4,
-        .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
@@ -234,7 +231,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
     {
         .target = ROCJITSU_CODE_TARGET_GFX1100,
         .arch = ROCJITSU_CODE_ARCH_RDNA3,
-        .architecture_family = ConSanArchitectureFamily::Rdna,
         .accumulator_model = ConSanAccumulatorModel::None,
         .scalar_placement_model = ConSanScalarPlacementModel::LivenessOnly,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
@@ -305,7 +301,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
     {
         .target = ROCJITSU_CODE_TARGET_GFX1201,
         .arch = ROCJITSU_CODE_ARCH_RDNA4,
-        .architecture_family = ConSanArchitectureFamily::Rdna,
         .accumulator_model = ConSanAccumulatorModel::None,
         .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
@@ -389,7 +384,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
     {
         .target = ROCJITSU_CODE_TARGET_GFX1250,
         .arch = ROCJITSU_CODE_ARCH_CDNA5,
-        .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
         .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
@@ -480,7 +474,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
                             const ExpectedTargetProfile &expected) {
   EXPECT_EQ(actual.target, expected.target);
   EXPECT_EQ(actual.arch, expected.arch);
-  EXPECT_EQ(actual.architecture_family, expected.architecture_family);
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
   EXPECT_EQ(actual.scalar_placement_model, expected.scalar_placement_model);
   EXPECT_EQ(actual.dispatch_identity, expected.dispatch_identity);
@@ -732,10 +725,6 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
     EXPECT_EQ(consan_target_profile(expected.arch), &profile);
     EXPECT_EQ(consan_arch_for_target(expected.target), expected.arch);
     EXPECT_TRUE(consan_is_capability_arch(expected.arch));
-    EXPECT_EQ(consan_arch_is_cdna(expected.arch),
-              expected.architecture_family == ConSanArchitectureFamily::Cdna);
-    EXPECT_EQ(consan_arch_is_rdna(expected.arch),
-              expected.architecture_family == ConSanArchitectureFamily::Rdna);
     EXPECT_EQ(consan_arch_supports_kernarg_preload_overflow_recovery(expected.arch),
               expected.supports_kernarg_preload_overflow_recovery);
     for (size_t other = index + 1; other < kConSanTargetProfiles.size(); ++other) {
@@ -761,7 +750,6 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
   for (rj_code_arch_t arch : unsupported_arches) {
     EXPECT_EQ(consan_target_profile(arch), nullptr);
     EXPECT_FALSE(consan_is_capability_arch(arch));
-    EXPECT_FALSE(consan_arch_is_cdna(arch));
     EXPECT_FALSE(consan_arch_supports_kernarg_preload_overflow_recovery(arch));
   }
 }
@@ -883,8 +871,6 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   EXPECT_FALSE(consan_arch_is_rdna4_or_cdna5(unsupported));
   EXPECT_FALSE(consan_arch_is_cdna5(unsupported));
   EXPECT_FALSE(consan_arch_is_rdna3_rdna4_or_cdna5(unsupported));
-  EXPECT_FALSE(consan_arch_is_cdna(unsupported));
-  EXPECT_FALSE(consan_arch_is_rdna(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));
   EXPECT_FALSE(consan_arch_uses_per_kernel_owner_translation(unsupported));
   EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));
