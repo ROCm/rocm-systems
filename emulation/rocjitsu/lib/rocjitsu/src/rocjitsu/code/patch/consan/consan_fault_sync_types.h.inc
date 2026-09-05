@@ -72,17 +72,13 @@ struct ConSanExecutionOwner {
 /// Completed analysis products inherit this value and add only application-
 /// private identity and operands. Runtime diagnostics copy this facet without
 /// maintaining a second field-by-field schema.
-struct ConSanFaultSitePresentation {
+struct ConSanFaultSitePresentation : ConSanDecodedSite {
   ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
   uint32_t occurrence = 0;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
   uint32_t width_bits = 0;
-  std::string mnemonic;
   std::string semantic_role;
   std::string decoded_operands;
   ConSanOrdinaryMemorySupportReason ordinary_memory_support_reason =
@@ -152,15 +148,11 @@ consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue 
 ///
 /// Synchronization analysis adds the private code-object binding below;
 /// runtime diagnostics copy this facet directly and cannot apply a move.
-struct ConSanBarrierMoveDestinationPresentation {
+struct ConSanBarrierMoveDestinationPresentation : ConSanDecodedSite {
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
   uint32_t basic_block_index = 0;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  std::string mnemonic;
   bool memory_operation = false;
   ConSanBarrierMoveDestinationIssue issue = ConSanBarrierMoveDestinationIssue::None;
   /// Decoder/relocator detail attached only to `NotRelocatable`. The stable
