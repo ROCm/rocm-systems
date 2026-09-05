@@ -36,6 +36,7 @@ struct ExpectedTargetProfile {
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
+  ConSanVectorMemoryCapability vector_memory;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
   bool moi_access_reports_need_explicit_dispatch_identity;
   bool supports_wave32;
@@ -86,6 +87,15 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .vector_memory = {
+            .instruction_word_count = 2,
+            .immediate_offset_bits = 13,
+            .flat_vector_only_saddr = 0,
+            .global_vector_only_saddr = 0x7fu,
+            .supports_flat_scalar_base = false,
+            .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
+            .scale_offset = ConSanScaleOffsetCapability::Absent,
+        },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
@@ -134,6 +144,15 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .vector_memory = {
+            .instruction_word_count = 2,
+            .immediate_offset_bits = 13,
+            .flat_vector_only_saddr = 0,
+            .global_vector_only_saddr = 0x7fu,
+            .supports_flat_scalar_base = false,
+            .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
+            .scale_offset = ConSanScaleOffsetCapability::Absent,
+        },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
@@ -182,6 +201,15 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .vector_memory = {
+            .instruction_word_count = 2,
+            .immediate_offset_bits = 13,
+            .flat_vector_only_saddr = 0x7cu,
+            .global_vector_only_saddr = 0x7cu,
+            .supports_flat_scalar_base = false,
+            .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
+            .scale_offset = ConSanScaleOffsetCapability::Absent,
+        },
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
         .moi_access_reports_need_explicit_dispatch_identity = true,
@@ -240,6 +268,15 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .flat_and_global = true,
                 .buffer_resource = true,
             },
+        .vector_memory = {
+            .instruction_word_count = 3,
+            .immediate_offset_bits = 24,
+            .flat_vector_only_saddr = 0x7cu,
+            .global_vector_only_saddr = 0x7cu,
+            .supports_flat_scalar_base = true,
+            .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
+            .scale_offset = ConSanScaleOffsetCapability::Disabled,
+        },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
         .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = true,
@@ -299,6 +336,15 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .lds_byte_offset_token = true,
                 .scaled_vglobal = true,
             },
+        .vector_memory = {
+            .instruction_word_count = 3,
+            .immediate_offset_bits = 24,
+            .flat_vector_only_saddr = 0x7cu,
+            .global_vector_only_saddr = 0x7cu,
+            .supports_flat_scalar_base = true,
+            .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
+            .scale_offset = ConSanScaleOffsetCapability::Supported,
+        },
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
         .moi_access_reports_need_explicit_dispatch_identity = false,
@@ -348,6 +394,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.atomic_address_materialization, expected.atomic_address_materialization);
+  EXPECT_EQ(actual.vector_memory, expected.vector_memory);
   EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
   EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
             expected.moi_access_reports_need_explicit_dispatch_identity);
@@ -454,6 +501,18 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].max_group_segment_bytes = 0u; });
   expect_invalid("missing ordinary atomic address materialization", [](auto &profiles) {
     profiles[0].atomic_address_materialization.flat_and_global = false;
+  });
+  expect_invalid("unsupported vector-memory instruction width", [](auto &profiles) {
+    profiles[0].vector_memory.instruction_word_count = 4u;
+  });
+  expect_invalid("vector-memory word and offset models disagree", [](auto &profiles) {
+    profiles[0].vector_memory.immediate_offset_bits = 24u;
+  });
+  expect_invalid("vector-only scalar selector outside encoding", [](auto &profiles) {
+    profiles[0].vector_memory.global_vector_only_saddr = 128u;
+  });
+  expect_invalid("scale-offset capability on a two-word encoding", [](auto &profiles) {
+    profiles[0].vector_memory.scale_offset = ConSanScaleOffsetCapability::Supported;
   });
   expect_invalid("unsupported FLAT compare-swap data-pair alignment",
                  [](auto &profiles) { profiles[0].flat_compare_swap_data_pair_alignment = 4u; });

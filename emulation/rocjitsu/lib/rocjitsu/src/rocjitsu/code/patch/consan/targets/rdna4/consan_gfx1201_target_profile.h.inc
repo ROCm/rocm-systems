@@ -15,6 +15,10 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   profile.address_free_private_limit_bytes = 0x800000u;
   profile.atomic_address_materialization.flat_and_global = true;
   profile.atomic_address_materialization.buffer_resource = true;
+  profile.vector_memory.instruction_word_count = 3;
+  profile.vector_memory.immediate_offset_bits = 24;
+  profile.vector_memory.supports_flat_scalar_base = true;
+  profile.vector_memory.scale_offset = ConSanScaleOffsetCapability::Disabled;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral;
   profile.supports_sc_inline_flat_trap_rewrite = true;
   return profile;

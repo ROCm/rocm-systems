@@ -365,6 +365,11 @@ _consan_assert_no_match(
     "consan_arch_is_(cdna3_or_cdna4|rdna4_or_cdna5)"
     "common program inventory must consume target-normalized instruction semantics"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_atomic_classifier.cpp"
+    "consan_arch_is_|ROCJITSU_CODE_ARCH_"
+    "common atomic classification must consume the target-owned vector-memory model"
+)
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

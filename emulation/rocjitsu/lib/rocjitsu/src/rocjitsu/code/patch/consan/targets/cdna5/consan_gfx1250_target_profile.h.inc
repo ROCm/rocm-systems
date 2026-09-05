@@ -40,6 +40,15 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
       .lds_byte_offset_token = true,
       .scaled_vglobal = true,
   };
+  profile.vector_memory = {
+      .instruction_word_count = 3,
+      .immediate_offset_bits = 24,
+      .flat_vector_only_saddr = 0x7cu,
+      .global_vector_only_saddr = 0x7cu,
+      .supports_flat_scalar_base = true,
+      .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
+      .scale_offset = ConSanScaleOffsetCapability::Supported,
+  };
   profile.moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector;
   profile.moi_access_reports_need_explicit_dispatch_identity = false;

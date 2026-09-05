@@ -249,6 +249,39 @@ struct ConSanAtomicAddressMaterializationCapability {
   bool operator==(const ConSanAtomicAddressMaterializationCapability &) const = default;
 };
 
+/// How a scalar-plus-vector memory address extends its 32-bit vector offset
+/// before adding it to the scalar base.
+enum class ConSanVectorOffsetExtension : uint8_t {
+  Zero,
+  Sign,
+};
+
+/// Availability of the explicit vector-offset scaling bit in a target's
+/// normalized memory encoding. `Absent` targets do not encode the field;
+/// `Disabled` targets encode it but ConSan admits only zero; `Supported`
+/// targets admit either value.
+enum class ConSanScaleOffsetCapability : uint8_t {
+  Absent,
+  Disabled,
+  Supported,
+};
+
+/// Shared heuristic model for the vector-memory address encodings consumed by
+/// ConSan. This deliberately captures the small set of semantic dimensions
+/// needed by common classifiers instead of making them recover product sets.
+/// Exact bit extraction remains in target decoder owners.
+struct ConSanVectorMemoryCapability {
+  uint8_t instruction_word_count = 2;
+  uint8_t immediate_offset_bits = 13;
+  uint32_t flat_vector_only_saddr = 0;
+  uint32_t global_vector_only_saddr = 0x7fu;
+  bool supports_flat_scalar_base = false;
+  ConSanVectorOffsetExtension vector_offset_extension = ConSanVectorOffsetExtension::Zero;
+  ConSanScaleOffsetCapability scale_offset = ConSanScaleOffsetCapability::Absent;
+
+  bool operator==(const ConSanVectorMemoryCapability &) const = default;
+};
+
 /// Target-owned strategy for placing the dispatch identity consumed by MOI
 /// reports. The common solver owns register search; this contract selects the
 /// target-neutral search and lossless overflow representation without
@@ -317,6 +350,7 @@ struct ConSanTargetProfile {
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
+  ConSanVectorMemoryCapability vector_memory;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
   bool moi_access_reports_need_explicit_dispatch_identity = true;
@@ -498,6 +532,20 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         static_cast<uint8_t>(profile.code_transport) >
             static_cast<uint8_t>(ConSanCodeTransportModel::PerKernelOwnerTranslation) ||
         !profile.atomic_address_materialization.flat_and_global ||
+        (profile.vector_memory.instruction_word_count != 2u &&
+         profile.vector_memory.instruction_word_count != 3u) ||
+        (profile.vector_memory.immediate_offset_bits != 13u &&
+         profile.vector_memory.immediate_offset_bits != 24u) ||
+        (profile.vector_memory.instruction_word_count == 2u) !=
+            (profile.vector_memory.immediate_offset_bits == 13u) ||
+        profile.vector_memory.flat_vector_only_saddr > 127u ||
+        profile.vector_memory.global_vector_only_saddr > 127u ||
+        static_cast<uint8_t>(profile.vector_memory.vector_offset_extension) >
+            static_cast<uint8_t>(ConSanVectorOffsetExtension::Sign) ||
+        static_cast<uint8_t>(profile.vector_memory.scale_offset) >
+            static_cast<uint8_t>(ConSanScaleOffsetCapability::Supported) ||
+        (profile.vector_memory.instruction_word_count == 2u &&
+         profile.vector_memory.scale_offset != ConSanScaleOffsetCapability::Absent) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||

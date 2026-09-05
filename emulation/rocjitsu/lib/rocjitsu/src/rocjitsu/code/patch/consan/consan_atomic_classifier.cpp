@@ -90,9 +90,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (!target)
     return reject(Reason::TargetUnavailable);
-  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(arch);
-  const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(arch);
-  const bool cdna5 = consan_arch_is_cdna5(arch);
+  const ConSanVectorMemoryCapability &memory = target->vector_memory;
 
   const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
   const uint16_t value_register_count = static_cast<uint16_t>((site.width_bits + 31u) / 32u);
@@ -114,7 +112,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   };
 
   if (site.mnemonic.starts_with("ds_")) {
-    if (!cdna5)
+    if (!target->atomic_address_materialization.lds_byte_offset_token)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits != 32u)
       return reject(Reason::InvalidAccessWidth);
@@ -150,7 +148,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (!cdna5)
+    if (!target->atomic_address_materialization.buffer_resource)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(Reason::InvalidAccessWidth);
@@ -196,25 +194,21 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(Reason::InvalidAccessWidth);
 
-  const bool two_word_encoding = !rdna4_or_cdna5;
-  const uint32_t expected_size = two_word_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
+  const uint32_t expected_size = memory.instruction_word_count * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(Reason::UnsupportedEncoding);
-  if ((cdna5 && !site.raw_scale_offset) || (!cdna5 && site.raw_scale_offset.value_or(false)))
+  if ((memory.scale_offset == ConSanScaleOffsetCapability::Supported &&
+       !site.raw_scale_offset) ||
+      (memory.scale_offset != ConSanScaleOffsetCapability::Supported &&
+       site.raw_scale_offset.value_or(false)))
     return reject(Reason::UnsupportedEncoding);
   if (!site.address_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.address_vgpr)
     return reject(Reason::MissingOperands);
 
-  constexpr uint32_t kCdnaGlobalNoSaddr = 0x7fu;
-  constexpr uint32_t kRdna3NoSaddr = 0x7cu;
   const uint32_t vector_only_saddr =
-      legacy_cdna ? (global ? kCdnaGlobalNoSaddr : 0u) : kRdna3NoSaddr;
-  constexpr int32_t kSigned13Min = -(1 << 12);
-  constexpr int32_t kSigned13Max = (1 << 12) - 1;
-  constexpr int32_t kSigned24Min = -(1 << 23);
-  constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  const int32_t offset_min = two_word_encoding ? kSigned13Min : kSigned24Min;
-  const int32_t offset_max = two_word_encoding ? kSigned13Max : kSigned24Max;
+      flat ? memory.flat_vector_only_saddr : memory.global_vector_only_saddr;
+  const int32_t offset_min = -(1 << (memory.immediate_offset_bits - 1u));
+  const int32_t offset_max = (1 << (memory.immediate_offset_bits - 1u)) - 1;
 
   ConSanAtomicLoweringFormKind kind;
   uint16_t address_register_count;
@@ -230,7 +224,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
                 : ConSanAtomicLoweringFormKind::GlobalVectorAddress;
     address_register_count = 2u;
   } else {
-    if (!rdna4_or_cdna5 && flat)
+    if (!memory.supports_flat_scalar_base && flat)
       return reject(Reason::UnsupportedEncoding);
     if (!site.scalar_address_sgpr || *site.raw_saddr != *site.scalar_address_sgpr)
       return reject(Reason::UnsupportedInputWidth);
@@ -261,7 +255,8 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
       .scalar_offset_sgpr = std::nullopt,
       .signed_byte_offset = *site.raw_ioffset,
       .scale_vector_offset = site.raw_scale_offset.value_or(false),
-      .sign_extend_vector_offset = legacy_cdna,
+      .sign_extend_vector_offset =
+          memory.vector_offset_extension == ConSanVectorOffsetExtension::Sign,
       .is_rmw = is_rmw,
       .compare_exchange = compare_exchange,
       .returns_old_value = site.returns_old_value.value_or(false),

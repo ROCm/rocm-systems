@@ -15,6 +15,8 @@
   profile.ordinary_sgpr_limit = 106;
   profile.user_sgpr_initialization_limit = 16;
   profile.max_group_segment_bytes = 64u * 1024u;
+  profile.vector_memory.flat_vector_only_saddr = 0x7cu;
+  profile.vector_memory.global_vector_only_saddr = 0x7cu;
   profile.semantic_form_mask = kConSanCommonSemanticFormMask;
   profile.requires_raw_memory_order_qualifier = true;
   return profile;
