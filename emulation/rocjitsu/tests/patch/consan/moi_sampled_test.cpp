@@ -5995,13 +5995,12 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   sequence.barrier_id = -1;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
-  sequence.execution_owners.push_back({.descriptor_file_offset = 0x80});
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence, true));
 
   const auto rejects = [&](auto mutate) {
     ConSanSyncSequence candidate = sequence;
     mutate(candidate);
-    EXPECT_FALSE(consan_moi_sampled_qualifies_barrier_sequence(candidate));
+    EXPECT_FALSE(consan_moi_sampled_qualifies_barrier_sequence(candidate, true));
   };
   rejects([](auto &item) { item.operation = ConSanSyncOperation::BarrierSignal; });
   rejects([](auto &item) { item.operation = ConSanSyncOperation::BarrierWait; });
@@ -6012,21 +6011,20 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   rejects([](auto &item) { item.barrier_scope = ConSanBarrierSite::Scope::Unknown; });
   rejects([](auto &item) { item.confidence = ConSanSemanticConfidence::Ambiguous; });
   sequence.in_cyclic_cfg_component = true;
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence, true));
   sequence.in_cyclic_cfg_component = false;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Cluster;
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence, true));
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
   rejects([](auto &item) { item.inside_scalar_clause = true; });
-  rejects([](auto &item) { item.execution_owners.clear(); });
+  EXPECT_FALSE(consan_moi_sampled_qualifies_barrier_sequence(sequence, false));
   ConSanSyncSequence callable = sequence;
   callable.in_kernel = false;
-  callable.execution_owners.push_back({.descriptor_file_offset = 0x90});
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(callable));
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(callable, true));
   rejects([](auto &item) { item.member_event_ids.emplace_back(); });
 }
 
-TEST(ConSanMoi, SampledBarrierQualificationAcceptsInKernelSequenceWithSeveralProvenOwners) {
+TEST(ConSanMoi, SampledBarrierQualificationRequiresProofButNotUniqueOwnership) {
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
@@ -6041,12 +6039,7 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsInKernelSequenceWithSeveralPro
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
-  sequence.execution_owners = {
-      {.descriptor_file_offset = 0x80},
-      {.descriptor_file_offset = 0x90},
-  };
-
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence, true));
 }
 
 TEST(ConSanMoi, SampledBarrierSnapshotMustStartAtPairedSelectedEpoch) {

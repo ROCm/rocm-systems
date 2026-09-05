@@ -68,11 +68,7 @@ bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSi
          (!require_same_block ||
           load_sequence.basic_block_index == cache_sequence.basic_block_index) &&
          consan_nonempty_execution_owners_equal(load_decoded->execution_owners,
-                                                cache_decoded->execution_owners) &&
-         consan_nonempty_execution_owners_equal(load_sequence.execution_owners,
-                                                cache_sequence.execution_owners) &&
-         consan_nonempty_execution_owners_equal(load_decoded->execution_owners,
-                                                load_sequence.execution_owners);
+                                                cache_decoded->execution_owners);
 }
 
 bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSite> program_sites,
@@ -114,11 +110,7 @@ bool consan_ordinary_release_metadata_compatible(std::span<const ConSanProgramSi
          cache_sequence.basic_block_index &&
          cache_sequence.basic_block_index == store_sequence.basic_block_index &&
          consan_nonempty_execution_owners_equal(cache_decoded->execution_owners,
-                                                store_decoded->execution_owners) &&
-         consan_nonempty_execution_owners_equal(cache_sequence.execution_owners,
-                                                store_sequence.execution_owners) &&
-         consan_nonempty_execution_owners_equal(store_decoded->execution_owners,
-                                                store_sequence.execution_owners);
+                                                store_decoded->execution_owners);
 }
 
 } // namespace rocjitsu

@@ -248,7 +248,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
-  sequence.execution_owners.push_back({});
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events.push_back(std::move(event));
   synchronization.sync_sequences.push_back(std::move(sequence));

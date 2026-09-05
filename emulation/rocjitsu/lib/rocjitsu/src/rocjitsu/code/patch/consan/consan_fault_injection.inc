@@ -372,8 +372,11 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         primary != nullptr
             ? program_inventory.sync().find_unique_sequence_containing(primary->source_site)
             : nullptr;
+    const std::vector<ConSanExecutionOwner> sequence_owners =
+        sequence != nullptr ? sync.execution_owners(*sequence)
+                            : std::vector<ConSanExecutionOwner>{};
     if (primary == nullptr || sequence == nullptr ||
-        !owned_by_requested_kernel(sequence->execution_owners, selection, options) ||
+        !owned_by_requested_kernel(sequence_owners, selection, options) ||
         sequence->operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) ||

@@ -732,7 +732,8 @@ struct ConSanAtomicFencePolicyResult {
 /// the policy boundary because both pure admission and the temporary legacy
 /// lowerer must agree during incremental migration.
 [[nodiscard]] bool
-consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence);
+consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
+                                              bool owner_proven);
 
 /// Final mechanism state of one admitted probe intent.
 ///

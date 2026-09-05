@@ -1932,9 +1932,7 @@ void associate_ordinary_release_sync_sequences(
     if (store_source == nullptr || store_source->width_bits != 32u || !store->scope ||
         !consan_memory_scope_is_agent_or_system(*store->scope) ||
         store->confidence != ConSanSemanticConfidence::Conservative ||
-        store_decoded->execution_owners.empty() ||
-        !consan_execution_owners_equal(store_decoded->execution_owners,
-                                       sequence.execution_owners)) {
+        store_decoded->execution_owners.empty()) {
       continue;
     }
     const auto boundary = exact_release_wait_boundary(sequence, blocks, arch);
@@ -2251,24 +2249,6 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
   return owners == owners_by_block.end() ? std::vector<ConSanExecutionOwner>{} : owners->second;
 }
 
-[[nodiscard]] std::vector<ConSanExecutionOwner>
-intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
-                           std::span<const ConSanExecutionOwner> rhs) {
-  std::vector<ConSanExecutionOwner> intersection;
-  for (const ConSanExecutionOwner &left : lhs) {
-    const auto right = std::ranges::find(rhs, left.descriptor_file_offset,
-                                         &ConSanExecutionOwner::descriptor_file_offset);
-    if (right == rhs.end())
-      continue;
-    intersection.push_back(
-        {.descriptor_file_offset = left.descriptor_file_offset,
-         .proof = static_cast<uint8_t>(left.proof) >= static_cast<uint8_t>(right->proof)
-                      ? left.proof
-                      : right->proof});
-  }
-  return intersection;
-}
-
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                rj_code_arch_t arch,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
@@ -2325,31 +2305,6 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   for (ConSanProgramSite &site : inventory.program_sites)
     site.execution_owners = execution_owners_for_offset(owners_by_block, block_index,
                                                         site.physical_id.original_text_offset);
-
-  // A large aggregate code object can contain hundreds of thousands of sync
-  // events and sequences. Looking up every sequence member with a linear scan
-  // makes owner annotation quadratic in the sync inventory size.
-  const SynchronizationInventoryView sync_inventory = inventory.view();
-  for (ConSanSyncSequence &sequence : inventory.sync_sequences) {
-    bool first = true;
-    for (const ConSanSyncEventId identity : sequence.member_event_ids) {
-      const ConSanSyncEvent *event = sync_inventory.find_event(identity);
-      if (event == nullptr) {
-        sequence.execution_owners.clear();
-        first = false;
-        break;
-      }
-      if (first) {
-        sequence.execution_owners =
-            inventory.program_sites[event->source_site.ordinal].execution_owners;
-        first = false;
-      } else {
-        sequence.execution_owners = intersect_execution_owners(
-            sequence.execution_owners,
-            inventory.program_sites[event->source_site.ordinal].execution_owners);
-      }
-    }
-  }
 }
 
 } // namespace

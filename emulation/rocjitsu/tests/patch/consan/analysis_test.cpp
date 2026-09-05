@@ -4456,7 +4456,7 @@ TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
   EXPECT_EQ(pair.confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_EQ(pair.member_event_ids.size(), 2u);
   EXPECT_NE(pair.confidence_reason.find("conditional CFG triangle"), std::string::npos);
-  ASSERT_EQ(pair.execution_owners.size(), 1u);
+  ASSERT_EQ(result.program_inventory.sync().execution_owners(pair).size(), 1u);
 }
 
 TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {

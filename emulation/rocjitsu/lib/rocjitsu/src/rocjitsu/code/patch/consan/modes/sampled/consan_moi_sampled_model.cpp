@@ -170,7 +170,8 @@ classify_consan_moi_sampled_pending_acquire(const ConSanMoiSampledPendingAcquire
   return State::Ready;
 }
 
-bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence) {
+bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
+                                                   bool owner_proven) {
   const bool static_id =
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate ||
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32;
@@ -178,7 +179,6 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
   // descriptors through shared helper code. Ownership is still proven when
   // every reachable descriptor is known; lowering validates that all owners
   // have compatible ABI inputs and a preceding selected causal window.
-  const bool owner_proven = !sequence.execution_owners.empty();
   return sequence.kind == ConSanSyncKind::Barrier &&
          sequence.operation == ConSanSyncOperation::BarrierFull &&
          sequence.memory_role == ConSanSyncMemoryRole::AcquireRelease &&

@@ -516,7 +516,13 @@ void try_apply_sampled_barrier_sync_patch(
   for (const MoiBarrierEvidenceSitePlan &barrier_plan : barrier_plans) {
     const ConSanSyncSequence *sequence_ptr =
         result.program_inventory.sync().find_unique_sequence(barrier_plan.association.value);
-    if (sequence_ptr == nullptr || !consan_moi_sampled_qualifies_barrier_sequence(*sequence_ptr)) {
+    const std::vector<ConSanExecutionOwner> sequence_owners =
+        sequence_ptr != nullptr
+            ? result.program_inventory.sync().execution_owners(*sequence_ptr)
+            : std::vector<ConSanExecutionOwner>{};
+    if (sequence_ptr == nullptr ||
+        !consan_moi_sampled_qualifies_barrier_sequence(*sequence_ptr,
+                                                      !sequence_owners.empty())) {
       result.errors.emplace_back("ConSan MOI sampled barrier evidence lost its qualified sequence");
       return;
     }
@@ -528,7 +534,7 @@ void try_apply_sampled_barrier_sync_patch(
     bool first_owner = true;
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
     std::optional<uint16_t> common_owner_shift;
-    for (const ConSanExecutionOwner &owner : sequence.execution_owners) {
+    for (const ConSanExecutionOwner &owner : sequence_owners) {
       const ConSanProgramContainer *owner_kernel =
           result.program_inventory.find_kernel_by_descriptor(owner.descriptor_file_offset);
       if (owner_kernel == nullptr ||
@@ -611,13 +617,13 @@ void try_apply_sampled_barrier_sync_patch(
           sequence.container_name);
       continue;
     }
-    if (sequence.execution_owners.empty()) {
+    if (sequence_owners.empty()) {
       result.errors.emplace_back("ConSan MOI sampled barrier evidence has no execution owner");
       return;
     }
     MoiBarrierEvidenceSitePlan lowering_plan = barrier_plan;
     lowering_plan.kernel_descriptor_file_offset =
-        sequence.execution_owners.front().descriptor_file_offset;
+        sequence_owners.front().descriptor_file_offset;
     candidates.push_back(
         {&sequence, std::move(lowering_plan), std::move(windows), uses_cluster_workgroup_id});
   }

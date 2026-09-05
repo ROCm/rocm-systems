@@ -174,7 +174,8 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
     if (member_sequences != sequences_by_member_offset.end()) {
       for (const ConSanSyncSequence *sequence : member_sequences->second) {
         if (request.engine != ConSanCapabilityEngine::Sampled ||
-            consan_moi_sampled_qualifies_barrier_sequence(*sequence)) {
+            consan_moi_sampled_qualifies_barrier_sequence(
+                *sequence, !synchronization.execution_owners(*sequence).empty())) {
           usable_sequences.push_back(sequence);
         }
       }

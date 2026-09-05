@@ -136,6 +136,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
     const ConSanSyncSequence *sequence = sync.find_unique_sequence_containing(site.source_site);
     if (load == nullptr || sequence == nullptr)
       return std::nullopt;
+    const std::vector<ConSanExecutionOwner> sequence_owners = sync.execution_owners(*sequence);
     if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->scope ||
         !consan_memory_scope_is_agent_or_system(*load->scope) ||
         sequence->kind != ConSanSyncKind::OrdinaryMemory ||
@@ -146,7 +147,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         !sequence->basic_block_index || sequence->member_event_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
         sync.find_event(sequence->member_event_ids.front()) != load ||
-        !consan_nonempty_execution_owners_equal(sequence->execution_owners, site.execution_owners))
+        !consan_nonempty_execution_owners_equal(sequence_owners, site.execution_owners))
       return std::nullopt;
     const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_ids.back());
     const ConSanFenceSite *cache_source =
@@ -188,11 +189,12 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   if (sequence == sync.sync_sequences.end()) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotFound};
   }
+  const std::vector<ConSanExecutionOwner> sequence_owners = sync.execution_owners(*sequence);
   if (sequence->kind != ConSanSyncKind::Barrier ||
       sequence->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       sequence->member_event_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||
-      !consan_execution_owners_include_requested_kernel(sequence->execution_owners, inventory,
+      !consan_execution_owners_include_requested_kernel(sequence_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
   }
@@ -274,6 +276,11 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
         .group = std::nullopt, .issue = Issue::SecondPairRejected, .member_issue = second.issue};
   const auto first_range = exact_barrier_drop_pair_range(*first.pair);
   const auto second_range = exact_barrier_drop_pair_range(*second.pair);
+  const SynchronizationInventoryView sync = inventory.program_inventory.sync();
+  const std::vector<ConSanExecutionOwner> first_owners =
+      sync.execution_owners(*first.pair->sequence);
+  const std::vector<ConSanExecutionOwner> second_owners =
+      sync.execution_owners(*second.pair->sequence);
   if (first.pair->sequence->identity == second.pair->sequence->identity ||
       first_range.second > second_range.first) {
     return {.group = std::nullopt,
@@ -282,8 +289,7 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
   }
   if (first.pair->sequence->container_name != second.pair->sequence->container_name ||
       first.pair->sequence->in_kernel != second.pair->sequence->in_kernel ||
-      !consan_nonempty_execution_owners_equal(first.pair->sequence->execution_owners,
-                                              second.pair->sequence->execution_owners)) {
+      !consan_nonempty_execution_owners_equal(first_owners, second_owners)) {
     return {.group = std::nullopt,
             .issue = Issue::PairsHaveDifferentOwners,
             .member_issue = ExactBarrierDropPairIssue::None};

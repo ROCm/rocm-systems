@@ -182,7 +182,6 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.basic_block_index = 0;
   sequence.member_event_ids.push_back({0});
   sequence.scope = event.scope;
-  sequence.execution_owners.push_back({});
   return sequence;
 }
 

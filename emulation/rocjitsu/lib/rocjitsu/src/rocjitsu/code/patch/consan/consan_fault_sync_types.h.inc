@@ -338,7 +338,6 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
   std::optional<uint32_t> participant_count;
   std::optional<uint64_t> participant_mask;
-  std::vector<ConSanExecutionOwner> execution_owners;
 };
 
 /// Analysis outcome for associating one cache/fence instruction with an

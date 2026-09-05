@@ -414,12 +414,10 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   load_sequence.kind = ConSanSyncKind::OrdinaryMemory;
   load_sequence.operation = ConSanSyncOperation::OrdinaryLoad;
   load_sequence.basic_block_index = 3u;
-  load_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence cache_sequence;
   cache_sequence.kind = ConSanSyncKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
-  cache_sequence.execution_owners = program_sites[1].execution_owners;
 
   EXPECT_TRUE(consan_ordinary_acquire_metadata_compatible(program_sites, load, load_sequence, cache,
                                                           cache_sequence));
@@ -621,12 +619,10 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   cache_sequence.kind = ConSanSyncKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
-  cache_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence store_sequence;
   store_sequence.kind = ConSanSyncKind::OrdinaryMemory;
   store_sequence.operation = ConSanSyncOperation::OrdinaryStore;
   store_sequence.basic_block_index = 3u;
-  store_sequence.execution_owners = program_sites[1].execution_owners;
 
   EXPECT_TRUE(consan_ordinary_release_metadata_compatible(program_sites, cache, cache_sequence,
                                                           store, store_sequence));
@@ -857,7 +853,7 @@ TEST(ConSan, FinalValidationRejectsCorruptedOrdinaryScopeMutation) {
   }));
 }
 
-TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
+TEST(ConSan, LargeSyncInventoryDerivesEverySequenceOwner) {
   constexpr size_t kLoadCount = 8192u;
   std::vector<uint32_t> text_words;
   text_words.reserve(3u * kLoadCount + 1u);
@@ -881,8 +877,10 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
     EXPECT_NE(test_sync_event(result, site), nullptr);
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     ASSERT_EQ(sequence.member_event_ids.size(), 1u);
-    ASSERT_EQ(sequence.execution_owners.size(), 1u);
-    EXPECT_EQ(sequence.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
+    const std::vector<ConSanExecutionOwner> owners =
+        result.program_inventory.sync().execution_owners(sequence);
+    ASSERT_EQ(owners.size(), 1u);
+    EXPECT_EQ(owners.front().proof, ConSanOwnerProofKind::KernelLocal);
   }
 }
 

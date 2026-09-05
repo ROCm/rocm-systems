@@ -345,6 +345,36 @@ struct SynchronizationInventoryView {
                               : std::span<const ConSanExecutionOwner>(decoded->execution_owners);
   }
 
+  /// Derive the owners that can reach every member of a logical sequence.
+  /// Member program sites are authoritative; retaining this intersection on
+  /// the sequence made ownership stale whenever either arena was revised.
+  [[nodiscard]] std::vector<ConSanExecutionOwner>
+  execution_owners(const ConSanSyncSequence &sequence) const {
+    std::vector<ConSanExecutionOwner> intersection;
+    bool first = true;
+    for (ConSanSyncEventId member : sequence.member_event_ids) {
+      const ConSanSyncEvent *event = find_event(member);
+      if (event == nullptr)
+        return {};
+      const std::span<const ConSanExecutionOwner> member_owners = execution_owners(*event);
+      if (first) {
+        intersection.assign(member_owners.begin(), member_owners.end());
+        first = false;
+        continue;
+      }
+      std::erase_if(intersection, [&](ConSanExecutionOwner &left) {
+        const auto right = std::ranges::find(member_owners, left.descriptor_file_offset,
+                                             &ConSanExecutionOwner::descriptor_file_offset);
+        if (right == member_owners.end())
+          return true;
+        if (static_cast<uint8_t>(right->proof) > static_cast<uint8_t>(left.proof))
+          left.proof = right->proof;
+        return false;
+      });
+    }
+    return intersection;
+  }
+
   [[nodiscard]] const ConSanProgramContainerRef *container(const ConSanSyncEvent &event) const {
     const ConSanProgramSite *decoded = source(event);
     return decoded == nullptr ? nullptr : &decoded->container;

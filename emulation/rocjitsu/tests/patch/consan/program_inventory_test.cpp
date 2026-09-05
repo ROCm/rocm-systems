@@ -492,6 +492,45 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
             &unique_event.view().sync().sync_events.front());
 }
 
+TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
+  const std::array<uint8_t, 8> bytes = {};
+  ProgramInventoryBuilder builder(bytes);
+  ConSanProgramSite first_source;
+  first_source.execution_owners = {
+      {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::KernelLocal},
+      {.descriptor_file_offset = 128, .proof = ConSanOwnerProofKind::DirectCall},
+  };
+  ConSanProgramSite second_source;
+  second_source.execution_owners = {
+      {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::RecoveredIndirectCall},
+      {.descriptor_file_offset = 256, .proof = ConSanOwnerProofKind::KernelLocal},
+  };
+  builder.add_semantic_site(std::move(first_source));
+  builder.add_semantic_site(std::move(second_source));
+
+  SynchronizationInventoryBuildView build = builder.synchronization();
+  ConSanSyncEvent first;
+  first.source_site = {0};
+  ConSanSyncEvent second;
+  second.source_site = {1};
+  build.sync_events = {first, second};
+  ConSanSyncSequence sequence;
+  sequence.member_event_ids = {{0}, {1}};
+  build.sync_sequences = {sequence};
+
+  const ProgramInventory inventory = builder.view();
+  const SynchronizationInventoryView graph = inventory.sync();
+  EXPECT_EQ(graph.execution_owners(graph.sync_sequences.front()),
+            (std::vector<ConSanExecutionOwner>{{.descriptor_file_offset = 64,
+                                                .proof = ConSanOwnerProofKind::RecoveredIndirectCall}}));
+
+  ProgramInventoryBuilder malformed(builder.view());
+  malformed.synchronization().sync_sequences.front().member_event_ids.push_back({99});
+  const ProgramInventory malformed_inventory = malformed.view();
+  const SynchronizationInventoryView malformed_graph = malformed_inventory.sync();
+  EXPECT_TRUE(malformed_graph.execution_owners(malformed_graph.sync_sequences.front()).empty());
+}
+
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
   const std::array<uint8_t, 128> bytes = {};
   ProgramInventoryBuilder original(bytes);

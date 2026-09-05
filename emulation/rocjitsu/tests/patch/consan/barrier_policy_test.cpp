@@ -58,7 +58,6 @@ make_barrier_sequence(std::span<const ConSanSyncEvent> events,
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = scope;
-  sequence.execution_owners.push_back({});
   for (size_t index = 0; index < events.size(); ++index)
     sequence.member_event_ids.push_back({static_cast<uint32_t>(index)});
   return sequence;
@@ -307,7 +306,6 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
        [](auto &s) { s.memory_role_confidence = ConSanSemanticConfidence::Unsupported; }},
       {"block", [](auto &s) { s.basic_block_index.reset(); }},
       {"clause", [](auto &s) { s.inside_scalar_clause = true; }},
-      {"owner", [](auto &s) { s.execution_owners.clear(); }},
       {"static-id",
        [](auto &s) { s.barrier_operand_source = ConSanBarrierSite::OperandSource::DynamicM0; }},
       {"id", [](auto &s) { s.barrier_id.reset(); }},
@@ -330,6 +328,21 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
               ConSanBarrierPolicyReason::UnqualifiedSyncSequence);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
+
+  std::vector ownerless_events{make_barrier_event(32)};
+  std::vector ownerless_sequences{make_barrier_sequence(ownerless_events)};
+  ProgramInventoryBuilder ownerless(build_barrier_inventory(std::move(ownerless_events),
+                                                             std::move(ownerless_sequences)));
+  ownerless.program_sites().front().execution_owners.clear();
+  const ConSanBarrierPolicyResult ownerless_policy = plan_consan_barrier_observation(
+      ownerless.view(), barrier_request(ConSanCapabilityEngine::Sampled));
+  ASSERT_TRUE(ownerless_policy.valid());
+  ASSERT_EQ(ownerless_policy.plan.barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(ownerless_policy.plan.barrier_site_decisions.front().kind,
+            ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(ownerless_policy.plan.barrier_site_decisions.front().reason,
+            ConSanBarrierPolicyReason::UnqualifiedSyncSequence);
+  EXPECT_TRUE(ownerless_policy.plan.probe_intents.empty());
 }
 
 TEST(ConSanBarrierPolicy, AmbiguousAndIncompleteSequencesFailClosedWithDistinctReasons) {

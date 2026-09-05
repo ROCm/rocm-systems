@@ -173,4 +173,5 @@ decode_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadataPacked
 /// sequences may have several proven kernel owners; lowering validates their
 /// common ABI inputs and requires a preceding selected window for every owner.
 [[nodiscard]] bool
-consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence);
+consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
+                                              bool owner_proven);

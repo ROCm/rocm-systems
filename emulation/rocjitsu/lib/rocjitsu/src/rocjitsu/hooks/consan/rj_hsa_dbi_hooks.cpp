@@ -4266,8 +4266,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->sc_perturb_required_count, config->sc_perturb_sleep);
     const rocjitsu::SynchronizationInventoryView sync = transform_result.program_inventory.sync();
     for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
+      const std::vector<rocjitsu::ConSanExecutionOwner> sequence_owners =
+          sync.execution_owners(sequence);
       const OwnerLogFields owners =
-          owner_log_fields(sequence.execution_owners, transform_result.program_inventory.kernels());
+          owner_log_fields(sequence_owners, transform_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       std::string members;
@@ -4372,7 +4374,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           barrier_literal_value.c_str(), barrier_raw_simm16.c_str(),
           rocjitsu::consan_barrier_scope_name(sequence.barrier_scope), release_wait_offset.data(),
           participant_count.c_str(), participant_mask.c_str(), members.c_str(),
-          sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
+          sequence_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       const rocjitsu::ConSanResourcePlanSummary &resource_summary =
