@@ -302,14 +302,11 @@ bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words
 bool consan_detail::append_moi_global_atomic_completion(std::vector<uint32_t> &words,
                                                         const ConSanTargetProfile &target) {
   const auto load = instrumentation::build_s_wait_global_load0(target.arch);
-  const bool needs_separate_store_wait = !consan_arch_is_cdna3_or_cdna4(target.arch);
-  const auto store = needs_separate_store_wait
-                         ? instrumentation::build_s_wait_global_store0(target.arch)
-                         : std::optional<uint32_t>{};
-  if (!load || (needs_separate_store_wait && !store))
+  const auto store = instrumentation::build_s_wait_global_store0(target.arch);
+  if (!load || !store)
     return false;
   words.push_back(*load);
-  if (store)
+  if (*store != *load)
     words.push_back(*store);
   return true;
 }

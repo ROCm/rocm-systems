@@ -401,6 +401,11 @@ _consan_assert_no_match(
     "consan_arch_is_rdna4_or_cdna5"
     "shared MOI workgroup-shadow planning must consume its target capability"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_support.cpp"
+    "consan_arch_is_"
+    "shared MOI support must compose target-provided mechanisms without product predicates"
+)
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

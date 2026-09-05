@@ -361,17 +361,15 @@ TEST(ConSanMoi, DeviceCacheRefreshUsesOnlyQualifiedTargetSequences) {
   }
 }
 
-TEST(ConSanMoi, GlobalAtomicCompletionUsesEachTargetsCounterModel) {
+TEST(ConSanMoi, GlobalAtomicCompletionUsesEachTargetsMinimalCounterSequence) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     const auto load = instrumentation::build_s_wait_global_load0(target.arch);
-    ASSERT_TRUE(load);
+    const auto store = instrumentation::build_s_wait_global_store0(target.arch);
+    ASSERT_TRUE(load && store);
     std::vector<uint32_t> expected = {*load};
-    if (!consan_arch_is_cdna3_or_cdna4(target.arch)) {
-      const auto store = instrumentation::build_s_wait_global_store0(target.arch);
-      ASSERT_TRUE(store);
+    if (*store != *load)
       expected.push_back(*store);
-    }
     std::vector<uint32_t> words;
     EXPECT_TRUE(consan_detail::append_moi_global_atomic_completion(words, target));
     EXPECT_EQ(words, expected);
