@@ -375,6 +375,11 @@ _consan_assert_no_match(
     "consan_arch_is_rdna4_or_cdna5"
     "common flat-access classification must consume the target-owned vector-memory model"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_access_target.cpp"
+    "consan_arch_"
+    "common MOI access lowering must consume normalized forms and target capabilities"
+)
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

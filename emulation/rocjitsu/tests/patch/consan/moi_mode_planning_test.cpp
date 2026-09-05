@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 
 namespace rocjitsu {
 namespace {
 
+using consan_moi_impl::append_materialize_direct_to_lds_address;
 using consan_moi_impl::find_moi_mode_operations;
 using consan_moi_impl::moi_mode_operations;
 using consan_moi_impl::moi_scalar_preservation_state;
@@ -26,8 +28,8 @@ using consan_moi_impl::resolve_moi_record_event_emission_plan;
 consan_moi_impl::MoiObjectModePlan
 plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
                        const TransformPolicy &, const ConSanMoiOperatingPoint &,
-                       const consan_moi_impl::MoiObjectFacts &facts,
-                       const ConSanObservationPlan &, const ProgramInventory &) {
+                       const consan_moi_impl::MoiObjectFacts &facts, const ConSanObservationPlan &,
+                       const ProgramInventory &) {
   consan_moi_impl::MoiObjectModePlan plan;
   plan.track_atomics = facts.has_admitted_atomic;
   plan.semantics.inline_access_present = facts.has_access_candidate;
@@ -255,6 +257,29 @@ TEST(ConSanMoiModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeMode
       resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_TRUE(private_epoch.uses_private_epoch);
   EXPECT_FALSE(private_epoch.has_complete_persistent_sgprs);
+}
+
+TEST(ConSanMoiModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm) {
+  ConSanMoiCandidate candidate;
+  candidate.lowering.form.emplace();
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress;
+  candidate.lowering.form->address_vgpr = 7u;
+  std::vector<uint32_t> words;
+  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+                                                       ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(words.empty());
+
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  candidate.lowering.form->address_vgpr.reset();
+  candidate.lowering.form->element_width_bits = 32u;
+  words.clear();
+  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+                                                       ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(words.empty());
+
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
+  EXPECT_FALSE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+                                                        ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {

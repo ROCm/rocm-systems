@@ -17,6 +17,7 @@
   profile.max_group_segment_bytes = 64u * 1024u;
   profile.vector_memory.flat_vector_only_saddr = 0x7cu;
   profile.vector_memory.global_vector_only_saddr = 0x7cu;
+  profile.moi_access.native_lds_spill_recovery = true;
   profile.semantic_form_mask = kConSanCommonSemanticFormMask;
   profile.requires_raw_memory_order_qualifier = true;
   return profile;

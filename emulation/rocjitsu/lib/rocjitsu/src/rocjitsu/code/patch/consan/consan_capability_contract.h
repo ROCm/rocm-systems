@@ -282,6 +282,19 @@ struct ConSanVectorMemoryCapability {
   bool operator==(const ConSanVectorMemoryCapability &) const = default;
 };
 
+/// Target-wide access-lowering mechanisms shared by the MOI engines.
+///
+/// These are deliberately implementation capabilities rather than product
+/// families. They state which recovery mechanisms the common access planner
+/// may rely on after program analysis has normalized the guest instruction.
+struct ConSanMoiAccessCapability {
+  bool dynamic_stack_uses_scalar_reservoir = false;
+  bool native_lds_spill_recovery = false;
+  bool clobbered_address_spill_reload = false;
+
+  bool operator==(const ConSanMoiAccessCapability &) const = default;
+};
+
 /// Target-owned strategy for placing the dispatch identity consumed by MOI
 /// reports. The common solver owns register search; this contract selects the
 /// target-neutral search and lossless overflow representation without
@@ -351,6 +364,7 @@ struct ConSanTargetProfile {
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
   ConSanVectorMemoryCapability vector_memory;
+  ConSanMoiAccessCapability moi_access;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
   bool moi_access_reports_need_explicit_dispatch_identity = true;
@@ -546,6 +560,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanScaleOffsetCapability::Supported) ||
         (profile.vector_memory.instruction_word_count == 2u &&
          profile.vector_memory.scale_offset != ConSanScaleOffsetCapability::Absent) ||
+        (profile.moi_access.clobbered_address_spill_reload &&
+         !profile.moi_access.native_lds_spill_recovery) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||

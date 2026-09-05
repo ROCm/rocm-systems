@@ -16,6 +16,9 @@ using consan_detail::range_overlaps;
 MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatingPoint &point,
                                                          const ConSanMoiCandidate &candidate,
                                                          rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const ConSanMoiAccessCapability capability =
+      target ? target->moi_access : ConSanMoiAccessCapability{};
   const uint16_t flat_address_scratch_count = flat_access_address_scratch_count(candidate);
   const bool needs_address_capture = flat_address_scratch_count != 0u ||
                                      candidate.is_direct_to_lds() ||
@@ -27,29 +30,28 @@ MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatin
       .address_scratch_vgpr_count = flat_address_scratch_count != 0u
                                         ? flat_address_scratch_count
                                         : static_cast<uint16_t>(needs_address_capture),
-      .two_address_replay_vgpr_count =
-          static_cast<uint16_t>(consan_arch_is_cdna5(arch) && candidate.is_native_two_range() &&
-                                candidate.encoded_offset_scale_bytes() > 8u),
-      .dynamic_stack_reservoir_vgpr_count =
-          static_cast<uint16_t>(consan_arch_is_rdna4_or_cdna5(arch) && point.moi_dynamic_stack_spill
-                                    ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
-                                    : 0u),
+      .two_address_replay_vgpr_count = static_cast<uint16_t>(
+          target && target->requires_split_two_address_lds_relocation &&
+          candidate.is_native_two_range() && candidate.encoded_offset_scale_bytes() > 8u),
+      .dynamic_stack_reservoir_vgpr_count = static_cast<uint16_t>(
+          capability.dynamic_stack_uses_scalar_reservoir && point.moi_dynamic_stack_spill
+              ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
+              : 0u),
       .has_exec_save = point.moi_exec_save_sgpr.has_value(),
       .initialize_owner_epoch = point.moi_initialize_owner_epoch,
       .has_persistent_owner_vgpr = point.moi_owner_epoch_vgprs.owner().has_value(),
       .uses_private_epoch = point.automatic_moi_private_epoch,
       .has_complete_persistent_sgprs = point.moi_persistent_sgprs.complete(),
-      .target_available = consan_is_capability_arch(arch),
-      .supports_native_lds_spill_recovery =
-          candidate.is_native_lds() &&
-          (consan_arch_is_rdna(arch) || consan_arch_is_cdna3_or_cdna4(arch)) &&
-          !requires_flat_materialization,
+      .target_available = target != nullptr,
+      .supports_native_lds_spill_recovery = capability.native_lds_spill_recovery &&
+                                            candidate.is_native_lds() &&
+                                            !requires_flat_materialization,
       .supports_clobbered_address_spill_reload =
-          consan_arch_is_cdna3_or_cdna4(arch) && !candidate.is_flat() &&
+          capability.clobbered_address_spill_reload && !candidate.is_flat() &&
           moi_load_clobbers_address(candidate) && !requires_flat_materialization,
       .guest_replay_requires_disjoint_address_scratch =
-          consan_arch_has_selectable_vgpr_bank(arch) && candidate.is_native_two_range() &&
-          candidate.encoded_offset_scale_bytes() > 8u,
+          target && target->requires_split_two_address_lds_relocation &&
+          candidate.is_native_two_range() && candidate.encoded_offset_scale_bytes() > 8u,
   };
 }
 
@@ -97,15 +99,13 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
     return false;
   const ConSanAccessLoweringForm &form = *candidate.lowering.form;
 
-  // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
-  // in an ordinary VGPR. Preserve it before relocating the guest instruction.
-  if (consan_arch_is_cdna5(arch)) {
+  if (form.kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress) {
     if (!form.address_vgpr || *form.address_vgpr >= 256u || result_vgpr >= 256u)
       return false;
     words.push_back(build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*form.address_vgpr), arch));
     return true;
   }
-  if (!consan_arch_is_cdna3_or_cdna4(arch))
+  if (form.kind != ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed)
     return false;
 
   const uint16_t lane_stride_shift = form.element_width_bits == 32u    ? 2u
@@ -242,7 +242,8 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   // probe subsequently selects bank zero for its own scratch registers.
   const ConSanAccessLoweringForm *form =
       candidate.lowering.form ? &*candidate.lowering.form : nullptr;
-  return consan_arch_has_selectable_vgpr_bank(arch) && form != nullptr &&
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target && target->has_selectable_vgpr_bank && form != nullptr &&
          form->kind != ConSanAccessLoweringFormKind::FlatVectorAddress &&
          form->kind != ConSanAccessLoweringFormKind::FlatScalarVectorAddress &&
          form->address_vgpr && (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;

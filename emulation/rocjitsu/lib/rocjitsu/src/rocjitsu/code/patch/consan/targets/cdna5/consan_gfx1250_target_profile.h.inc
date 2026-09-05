@@ -49,6 +49,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
       .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
       .scale_offset = ConSanScaleOffsetCapability::Supported,
   };
+  profile.moi_access.dynamic_stack_uses_scalar_reservoir = true;
   profile.moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector;
   profile.moi_access_reports_need_explicit_dispatch_identity = false;
