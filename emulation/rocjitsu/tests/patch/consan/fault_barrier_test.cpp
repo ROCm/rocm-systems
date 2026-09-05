@@ -1084,7 +1084,6 @@ TEST(ConSan, FaultInventoryAssignsStableBarrierIdentities) {
   EXPECT_EQ(first.fault_sites[0].identity, second.fault_sites[0].identity);
   EXPECT_EQ(first.fault_sites[1].identity, second.fault_sites[1].identity);
   EXPECT_NE(first.fault_sites[0].identity, first.fault_sites[1].identity);
-  EXPECT_TRUE(first.fault_sites[0].code_object_fingerprint.starts_with("fnv1a64:"));
   EXPECT_EQ(first.fault_sites[0].kind, ConSanFaultSiteKind::Barrier);
   EXPECT_EQ(first.fault_sites[0].container_name, "stable_barriers");
   EXPECT_TRUE(first.fault_sites[0].in_kernel);

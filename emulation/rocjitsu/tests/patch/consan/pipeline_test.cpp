@@ -445,7 +445,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   published_fault_site.sync_memory_role = ConSanSyncMemoryRole::Release;
   published_fault_site.execution_owners = {
       {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::DirectCall}};
-  published_fault_site.code_object_fingerprint = inventory.code_object_id().fingerprint;
   published_fault_site.address_vgpr = 2u;
   published_fault_site.selectable_vgpr_bank_mode = 1u;
   const ConSanFaultSitePresentation expected_fault_site = published_fault_site;
@@ -459,7 +458,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   published_destination.file_offset = 48u;
   published_destination.size = 4u;
   published_destination.mnemonic = "v_add_f32";
-  published_destination.code_object_fingerprint = inventory.code_object_id().fingerprint;
   published_destination.execution_owners = {
       {.descriptor_file_offset = 128u, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}};
   const ConSanBarrierMoveDestinationPresentation expected_destination = published_destination;

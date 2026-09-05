@@ -100,7 +100,6 @@ struct ConSanFaultSitePresentation {
 /// identity and target operand state.
 struct ConSanFaultSite : ConSanFaultSitePresentation {
   ConSanProgramContainerId container_id;
-  std::string code_object_fingerprint;
   std::optional<uint16_t> address_vgpr;
   /// Target-defined selectable-bank state at this instruction.
   std::optional<uint16_t> selectable_vgpr_bank_mode;
@@ -179,11 +178,9 @@ struct ConSanBarrierMoveDestinationPresentation {
   bool operator==(const ConSanBarrierMoveDestinationPresentation &) const = default;
 };
 
-/// A real-instruction destination bound to the code object in which analysis
-/// proved it suitable for whole-barrier movement.
-struct ConSanBarrierMoveDestination : ConSanBarrierMoveDestinationPresentation {
-  std::string code_object_fingerprint;
-};
+/// Selection and diagnostics consume the same complete destination facts;
+/// code-object identity is already carried by the owning program inventory.
+using ConSanBarrierMoveDestination = ConSanBarrierMoveDestinationPresentation;
 
 enum class ConSanSyncEventKind : uint8_t {
   Barrier,

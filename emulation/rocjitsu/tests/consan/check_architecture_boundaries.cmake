@@ -190,7 +190,7 @@ endif()
 file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
 file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
 file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
-foreach(_product IN ITEMS FaultSite FaultMutationPlan BarrierMoveDestination)
+foreach(_product IN ITEMS FaultSite FaultMutationPlan)
     string(REPLACE "Plan" "" _presentation "${_product}")
     if(NOT _fault_presentation_contract MATCHES
        "struct ConSan${_product} : ConSan${_presentation}Presentation")
@@ -199,6 +199,12 @@ foreach(_product IN ITEMS FaultSite FaultMutationPlan BarrierMoveDestination)
         )
     endif()
 endforeach()
+if(NOT _fault_presentation_contract MATCHES
+   "using ConSanBarrierMoveDestination = ConSanBarrierMoveDestinationPresentation")
+    message(FATAL_ERROR
+        "ConSan BarrierMoveDestination regained a redundant private wrapper"
+    )
+endif()
 foreach(_diagnostic IN ITEMS FaultSite FaultMutation BarrierMoveDestination)
     if(NOT _transform_diagnostics_contract MATCHES
        "using ConSan${_diagnostic}Diagnostic = ConSan${_diagnostic}Presentation")

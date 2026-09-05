@@ -143,7 +143,6 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
       continue;
     }
 
-    site.code_object_fingerprint = fingerprint;
     site.container_id = decoded.container.id;
     site.container_name = decoded.container.name;
     site.in_kernel = decoded.container.is_kernel();
@@ -173,7 +172,6 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     ConSanFaultSite site;
     site.kind = ConSanFaultSiteKind::LdsAccess;
     site.container_id = access.container.id;
-    site.code_object_fingerprint = fingerprint;
     site.container_name = access.container.name;
     site.in_kernel = access.container.is_kernel();
     site.occurrence = occurrence++;
@@ -1091,7 +1089,6 @@ void build_barrier_move_destination_inventory(
           continue;
 
         ConSanBarrierMoveDestination destination;
-        destination.code_object_fingerprint = event->semantic_id.physical.code_object.fingerprint;
         destination.container_name = sequence.container_name;
         destination.in_kernel = sequence.in_kernel;
         destination.basic_block_index = static_cast<uint32_t>(block_index);
