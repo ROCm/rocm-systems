@@ -13,6 +13,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <utility>
 
 namespace rocjitsu::consan_hook {
 
@@ -230,111 +231,66 @@ struct BoolEnvBinding {
   return true;
 }
 
-[[nodiscard]] bool parse_delay_mode_env(rocjitsu::ConSanDelayMode *out) {
-  const char *value = std::getenv("RJ_CONSAN_DELAY_MODE");
+template <typename Enum>
+[[nodiscard]] bool
+parse_enum_env(const char *name, Enum default_value, Enum *out,
+               std::initializer_list<std::pair<std::string_view, Enum>> vocabulary,
+               const char *expected, bool case_insensitive = true) {
+  const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
-    *out = rocjitsu::ConSanDelayMode::Nop;
+    *out = default_value;
     return true;
   }
-  if (ascii_iequals(value, "nop")) {
-    *out = rocjitsu::ConSanDelayMode::Nop;
+  const auto entry = std::ranges::find_if(vocabulary, [&](const auto &candidate) {
+    return case_insensitive ? ascii_iequals(value, candidate.first) : value == candidate.first;
+  });
+  if (entry != vocabulary.end()) {
+    *out = entry->second;
     return true;
   }
-  if (ascii_iequals(value, "sleep")) {
-    *out = rocjitsu::ConSanDelayMode::Sleep;
-    return true;
-  }
-  if (ascii_iequals(value, "sleep_var") || ascii_iequals(value, "sleep-var")) {
-    *out = rocjitsu::ConSanDelayMode::SleepVar;
-    return true;
-  }
-
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_DELAY_MODE='%s'; "
-               "expected nop|sleep|sleep_var\n",
-               value);
+  std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected %s\n", name, value,
+               expected);
   return false;
+}
+
+[[nodiscard]] bool parse_delay_mode_env(rocjitsu::ConSanDelayMode *out) {
+  using E = rocjitsu::ConSanDelayMode;
+  return parse_enum_env("RJ_CONSAN_DELAY_MODE", E::Nop, out,
+                        {{"nop", E::Nop},
+                         {"sleep", E::Sleep},
+                         {"sleep_var", E::SleepVar},
+                         {"sleep-var", E::SleepVar}},
+                        "nop|sleep|sleep_var");
 }
 
 [[nodiscard]] bool parse_barrier_move_direction_env(rocjitsu::ConSanBarrierMoveDirection *out) {
-  const char *value = std::getenv("RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION");
-  if (value == nullptr || *value == '\0' || std::strcmp(value, "legacy-marker") == 0 ||
-      std::strcmp(value, "legacy_marker") == 0) {
-    *out = rocjitsu::ConSanBarrierMoveDirection::LegacyMarker;
-    return true;
-  }
-  if (std::strcmp(value, "earlier") == 0) {
-    *out = rocjitsu::ConSanBarrierMoveDirection::Earlier;
-    return true;
-  }
-  if (std::strcmp(value, "later") == 0) {
-    *out = rocjitsu::ConSanBarrierMoveDirection::Later;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION='%s'; "
-               "expected legacy-marker, earlier, or later\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanBarrierMoveDirection;
+  return parse_enum_env("RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION", E::LegacyMarker, out,
+                        {{"legacy-marker", E::LegacyMarker},
+                         {"legacy_marker", E::LegacyMarker},
+                         {"earlier", E::Earlier},
+                         {"later", E::Later}},
+                        "legacy-marker, earlier, or later", false);
 }
 
 [[nodiscard]] bool parse_sc_perturb_kind_env(rocjitsu::ConSanPerturbationKind *out) {
-  const char *value = std::getenv("RJ_CONSAN_SC_PERTURB_KIND");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "none")) {
-    *out = rocjitsu::ConSanPerturbationKind::None;
-    return true;
-  }
-  if (ascii_iequals(value, "barrier")) {
-    *out = rocjitsu::ConSanPerturbationKind::Barrier;
-    return true;
-  }
-  if (ascii_iequals(value, "atomic")) {
-    *out = rocjitsu::ConSanPerturbationKind::Atomic;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_SC_PERTURB_KIND='%s'; "
-               "expected none, barrier, or atomic\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanPerturbationKind;
+  return parse_enum_env("RJ_CONSAN_SC_PERTURB_KIND", E::None, out,
+                        {{"none", E::None}, {"barrier", E::Barrier}, {"atomic", E::Atomic}},
+                        "none, barrier, or atomic");
 }
 
 [[nodiscard]] bool parse_sc_perturb_edge_env(rocjitsu::ConSanPerturbationEdge *out) {
-  const char *value = std::getenv("RJ_CONSAN_SC_PERTURB_EDGE");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "release")) {
-    *out = rocjitsu::ConSanPerturbationEdge::Release;
-    return true;
-  }
-  if (ascii_iequals(value, "acquire")) {
-    *out = rocjitsu::ConSanPerturbationEdge::Acquire;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_SC_PERTURB_EDGE='%s'; "
-               "expected release or acquire\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanPerturbationEdge;
+  return parse_enum_env("RJ_CONSAN_SC_PERTURB_EDGE", E::Release, out,
+                        {{"release", E::Release}, {"acquire", E::Acquire}}, "release or acquire");
 }
 
 [[nodiscard]] bool parse_atomic_order_edge_env(rocjitsu::ConSanAtomicOrderEdge *out) {
-  const char *value = std::getenv("RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "any")) {
-    *out = rocjitsu::ConSanAtomicOrderEdge::Any;
-    return true;
-  }
-  if (ascii_iequals(value, "release")) {
-    *out = rocjitsu::ConSanAtomicOrderEdge::Release;
-    return true;
-  }
-  if (ascii_iequals(value, "acquire")) {
-    *out = rocjitsu::ConSanAtomicOrderEdge::Acquire;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE='%s'; "
-               "expected any, release, or acquire\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanAtomicOrderEdge;
+  return parse_enum_env("RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE", E::Any, out,
+                        {{"any", E::Any}, {"release", E::Release}, {"acquire", E::Acquire}},
+                        "any, release, or acquire");
 }
 
 [[nodiscard]] bool parse_flavor_env(std::optional<rocjitsu::ConSanFlavor> *out) {
@@ -388,95 +344,44 @@ struct BoolEnvBinding {
 }
 
 [[nodiscard]] bool parse_moi_owner_source_env(rocjitsu::ConSanMoiOwnerSource *out) {
-  const char *value = std::getenv("RJ_CONSAN_MOI_OWNER_SOURCE");
-  if (value == nullptr || *value == '\0') {
-    *out = rocjitsu::ConSanMoiOwnerSource::Automatic;
-    return true;
-  }
-  const std::string_view mode(value);
-  if (mode == "automatic" || mode == "auto") {
-    *out = rocjitsu::ConSanMoiOwnerSource::Automatic;
-    return true;
-  }
-  if (mode == "workitem_id" || mode == "workitem") {
-    *out = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
-    return true;
-  }
-  if (mode == "hw_id" || mode == "hwid") {
-    *out = rocjitsu::ConSanMoiOwnerSource::HwId;
-    return true;
-  }
-
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_OWNER_SOURCE='%s'; "
-               "expected automatic|workitem_id|hw_id\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanMoiOwnerSource;
+  return parse_enum_env("RJ_CONSAN_MOI_OWNER_SOURCE", E::Automatic, out,
+                        {{"automatic", E::Automatic},
+                         {"auto", E::Automatic},
+                         {"workitem_id", E::WorkitemId},
+                         {"workitem", E::WorkitemId},
+                         {"hw_id", E::HwId},
+                         {"hwid", E::HwId}},
+                        "automatic|workitem_id|hw_id", false);
 }
 
 [[nodiscard]] bool parse_flat_provenance_mode_env(rocjitsu::ConSanFlatProvenanceMode *out) {
-  const char *value = std::getenv("RJ_CONSAN_FLAT_PROVENANCE");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "likely") ||
-      ascii_iequals(value, "default")) {
-    *out = rocjitsu::ConSanFlatProvenanceMode::Likely;
-    return true;
-  }
-  if (ascii_iequals(value, "strict") || ascii_iequals(value, "group")) {
-    *out = rocjitsu::ConSanFlatProvenanceMode::Strict;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FLAT_PROVENANCE='%s'; "
-               "expected likely|strict\n",
-               value);
-  return false;
+  using E = rocjitsu::ConSanFlatProvenanceMode;
+  return parse_enum_env(
+      "RJ_CONSAN_FLAT_PROVENANCE", E::Likely, out,
+      {{"likely", E::Likely}, {"default", E::Likely}, {"strict", E::Strict}, {"group", E::Strict}},
+      "likely|strict");
 }
 
 [[nodiscard]] bool parse_check_trap_mode_env(CheckTrapMode *out) {
-  const char *value = std::getenv("RJ_CONSAN_CHECK_TRAP_MODE");
-  if (value == nullptr || *value == '\0') {
-    *out = CheckTrapMode::All;
-    return true;
-  }
-  if (ascii_iequals(value, "all") || ascii_iequals(value, "both") ||
-      ascii_iequals(value, "default")) {
-    *out = CheckTrapMode::All;
-    return true;
-  }
-  if (ascii_iequals(value, "lds") || ascii_iequals(value, "ds") ||
-      ascii_iequals(value, "native-lds")) {
-    *out = CheckTrapMode::Lds;
-    return true;
-  }
-  if (ascii_iequals(value, "flat") || ascii_iequals(value, "vflat") ||
-      ascii_iequals(value, "generic")) {
-    *out = CheckTrapMode::Flat;
-    return true;
-  }
-
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_CHECK_TRAP_MODE='%s'; "
-               "expected all|lds|flat\n",
-               value);
-  return false;
+  return parse_enum_env("RJ_CONSAN_CHECK_TRAP_MODE", CheckTrapMode::All, out,
+                        {{"all", CheckTrapMode::All},
+                         {"both", CheckTrapMode::All},
+                         {"default", CheckTrapMode::All},
+                         {"lds", CheckTrapMode::Lds},
+                         {"ds", CheckTrapMode::Lds},
+                         {"native-lds", CheckTrapMode::Lds},
+                         {"flat", CheckTrapMode::Flat},
+                         {"vflat", CheckTrapMode::Flat},
+                         {"generic", CheckTrapMode::Flat}},
+                        "all|lds|flat");
 }
 
 [[nodiscard]] bool parse_sc_report_mode_env(ScReportMode *out) {
-  const char *value = std::getenv("RJ_CONSAN_SC_REPORT_MODE");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "auto") ||
-      ascii_iequals(value, "default")) {
-    *out = ScReportMode::Auto;
-    return true;
-  }
-  if (ascii_iequals(value, "trap")) {
-    *out = ScReportMode::Trap;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_SC_REPORT_MODE='%s'; "
-               "expected auto|trap\n",
-               value);
-  return false;
+  return parse_enum_env(
+      "RJ_CONSAN_SC_REPORT_MODE", ScReportMode::Auto, out,
+      {{"auto", ScReportMode::Auto}, {"default", ScReportMode::Auto}, {"trap", ScReportMode::Trap}},
+      "auto|trap");
 }
 
 [[nodiscard]] bool parse_log_level(int *out) {
@@ -587,19 +492,9 @@ void warn_deprecated_env(const char *name, const char *replacement) {
 }
 
 [[nodiscard]] bool parse_policy_env(HookPolicy *out) {
-  const char *value = std::getenv("RJ_CONSAN_POLICY");
-  if (value == nullptr || *value == '\0' || ascii_iequals(value, "default")) {
-    *out = HookPolicy::Default;
-    return true;
-  }
-  if (ascii_iequals(value, "strict")) {
-    *out = HookPolicy::Strict;
-    return true;
-  }
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_POLICY='%s'; expected default|strict\n",
-               value);
-  return false;
+  return parse_enum_env("RJ_CONSAN_POLICY", HookPolicy::Default, out,
+                        {{"default", HookPolicy::Default}, {"strict", HookPolicy::Strict}},
+                        "default|strict");
 }
 
 void warn_irrelevant_env_combinations(const HookConfig &config) {
