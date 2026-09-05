@@ -61,8 +61,7 @@
     plan.in_kernel = event->in_kernel;
     auto container = resolve_moi_evidence_container(inventory, event->in_kernel,
                                                     event->container_name, event->execution_owners);
-    const ConSanBarrierSite *site =
-        container ? container->find_site<ConSanBarrierSite>(event->text_offset) : nullptr;
+    const ConSanBarrierSite *site = inventory.decoded_site<ConSanBarrierSite>(event->source_site);
     if (site == nullptr) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};

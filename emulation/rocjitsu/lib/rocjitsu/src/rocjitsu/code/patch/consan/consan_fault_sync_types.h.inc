@@ -237,6 +237,10 @@ struct ConSanSyncEvent {
   /// Stable original-program identity shared by every symbol alias that
   /// decodes this same physical synchronization instruction.
   SemanticSiteId semantic_id;
+  /// Exact source record from which synchronization analysis derived this
+  /// event. Unlike container/name/offset joins, this remains unambiguous when
+  /// several symbols alias one physical instruction.
+  ConSanProgramSiteId source_site;
   ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
   ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
   ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;

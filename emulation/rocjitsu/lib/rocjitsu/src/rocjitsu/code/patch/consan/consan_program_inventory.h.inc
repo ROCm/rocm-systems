@@ -445,18 +445,6 @@ public:
     const auto function = std::ranges::find(records, name, &ConSanFunctionInfo::name);
     return function == records.end() ? nullptr : &*function;
   }
-  /// Resolve the immutable attribution record for a symbol container.
-  [[nodiscard]] std::optional<ConSanProgramContainerRef>
-  find_container(bool in_kernel, std::string_view name) const {
-    if (in_kernel) {
-      const ConSanKernelInfo *kernel = find_kernel_by_name(name);
-      return kernel == nullptr ? std::nullopt
-                               : std::optional{consan_program_container_ref(*kernel)};
-    }
-    const ConSanFunctionInfo *function = find_function_by_name(name);
-    return function == nullptr ? std::nullopt
-                               : std::optional{consan_program_container_ref(*function)};
-  }
   [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
                     : std::span<const ConSanAccessInventorySite>{};
@@ -469,30 +457,16 @@ public:
                     : std::span<const ConSanDecodedProgramSite>{};
   }
 
-  /// Resolve one uniquely decoded payload in a symbol container. This is the
-  /// sole compatibility join needed while synchronization events acquire a
-  /// direct stable source-site identity.
-  template <typename Site>
-  [[nodiscard]] const Site *find_unique_decoded_site(const ConSanProgramContainerRef &container,
-                                                     uint64_t text_offset) const {
-    const Site *match = nullptr;
-    for (const ConSanDecodedProgramSite &decoded : decoded_sites()) {
-      if (decoded.container != container || decoded.text_offset() != text_offset)
-        continue;
-      const Site *site = decoded.get_if<Site>();
-      if (site == nullptr)
-        continue;
-      if (match != nullptr)
-        return nullptr;
-      match = site;
-    }
-    return match;
+  /// Resolve one exact source-site handle in this inventory revision.
+  [[nodiscard]] const ConSanDecodedProgramSite *decoded_site(ConSanProgramSiteId id) const {
+    const std::span<const ConSanDecodedProgramSite> sites = decoded_sites();
+    return id.valid() && id.ordinal < sites.size() ? &sites[id.ordinal] : nullptr;
   }
-  template <typename Site>
-  [[nodiscard]] const Site *find_unique_decoded_site(bool in_kernel, std::string_view container,
-                                                     uint64_t text_offset) const {
-    const std::optional<ConSanProgramContainerRef> reference = find_container(in_kernel, container);
-    return reference ? find_unique_decoded_site<Site>(*reference, text_offset) : nullptr;
+
+  /// Resolve one exact source-site handle and require its typed payload.
+  template <typename Site> [[nodiscard]] const Site *decoded_site(ConSanProgramSiteId id) const {
+    const ConSanDecodedProgramSite *site = decoded_site(id);
+    return site == nullptr ? nullptr : site->get_if<Site>();
   }
   /// Return the complete immutable synchronization projection as one value.
   [[nodiscard]] SynchronizationInventoryView sync() const {

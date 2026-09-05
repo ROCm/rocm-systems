@@ -186,8 +186,7 @@ find_static_participant_init(const ProgramInventory &program_inventory,
   });
   if (init_event == sync.sync_events.end())
     return nullptr;
-  return program_inventory.find_unique_decoded_site<ConSanBarrierSite>(
-      group.in_kernel, group.container_name, init_event->text_offset);
+  return program_inventory.decoded_site<ConSanBarrierSite>(init_event->source_site);
 }
 
 template <typename State>

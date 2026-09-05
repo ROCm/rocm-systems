@@ -16,16 +16,9 @@ namespace rocjitsu::consan_moi_impl {
 /// being rediscovered by each evidence kind.
 struct MoiEvidenceContainerView {
   std::string qualified_name;
-  const ProgramInventory *inventory = nullptr;
-  ConSanProgramContainerRef container;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   uint64_t entry_text_offset = 0, text_file_offset = 0, code_size = 0;
   bool uses_cluster_workgroup_id = false;
-
-  template <typename Site> [[nodiscard]] const Site *find_site(uint64_t text_offset) const {
-    return inventory == nullptr ? nullptr
-                                : inventory->find_unique_decoded_site<Site>(container, text_offset);
-  }
 };
 
 [[nodiscard]] std::optional<MoiEvidenceContainerView>

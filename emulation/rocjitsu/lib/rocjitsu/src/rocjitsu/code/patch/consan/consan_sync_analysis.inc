@@ -289,10 +289,12 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
   const std::string_view fingerprint = code_object_id.fingerprint;
   const std::string container_kind = in_kernel ? "kernel" : "function";
   const ConSanProgramContainerRef container_ref = consan_program_container_ref(container);
-  const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind) {
+  const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind,
+                                ConSanProgramSiteId source_site) {
     event.semantic_id.physical.code_object = code_object_id;
     event.semantic_id.physical.original_text_offset = event.text_offset;
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+    event.source_site = source_site;
     event.code_object_fingerprint = fingerprint;
     event.source_containers = {container.name};
     event.container_name = container.name;
@@ -305,7 +307,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
   };
 
   uint32_t barrier_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
+  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
+    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
     const ConSanBarrierSite *site_ptr = decoded.get_if<ConSanBarrierSite>();
     if (decoded.container != container_ref || site_ptr == nullptr)
       continue;
@@ -389,11 +392,12 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.memory_role = ConSanSyncMemoryRole::Unknown;
       event.memory_role_confidence = ConSanSemanticConfidence::Unsupported;
     }
-    finish_event(event, "barrier");
+    finish_event(event, "barrier", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   uint32_t fence_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
+  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
+    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
     const ConSanFenceSite *site_ptr = decoded.get_if<ConSanFenceSite>();
     if (decoded.container != container_ref || site_ptr == nullptr)
       continue;
@@ -414,11 +418,12 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.cache_operation = site.cache_operation;
     event.ordinary_acquire_mutation_supported = site.ordinary_acquire_mutation_supported;
     event.mnemonic = site.mnemonic;
-    finish_event(event, "fence");
+    finish_event(event, "fence", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   uint32_t ordinary_memory_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
+  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
+    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
     const ConSanOrdinaryMemorySite *site_ptr = decoded.get_if<ConSanOrdinaryMemorySite>();
     if (decoded.container != container_ref || site_ptr == nullptr)
       continue;
@@ -453,11 +458,13 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.static_byte_offset = *site.raw_ioffset;
     event.raw_scope = site.raw_scope;
     event.scope = site.scope;
-    finish_event(event, "ordinary-memory");
+    finish_event(event, "ordinary-memory",
+                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   uint32_t atomic_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
+  for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
+    const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
     const ConSanAtomicSite *site_ptr = decoded.get_if<ConSanAtomicSite>();
     if (decoded.container != container_ref || site_ptr == nullptr)
       continue;
@@ -497,7 +504,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.raw_scope = site.raw_scope;
     event.scope =
         implicit_workgroup_scope ? std::optional{ConSanMemoryScope::Workgroup} : site.scope;
-    finish_event(event, "atomic");
+    finish_event(event, "atomic", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   std::stable_sort(events.begin() + static_cast<std::ptrdiff_t>(container_begin), events.end(),
@@ -1228,14 +1235,12 @@ void build_barrier_move_destination_inventory(
 [[nodiscard]] bool has_exact_group_flat_communication_site(const ProgramInventory &inventory,
                                                            const ConSanSyncEvent &event) {
   if (event.kind == ConSanSyncEventKind::Atomic) {
-    const ConSanAtomicSite *site = inventory.find_unique_decoded_site<ConSanAtomicSite>(
-        event.in_kernel, event.container_name, event.text_offset);
+    const ConSanAtomicSite *site = inventory.decoded_site<ConSanAtomicSite>(event.source_site);
     return site != nullptr && site->address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup;
   }
   if (event.kind == ConSanSyncEventKind::OrdinaryMemory) {
     const ConSanOrdinaryMemorySite *site =
-        inventory.find_unique_decoded_site<ConSanOrdinaryMemorySite>(
-            event.in_kernel, event.container_name, event.text_offset);
+        inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
     return site != nullptr && site->flat_address_space_hint == ConSanFlatAddressSpaceHint::Group;
   }
   return false;
@@ -1258,8 +1263,7 @@ void build_barrier_move_destination_inventory(
   if (event.kind != ConSanSyncEventKind::OrdinaryMemory)
     return false;
   const ConSanOrdinaryMemorySite *site =
-      program_inventory.find_unique_decoded_site<ConSanOrdinaryMemorySite>(
-          event.in_kernel, event.container_name, event.text_offset);
+      program_inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
   if (site == nullptr || site->operation != ConSanOrdinaryMemoryOperation::Load ||
       site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
     return false;

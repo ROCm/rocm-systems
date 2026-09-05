@@ -127,14 +127,12 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
 
 [[nodiscard]] const ConSanAtomicSite *find_atomic_site(const ProgramInventory &inventory,
                                                        const ConSanSyncEvent &event) {
-  return inventory.find_unique_decoded_site<ConSanAtomicSite>(event.in_kernel, event.container_name,
-                                                              event.text_offset);
+  return inventory.decoded_site<ConSanAtomicSite>(event.source_site);
 }
 
 [[nodiscard]] const ConSanOrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
                                                                  const ConSanSyncEvent &event) {
-  return inventory.find_unique_decoded_site<ConSanOrdinaryMemorySite>(
-      event.in_kernel, event.container_name, event.text_offset);
+  return inventory.decoded_site<ConSanOrdinaryMemorySite>(event.source_site);
 }
 
 [[nodiscard]] ConSanAtomicSite normalize_ordinary_site(const ConSanOrdinaryMemorySite &site) {

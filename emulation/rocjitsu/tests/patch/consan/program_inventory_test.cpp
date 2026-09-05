@@ -547,10 +547,20 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
   ASSERT_FALSE(result.program_inventory.sync().sync_events.empty());
   for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
     EXPECT_TRUE(event.semantic_id.valid());
+    EXPECT_TRUE(event.source_site.valid());
     EXPECT_EQ(event.semantic_id.domain, ConSanSemanticSiteDomain::SynchronizationEvent);
     EXPECT_EQ(event.semantic_id.physical.code_object, result.program_inventory.code_object_id());
     EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset);
+    const ConSanDecodedProgramSite *source =
+        result.program_inventory.decoded_site(event.source_site);
+    ASSERT_NE(source, nullptr);
+    EXPECT_EQ(source->text_offset(), event.text_offset);
+    EXPECT_NE(source->get_if<ConSanBarrierSite>(), nullptr);
   }
+  EXPECT_EQ(result.program_inventory.decoded_site(ConSanProgramSiteId{}), nullptr);
+  EXPECT_EQ(result.program_inventory.decoded_site(ConSanProgramSiteId{
+                static_cast<uint32_t>(result.program_inventory.decoded_sites().size())}),
+            nullptr);
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     ASSERT_EQ(sequence.member_semantic_ids.size(), sequence.member_event_identities.size());
     for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {

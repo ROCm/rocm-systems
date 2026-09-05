@@ -77,6 +77,21 @@ struct PhysicalSiteId {
   bool operator==(const PhysicalSiteId &) const = default;
 };
 
+/// Stable handle into one immutable `ProgramInventory`'s decoded-site arena.
+///
+/// Arena order is finalized before synchronization analysis and is preserved
+/// by inventory copies and mutable revisions. Keeping this handle distinct
+/// from a text offset prevents later phases from reconstructing source-site
+/// identity from container names and locations.
+struct ConSanProgramSiteId {
+  static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
+  uint32_t ordinal = kInvalidOrdinal;
+
+  [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
+
+  bool operator==(const ConSanProgramSiteId &) const = default;
+};
+
 /// Semantic domain that gives meaning to the member ordinals in a
 /// `SemanticSiteId`.
 ///

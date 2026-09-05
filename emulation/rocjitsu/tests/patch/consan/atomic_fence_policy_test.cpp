@@ -231,6 +231,26 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   for (ConSanOrdinaryMemorySite &site : ordinary_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
+  const std::span<const ConSanDecodedProgramSite> decoded_sites = builder.view().decoded_sites();
+  for (ConSanSyncEvent &event : events) {
+    std::optional<ConSanProgramSiteId> match;
+    for (size_t index = 0; index < decoded_sites.size(); ++index) {
+      const ConSanDecodedProgramSite &decoded = decoded_sites[index];
+      const bool kind_matches = (event.kind == ConSanSyncEventKind::Atomic &&
+                                 decoded.get_if<ConSanAtomicSite>() != nullptr) ||
+                                (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
+                                 decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr);
+      if (!kind_matches || decoded.text_offset() != event.text_offset)
+        continue;
+      if (match) {
+        match.reset();
+        break;
+      }
+      match = ConSanProgramSiteId{static_cast<uint32_t>(index)};
+    }
+    if (match)
+      event.source_site = *match;
+  }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
   synchronization.sync_sequences = std::move(sequences);
