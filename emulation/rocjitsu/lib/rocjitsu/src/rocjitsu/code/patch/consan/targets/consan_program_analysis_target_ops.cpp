@@ -6,26 +6,13 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops_internal.h"
 
-#include <array>
-
 namespace rocjitsu {
 
 namespace {
 
 [[nodiscard]] const ConSanProgramAnalysisTargetOperations *operations(rj_code_arch_t arch) {
-  static constexpr std::array registrations{
-      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA3,
-                                              &kConSanCdna3Cdna4ProgramAnalysisOperations},
-      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA4,
-                                              &kConSanCdna3Cdna4ProgramAnalysisOperations},
-      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA3,
-                                              &kConSanRdna3ProgramAnalysisOperations},
-      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA4,
-                                              &kConSanRdna4ProgramAnalysisOperations},
-      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA5,
-                                              &kConSanCdna5ProgramAnalysisOperations},
-  };
-  return find_consan_program_analysis_target_operations<rj_code_arch_t>(registrations, arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target == nullptr ? nullptr : target->program_analysis;
 }
 
 template <typename Result, typename... Parameters, typename... Arguments>

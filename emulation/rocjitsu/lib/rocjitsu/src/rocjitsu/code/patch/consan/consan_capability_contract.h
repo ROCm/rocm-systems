@@ -18,6 +18,12 @@
 
 namespace rocjitsu {
 
+struct ConSanProgramAnalysisTargetOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanCdna3Cdna4ProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanRdna3ProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanRdna4ProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanCdna5ProgramAnalysisOperations;
+
 /// Architectural operand encodings used uniformly by every supported target
 /// profile.  Concrete target packages own exceptions; common construction and
 /// validation use these target-neutral names instead of importing one ISA
@@ -298,6 +304,9 @@ struct ConSanTargetProfile {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   ConSanArchitectureFamily architecture_family = ConSanArchitectureFamily::Cdna;
   ConSanAccumulatorModel accumulator_model = ConSanAccumulatorModel::None;
+  /// Target-owned decoder facet. Keeping this registration beside the target
+  /// facts prevents every consumer domain from rebuilding the five-target map.
+  const ConSanProgramAnalysisTargetOperations *program_analysis = nullptr;
   ConSanDispatchIdentitySource dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair;
   std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
@@ -463,7 +472,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
     const ConSanTargetProfile &profile = profiles[lhs];
     const auto &workgroup_identity = profile.command_processor_workgroup_identity;
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
-        profile.arch == ROCJITSU_CODE_ARCH_INVALID || !profile.supports_wave64 ||
+        profile.arch == ROCJITSU_CODE_ARCH_INVALID || profile.program_analysis == nullptr ||
+        !profile.supports_wave64 ||
         (profile.flat_compare_swap_data_pair_alignment != 1u &&
          profile.flat_compare_swap_data_pair_alignment != 2u) ||
         profile.exec_register_width_bits != 64u || profile.global_address_width_bits != 64u ||

@@ -6,6 +6,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   ConSanTargetProfile profile = consan_rdna_target_profile_defaults();
   profile.target = ROCJITSU_CODE_TARGET_GFX1201;
   profile.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  profile.program_analysis = &kConSanRdna4ProgramAnalysisOperations;
   profile.command_processor_workgroup_identity = {
       .grid_x_ttmp = 9u,
       .grid_yz_ttmp = 7u,

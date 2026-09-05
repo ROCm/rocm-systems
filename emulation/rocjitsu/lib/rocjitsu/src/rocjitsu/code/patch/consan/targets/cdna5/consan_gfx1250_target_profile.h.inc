@@ -11,6 +11,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   profile.target = ROCJITSU_CODE_TARGET_GFX1250;
   profile.arch = ROCJITSU_CODE_ARCH_CDNA5;
   profile.accumulator_model = ConSanAccumulatorModel::SelectableVgprBank;
+  profile.program_analysis = &kConSanCdna5ProgramAnalysisOperations;
   profile.dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral;
   profile.command_processor_workgroup_identity = {
       .grid_x_ttmp = 9u,

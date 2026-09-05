@@ -6,6 +6,7 @@
   ConSanTargetProfile profile;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
   profile.accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned;
+  profile.program_analysis = &kConSanCdna3Cdna4ProgramAnalysisOperations;
   profile.resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6};
   profile.vgpr_allocation_granularity_wave64 = 8;
   profile.accumulator_offset_granularity = 4;
