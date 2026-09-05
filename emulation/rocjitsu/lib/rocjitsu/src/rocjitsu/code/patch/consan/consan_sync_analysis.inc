@@ -2074,11 +2074,12 @@ void associate_ordinary_acquire_sync_sequences(
   }
   sync_sequences = std::move(associated);
 
-  // CDNA3/4 lower an LDS acquire load to group-FLAT SC0 plus a combined
-  // VMEM/LDS zero wait. CDNA5's group-aperture form needs only the exact
-  // combined zero wait: LDS has no cache invalidate operation. Keep this
-  // fallback separate from RDNA's cache-associated acquire paths above.
-  if (!consan_arch_is_cdna(arch))
+  // Some targets lower an LDS acquire load to group-FLAT ordering plus an
+  // exact combined load/LDS zero wait, without a cache-invalidate operation.
+  // Keep that target-owned fallback separate from the cache-associated paths
+  // above.
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr || !target->synchronization.workgroup_flat_acquire_wait_fallback)
     return;
   for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncKind::OrdinaryMemory ||

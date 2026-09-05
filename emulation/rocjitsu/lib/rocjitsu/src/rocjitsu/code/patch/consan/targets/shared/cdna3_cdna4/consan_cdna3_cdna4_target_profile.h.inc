@@ -24,9 +24,12 @@
   };
   profile.moi_access.native_lds_spill_recovery = true;
   profile.moi_access.clobbered_address_spill_reload = true;
+  profile.synchronization.workgroup_flat_acquire_wait_fallback = true;
   profile.moi_placement = {
       .scratch_vgpr_alignment = 2,
       .branch_only_spill_embeds_setup_state = true,
+      .automatic_dispatch_sgpr_requires_owner_admission = true,
+      .full_workgroup_payload_consumption = ConSanMoiWorkgroupPayloadConsumption::EntryCapture,
   };
   profile.supports_kernarg_preload_overflow_recovery = true;
   profile.requires_even_vgpr_tuples = true;

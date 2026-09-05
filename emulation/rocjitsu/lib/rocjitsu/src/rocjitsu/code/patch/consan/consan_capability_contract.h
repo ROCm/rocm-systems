@@ -317,6 +317,15 @@ struct ConSanMoiAccessCapability {
   bool operator==(const ConSanMoiAccessCapability &) const = default;
 };
 
+/// Target synchronization sequence recognized after normalized instruction
+/// decoding. Exact wait decoding remains target-owned; this facet only admits
+/// the common same-block group-FLAT acquire/wait association.
+struct ConSanSynchronizationCapability {
+  bool workgroup_flat_acquire_wait_fallback = false;
+
+  bool operator==(const ConSanSynchronizationCapability &) const = default;
+};
+
 /// Target-wide heuristic for placing temporary scalar instrumentation state.
 ///
 /// `DescriptorPartitioned` protects the compiler's physical-VCC and AccVGPR
@@ -333,9 +342,17 @@ enum class ConSanScalarPlacementModel : uint8_t {
   SpillBacked,
 };
 
+enum class ConSanMoiWorkgroupPayloadConsumption : uint8_t {
+  ObservationBody,
+  EntryCapture,
+};
+
 struct ConSanMoiPlacementCapability {
   uint8_t scratch_vgpr_alignment = 1;
   bool branch_only_spill_embeds_setup_state = false;
+  bool automatic_dispatch_sgpr_requires_owner_admission = false;
+  ConSanMoiWorkgroupPayloadConsumption full_workgroup_payload_consumption =
+      ConSanMoiWorkgroupPayloadConsumption::ObservationBody;
 
   bool operator==(const ConSanMoiPlacementCapability &) const = default;
 };
@@ -412,6 +429,7 @@ struct ConSanTargetProfile {
   ConSanVectorMemoryCapability vector_memory;
   ConSanNativeLdsCapability native_lds;
   ConSanMoiAccessCapability moi_access;
+  ConSanSynchronizationCapability synchronization;
   ConSanMoiPlacementCapability moi_placement;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
@@ -619,6 +637,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanScalarPlacementModel::SpillBacked) ||
         (profile.moi_placement.scratch_vgpr_alignment != 1u &&
          profile.moi_placement.scratch_vgpr_alignment != 2u) ||
+        static_cast<uint8_t>(profile.moi_placement.full_workgroup_payload_consumption) >
+            static_cast<uint8_t>(ConSanMoiWorkgroupPayloadConsumption::EntryCapture) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||

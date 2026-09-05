@@ -66,6 +66,12 @@ foreach(_file IN LISTS _consan_layout_files)
         message(FATAL_ERROR
             "ConSan target-specific file escaped targets/: ${_relative}")
     endif()
+    if(NOT _relative MATCHES "^targets/" AND
+       NOT _relative STREQUAL "consan_capability_contract.h" AND
+       _contents MATCHES "consan_arch_is_(cdna|rdna)|ROCJITSU_CODE_ARCH_(CDNA|RDNA)")
+        message(FATAL_ERROR
+            "ConSan common implementation names an architecture family instead of consuming target facts: ${_relative}")
+    endif()
     if(_name MATCHES
            "^consan_(moi_(record_replay|sampled|inline_shadow)|supercollider)" AND
        NOT _relative MATCHES "^(modes|targets)/")

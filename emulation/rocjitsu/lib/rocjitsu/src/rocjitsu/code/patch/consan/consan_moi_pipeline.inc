@@ -114,8 +114,9 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
                             planning.plans);
   append_moi_operational_resource_plans(state, debug, point, problem, planning.errors,
                                         planning.plans);
-  if (consan_arch_is_cdna(arch) && point.moi_dispatch_identity.automatic_sgpr() &&
-      point.moi_dispatch_identity.sgpr()) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target && target->moi_placement.automatic_dispatch_sgpr_requires_owner_admission &&
+      point.moi_dispatch_identity.automatic_sgpr() && point.moi_dispatch_identity.sgpr()) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       ConSanMoiOperatingPoint owner_point = point;
       if (!attempted_point.owner_transient_sgprs.empty() &&

@@ -940,11 +940,13 @@ plan_moi_workgroup_shadow_clear(const ConSanTargetProfile &target, uint32_t init
 [[nodiscard]] inline bool
 patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_arch_t arch,
                                          const ConSanPatchLoweringProduct &patch) {
-  if (!consan_is_capability_arch(arch) || patch.owner_descriptor_file_offsets.empty() ||
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr || patch.owner_descriptor_file_offsets.empty() ||
       engine == ConSanCapabilityEngine::SuperCollider || engine == ConSanCapabilityEngine::Count) {
     return false;
   }
-  if (consan_arch_is_cdna3_or_cdna4(arch)) {
+  if (target->moi_placement.full_workgroup_payload_consumption ==
+      ConSanMoiWorkgroupPayloadConsumption::EntryCapture) {
     const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
     return entry_capture &&
