@@ -642,6 +642,13 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       if (runtimeLayout == amdSmiFabricRuntimeLayout::Unknown) {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
         useSysfs = true;
+      } else if (runtimeLayout == amdSmiFabricRuntimeLayout::ExtendedUnion) {
+        // The v1 window is where we expect it, but RCCL does not read the v2 payload and the
+        // library reports v1 through a version enumerator we do not yet accept, so the typed path
+        // would discard every device. sysfs returns the same fields without that dependency.
+        WARN("AMD SMI fabric: the loaded library uses the extended fabric union, which RCCL does not read yet; "
+             "falling back to sysfs");
+        useSysfs = true;
       } else if (runtimeLayoutIs8Gpu != amdSmiFabricLayoutIs8Gpu) {
         WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %u-GPU layout, but the loaded library uses the "
              "%u-GPU layout; falling back to sysfs",

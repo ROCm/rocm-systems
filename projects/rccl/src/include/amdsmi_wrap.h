@@ -495,7 +495,20 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 256;
 
-static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
+// amd_smi 27.x added amdsmi_fabric_info_v2_t to the payload union. That member is larger than v1,
+// so the outer struct grows and reserved moves, but the v1 window we read keeps its 16-GPU
+// offsets. Recognize it by those offsets plus an outer struct that outgrew the 16-GPU size, rather
+// than by a third hardcoded size, so a later v2 growth does not break the build again. RCCL does
+// not read v2, and a runtime on this layout is routed to sysfs by
+// amdSmiDetectFabricRuntimeLayout.
+constexpr bool amdSmiFabricLayoutIsExtendedUnion =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
+  offsetof(amdsmi_fabric_info_t, reserved) > kAmdSmiFabricState16GpuOffset;
+
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -578,13 +591,21 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
 // 16-GPU runtime.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
+// Never smaller than the struct our header declares: a runtime built against a larger declaration
+// writes that many bytes through the pointer we hand it, so a fixed 16-GPU buffer would be
+// overrun by an extended-union runtime.
+constexpr size_t kAmdSmiFabricInfoBufferSize =
+  sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize ? sizeof(amdsmi_fabric_info_t)
+                                                            : kAmdSmiFabricInfo16GpuSize;
+
 struct alignas(amdsmi_fabric_info_t) amdSmiFabricInfoBuffer {
-  unsigned char bytes[kAmdSmiFabricInfo16GpuSize];
+  unsigned char bytes[kAmdSmiFabricInfoBufferSize];
 };
 
 enum class amdSmiFabricRuntimeLayout {
   EightGpu,
   SixteenGpu,
+  ExtendedUnion,
   Unknown,
 };
 
@@ -596,15 +617,28 @@ inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer
   return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
 }
 
+// Two windows, so the three layouts are told apart by how far the runtime wrote: an 8-GPU runtime
+// leaves both untouched, a 16-GPU one zeroes the first and leaves the second, an extended-union
+// one zeroes both. When built against a 16-GPU header the second window is empty and its flags
+// stay true, which reduces this to the original two-way test.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
+  bool midIsCanary = true;
+  bool midIsZero = true;
+  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
+    midIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
+    midIsZero &= buffer.bytes[i] == 0;
+  }
   bool tailIsCanary = true;
   bool tailIsZero = true;
-  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
+  for (size_t i = kAmdSmiFabricInfo16GpuSize; i < kAmdSmiFabricInfoBufferSize; ++i) {
     tailIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
     tailIsZero &= buffer.bytes[i] == 0;
   }
-  if (tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
-  if (tailIsZero) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  if (midIsCanary && tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
+  if (midIsZero && tailIsCanary) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  if (midIsZero && tailIsZero && kAmdSmiFabricInfoBufferSize > kAmdSmiFabricInfo16GpuSize) {
+    return amdSmiFabricRuntimeLayout::ExtendedUnion;
+  }
   return amdSmiFabricRuntimeLayout::Unknown;
 }
 
