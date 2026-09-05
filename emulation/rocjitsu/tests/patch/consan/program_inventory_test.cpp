@@ -141,16 +141,13 @@ TEST(ConSanProgramInventory, PhysicalAndSemanticIdentitiesHaveExplicitValidityAn
 
 TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
   ConSanProgramContainerRef container;
+  container.id = {1};
   container.kind = ConSanProgramContainerKind::Kernel;
   container.name = "kernel";
-  container.entry_text_offset = 64;
-  container.kernel_descriptor_file_offset = 128;
-  container.uses_cluster_workgroup_id = true;
   EXPECT_TRUE(container.is_kernel());
   EXPECT_EQ(container, container);
   ConSanProgramContainerRef function = container;
   function.kind = ConSanProgramContainerKind::Function;
-  function.kernel_descriptor_file_offset.reset();
   EXPECT_FALSE(function.is_kernel());
   EXPECT_NE(container, function);
 
@@ -301,6 +298,23 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.find_kernel_by_name("missing"), nullptr);
   EXPECT_EQ(inventory.find_function_by_name("helper"), &inventory.functions()[0]);
   EXPECT_EQ(inventory.find_function_by_name("missing"), nullptr);
+
+  ConSanAccessInventorySite owned;
+  owned.container = consan_program_container_ref(inventory.kernels()[0]);
+  owned.execution_owner_descriptor_file_offsets = {768, 512, 768};
+  EXPECT_EQ(inventory.execution_owner_descriptors(owned),
+            (std::vector<uint64_t>{512, 768}));
+
+  // A pre-insertion synthetic reference may be rebound by kind and name only
+  // when that attribution is unique. Duplicate symbol names must not silently
+  // acquire the first alias's stable identity.
+  ConSanAccessInventorySite ambiguous = make_inventory_lds_site("ds_store_b32", 16);
+  ambiguous.container.kind = ConSanProgramContainerKind::Kernel;
+  ambiguous.container.name = "kernel";
+  builder.access_sites().push_back(std::move(ambiguous));
+  const std::array<uint8_t, 4> bytes = {};
+  builder.publish_decoded_accesses(bytes);
+  EXPECT_FALSE(builder.view().access_sites().back().container.id.valid());
 }
 
 TEST(ConSanProgramInventory, PreappliedMutationGeometryBelongsToExactInputRevision) {
@@ -662,7 +676,8 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   ASSERT_EQ(builder.view().access_sites().size(), 3u);
   builder.publish_decoded_accesses(bytes);
 
-  const auto sites = builder.view().access_sites();
+  const ProgramInventory inventory = builder.view();
+  const auto sites = inventory.access_sites();
   ASSERT_EQ(sites.size(), 3u);
   const ConSanAccessInventorySite &byte = sites[0];
   EXPECT_EQ(byte.origin, ConSanAccessOrigin::NativeLds);
@@ -671,10 +686,12 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.confidence, ConSanSemanticConfidence::Exact);
   EXPECT_TRUE(byte.lowering.replay_guest_access.available());
   EXPECT_EQ(byte.container.kind, ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(byte.container.kernel_descriptor_file_offset, 512u);
-  EXPECT_EQ(byte.container.text_file_offset, 1024u);
-  EXPECT_TRUE(byte.container.code_size_inferred_from_zero);
-  EXPECT_TRUE(byte.container.uses_cluster_workgroup_id);
+  const ConSanProgramContainer *byte_container = inventory.container(byte.container.id);
+  ASSERT_NE(byte_container, nullptr);
+  EXPECT_EQ(byte_container->descriptor_file_offset, 512u);
+  EXPECT_EQ(byte_container->text_file_offset, 1024u);
+  EXPECT_TRUE(byte_container->code_size_inferred_from_zero);
+  EXPECT_TRUE(byte_container->uses_cluster_workgroup_id);
   EXPECT_EQ(byte.operands.destination_vgpr, 2u);
   EXPECT_EQ(byte.operands.destination_accvgpr, 4u);
   EXPECT_EQ(byte.operands.address_vgpr, 3u);
@@ -721,7 +738,8 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
   };
   builder.reattribute_access_range(80, 32, builder.kernels().front(), decoded_accesses, bytes);
 
-  const auto accesses = builder.view().access_sites();
+  const ProgramInventory inventory = builder.view();
+  const auto accesses = inventory.access_sites();
   ASSERT_EQ(accesses.size(), 5u);
   for (const uint64_t offset : {80u, 88u, 96u, 104u}) {
     const auto access = std::ranges::find(accesses, offset, [](const auto &candidate) {
@@ -729,14 +747,18 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
     });
     ASSERT_NE(access, accesses.end());
     EXPECT_EQ(access->container.name, "owner");
-    EXPECT_EQ(access->container.kernel_descriptor_file_offset, 512u);
+    const ConSanProgramContainer *container = inventory.container(access->container.id);
+    ASSERT_NE(container, nullptr);
+    EXPECT_EQ(container->descriptor_file_offset, 512u);
   }
   const auto outside = std::ranges::find(accesses, 120u, [](const auto &candidate) {
     return candidate.physical_id.original_text_offset;
   });
   ASSERT_NE(outside, accesses.end());
   EXPECT_EQ(outside->container.name, "overlapping");
-  EXPECT_EQ(outside->container.kernel_descriptor_file_offset, 768u);
+  const ConSanProgramContainer *outside_container = inventory.container(outside->container.id);
+  ASSERT_NE(outside_container, nullptr);
+  EXPECT_EQ(outside_container->descriptor_file_offset, 768u);
 }
 
 TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecificEncoding) {

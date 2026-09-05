@@ -182,9 +182,8 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
       if (site->origin == ConSanAccessOrigin::Flat)
         continue;
 
-      std::vector<uint64_t> owners = site->execution_owner_descriptor_file_offsets;
-      if (owners.empty() && site->container.kernel_descriptor_file_offset)
-        owners.push_back(*site->container.kernel_descriptor_file_offset);
+      std::vector<uint64_t> owners =
+          context.program_inventory.execution_owner_descriptors(*site);
       if (owners.empty()) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
         return requirements;

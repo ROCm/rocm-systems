@@ -501,14 +501,15 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
 /// Add the gfx1250 execution-mode fact that current lowerers derive directly
 /// from pristine code bytes immediately before emission.
 [[nodiscard]] std::optional<uint16_t>
-test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes,
+test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
                                const ConSanAccessInventorySite &access) {
   const uint64_t anchor = access.physical_id.original_text_offset;
-  if (anchor < access.container.entry_text_offset || access.file_offset < anchor)
+  const ConSanProgramContainer *container = inventory.container(access.container.id);
+  if (container == nullptr || anchor < container->entry_text_offset || access.file_offset < anchor)
     return std::nullopt;
-  return consan_selectable_vgpr_bank_mode_at(
-      ROCJITSU_CODE_ARCH_CDNA5, bytes, access.file_offset - anchor,
-      access.container.entry_text_offset, access.file_offset);
+  return consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes,
+                                             access.file_offset - anchor,
+                                             container->entry_text_offset, access.file_offset);
 }
 
 [[nodiscard]] constexpr bool is_consan_access_intent(ConSanProbeIntentKind kind) {

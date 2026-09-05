@@ -144,7 +144,7 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
 }
 
 void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
-                                    rj_code_arch_t arch,
+                                    rj_code_arch_t arch, const ProgramInventory &inventory,
                                     std::span<const ConSanAccessInventorySite> accesses,
                                     std::vector<ConSanFaultSite> &sites) {
   std::optional<ConSanProgramContainerRef> previous_container;
@@ -169,10 +169,12 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     site.size = access.instruction_size;
     site.width_bits = access.decoded_width_bits;
     site.address_vgpr = access.operands.address_vgpr;
-    if (consan_arch_has_selectable_vgpr_bank(arch) && access.file_offset >= site.text_offset) {
-      site.selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
-          arch, bytes, access.container.text_file_offset, access.container.entry_text_offset,
-          access.file_offset);
+    const ConSanProgramContainer *container = inventory.container(access.container.id);
+    if (container != nullptr && consan_arch_has_selectable_vgpr_bank(arch) &&
+        access.file_offset >= site.text_offset) {
+      site.selectable_vgpr_bank_mode =
+          consan_selectable_vgpr_bank_mode_at(arch, bytes, container->text_file_offset,
+                                              container->entry_text_offset, access.file_offset);
     }
     site.mnemonic = access.mnemonic;
     site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
@@ -201,8 +203,8 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
         return std::tuple{lhs.container_id, kind_order(lhs.kind), lhs.text_offset} <
                std::tuple{rhs.container_id, kind_order(rhs.kind), rhs.text_offset};
       });
-  append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory.access_sites(),
-                                 result.fault_sites);
+  append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory,
+                                 result.program_inventory.access_sites(), result.fault_sites);
 }
 
 [[nodiscard]] ConSanSyncAddressSource sync_address_source(ConSanAtomicAddressSpaceHint hint) {
@@ -470,8 +472,10 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
   const std::span<const ConSanDecodedProgramSite> decoded_sites = inventory.decoded_sites;
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
     const ConSanDecodedProgramSite *source = source_site(decoded_sites, event);
-    return source == nullptr ? std::nullopt
-                             : std::optional<uint64_t>(source->container.entry_text_offset);
+    const ConSanProgramContainer *container =
+        source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
+    return container == nullptr ? std::nullopt
+                                : std::optional<uint64_t>(container->entry_text_offset);
   };
 
   return consan_detail::canonicalize_physical_site_aliases(

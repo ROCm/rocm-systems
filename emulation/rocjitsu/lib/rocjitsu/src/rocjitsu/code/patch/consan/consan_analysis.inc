@@ -1745,14 +1745,18 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   // decoded site is dead. Preserve the previous conservative inventory.
   if (owned_blocks.empty())
     return;
+  const auto inferred_container_range = [&](const ConSanProgramContainerRef &reference) {
+    return reference.id.valid() && reference.id.ordinal < containers.size() &&
+           containers[reference.id.ordinal].code_size_inferred_from_zero;
+  };
   std::erase_if(decoded_sites, [&](const ConSanDecodedProgramSite &site) {
-    if (!site.container.code_size_inferred_from_zero)
+    if (!inferred_container_range(site.container))
       return false;
     const BasicBlock *block = block_for_offset(block_index, site.text_offset());
     return block == nullptr || !owned_blocks.contains(block);
   });
   std::erase_if(accesses, [&](const ConSanAccessInventorySite &access) {
-    if (!access.container.code_size_inferred_from_zero)
+    if (!inferred_container_range(access.container))
       return false;
     const BasicBlock *block =
         block_for_offset(block_index, access.physical_id.original_text_offset);

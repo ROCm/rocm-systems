@@ -19,7 +19,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   const bool has_plannable_supported_site =
       std::ranges::any_of(admitted_sites, [&](const auto &entry) {
         const std::vector<uint64_t> owners =
-            entry.second->execution_and_container_owner_descriptor_file_offsets();
+            result.program_inventory.execution_owner_descriptors(*entry.second);
         return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
           const ConSanProgramContainer *kernel =
               result.program_inventory.find_kernel_by_descriptor(owner);
@@ -88,7 +88,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const auto &[file_offset, site] : admitted_sites) {
     (void)file_offset;
     auto facts = owner_analysis.site_facts(
-        *site, site->execution_and_container_owner_descriptor_file_offsets());
+        *site, result.program_inventory.execution_owner_descriptors(*site));
     if (!facts) {
       (void)publish_sc_access_rejection(
           result.coverage_ledger, result.errors, site->physical_id,
@@ -156,12 +156,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             ? std::optional<uint16_t>(*site_context.owners.max_sgpr_ref + 1u)
             : std::nullopt;
     const ConSanAccessInventorySite &site = *site_context.site;
+    const ConSanProgramContainer *container = result.program_inventory.container(site.container.id);
     ++supported_candidate_count;
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
-        target.has_selectable_vgpr_bank && site.file_offset >= site.physical_id.original_text_offset
+        container != nullptr && target.has_selectable_vgpr_bank &&
+                site.file_offset >= site.physical_id.original_text_offset
             ? consan_selectable_vgpr_bank_mode_at(
                   arch, original_bytes, site.file_offset - site.physical_id.original_text_offset,
-                  site.container.entry_text_offset, site.file_offset)
+                  container->entry_text_offset, site.file_offset)
             : std::nullopt;
     auto required_vgprs = access_dword_count(site);
     if (!required_vgprs) {
@@ -635,7 +637,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               std::max(plan->second.saved_frame_base_sgpr, plan->second.saved_scc_sgpr) + 1u));
     }
     planned.info.owner_descriptor_file_offsets =
-        site.execution_and_container_owner_descriptor_file_offsets();
+        result.program_inventory.execution_owner_descriptors(site);
     if (spill != selected_spills.sequences.end()) {
       planned.info.spilled_vgpr_count = spill->second.vgpr_count;
       planned.info.required_private_segment_size = spill->second.total_private_bytes;

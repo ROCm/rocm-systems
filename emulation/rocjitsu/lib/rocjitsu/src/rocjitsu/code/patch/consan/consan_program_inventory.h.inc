@@ -123,21 +123,6 @@ struct ConSanAccessInventorySite {
   /// reasons.
   [[nodiscard]] bool complete() const { return exclusions.empty() && !ranges.empty(); }
 
-  /// Return the canonical descriptors that can own execution of this access,
-  /// including its containing kernel when symbol-range ownership did not
-  /// already publish that descriptor. Shared helper bodies can name several
-  /// execution owners; callers that mutate descriptor state must update the
-  /// complete returned set.
-  [[nodiscard]] std::vector<uint64_t>
-  execution_and_container_owner_descriptor_file_offsets() const {
-    std::vector<uint64_t> owners = execution_owner_descriptor_file_offsets;
-    if (container.kernel_descriptor_file_offset)
-      owners.push_back(*container.kernel_descriptor_file_offset);
-    std::ranges::sort(owners);
-    owners.erase(std::ranges::unique(owners).begin(), owners.end());
-    return owners;
-  }
-
   bool operator==(const ConSanAccessInventorySite &) const = default;
 };
 
@@ -475,6 +460,21 @@ public:
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
                     : std::span<const ConSanAccessInventorySite>{};
   }
+  /// Return every kernel descriptor that can own execution of an access,
+  /// including its containing kernel when symbol-range ownership did not
+  /// already publish that descriptor. Shared helper bodies can name several
+  /// execution owners; callers that mutate descriptor state must update the
+  /// complete returned set.
+  [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(
+      const ConSanAccessInventorySite &site) const {
+    std::vector<uint64_t> owners = site.execution_owner_descriptor_file_offsets;
+    if (const ConSanProgramContainer *record = container(site.container.id);
+        record != nullptr && record->is_kernel())
+      owners.push_back(record->descriptor_file_offset);
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    return owners;
+  }
   /// Return the authoritative decoded source sites used by synchronization
   /// and fault analysis. Payloads remain decoder facts; policy and lowering
   /// products live in later phase-owned records.
@@ -624,13 +624,15 @@ public:
     const auto bind_container = [&](ConSanProgramContainerRef &reference) {
       if (reference.id.valid())
         return;
-      const auto match = std::ranges::find_if(storage_->containers, [&](const auto &container) {
-        ConSanProgramContainerRef candidate = consan_program_container_ref(container);
-        candidate.id = {};
-        return candidate == reference;
-      });
-      if (match != storage_->containers.end())
-        reference = consan_program_container_ref(*match);
+      const auto matches = [&](const ConSanProgramContainer &container) {
+        return container.kind == reference.kind && container.name == reference.name;
+      };
+      const auto match = std::ranges::find_if(storage_->containers, matches);
+      if (match == storage_->containers.end() ||
+          std::ranges::find_if(std::next(match), storage_->containers.end(), matches) !=
+              storage_->containers.end())
+        return;
+      reference = consan_program_container_ref(*match);
     };
     for (ConSanAccessInventorySite &access : storage_->access_sites) {
       bind_container(access.container);

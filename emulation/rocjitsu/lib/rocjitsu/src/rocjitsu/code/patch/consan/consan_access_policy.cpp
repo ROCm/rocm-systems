@@ -95,16 +95,22 @@ namespace {
          });
 }
 
-[[nodiscard]] bool access_alias_semantics_equal(const ConSanAccessInventorySite &lhs,
+[[nodiscard]] bool access_alias_semantics_equal(const ProgramInventory &inventory,
+                                                const ConSanAccessInventorySite &lhs,
                                                 const ConSanAccessInventorySite &rhs) {
-  return std::tie(lhs.container.kind, lhs.container.entry_text_offset, lhs.origin, lhs.kind,
-                  lhs.address_space, lhs.provenance, lhs.confidence, lhs.lowering, lhs.file_offset,
-                  lhs.instruction_size, lhs.decoded_width_bits, lhs.mnemonic,
-                  lhs.flat_address_space_hint, lhs.operands, lhs.ranges, lhs.exclusions) ==
-         std::tie(rhs.container.kind, rhs.container.entry_text_offset, rhs.origin, rhs.kind,
-                  rhs.address_space, rhs.provenance, rhs.confidence, rhs.lowering, rhs.file_offset,
-                  rhs.instruction_size, rhs.decoded_width_bits, rhs.mnemonic,
-                  rhs.flat_address_space_hint, rhs.operands, rhs.ranges, rhs.exclusions);
+  const auto container_entry = [&](const ConSanAccessInventorySite &site) {
+    const ConSanProgramContainer *container = inventory.container(site.container.id);
+    return container == nullptr ? std::optional<uint64_t>{}
+                                : std::optional{container->entry_text_offset};
+  };
+  return std::tuple(lhs.container.kind, container_entry(lhs), lhs.origin, lhs.kind,
+                    lhs.address_space, lhs.provenance, lhs.confidence, lhs.lowering,
+                    lhs.file_offset, lhs.instruction_size, lhs.decoded_width_bits, lhs.mnemonic,
+                    lhs.flat_address_space_hint, lhs.operands, lhs.ranges, lhs.exclusions) ==
+         std::tuple(rhs.container.kind, container_entry(rhs), rhs.origin, rhs.kind,
+                    rhs.address_space, rhs.provenance, rhs.confidence, rhs.lowering,
+                    rhs.file_offset, rhs.instruction_size, rhs.decoded_width_bits, rhs.mnemonic,
+                    rhs.flat_address_space_hint, rhs.operands, rhs.ranges, rhs.exclusions);
 }
 
 [[nodiscard]] ConSanAccessPolicyReason access_classifier_reason(ConSanAccessClassifierReason reason,
@@ -729,8 +735,9 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
 
-    const bool conflicting_alias = std::ranges::any_of(
-        aliases, [&](const auto *alias) { return !access_alias_semantics_equal(access, *alias); });
+    const bool conflicting_alias = std::ranges::any_of(aliases, [&](const auto *alias) {
+      return !access_alias_semantics_equal(inventory, access, *alias);
+    });
     const bool flat = access.origin == ConSanAccessOrigin::Flat;
     const ConSanCapabilityForm form =
         flat ? ConSanCapabilityForm::GroupFlatAccess : ConSanCapabilityForm::NativeLdsAccess;

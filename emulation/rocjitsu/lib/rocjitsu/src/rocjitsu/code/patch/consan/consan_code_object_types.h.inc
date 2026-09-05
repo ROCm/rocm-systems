@@ -331,27 +331,16 @@ struct ConSanProgramContainerId {
 /// Attribution reference from a semantic site to the symbol range through
 /// which it was decoded.
 ///
-/// Kernel descriptor identity is optional because function aliases do not own
-/// a descriptor. Execution owners are kept separately: a shared function can
-/// be decoded through one symbol yet execute for several kernel descriptors.
+/// The stable arena handle is authoritative. Kind and name remain as cheap
+/// presentation and selection facets; container geometry and descriptor
+/// identity are resolved through `ProgramInventory`. Execution owners are
+/// kept separately because a shared function can execute for several kernels.
 struct ConSanProgramContainerRef {
   ConSanProgramContainerId id;
   /// Whether the symbol is a dispatchable kernel or a helper function.
   ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
   /// Symbol name retained for diagnostics and symbol-attributed inventory lookup.
   std::string name;
-  /// Original executable-text entry offset of the symbol range.
-  uint64_t entry_text_offset = 0;
-  /// File offset corresponding to `entry_text_offset` in the pristine image.
-  uint64_t text_file_offset = 0;
-  /// Whether a zero-sized symbol forced the parser to infer this range's end.
-  bool code_size_inferred_from_zero = false;
-  /// Descriptor file offset for a kernel; absent for a function.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
-  /// Whether this container's code observes the target-provided cluster
-  /// workgroup coordinate. This is decoded program behavior, not a product
-  /// test; targets without cluster facilities always leave it false.
-  bool uses_cluster_workgroup_id = false;
 
   /// Return whether this attribution record names a dispatchable kernel. The
   /// result is derived from `kind`, so no parallel boolean can disagree.
@@ -469,12 +458,6 @@ consan_program_container_ref(const ConSanProgramContainer &container) {
       .id = container.id,
       .kind = container.kind,
       .name = container.name,
-      .entry_text_offset = container.entry_text_offset,
-      .text_file_offset = container.text_file_offset,
-      .code_size_inferred_from_zero = container.code_size_inferred_from_zero,
-      .kernel_descriptor_file_offset =
-          container.is_kernel() ? std::optional{container.descriptor_file_offset} : std::nullopt,
-      .uses_cluster_workgroup_id = container.uses_cluster_workgroup_id,
   };
 }
 

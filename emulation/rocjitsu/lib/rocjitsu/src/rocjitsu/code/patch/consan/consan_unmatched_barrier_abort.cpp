@@ -50,8 +50,12 @@ void append_unmatched_barrier_wait(const ConSanDecodedProgramSite &decoded,
                std::ranges::find(sequence.member_event_identities, event->identity) !=
                    sequence.member_event_identities.end();
       });
-  if (!belongs_to_sequence)
-    waits.push_back({site, decoded.container.kernel_descriptor_file_offset});
+  if (!belongs_to_sequence) {
+    const ConSanProgramContainer *container = inventory.container(decoded.container.id);
+    waits.push_back({site, container != nullptr && container->is_kernel()
+                               ? std::optional{container->descriptor_file_offset}
+                               : std::nullopt});
+  }
 }
 
 } // namespace

@@ -1811,12 +1811,11 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
   const ConSanAccessInventorySite *best = nullptr;
   for (const ConSanAccessInventorySite &site : inventory.access_sites()) {
-    if (!site.container.is_kernel() || !site.container.kernel_descriptor_file_offset ||
-        site.origin != ConSanAccessOrigin::NativeLds || site.kind != ConSanLdsAccessKind::Read ||
-        !site.lowering.replay_guest_access.available() || site.decoded_width_bits != 32)
+    if (!site.container.is_kernel() || site.origin != ConSanAccessOrigin::NativeLds ||
+        site.kind != ConSanLdsAccessKind::Read || !site.lowering.replay_guest_access.available() ||
+        site.decoded_width_bits != 32)
       continue;
-    const ConSanProgramContainer *kernel =
-        inventory.find_kernel_by_descriptor(*site.container.kernel_descriptor_file_offset);
+    const ConSanProgramContainer *kernel = inventory.container(site.container.id);
     if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;
     if (best == nullptr || site.file_offset < best->file_offset)

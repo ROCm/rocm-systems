@@ -173,7 +173,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const auto &[file_offset, access] : admitted_sites) {
     (void)file_offset;
     const ConSanAccessInventorySite &site = *access;
-    std::vector<uint64_t> owners = site.execution_and_container_owner_descriptor_file_offsets();
+    std::vector<uint64_t> owners =
+        result.program_inventory.execution_owner_descriptors(site);
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (plan.site_kind == ConSanResourceSiteKind::Access &&
           plan.text_offset == site.physical_id.original_text_offset) {
@@ -650,10 +651,10 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
         !is_instrumentable_group_flat_hint(access.flat_address_space_hint,
                                            options.flat_provenance_mode))
       continue;
-    if (access.container.kernel_descriptor_file_offset) {
-      const ConSanProgramContainer *kernel = result.program_inventory.find_kernel_by_descriptor(
-          *access.container.kernel_descriptor_file_offset);
-      if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
+    if (const ConSanProgramContainer *kernel =
+            result.program_inventory.container(access.container.id);
+        kernel != nullptr && kernel->is_kernel()) {
+      if (kernel->preflight_action == ConSanPreflightAction::Blocked)
         continue;
     }
     candidates.push_back(&access);
