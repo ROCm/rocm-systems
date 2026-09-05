@@ -181,8 +181,10 @@ find_static_participant_init(const ProgramInventory &program_inventory,
   const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
     const SemanticSiteId member =
         event.semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
+    const ConSanProgramContainerRef *container = sync.container(event);
     return event.operation == ConSanSyncOperation::BarrierInit &&
-           event.container_name == group.container_name && event.in_kernel == group.in_kernel &&
+           container != nullptr && container->name == group.container_name &&
+           container->is_kernel() == group.in_kernel &&
            std::ranges::find(group.member_semantic_ids, member) != group.member_semantic_ids.end();
   });
   if (init_event == sync.sync_events.end())

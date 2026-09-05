@@ -286,8 +286,6 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.source_site = source_site;
     event.source_containers = {source.container.name};
-    event.container_name = source.container.name;
-    event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + std::string(container_kind) + "=" +
                      source.container.name + "|event=" + std::string(kind) + "|pc=0x" +
                      consan_fixed_hex(event.text_offset(), 16) +
@@ -471,11 +469,9 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   if (lhs_source == nullptr || rhs_source == nullptr || !lhs_source->same_payload(*rhs_source))
     return false;
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
-                  lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.in_kernel,
-                  lhs.scope) == std::tie(rhs.kind, rhs.operation, rhs.address_source,
-                                         rhs.memory_role, rhs.rmw_outcome, rhs.confidence,
-                                         rhs.memory_role_confidence, rhs.confidence_reason,
-                                         rhs.in_kernel, rhs.scope);
+                  lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.scope) ==
+         std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
+                  rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason, rhs.scope);
 }
 
 [[nodiscard]] bool
@@ -496,7 +492,10 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
         const ConSanProgramSite *source = source_site(program_sites, event);
         return source == nullptr ? uint64_t{0} : source->decoded_file_offset();
       },
-      [](const ConSanSyncEvent &event) -> std::string_view { return event.container_name; },
+      [&](const ConSanSyncEvent &event) -> std::string_view {
+        const ConSanProgramSite *source = source_site(program_sites, event);
+        return source == nullptr ? std::string_view{} : std::string_view(source->container.name);
+      },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
         return container_entry(lhs) == container_entry(rhs) &&
                sync_event_semantics_equal(program_sites, lhs, rhs);
@@ -596,8 +595,8 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.memory_role_confidence = event.memory_role_confidence;
     sequence.confidence_reason = event.confidence_reason;
     sequence.identity = event.identity + "|sequence=singleton";
-    sequence.container_name = event.container_name;
-    sequence.in_kernel = event.in_kernel;
+    sequence.container_name = source.container.name;
+    sequence.in_kernel = source.container.is_kernel();
     sequence.begin_text_offset = event.text_offset();
     sequence.end_text_offset = event.text_offset() + source.size();
     sequence.member_semantic_ids.push_back(
@@ -2268,8 +2267,12 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
       event_by_physical_site;
   event_by_physical_site.reserve(result.program_inventory.sync().sync_events.size());
   for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
-    event_by_site.emplace(
-        EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset()}, &event);
+    const ConSanProgramSite *source = result.program_inventory.program_site(event.source_site);
+    if (source != nullptr) {
+      event_by_site.emplace(EventKey{event.kind, source->container.is_kernel(),
+                                     source->container.name, event.text_offset()},
+                            &event);
+    }
     const auto [entry, inserted] =
         event_by_physical_site.emplace(PhysicalEventKey{event.kind, event.text_offset()}, &event);
     if (!inserted)

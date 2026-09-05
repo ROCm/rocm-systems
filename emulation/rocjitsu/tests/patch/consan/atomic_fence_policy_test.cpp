@@ -136,8 +136,7 @@ ConSanSyncEvent make_atomic_event(
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = container + "|atomic=" + std::to_string(offset);
-  event.container_name = std::move(container);
-  event.in_kernel = true;
+  event.source_containers.push_back(std::move(container));
   event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
                                                                      : ConSanMemoryScope::Agent;
   return event;
@@ -178,8 +177,8 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = std::move(identity);
-  sequence.container_name = event.container_name;
-  sequence.in_kernel = event.in_kernel;
+  sequence.container_name = event.source_containers.front();
+  sequence.in_kernel = true;
   sequence.begin_text_offset = event.text_offset();
   sequence.end_text_offset = event.text_offset() + 12u;
   sequence.basic_block_index = 0;
@@ -263,6 +262,12 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
   for (ConSanProgramSite &site : builder.program_sites()) {
     if (std::ranges::find(unowned_offsets, site.text_offset()) == unowned_offsets.end())
       site.execution_owners.push_back({});
+  }
+  for (const ConSanSyncEvent &event : events) {
+    if (event.source_site.valid() && event.source_site.ordinal < builder.program_sites().size() &&
+        !event.source_containers.empty())
+      builder.program_sites()[event.source_site.ordinal].container.name =
+          event.source_containers.front();
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
@@ -853,7 +858,7 @@ TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
 TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) {
   std::vector events{make_atomic_event()};
   ConSanSyncEvent alias = events.front();
-  alias.container_name = "aliased_kernel";
+  alias.source_containers = {"aliased_kernel"};
   events.front().source_site = {0};
   alias.source_site = {1};
   events.push_back(std::move(alias));

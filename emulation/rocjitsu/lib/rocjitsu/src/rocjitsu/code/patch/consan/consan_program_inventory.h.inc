@@ -335,6 +335,27 @@ struct SynchronizationInventoryView {
                               : std::span<const ConSanExecutionOwner>(decoded->execution_owners);
   }
 
+  [[nodiscard]] const ConSanProgramContainerRef *container(const ConSanSyncEvent &event) const {
+    const ConSanProgramSite *decoded = source(event);
+    return decoded == nullptr ? nullptr : &decoded->container;
+  }
+
+  [[nodiscard]] std::string_view container_name(const ConSanSyncEvent &event) const {
+    const ConSanProgramContainerRef *record = container(event);
+    return record == nullptr ? std::string_view{} : std::string_view(record->name);
+  }
+
+  [[nodiscard]] bool in_kernel(const ConSanSyncEvent &event) const {
+    const ConSanProgramContainerRef *record = container(event);
+    return record != nullptr && record->is_kernel();
+  }
+
+  [[nodiscard]] bool same_container(const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) const {
+    const ConSanProgramContainerRef *left = container(lhs);
+    const ConSanProgramContainerRef *right = container(rhs);
+    return left != nullptr && right != nullptr && *left == *right;
+  }
+
   /// Resolve one typed event identity to its sole authoritative record. An
   /// absent identity returns null; physical aliases have already been
   /// canonicalized before this immutable view is published.
@@ -416,7 +437,7 @@ struct SynchronizationInventoryView {
         physical_is_ambiguous = true;
       else
         physical = &event;
-      if (event.container_name != container_name || event.in_kernel != in_kernel)
+      if (this->container_name(event) != container_name || this->in_kernel(event) != in_kernel)
         continue;
       if (exact != nullptr)
         return nullptr;

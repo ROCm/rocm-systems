@@ -366,8 +366,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   };
   barrier.kind = ConSanSyncEventKind::Barrier;
   barrier.operation = ConSanSyncOperation::BarrierFull;
-  barrier.container_name = "kernel_c";
-  barrier.in_kernel = true;
   ConSanProgramSite barrier_source;
   barrier_source.physical_id = barrier.semantic_id.physical;
   barrier_source.container = consan_program_container_ref(inventory_builder.kernels().back());

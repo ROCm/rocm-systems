@@ -254,8 +254,6 @@ struct ConSanSyncEvent {
   /// decoded. Analysis canonicalizes equivalent aliases into one event while
   /// preserving this attribution for policy diagnostics and filtering.
   std::vector<std::string> source_containers;
-  std::string container_name;
-  bool in_kernel = true;
   std::optional<ConSanMemoryScope> scope;
   /// Original text position is part of the event's canonical physical
   /// identity. Keeping a second mutable copy allowed the two identities to

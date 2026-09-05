@@ -39,8 +39,6 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
       synchronization.find_unique_event(ConSanSyncEventKind::Barrier, decoded.container.name,
                                         decoded.container.is_kernel(), site->text_offset);
   if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
-      event->container_name != decoded.container.name ||
-      event->in_kernel != decoded.container.is_kernel() ||
       synchronization.source(*event) != &decoded)
     return;
   const SemanticSiteId member_identity =

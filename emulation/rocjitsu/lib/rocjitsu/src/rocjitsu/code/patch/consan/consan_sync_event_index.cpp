@@ -18,8 +18,9 @@ template <typename FindEvent, typename FindSource>
         member_identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent);
     const ConSanSyncEvent *event = find_event(event_identity);
     const ConSanProgramSite *source = event == nullptr ? nullptr : find_source(*event);
-    if (event == nullptr || event->container_name != sequence.container_name || source == nullptr ||
-        event->in_kernel != sequence.in_kernel || event->text_offset() < prior_end ||
+    if (event == nullptr || source == nullptr ||
+        source->container.name != sequence.container_name ||
+        source->container.is_kernel() != sequence.in_kernel || event->text_offset() < prior_end ||
         event->text_offset() < sequence.begin_text_offset ||
         event->text_offset() + source->size() > sequence.end_text_offset) {
       return false;

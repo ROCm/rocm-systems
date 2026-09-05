@@ -52,12 +52,14 @@ namespace {
 }
 
 [[nodiscard]] std::vector<std::string>
-container_names(std::span<const ConSanSyncEvent *const> aliases) {
+container_names(const SynchronizationInventoryView &inventory,
+                std::span<const ConSanSyncEvent *const> aliases) {
   std::vector<std::string> names;
   names.reserve(aliases.size());
   for (const ConSanSyncEvent *event : aliases) {
+    const std::string fallback(inventory.container_name(*event));
     const std::span<const std::string> sources = event->source_containers.empty()
-                                                     ? std::span(&event->container_name, 1u)
+                                                     ? std::span(&fallback, 1u)
                                                      : std::span(event->source_containers);
     for (const std::string &source : sources) {
       if (std::ranges::find(names, source) == names.end())
@@ -147,7 +149,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   for (const auto &[offset, aliases] : events_by_offset) {
     const ConSanSyncEvent &event = *aliases.front();
     const ConSanBarrierSite *barrier = synchronization.source_as<ConSanBarrierSite>(event);
-    const std::vector<std::string> names = container_names(aliases);
+    const std::vector<std::string> names = container_names(synchronization, aliases);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
     std::optional<ConSanProbeIntentId> intent_id;
@@ -170,8 +172,9 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
     }
     const bool allowlist_filtered = !consan_site_matches_kernel_allowlist(
         inventory, owner_descriptors, names, request.kernel_name_allowlist);
-    const bool only_runtime_kernels = std::ranges::all_of(aliases, [](const auto *alias) {
-      return alias->in_kernel && runtime_kernel(alias->container_name);
+    const bool only_runtime_kernels = std::ranges::all_of(aliases, [&](const auto *alias) {
+      return synchronization.in_kernel(*alias) &&
+             runtime_kernel(synchronization.container_name(*alias));
     });
     bool redundant = false;
     if (event.operation == ConSanSyncOperation::BarrierFull) {

@@ -58,9 +58,10 @@
     plan.semantic_site = event->semantic_id;
     plan.association = {.value = sequence->identity};
     plan.evidence_intent = id;
-    plan.in_kernel = event->in_kernel;
-    auto container = resolve_moi_evidence_container(
-        inventory, event->in_kernel, event->container_name, graph.execution_owners(*event));
+    plan.in_kernel = graph.in_kernel(*event);
+    auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*event),
+                                                    graph.container_name(*event),
+                                                    graph.execution_owners(*event));
     const ConSanBarrierSite *site = inventory.program_site<ConSanBarrierSite>(event->source_site);
     if (site == nullptr) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");

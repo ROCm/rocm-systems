@@ -221,7 +221,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = "barrier";
-  event.container_name = "kernel";
   event.source_site = {0};
   ConSanBarrierSite source;
   source.operation = ConSanBarrierSite::Operation::Full;
@@ -232,7 +231,9 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   source.operand_source = ConSanBarrierSite::OperandSource::Immediate;
   source.scope = ConSanBarrierSite::Scope::Workgroup;
   source.mnemonic = "s_barrier";
-  builder.program_sites().push_back(make_consan_program_site({}, std::move(source)));
+  builder.program_sites().push_back(make_consan_program_site(
+      {.id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"},
+      std::move(source)));
   builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncSequenceKind::Barrier;

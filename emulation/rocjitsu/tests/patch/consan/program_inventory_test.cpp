@@ -448,7 +448,6 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   ConSanSyncEvent first;
   first.kind = ConSanSyncEventKind::Atomic;
   first.identity = "first";
-  first.container_name = "first-container";
   first.semantic_id.physical.original_text_offset = 12;
   first.semantic_id = {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 12},
@@ -456,7 +455,16 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   };
   ConSanSyncEvent alias = first;
   alias.identity = "alias";
-  alias.container_name = "alias-container";
+  first.source_site = {0};
+  alias.source_site = {1};
+  ConSanProgramSite first_source;
+  first_source.container = {
+      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "first-container"};
+  ConSanProgramSite alias_source;
+  alias_source.container = {
+      .id = {1}, .kind = ConSanProgramContainerKind::Kernel, .name = "alias-container"};
+  builder.add_semantic_site(std::move(first_source));
+  builder.add_semantic_site(std::move(alias_source));
   build.sync_events = {first, alias};
 
   SemanticSiteId member = first.semantic_id;

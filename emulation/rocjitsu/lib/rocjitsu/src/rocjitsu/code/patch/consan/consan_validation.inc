@@ -1590,8 +1590,8 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
         anchor_source == nullptr ||
         (composite && patch.perturbation_source_anchor_identity != outer_member) ||
-        anchor_event->container_name != sequence->container_name ||
-        anchor_event->in_kernel != sequence->in_kernel ||
+        anchor_source->container.name != sequence->container_name ||
+        anchor_source->container.is_kernel() != sequence->in_kernel ||
         candidate->anchor_text_offset != anchor_event->text_offset() ||
         candidate->anchor_size != anchor_source->size() ||
         proof_anchor_offset != anchor_event->text_offset() ||

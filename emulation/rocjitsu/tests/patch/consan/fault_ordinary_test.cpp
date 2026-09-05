@@ -401,7 +401,6 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   load.operation = ConSanSyncOperation::OrdinaryLoad;
   load.confidence = ConSanSemanticConfidence::Conservative;
   load.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
-  load.container_name = "kernel";
   load.source_site = {0};
   load.scope = ConSanMemoryScope::Agent;
   ConSanSyncEvent cache = load;
@@ -409,6 +408,9 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   cache.operation = ConSanSyncOperation::Fence;
   cache.source_site = {1};
   std::vector<ConSanProgramSite> program_sites(2);
+  program_sites[0].container = {
+      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"};
+  program_sites[1].container = program_sites[0].container;
   ConSanOrdinaryMemorySite load_source;
   load_source.width_bits = 32u;
   program_sites[0].payload = std::move(load_source);
@@ -609,13 +611,15 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   cache.source_site = {0};
   cache.confidence = ConSanSemanticConfidence::Conservative;
   cache.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
-  cache.container_name = "kernel";
   ConSanSyncEvent store = cache;
   store.kind = ConSanSyncEventKind::OrdinaryMemory;
   store.operation = ConSanSyncOperation::OrdinaryStore;
   store.source_site = {1};
   store.scope = ConSanMemoryScope::Agent;
   std::vector<ConSanProgramSite> program_sites(2);
+  program_sites[0].container = {
+      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"};
+  program_sites[1].container = program_sites[0].container;
   ConSanFenceSite cache_source;
   cache_source.cache_operation = ConSanCacheOperation::Release;
   cache_source.mnemonic = "global_wb";

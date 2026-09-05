@@ -160,9 +160,9 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
         const auto event =
             std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
               const ConSanProgramSite *source = pristine_inventory.program_site(item.source_site);
-              return item.container_name == candidate->container_name &&
-                     item.in_kernel == candidate->in_kernel &&
-                     item.text_offset() == patch.anchor_offset && source != nullptr &&
+              return source != nullptr && source->container.name == candidate->container_name &&
+                     source->container.is_kernel() == candidate->in_kernel &&
+                     item.text_offset() == patch.anchor_offset &&
                      source->size() == patch.original_size;
             });
         if (event != pristine_inventory.sync().sync_events.end() &&
