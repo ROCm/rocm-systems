@@ -68,6 +68,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::optional<uint16_t> relative_cell_index_vgpr = std::nullopt,
     uint32_t relative_cell_index = 0u) {
   InstructionSequence sequence(words);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!target)
+    return false;
   if (!plan.scalar_state.exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
   if (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes)
@@ -443,16 +446,17 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // ordinary transaction window on every target: exact-range construction
   // reuses current_field_vgpr, so aliasing SLOT with that temporary redirects
   // later record stores through a byte offset or negative range endpoint.
-  // CDNA3/4 additionally require the tuple to start at an even VGPR.
+  // Targets with an aligned FLAT compare-swap tuple round the candidate down
+  // to the preceding legal register boundary.
   constexpr uint16_t diagnostic_tuple_offset =
       consan_detail::inline_shadow_transaction_scratch_count(/*has_exec_save=*/true,
                                                              /*track_atomics=*/false) -
       2u;
   const uint16_t diagnostic_tuple_candidate =
       static_cast<uint16_t>(plan.scratch_vgpr + diagnostic_tuple_offset);
-  const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
-  const uint16_t slot_vgpr =
-      consan_arch_is_cdna3_or_cdna4(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
+  const uint16_t slot_vgpr = static_cast<uint16_t>(
+      diagnostic_tuple_candidate -
+      diagnostic_tuple_candidate % target->flat_compare_swap_data_pair_alignment);
   sequence.require(append_select_first_active_lane(
       words, tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
       static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), arch));
@@ -1605,7 +1609,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   const bool byte_granular_external_shadow = plan.byte_granular_external_shadow;
   const bool spill_overlaps_guest_operands = plan.spill_overlaps_guest_operands;
   const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
-  if (!plan.scalar_state.exec_save_sgpr ||
+  if (!target || !plan.scalar_state.exec_save_sgpr ||
       (!has_hardware_dispatch_id && !plan.dispatch_id.literal) ||
       !plan.dispatch_id.is_well_formed()) {
     errors.emplace_back(
@@ -1691,13 +1695,14 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
   };
   const std::optional<uint16_t> spill_backed_lds_byte_offset_source =
-      spill != nullptr && !materialize_flat_address && (consan_arch_is_cdna3_or_cdna4(arch)) &&
+      spill != nullptr && !materialize_flat_address &&
+              target->moi_access.clobbered_address_spill_reload &&
               source_is_spilled(*lds_byte_offset_vgpr)
           ? lds_byte_offset_vgpr
           : std::nullopt;
   const bool compact_spill_keeps_disjoint_clobbered_address =
       spill != nullptr && scratch_count == spill_scratch_count &&
-      (consan_arch_is_cdna3_or_cdna4(arch)) && moi_load_clobbers_address(candidate) &&
+      access_resource_facts.supports_clobbered_address_spill_reload &&
       !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (candidate.is_direct_to_lds()) {
@@ -1962,12 +1967,13 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     return std::nullopt;
   }
 
-  // The global versioned transaction keeps old_value at +5 so its CDNA CAS
-  // tuples remain even. The workgroup-local B64 DS exchange instead requires
-  // an even return tuple, so rotate only that local result to the unused +6
-  // pair on CDNA3/4.
-  const uint16_t local_old_value_vgpr =
-      static_cast<uint16_t>(old_value_vgpr + (consan_arch_is_cdna3_or_cdna4(arch) ? 1u : 0u));
+  // The global versioned transaction keeps old_value at +5 and aligns its CAS
+  // tuple downward. The workgroup-local B64 DS exchange instead aligns its
+  // return tuple upward into the unused following registers.
+  const uint16_t local_old_value_vgpr = static_cast<uint16_t>(
+      old_value_vgpr + (target->flat_compare_swap_data_pair_alignment -
+                        old_value_vgpr % target->flat_compare_swap_data_pair_alignment) %
+                           target->flat_compare_swap_data_pair_alignment);
 
   for (const ConSanAccessRange &range : access_ranges) {
     ConSanMoiLdsCellRange cell_range;

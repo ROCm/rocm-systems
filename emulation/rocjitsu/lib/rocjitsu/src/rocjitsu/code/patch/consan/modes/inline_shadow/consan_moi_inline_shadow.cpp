@@ -141,7 +141,13 @@ bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &sta
         "private preservation");
     return false;
   }
-  const uint16_t ordinary_sgpr_count = consan_arch_is_cdna3_or_cdna4(arch) ? 102u : kMaxSgprs;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!target || required_sgpr_count > target->ordinary_sgpr_limit) {
+    errors.emplace_back("ConSan MOI inline-shadow diagnostics require a supported target SGPR "
+                        "layout");
+    return false;
+  }
+  const uint16_t ordinary_sgpr_count = target->ordinary_sgpr_limit;
   const uint16_t max_exec_save_sgpr =
       static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
   if (*state.exec_save_sgpr > max_exec_save_sgpr || *state.exec_save_sgpr % 2u != 0u) {
@@ -175,13 +181,10 @@ uint16_t inline_shadow_spill_backed_scratch_count(bool track_atomics,
                                (resource_facts.supports_clobbered_address_spill_reload ? 1u : 0u));
 }
 
-MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
-                                                 const BoundRuntimeResources &resources,
-                                                 const TransformPolicy &,
-                                                 const ConSanMoiOperatingPoint &point,
-                                                 const MoiObjectFacts &facts,
-                                                 const ConSanObservationPlan &observation_plan,
-                                                 const ProgramInventory &inventory) {
+MoiObjectModePlan plan_inline_shadow_object_mode(
+    const ConSanRequest &request, const BoundRuntimeResources &resources, const TransformPolicy &,
+    const ConSanMoiOperatingPoint &point, const MoiObjectFacts &facts,
+    const ConSanObservationPlan &observation_plan, const ProgramInventory &inventory) {
   MoiObjectModePlan plan = make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::HwId);
   plan.prologue_requires_consumer = true;
   if (plan.owner_source == ConSanMoiOwnerSource::WorkitemId) {

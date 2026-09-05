@@ -380,6 +380,17 @@ _consan_assert_no_match(
     "consan_arch_"
     "common MOI access lowering must consume normalized forms and target capabilities"
 )
+foreach(_inline_shadow_profile_client IN ITEMS
+    modes/inline_shadow/consan_moi_inline_shadow.cpp
+    modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
+    consan_validation.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_inline_shadow_profile_client}"
+        "consan_arch_is_cdna3_or_cdna4"
+        "InlineShadow resource geometry must consume exact target-profile facts"
+    )
+endforeach()
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

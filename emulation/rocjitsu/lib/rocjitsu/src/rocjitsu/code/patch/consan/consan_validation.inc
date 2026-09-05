@@ -36,10 +36,6 @@ struct ValidationByteRange {
   return lhs.begin < rhs.end && rhs.begin < lhs.end;
 }
 
-[[nodiscard]] constexpr bool validation_uses_legacy_cdna(const ConSanTargetProfile &target) {
-  return consan_arch_is_cdna3_or_cdna4(target.arch);
-}
-
 [[nodiscard]] bool has_blocked_kernel(const ProgramInventory &inventory) {
   return std::ranges::any_of(inventory.kernels(), [](const ConSanProgramContainer &kernel) {
     return kernel.preflight_action == ConSanPreflightAction::Blocked;
@@ -2104,8 +2100,11 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_publication_loop ? 1u : 0u);
-      const bool cdna = validation_uses_legacy_cdna(*environment.target_profile);
-      const uint16_t old_value_offset = cdna ? 6u : 5u;
+      const uint16_t alignment =
+          environment.target_profile->flat_compare_swap_data_pair_alignment;
+      const uint16_t old_value_candidate = static_cast<uint16_t>(scratch + 5u);
+      const uint16_t old_value_offset = static_cast<uint16_t>(
+          5u + (alignment - old_value_candidate % alignment) % alignment);
       const auto expected_local_exchange_b64 = instrumentation::build_ds_storexchg_rtn_b64(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
           static_cast<uint16_t>(scratch + 2u), 0u, arch);
@@ -2399,10 +2398,14 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna = validation_uses_legacy_cdna(*environment.target_profile);
-    const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
+    const uint16_t alignment = environment.target_profile->flat_compare_swap_data_pair_alignment;
+    const uint16_t snapshot_candidate = static_cast<uint16_t>(scratch + 5u);
+    const uint16_t snapshot_address = static_cast<uint16_t>(
+        snapshot_candidate + (alignment - snapshot_candidate % alignment) % alignment);
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
-    const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
+    const uint16_t version_cas_candidate = static_cast<uint16_t>(scratch + 5u);
+    const uint16_t version_cas_value = static_cast<uint16_t>(
+        version_cas_candidate - version_cas_candidate % alignment);
     const auto version_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
@@ -2504,7 +2507,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
-                               static_cast<uint16_t>(scratch + (cdna ? 5u : 7u)));
+                               static_cast<uint16_t>(scratch + (alignment > 1u ? 5u : 7u)));
     snapshot_stores_valid &= require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, flags),
                                                     static_cast<uint16_t>(scratch + 8u));
     for (uint16_t i = 0; i < 4u; ++i) {
