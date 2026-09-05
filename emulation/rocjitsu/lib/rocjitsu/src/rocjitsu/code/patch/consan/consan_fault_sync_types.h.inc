@@ -95,6 +95,10 @@ struct ConSanFaultSitePresentation : ConSanDecodedSite {
 /// A currently injectable instruction with its application-private proof
 /// identity and target operand state.
 struct ConSanFaultSite : ConSanFaultSitePresentation {
+  /// Exact decoded instruction from which this injectable projection was
+  /// derived. Synchronization annotation follows this handle instead of
+  /// reconstructing source identity from copied names and offsets.
+  ConSanProgramSiteId source_site;
   ConSanProgramContainerId container_id;
   std::optional<uint16_t> address_vgpr;
   /// Target-defined selectable-bank state at this instruction.

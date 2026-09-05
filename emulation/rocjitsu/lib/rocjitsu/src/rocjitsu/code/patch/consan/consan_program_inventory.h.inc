@@ -811,8 +811,11 @@ public:
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
     }
-    for (ConSanProgramSite &site : storage_->program_sites.sites())
+    for (ConSanProgramSite &site : storage_->program_sites.sites()) {
       bind_container(site.container);
+      if (!site.physical_id.code_object.valid())
+        site.physical_id.code_object = storage_->code_object_id;
+    }
   }
 
   /// Transfer normalized accesses in a staged executable range to their

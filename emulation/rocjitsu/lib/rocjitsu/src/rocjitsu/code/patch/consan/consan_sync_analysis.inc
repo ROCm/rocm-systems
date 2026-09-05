@@ -143,6 +143,7 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
       continue;
     }
 
+    site.source_site = {static_cast<uint32_t>(decoded_index)};
     site.container_id = decoded.container.id;
     site.container_name = decoded.container.name;
     site.in_kernel = decoded.container.is_kernel();
@@ -157,11 +158,12 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
 
 void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                     rj_code_arch_t arch, const ProgramInventory &inventory,
-                                    std::span<const ConSanProgramSite> accesses,
+                                    std::span<const ConSanProgramSite> program_sites,
                                     std::vector<ConSanFaultSite> &sites) {
   std::optional<ConSanProgramContainerRef> previous_container;
   uint32_t occurrence = 0;
-  for (const ConSanProgramSite &access : accesses) {
+  for (size_t source_index = 0; source_index < program_sites.size(); ++source_index) {
+    const ConSanProgramSite &access = program_sites[source_index];
     if (!lds_address_fault_site_supported(access, arch) ||
         (access.container.is_kernel() && is_rocclr_runtime_kernel_name(access.container.name)))
       continue;
@@ -171,6 +173,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     }
     ConSanFaultSite site;
     site.kind = ConSanFaultSiteKind::LdsAccess;
+    site.source_site = {static_cast<uint32_t>(source_index)};
     site.container_id = access.container.id;
     site.container_name = access.container.name;
     site.in_kernel = access.container.is_kernel();
@@ -215,7 +218,7 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                std::tuple{rhs.container_id, kind_order(rhs.kind), rhs.text_offset};
       });
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory,
-                                 result.program_inventory.access_sites(), result.fault_sites);
+                                 result.program_inventory.program_sites(), result.fault_sites);
 }
 
 [[nodiscard]] ConSanSyncAddressSource sync_address_source(ConSanAtomicAddressSpaceHint hint) {
@@ -2212,81 +2215,20 @@ void associate_ordinary_acquire_sync_sequences(
 }
 
 void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &result) {
-  struct EventKey {
-    ConSanSyncEventKind kind;
-    bool in_kernel;
-    std::string_view container_name;
-    uint64_t text_offset;
-
-    bool operator==(const EventKey &) const = default;
-  };
-  struct EventKeyHash {
-    size_t operator()(const EventKey &key) const {
-      size_t value = std::hash<std::string_view>{}(key.container_name);
-      const auto combine = [&](size_t part) {
-        value ^= part + 0x9e3779b9u + (value << 6u) + (value >> 2u);
-      };
-      combine(std::hash<uint64_t>{}(key.text_offset));
-      combine(std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind)));
-      combine(std::hash<bool>{}(key.in_kernel));
-      return value;
-    }
-  };
-
-  // Aggregate code objects can contain tens of thousands of fault sites and
-  // synchronization events with long mangled owner names. A linear event
-  // search per site makes this annotation quadratic and spends most of its
-  // time comparing those names.
-  std::unordered_map<EventKey, const ConSanSyncEvent *, EventKeyHash> event_by_site;
-  event_by_site.reserve(result.program_inventory.sync().sync_events.size());
-  struct PhysicalEventKey {
-    ConSanSyncEventKind kind;
-    uint64_t text_offset;
-
-    bool operator==(const PhysicalEventKey &) const = default;
-  };
-  struct PhysicalEventKeyHash {
-    size_t operator()(const PhysicalEventKey &key) const {
-      size_t value = std::hash<uint64_t>{}(key.text_offset);
-      value ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind)) + 0x9e3779b9u + (value << 6u) +
-               (value >> 2u);
-      return value;
-    }
-  };
-  std::unordered_map<PhysicalEventKey, const ConSanSyncEvent *, PhysicalEventKeyHash>
-      event_by_physical_site;
-  event_by_physical_site.reserve(result.program_inventory.sync().sync_events.size());
-  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
-    const ConSanProgramSite *source = result.program_inventory.program_site(event.source_site);
-    if (source != nullptr) {
-      event_by_site.emplace(EventKey{event.kind, source->container.is_kernel(),
-                                     source->container.name, event.text_offset()},
-                            &event);
-    }
-    const auto [entry, inserted] =
-        event_by_physical_site.emplace(PhysicalEventKey{event.kind, event.text_offset()}, &event);
-    if (!inserted)
-      entry->second = nullptr;
-  }
-
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const SyncEventSemanticIndex events =
+      build_sync_event_semantic_index(sync.sync_events, sync.program_sites);
   const SyncSequenceMembershipIndex sequence_by_event =
-      build_sync_sequence_membership_index(result.program_inventory.sync().sync_sequences);
+      build_sync_sequence_membership_index(sync.sync_sequences);
 
   for (ConSanFaultSite &site : result.fault_sites) {
-    const ConSanSyncEventKind expected_kind =
-        site.kind == ConSanFaultSiteKind::Barrier  ? ConSanSyncEventKind::Barrier
-        : site.kind == ConSanFaultSiteKind::Atomic ? ConSanSyncEventKind::Atomic
-                                                   : ConSanSyncEventKind::OrdinaryMemory;
-    const auto exact_event = event_by_site.find(
-        EventKey{expected_kind, site.in_kernel, site.container_name, site.text_offset});
+    const ConSanProgramSite *source = result.program_inventory.program_site(site.source_site);
     const ConSanSyncEvent *event =
-        exact_event == event_by_site.end() ? nullptr : exact_event->second;
-    if (event == nullptr) {
-      const auto physical_event =
-          event_by_physical_site.find(PhysicalEventKey{expected_kind, site.text_offset});
-      if (physical_event != event_by_physical_site.end())
-        event = physical_event->second;
-    }
+        source == nullptr
+            ? nullptr
+            : find_sequence_member_event(
+                  events, SemanticSiteId{.physical = source->physical_id,
+                                         .domain = ConSanSemanticSiteDomain::SynchronizationEvent});
     if (event == nullptr)
       continue;
     site.sync_event_identity = event->identity;
