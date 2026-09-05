@@ -1315,13 +1315,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
+    std::string_view failed_stage;
     bool succeeded = false;
     ~FailureStage() {
       if (!succeeded)
         errors.emplace_back("ConSan MOI inline versioned release transaction failed during " +
-                            std::string(stage));
+                            std::string(failed_stage.empty() ? stage : failed_stage));
     }
-  } failure{errors};
+  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
   const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
   const uint64_t release_table_base =
@@ -1366,6 +1367,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   MoiPublicationExec exec_masks(words, narrow_save, arch);
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success) {
+      failure.failed_stage = failure.stage;
+      if (!message.empty())
+        errors.emplace_back(message);
+    }
+    sequence.require(success);
+  };
+  const auto set_stage = [&](std::string_view stage) {
+    if (!sequence && failure.failed_stage.empty())
+      failure.failed_stage = failure.stage;
+    failure.stage = stage;
+  };
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
   const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
@@ -1388,7 +1402,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return narrow_vcc();
   };
 
-  failure.stage = "guest-address preservation";
+  set_stage("guest-address preservation");
   if (stable_guest_address != guest_address) {
     // Copy high first only when the destination begins at the source high
     // word; otherwise the ordinary low/high order is alias-safe.
@@ -1407,14 +1421,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     }
   }
 
-  failure.stage = "transaction initialization";
-  if (!append_save_moi_special_state(words, plan.special_state, arch) ||
-      !append_inline_workgroup_key(words, plan.workgroup_sources, plan.workgroup_key_registers,
-                                   workgroup_key, static_cast<uint16_t>(base + 6u), temporary,
-                                   /*original_exec_save_offset=*/12u, arch)) {
-    errors.emplace_back("ConSan MOI inline release could not initialize its EXEC transaction");
-    return false;
-  }
+  set_stage("transaction initialization");
+  require_emission(append_save_moi_special_state(words, plan.special_state, arch) &&
+                       append_inline_workgroup_key(words, plan.workgroup_sources,
+                                                   plan.workgroup_key_registers, workgroup_key,
+                                                   static_cast<uint16_t>(base + 6u), temporary,
+                                                   /*original_exec_save_offset=*/12u, arch),
+                   "ConSan MOI inline release could not initialize its EXEC transaction");
   const auto narrow_compare_exchange_success = [&]() -> bool {
     if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
@@ -1428,19 +1441,15 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     }
     return true;
   };
-  failure.stage = "guest CAS qualification";
-  if (predicate_on_compare_exchange_success && !emit_guest_instruction &&
-      !narrow_compare_exchange_success()) {
-    errors.emplace_back("ConSan MOI inline release CAS could not predicate publication");
-    return false;
-  }
-  failure.stage = "release-slot addressing";
-  if (!save_exec(eligible_exec) ||
-      !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
-                                                 stable_guest_address, slot_address, arch)) {
-    errors.emplace_back("ConSan MOI inline release could not initialize its version transaction");
-    return false;
-  }
+  set_stage("guest CAS qualification");
+  if (predicate_on_compare_exchange_success && !emit_guest_instruction)
+    require_emission(narrow_compare_exchange_success(),
+                     "ConSan MOI inline release CAS could not predicate publication");
+  set_stage("release-slot addressing");
+  require_emission(save_exec(eligible_exec) && append_inline_atomic_release_slot_address(
+                                                   words, release_table_base, release_capacity,
+                                                   stable_guest_address, slot_address, arch),
+                   "ConSan MOI inline release could not initialize its version transaction");
 
   // Another wave can hold the direct-mapped release slot in its odd
   // publishing state for the complete causal-snapshot capture and guest RMW.
@@ -1451,7 +1460,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // Coherent version polls plus a short yield let a resident publisher
   // complete, while the finite bound still terminates on a permanently stuck
   // odd slot.
-  failure.stage = "release-slot reservation";
+  set_stage("release-slot reservation");
   const auto append_release_candidate = [&]() {
     if (!append_atomic_load_u32(words, slot_address, prior_version, arch)) {
       errors.emplace_back("ConSan MOI inline release could not begin its version retry");
@@ -1477,45 +1486,41 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
            sequence.emit(
                instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch));
   };
-  if (!append_moi_bounded_version_claim(
-          words, sequence, exec_masks,
-          {.slot_address_vgpr = slot_address,
-           .eligible_exec_sgpr = eligible_exec,
-           .claimed_exec_sgpr = claimed_exec,
-           .retry_exec_sgpr = committed_exec,
-           .retry_count_sgpr = retry_count_sgpr,
-           .base_version_vgpr = prior_version,
-           .desired_vgpr = cas_new,
-           .expected_vgpr = cas_expected,
-           .version_offset = offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-           .retry_limit = kConSanMoiInlineMetadataPublicationRetryLimit,
-           .sleep_delay = kConSanMoiInlineMetadataPublicationSleepDelay},
-          append_release_candidate, arch)) {
-    return false;
-  }
+  require_emission(append_moi_bounded_version_claim(
+      words, sequence, exec_masks,
+      {.slot_address_vgpr = slot_address,
+       .eligible_exec_sgpr = eligible_exec,
+       .claimed_exec_sgpr = claimed_exec,
+       .retry_exec_sgpr = committed_exec,
+       .retry_count_sgpr = retry_count_sgpr,
+       .base_version_vgpr = prior_version,
+       .desired_vgpr = cas_new,
+       .expected_vgpr = cas_expected,
+       .version_offset = offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+       .retry_limit = kConSanMoiInlineMetadataPublicationRetryLimit,
+       .sleep_delay = kConSanMoiInlineMetadataPublicationSleepDelay},
+      append_release_candidate, arch));
 
-  failure.stage = "reservation outcome journaling";
+  set_stage("reservation outcome journaling");
   if (import_claimed_predecessor) {
-    if (!restore_exec(claimed_exec) || !save_exec(failed_exec))
-      return false;
+    require_emission(restore_exec(claimed_exec) && save_exec(failed_exec));
   } else {
-    if (!sequence.emit(
-            instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch)))
-      return false;
-    if (!save_exec(failed_exec))
-      return false;
+    sequence.append(
+        instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch));
+    require_emission(save_exec(failed_exec));
   }
 
-  failure.stage = "claimed predecessor import";
+  set_stage("claimed predecessor import");
   if (import_claimed_predecessor) {
+    if (!sequence)
+      return false;
     const uint16_t source_version = static_cast<uint16_t>(base + 20u);
     // The successful claim returns the authoritative prior even version in
     // cas_new. Keep the acquire source tied to that returned value instead of
     // the retry-loop temporary, whose lifetime ends at the claim boundary.
     words.push_back(build_v_mov_b32_e32(source_version, vector_source_vgpr(cas_new), arch));
-    if (!restore_exec(original_exec) ||
-        !append_restore_moi_special_state(words, plan.special_state, arch))
-      return false;
+    require_emission(restore_exec(original_exec) &&
+                     append_restore_moi_special_state(words, plan.special_state, arch));
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
@@ -1523,34 +1528,30 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       words.push_back(word);
     }
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
-    if (!append_moi_flat_load_wait(words, arch))
-      return false;
-    if (!sequence.emit(instrumentation::build_s_wait_flat_store0(arch)))
-      return false;
+    require_emission(append_moi_flat_load_wait(words, arch));
+    sequence.append(instrumentation::build_s_wait_flat_store0(arch));
     // The token transaction journals its source version in scratch+8, but an
     // empty predecessor narrows EXEC before that transaction is entered. Seed
     // the same journal slot here so both the empty and nonempty paths retain
     // the claim's prior even version for the successor commit.
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(base + 8u),
                                         vector_source_vgpr(source_version), arch));
-    if (!append_save_moi_special_state(words, plan.special_state, arch))
-      return false;
-    if (predicate_on_compare_exchange_success &&
-        (!restore_exec(claimed_exec) || !narrow_compare_exchange_success() ||
-         !save_exec(claimed_exec))) {
-      errors.emplace_back(
+    require_emission(append_save_moi_special_state(words, plan.special_state, arch));
+    if (predicate_on_compare_exchange_success && sequence) {
+      require_emission(
+          restore_exec(claimed_exec) && narrow_compare_exchange_success() &&
+              save_exec(claimed_exec),
           "ConSan MOI inline release CAS could not predicate its claimed predecessor import");
-      return false;
     }
-    if (!restore_exec(claimed_exec) ||
-        !append_inline_atomic_acquire_import(
-            words, plan, scratch_vgpr, stable_guest_address, workgroup_key, cas_new, cas_expected,
-            temporary, snapshot_table_base, snapshot_capacity, token_table_base, token_capacity,
-            /*source_slot_claimed=*/true,
-            /*release_sequence_only=*/
-            candidate.event_kind == ConSanMoiAtomicEventKind::Release, inline_access_present, arch,
-            errors))
-      return false;
+    require_emission(restore_exec(claimed_exec) &&
+                     append_inline_atomic_acquire_import(
+                         words, plan, scratch_vgpr, stable_guest_address, workgroup_key, cas_new,
+                         cas_expected, temporary, snapshot_table_base, snapshot_capacity,
+                         token_table_base, token_capacity,
+                         /*source_slot_claimed=*/true,
+                         /*release_sequence_only=*/
+                         candidate.event_kind == ConSanMoiAtomicEventKind::Release,
+                         inline_access_present, arch, errors));
     // Acquire import reuses the release slot-address and scratch+20 source
     // version for its token transaction. That transaction journals the source
     // version in scratch+8; recover the claim's prior even version from there
@@ -1566,60 +1567,47 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       // Restore the prior even slot for failed comparisons, then define
       // detector undercoverage solely over successful guest lanes that could
       // not claim metadata.
-      if (!restore_exec(original_exec) || !narrow_compare_exchange_success() ||
-          !save_exec(eligible_exec))
-        return false;
+      require_emission(restore_exec(original_exec) && narrow_compare_exchange_success() &&
+                       save_exec(eligible_exec));
       const auto successful_claims =
           instrumentation::build_s_and_b64(claimed_exec, failed_exec, eligible_exec, arch);
       const auto failed_comparisons =
           instrumentation::build_s_andn2_b64(ready_exec, failed_exec, claimed_exec, arch);
-      if (!successful_claims || !failed_comparisons)
-        return false;
-      words.push_back(*successful_claims);
-      words.push_back(*failed_comparisons);
-      if (!restore_exec(ready_exec) ||
-          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
-                                                     stable_guest_address, slot_address, arch))
-        return false;
+      sequence.append(successful_claims, failed_comparisons);
+      require_emission(restore_exec(ready_exec) && append_inline_atomic_release_slot_address(
+                                                       words, release_table_base, release_capacity,
+                                                       stable_guest_address, slot_address, arch));
       words.push_back(build_v_mov_b32_e32(
           prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
-      if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
-                                         offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-                                         prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
-                                         /*expected_delta=*/1u, arch) ||
-          !save_exec(committed_exec))
-        return false;
+      require_emission(
+          append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                        prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
+                                        /*expected_delta=*/1u, arch) &&
+          save_exec(committed_exec));
       const auto restore_failed =
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, ready_exec, committed_exec, arch);
-      if (!restore_failed)
-        return false;
-      words.push_back(*restore_failed);
-      if (!append_atomic_fetch_add_one_u32(
-              words,
-              plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_overflow_count),
-              temporary, cas_new, arch))
-        return false;
+      sequence.append(restore_failed);
+      require_emission(append_atomic_fetch_add_one_u32(
+          words,
+          plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_overflow_count),
+          temporary, cas_new, arch));
       const auto rebuild_failed =
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch);
-      if (!rebuild_failed)
-        return false;
-      words.push_back(*rebuild_failed);
-      if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
-          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
-                                                     stable_guest_address, slot_address, arch))
-        return false;
+      sequence.append(rebuild_failed);
+      require_emission(
+          save_exec(failed_exec) && restore_exec(claimed_exec) &&
+          append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                    stable_guest_address, slot_address, arch));
     } else {
-      if (!restore_exec(failed_exec) || !save_exec(claimed_exec))
-        return false;
+      require_emission(restore_exec(failed_exec) && save_exec(claimed_exec));
       const auto rebuild_failed =
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, original_exec, claimed_exec, arch);
-      if (!rebuild_failed)
-        return false;
-      words.push_back(*rebuild_failed);
-      if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
-          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
-                                                     stable_guest_address, slot_address, arch))
-        return false;
+      sequence.append(rebuild_failed);
+      require_emission(
+          save_exec(failed_exec) && restore_exec(claimed_exec) &&
+          append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                    stable_guest_address, slot_address, arch));
     }
     words.push_back(build_v_mov_b32_e32(
         prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
@@ -1632,24 +1620,21 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // between our metadata snapshot and import. Restore the prior even version
     // unchanged after the acquired-token transaction; this reader never
     // becomes a release publisher itself.
-    failure.stage = "acquire reservation restore";
+    set_stage("acquire reservation restore");
     // Guest VCC/SCC were re-saved immediately after the guest load, before
     // acquire import. Do not snapshot them again here: the import changes
     // both condition registers, so a second save would replace guest state
     // with detector state just before the final restore.
-    if (!restore_exec(claimed_exec))
-      return false;
-    if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-                                       prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
-                                       /*expected_delta=*/1u, arch) ||
-        !save_exec(committed_exec))
-      return false;
+    require_emission(restore_exec(claimed_exec));
+    require_emission(
+        append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                      prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
+                                      /*expected_delta=*/1u, arch) &&
+        save_exec(committed_exec));
     const auto failed =
         instrumentation::build_s_andn2_b64(kAmdGpuExecLo, original_exec, committed_exec, arch);
-    if (!failed)
-      return false;
-    words.push_back(*failed);
+    sequence.append(failed);
     // A tight polling acquire can otherwise unlock and immediately reclaim
     // the same direct-mapped slot indefinitely while a release wave is asleep
     // in its bounded claim loop. Yield once after every read-side unlock so a
@@ -1657,66 +1642,56 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // poll can re-enter this transaction.
     const uint32_t publisher_handoff =
         build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch);
-    if (!append_atomic_fetch_add_one_u32(words,
-                                         plan.report_buffer_address +
-                                             offsetof(ConSanMoiReportHeader, inline_overflow_count),
-                                         temporary, cas_new, arch) ||
-        !restore_exec(original_exec))
-      return false;
+    require_emission(
+        append_atomic_fetch_add_one_u32(words,
+                                        plan.report_buffer_address +
+                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
+                                        temporary, cas_new, arch) &&
+        restore_exec(original_exec));
     words.push_back(publisher_handoff);
-    if (!append_restore_moi_special_state(words, plan.special_state, arch))
-      return false;
-    failure.succeeded = sequence.resolve_branches(arch);
+    require_emission(append_restore_moi_special_state(words, plan.special_state, arch));
+    failure.succeeded = sequence.finish(arch);
     return failure.succeeded;
   }
 
-  failure.stage = "causal snapshot capture";
-  if (!restore_exec(claimed_exec) ||
-      !append_inline_release_causal_snapshot_capture(
-          words, plan, scratch_vgpr, stable_guest_address, workgroup_key, token_table_base,
-          token_capacity, snapshot_table_base, snapshot_capacity, arch))
-    return false;
+  set_stage("causal snapshot capture");
+  require_emission(
+      restore_exec(claimed_exec) &&
+      append_inline_release_causal_snapshot_capture(words, plan, scratch_vgpr, stable_guest_address,
+                                                    workgroup_key, token_table_base, token_capacity,
+                                                    snapshot_table_base, snapshot_capacity, arch));
 
-  failure.stage = "release metadata publication";
-  if (!sequence.emit_all(
-          instrumentation::build_v_and_b32_literal(temporary, consan_moi_exact_shadow::max_epoch,
-                                                   plan.owner_epoch_vgprs.epoch, arch),
-          instrumentation::build_v_add_u32(temporary, scalar_positive_inline_u32(1), temporary,
-                                           arch),
-          instrumentation::build_v_min_u32_literal(temporary, consan_moi_exact_shadow::max_epoch,
-                                                   temporary, arch)))
-    return false;
-  if (!append_moi_publication_stores(
-          words, slot_address,
-          {{offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id), plan.owner_epoch_vgprs.owner},
-           {offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one), temporary},
-           {offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key), workgroup_key},
-           {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), stable_guest_address},
-           {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
-            static_cast<uint16_t>(stable_guest_address + 1u)}},
-          arch))
-    return false;
+  set_stage("release metadata publication");
+  sequence.append(
+      instrumentation::build_v_and_b32_literal(temporary, consan_moi_exact_shadow::max_epoch,
+                                               plan.owner_epoch_vgprs.epoch, arch),
+      instrumentation::build_v_add_u32(temporary, scalar_positive_inline_u32(1), temporary, arch),
+      instrumentation::build_v_min_u32_literal(temporary, consan_moi_exact_shadow::max_epoch,
+                                               temporary, arch));
+  require_emission(append_moi_publication_stores(
+      words, slot_address,
+      {{offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id), plan.owner_epoch_vgprs.owner},
+       {offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one), temporary},
+       {offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key), workgroup_key},
+       {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), stable_guest_address},
+       {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
+        static_cast<uint16_t>(stable_guest_address + 1u)}},
+      arch));
   if (!append_moi_report_dispatch_id_word(words, plan.dispatch_id, temporary,
                                           /*high_word=*/false, arch)) {
-    errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
-    return false;
+    require_emission(false, "ConSan MOI inline release could not materialize dispatch ID low");
   }
-  if (!append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
-                                       temporary, arch))
-    return false;
+  require_emission(append_store_u32_vgpr_at_offset(
+      words, slot_address, offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id), temporary,
+      arch));
   if (!append_moi_report_dispatch_id_word(words, plan.dispatch_id, temporary,
                                           /*high_word=*/true, arch)) {
-    errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
-    return false;
+    require_emission(false, "ConSan MOI inline release could not materialize dispatch ID high");
   }
-  if (!append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) +
-                                           sizeof(uint32_t),
-                                       temporary, arch))
-    return false;
-  if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
-    return false;
+  require_emission(append_store_u32_vgpr_at_offset(
+      words, slot_address,
+      offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) + sizeof(uint32_t), temporary, arch));
+  sequence.append(instrumentation::build_s_wait_global_store0(arch));
 
   // A wave can issue the same release RMW from several lanes. The direct
   // object table can publish only one representative at a time, but the
@@ -1724,34 +1699,30 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // dispatch/workgroup/address identity. Preserve fail-closed accounting for
   // actual direct-map collisions instead of treating benign same-object
   // coalescing as detector undercoverage.
-  failure.stage = "same-object collision classification";
-  if (!restore_exec(failed_exec) ||
-      !require_dispatch_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
-                              /*high_word=*/false) ||
-      !require_dispatch_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) +
-                                  sizeof(uint32_t),
-                              /*high_word=*/true) ||
-      !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
-                     vector_source_vgpr(workgroup_key)) ||
-      !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                     vector_source_vgpr(stable_guest_address)) ||
-      !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
-                     vector_source_vgpr(static_cast<uint16_t>(stable_guest_address + 1u))) ||
-      !save_exec(committed_exec))
-    return false;
-  if (!sequence.emit(
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, failed_exec, committed_exec, arch)))
-    return false;
-  if (!append_atomic_fetch_add_one_u32(words,
-                                       plan.report_buffer_address +
-                                           offsetof(ConSanMoiReportHeader, inline_overflow_count),
-                                       temporary, cas_new, arch))
-    return false;
-  if (!restore_exec(original_exec) ||
-      !append_restore_moi_special_state(words, plan.special_state, arch))
-    return false;
+  set_stage("same-object collision classification");
+  require_emission(
+      restore_exec(failed_exec) &&
+      require_dispatch_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
+                             /*high_word=*/false) &&
+      require_dispatch_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) +
+                                 sizeof(uint32_t),
+                             /*high_word=*/true) &&
+      require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
+                    vector_source_vgpr(workgroup_key)) &&
+      require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
+                    vector_source_vgpr(stable_guest_address)) &&
+      require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
+                    vector_source_vgpr(static_cast<uint16_t>(stable_guest_address + 1u))) &&
+      save_exec(committed_exec));
+  sequence.append(
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, failed_exec, committed_exec, arch));
+  require_emission(append_atomic_fetch_add_one_u32(
+      words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_overflow_count),
+      temporary, cas_new, arch));
+  require_emission(restore_exec(original_exec) &&
+                   append_restore_moi_special_state(words, plan.special_state, arch));
 
-  failure.stage = "guest completion";
+  set_stage("guest completion");
   if (emit_guest_instruction && !import_claimed_predecessor) {
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -1760,32 +1731,28 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       words.push_back(word);
     }
   }
-  if (!append_moi_flat_load_wait(words, arch))
-    return false;
-  if (!sequence.emit(instrumentation::build_s_wait_flat_store0(arch)))
-    return false;
+  require_emission(append_moi_flat_load_wait(words, arch));
+  sequence.append(instrumentation::build_s_wait_flat_store0(arch));
 
-  failure.stage = "release commit";
-  if (!append_save_moi_special_state(words, plan.special_state, arch) ||
-      !restore_exec(claimed_exec))
-    return false;
-  if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
-                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-                                     prior_version, cas_new, cas_expected,
-                                     /*desired_delta=*/2u, /*expected_delta=*/1u, arch) ||
-      !save_exec(committed_exec))
-    return false;
-  if (!sequence.emit(
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, claimed_exec, committed_exec, arch)))
-    return false;
-  if (!append_atomic_fetch_add_one_u32(words,
-                                       plan.report_buffer_address +
-                                           offsetof(ConSanMoiReportHeader, inline_overflow_count),
-                                       temporary, cas_new, arch) ||
-      !restore_exec(original_exec) ||
-      !append_restore_moi_special_state(words, plan.special_state, arch))
-    return false;
-  failure.succeeded = sequence.resolve_branches(arch);
+  set_stage("release commit");
+  require_emission(append_save_moi_special_state(words, plan.special_state, arch) &&
+                   restore_exec(claimed_exec));
+  require_emission(
+      append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                    offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                    prior_version, cas_new, cas_expected,
+                                    /*desired_delta=*/2u, /*expected_delta=*/1u, arch) &&
+      save_exec(committed_exec));
+  sequence.append(
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, claimed_exec, committed_exec, arch));
+  require_emission(
+      append_atomic_fetch_add_one_u32(words,
+                                      plan.report_buffer_address +
+                                          offsetof(ConSanMoiReportHeader, inline_overflow_count),
+                                      temporary, cas_new, arch) &&
+      restore_exec(original_exec) &&
+      append_restore_moi_special_state(words, plan.special_state, arch));
+  failure.succeeded = sequence.finish(arch);
   return failure.succeeded;
 }
 
