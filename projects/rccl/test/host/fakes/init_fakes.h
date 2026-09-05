@@ -16,6 +16,7 @@
 #include "env_fakes.h"         // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
+#include "nccl_stubs.h"        // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
 #include "os.h"                // ncclAffinity, for the initTransportsRank affinity seams below
 #include "rccl_wrap_fakes.h"   // src/rccl_wrap.cc seams (shared)
 #include "recorder_fakes.h"    // rccl::Recorder no-ops (shared)
@@ -190,7 +191,6 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 // -------------------------------------------------------------------------
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
-extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 
 void InstallCommAllocSuccess();

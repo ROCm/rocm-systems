@@ -299,7 +299,6 @@ ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_nc
 // commCleanup ordering oracle; the fakes that append to it live in nccl_stubs.cc. See init_fakes.h.
 std::vector<std::string> g_cleanupCallOrder;
 ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
-ncclResult_t g_ncclTunerPluginUnloadResult = ncclSuccess;
 struct ncclComm* g_ncclTunerPluginUnloadLastComm = nullptr;
 
 void InstallCommAllocSuccess() {
@@ -325,6 +324,7 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ResetRecorderFakes();
   ResetRcclWrapFakes();
+  ResetNcclStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();
@@ -403,6 +403,5 @@ void ResetInitFakes() {
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
-  g_ncclTunerPluginUnloadResult = ncclSuccess;
   g_ncclTunerPluginUnloadLastComm = nullptr;
 }
