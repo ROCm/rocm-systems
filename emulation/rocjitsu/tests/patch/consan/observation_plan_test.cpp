@@ -248,7 +248,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   SemanticSiteId member = event.semantic_id;
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   sequence.member_semantic_ids.push_back(member);
-  sequence.member_event_identities.push_back(event.identity);
   sequence.barrier_id = 0;
   sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;

@@ -341,6 +341,30 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve a sequence-member identity through the authoritative event
+  /// arena. Sequence membership uses a distinct semantic domain so callers
+  /// cannot accidentally treat a graph edge as an event record.
+  [[nodiscard]] const ConSanSyncEvent *find_sequence_member(SemanticSiteId identity) const {
+    identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+    return find_event(identity);
+  }
+
+  /// Materialize stable diagnostic names only at an external presentation or
+  /// mutation-plan boundary. The synchronization graph itself stores one
+  /// typed member vector.
+  [[nodiscard]] std::optional<std::vector<std::string>>
+  sequence_member_identities(std::span<const SemanticSiteId> members) const {
+    std::vector<std::string> identities;
+    identities.reserve(members.size());
+    for (SemanticSiteId member : members) {
+      const ConSanSyncEvent *event = find_sequence_member(member);
+      if (event == nullptr)
+        return std::nullopt;
+      identities.push_back(event->identity);
+    }
+    return identities;
+  }
+
   /// Resolve one unique synchronization event by physical site and kind.
   ///
   /// This is the graph-side join used by a target-neutral probe intent, whose
@@ -420,16 +444,8 @@ struct SynchronizationInventoryView {
   /// silently choose one of several contradictory ordering interpretations.
   [[nodiscard]] const ConSanSyncSequence *
   find_unique_sequence_containing(std::string_view event_identity) const {
-    const ConSanSyncSequence *match = nullptr;
-    for (const ConSanSyncSequence &sequence : sync_sequences) {
-      if (std::ranges::find(sequence.member_event_identities, event_identity) ==
-          sequence.member_event_identities.end())
-        continue;
-      if (match != nullptr)
-        return nullptr;
-      match = &sequence;
-    }
-    return match;
+    const ConSanSyncEvent *event = find_event(event_identity);
+    return event == nullptr ? nullptr : find_unique_sequence_containing(event->semantic_id);
   }
 
   /// Resolve one unique synchronization sequence by its stable graph identity.

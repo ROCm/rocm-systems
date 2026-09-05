@@ -66,7 +66,6 @@ make_barrier_sequence(std::span<const ConSanSyncEvent> events,
     SemanticSiteId member = event.semantic_id;
     member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
     sequence.member_semantic_ids.push_back(std::move(member));
-    sequence.member_event_identities.push_back(event.identity);
   }
   return sequence;
 }
@@ -97,8 +96,10 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
     site.scope = ConSanBarrierSite::Scope::Workgroup;
     for (const ConSanSyncSequence &sequence : sequences) {
-      if (std::ranges::find(sequence.member_event_identities, event.identity) !=
-          sequence.member_event_identities.end()) {
+      SemanticSiteId member = event.semantic_id;
+      member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+      if (std::ranges::find(sequence.member_semantic_ids, member) !=
+          sequence.member_semantic_ids.end()) {
         site.scope = sequence.barrier_scope;
         break;
       }
@@ -315,11 +316,7 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
        [](auto &s) { s.barrier_operand_source = ConSanBarrierSite::OperandSource::DynamicM0; }},
       {"id", [](auto &s) { s.barrier_id.reset(); }},
       {"scope", [](auto &s) { s.barrier_scope = ConSanBarrierSite::Scope::Unknown; }},
-      {"members",
-       [](auto &s) {
-         s.member_semantic_ids.clear();
-         s.member_event_identities.clear();
-       }},
+      {"members", [](auto &s) { s.member_semantic_ids.clear(); }},
       {"bounds", [](auto &s) { s.end_text_offset = s.begin_text_offset; }},
   };
   for (const auto &[name, mutate] : cases) {

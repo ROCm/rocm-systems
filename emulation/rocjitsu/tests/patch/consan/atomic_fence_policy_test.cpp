@@ -187,7 +187,6 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   SemanticSiteId member = event.semantic_id;
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   sequence.member_semantic_ids.push_back(member);
-  sequence.member_event_identities.push_back(event.identity);
   sequence.scope = event.scope;
   sequence.execution_owners = event.execution_owners;
   return sequence;

@@ -25,8 +25,8 @@ struct UnmatchedBarrierWait {
   std::optional<uint64_t> owner_descriptor_file_offset;
 };
 
-void append_unmatched_barrier_wait(const ConSanProgramSite &decoded,
-                                   const ConSanOptions &options, const ProgramInventory &inventory,
+void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSanOptions &options,
+                                   const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
   const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
   if (site == nullptr || !consan_container_selected(options, decoded.container.name))
@@ -43,12 +43,14 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded,
       event->in_kernel != decoded.container.is_kernel() ||
       synchronization.source(*event) != &decoded)
     return;
+  SemanticSiteId member_identity = event->semantic_id;
+  member_identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   const bool belongs_to_sequence =
       std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
         return sequence.kind == ConSanSyncSequenceKind::Barrier &&
-               sequence.member_event_identities.size() > 1u &&
-               std::ranges::find(sequence.member_event_identities, event->identity) !=
-                   sequence.member_event_identities.end();
+               sequence.member_semantic_ids.size() > 1u &&
+               std::ranges::find(sequence.member_semantic_ids, member_identity) !=
+                   sequence.member_semantic_ids.end();
       });
   if (!belongs_to_sequence) {
     const ConSanProgramContainer *container = inventory.container(decoded.container.id);

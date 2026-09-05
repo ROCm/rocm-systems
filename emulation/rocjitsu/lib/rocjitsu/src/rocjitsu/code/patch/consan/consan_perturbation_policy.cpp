@@ -57,7 +57,7 @@ perturbation_rejection_reason(const SyncEventSemanticIndex &events,
   if (kind == ConSanPerturbationKind::Barrier) {
     if (sequence.kind != ConSanSyncSequenceKind::Barrier ||
         sequence.operation != ConSanSyncOperation::BarrierFull ||
-        sequence.member_event_identities.size() != 2u)
+        sequence.member_semantic_ids.size() != 2u)
       return Reason::NotQualifiedFullBarrier;
     if (sequence.barrier_operand_source != ConSanBarrierSite::OperandSource::Immediate ||
         !sequence.barrier_id || sequence.barrier_scope == ConSanBarrierSite::Scope::Unknown)

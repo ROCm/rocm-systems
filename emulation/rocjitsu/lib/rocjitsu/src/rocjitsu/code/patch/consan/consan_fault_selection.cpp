@@ -155,12 +155,12 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative) ||
-        !sequence->basic_block_index || sequence->member_event_identities.size() != 2u ||
+        !sequence->basic_block_index || sequence->member_semantic_ids.size() != 2u ||
         !sequence_has_exact_members(sync, *sequence) ||
-        sequence->member_event_identities.front() != load->identity ||
+        sync.find_sequence_member(sequence->member_semantic_ids.front()) != load ||
         !same_execution_owners(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
-    const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_identities.back());
+    const ConSanSyncEvent *cache = sync.find_sequence_member(sequence->member_semantic_ids.back());
     const ConSanFenceSite *cache_source =
         cache == nullptr ? nullptr : sync.source_as<ConSanFenceSite>(*cache);
     if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
@@ -203,8 +203,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   if (sequence->kind != ConSanSyncSequenceKind::Barrier ||
       sequence->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
-      sequence->member_event_identities.size() != 2u ||
-      !sequence_has_exact_members(sync, *sequence) ||
+      sequence->member_semantic_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||
       !consan_execution_owners_include_requested_kernel(sequence->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
@@ -212,17 +211,29 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
 
   const ConSanFaultSite *primary = find_fault_site_by_identity(
       inventory, selection.primary_site_identity, ConSanFaultSiteKind::Barrier);
+  const ConSanSyncEvent *primary_event = primary != nullptr && primary->sync_event_identity
+                                             ? sync.find_event(*primary->sync_event_identity)
+                                             : nullptr;
+  SemanticSiteId primary_member_id;
+  if (primary_event != nullptr) {
+    primary_member_id = primary_event->semantic_id;
+    primary_member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  }
   if (primary == nullptr || !primary->sync_event_identity || !primary->sync_sequence_identity ||
-      *primary->sync_sequence_identity != sequence->identity ||
-      std::ranges::find(sequence->member_event_identities, *primary->sync_event_identity) ==
-          sequence->member_event_identities.end() ||
+      primary_event == nullptr || *primary->sync_sequence_identity != sequence->identity ||
+      std::ranges::find(sequence->member_semantic_ids, primary_member_id) ==
+          sequence->member_semantic_ids.end() ||
       !consan_execution_owners_include_requested_kernel(primary->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::PrimaryNotMember};
   }
 
   const ConSanFaultSite *companion = nullptr;
-  for (const std::string &member_identity : sequence->member_event_identities) {
+  for (SemanticSiteId member_id : sequence->member_semantic_ids) {
+    const ConSanSyncEvent *member = sync.find_sequence_member(member_id);
+    if (member == nullptr)
+      return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
+    const std::string &member_identity = member->identity;
     const auto matching_site =
         std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier &&

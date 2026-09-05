@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 
 #include <algorithm>
 #include <map>
@@ -23,36 +24,26 @@ struct SequenceMembership {
 };
 
 /// Read-only join from stable event identity to its sequence-membership fact.
-using SequenceMembershipIndex = std::unordered_map<std::string_view, SequenceMembership>;
+using SequenceMembershipIndex =
+    std::unordered_map<SemanticSiteId, SequenceMembership, SyncEventSemanticIdHash>;
 
 [[nodiscard]] SequenceMembershipIndex
 build_sequence_membership_index(std::span<const ConSanSyncSequence> sequences) {
   SequenceMembershipIndex result;
   size_t member_count = 0;
   for (const ConSanSyncSequence &sequence : sequences)
-    member_count += sequence.member_event_identities.size();
+    member_count += sequence.member_semantic_ids.size();
   result.reserve(member_count);
   for (const ConSanSyncSequence &sequence : sequences) {
-    for (const std::string &identity : sequence.member_event_identities) {
+    for (SemanticSiteId identity : sequence.member_semantic_ids) {
+      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
       const auto [entry, inserted] =
-          result.try_emplace(identity, SequenceMembership{&sequence, false});
+          result.try_emplace(std::move(identity), SequenceMembership{&sequence, false});
       if (!inserted) {
         entry->second.sequence = nullptr;
         entry->second.ambiguous = true;
       }
     }
-  }
-  return result;
-}
-
-[[nodiscard]] std::unordered_map<std::string_view, const ConSanSyncEvent *>
-build_event_index(std::span<const ConSanSyncEvent> events) {
-  std::unordered_map<std::string_view, const ConSanSyncEvent *> result;
-  result.reserve(events.size());
-  for (const ConSanSyncEvent &event : events) {
-    const auto [entry, inserted] = result.emplace(event.identity, &event);
-    if (!inserted)
-      entry->second = nullptr;
   }
   return result;
 }
@@ -364,8 +355,6 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   const SynchronizationInventoryView synchronization = inventory.sync();
   const SequenceMembershipIndex memberships =
       build_sequence_membership_index(synchronization.sync_sequences);
-  const auto events_by_identity = build_event_index(synchronization.sync_events);
-
   std::map<std::pair<ConSanSyncEventKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
       aliases_by_site;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
@@ -378,7 +367,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   for (const auto &[site_key, aliases] : aliases_by_site) {
     (void)site_key;
     const ConSanSyncEvent &event = *aliases.front();
-    const auto membership_entry = memberships.find(event.identity);
+    const auto membership_entry = memberships.find(event.semantic_id);
     const SequenceMembership membership =
         membership_entry == memberships.end() ? SequenceMembership{} : membership_entry->second;
     // Ordinary memory belongs to access policy unless synchronization

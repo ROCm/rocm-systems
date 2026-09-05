@@ -12,16 +12,12 @@ namespace {
 template <typename FindEvent, typename FindSource>
 [[nodiscard]] bool sequence_has_exact_members_impl(const ConSanSyncSequence &sequence,
                                                    FindEvent find_event, FindSource find_source) {
-  if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
-    return false;
   uint64_t prior_end = sequence.begin_text_offset;
-  for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
-    SemanticSiteId event_identity = sequence.member_semantic_ids[index];
+  for (SemanticSiteId event_identity : sequence.member_semantic_ids) {
     event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     const ConSanSyncEvent *event = find_event(event_identity);
     const ConSanProgramSite *source = event == nullptr ? nullptr : find_source(*event);
     if (event == nullptr || event->container_name != sequence.container_name || source == nullptr ||
-        event->identity != sequence.member_event_identities[index] ||
         event->in_kernel != sequence.in_kernel || event->text_offset() < prior_end ||
         event->text_offset() < sequence.begin_text_offset ||
         event->text_offset() + source->size() > sequence.end_text_offset) {

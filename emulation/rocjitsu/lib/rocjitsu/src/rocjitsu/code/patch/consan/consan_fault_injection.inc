@@ -90,17 +90,15 @@ static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
   }
   if (edge != ConSanAtomicOrderEdge::Acquire && encoding != AtomicFaultEncoding::CdnaFlat)
     result.release_wait_text_offset = result.sequence->release_wait_text_offset;
-  for (const std::string &identity : result.sequence->member_event_identities) {
-    const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
-      return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
-    });
-    if (event != sync.sync_events.end() &&
+  for (SemanticSiteId identity : result.sequence->member_semantic_ids) {
+    const ConSanSyncEvent *event = sync.find_sequence_member(identity);
+    if (event != nullptr && event->kind == ConSanSyncEventKind::Fence &&
         (edge == ConSanAtomicOrderEdge::Any ||
          (edge == ConSanAtomicOrderEdge::Release &&
-          is_release_cache_event(sync.program_sites, &*event)) ||
+          is_release_cache_event(sync.program_sites, event)) ||
          (edge == ConSanAtomicOrderEdge::Acquire &&
-          is_acquire_cache_event(sync.program_sites, &*event)))) {
-      result.fence = &*event;
+          is_acquire_cache_event(sync.program_sites, event)))) {
+      result.fence = event;
       break;
     }
   }
@@ -131,7 +129,7 @@ is_member_of_qualified_logical_barrier_pair(const ConSanFaultSelectionView &inve
   return sequence != nullptr && sequence->operation == ConSanSyncOperation::BarrierFull &&
          consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) &&
-         sequence->member_event_identities.size() == 2u;
+         sequence->member_semantic_ids.size() == 2u;
 }
 
 [[nodiscard]] ExactBarrierDropPairResolution
@@ -168,9 +166,9 @@ find_lifecycle_group_for_sequence(const ProgramInventory &program_inventory,
                                   const ConSanSyncSequence &sequence) {
   const SynchronizationInventoryView sync = program_inventory.sync();
   const auto group = std::ranges::find_if(sync.barrier_lifecycle_groups, [&](const auto &item) {
-    return std::ranges::all_of(sequence.member_event_identities, [&](const std::string &identity) {
-      return std::ranges::find(item.member_event_identities, identity) !=
-             item.member_event_identities.end();
+    return std::ranges::all_of(sequence.member_semantic_ids, [&](const SemanticSiteId &identity) {
+      return std::ranges::find(item.member_semantic_ids, identity) !=
+             item.member_semantic_ids.end();
     });
   });
   return group == sync.barrier_lifecycle_groups.end() ? nullptr : &*group;
@@ -181,10 +179,11 @@ find_static_participant_init(const ProgramInventory &program_inventory,
                              const ConSanBarrierLifecycleGroup &group) {
   const SynchronizationInventoryView sync = program_inventory.sync();
   const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
+    SemanticSiteId member = event.semantic_id;
+    member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
     return event.operation == ConSanSyncOperation::BarrierInit &&
            event.container_name == group.container_name && event.in_kernel == group.in_kernel &&
-           std::ranges::find(group.member_event_identities, event.identity) !=
-               group.member_event_identities.end();
+           std::ranges::find(group.member_semantic_ids, member) != group.member_semantic_ids.end();
   });
   if (init_event == sync.sync_events.end())
     return nullptr;
@@ -284,6 +283,17 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
   const auto make_plan = [&](ConSanFaultMutationKind kind, const ConSanFaultSite &site) {
     return make_named_plan(kind, site.identity);
   };
+  const auto retain_member_identities = [&](ConSanFaultMutationPlan &plan,
+                                            std::span<const SemanticSiteId> members) {
+    auto identities = sync.sequence_member_identities(members);
+    if (!identities) {
+      result.errors.emplace_back(
+          "ConSan fault planning could not resolve typed synchronization members");
+      return false;
+    }
+    plan.ordered_member_identities = std::move(*identities);
+    return true;
+  };
   auto append_primary = [&](ConSanFaultMutationKind kind, const ConSanFaultSite *site) {
     if (site == nullptr) {
       result.warnings.emplace_back("ConSan fault dry run found no site for the requested mutation");
@@ -331,15 +341,23 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
           // completing member.
           plan.companion_identity = group->second.primary->identity;
           plan.logical_sequence_identity = exact_barrier_drop_group_identity(*group);
-          plan.ordered_member_identities = group->first.sequence->member_event_identities;
-          plan.ordered_member_identities.insert(
-              plan.ordered_member_identities.end(),
-              group->second.sequence->member_event_identities.begin(),
-              group->second.sequence->member_event_identities.end());
+          if (!retain_member_identities(plan, group->first.sequence->member_semantic_ids))
+            return;
+          auto second =
+              sync.sequence_member_identities(group->second.sequence->member_semantic_ids);
+          if (!second) {
+            result.errors.emplace_back(
+                "ConSan fault planning could not resolve typed synchronization members");
+            return;
+          }
+          plan.ordered_member_identities.insert(plan.ordered_member_identities.end(),
+                                                std::make_move_iterator(second->begin()),
+                                                std::make_move_iterator(second->end()));
         } else {
           plan.companion_identity = pair->companion->identity;
           plan.logical_sequence_identity = pair->sequence->identity;
-          plan.ordered_member_identities = pair->sequence->member_event_identities;
+          if (!retain_member_identities(plan, pair->sequence->member_semantic_ids))
+            return;
         }
         result.fault_plans.push_back(std::move(plan));
       }
@@ -372,7 +390,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         sequence->operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) ||
-        sequence->member_event_identities.size() != 2u) {
+        sequence->member_semantic_ids.size() != 2u) {
       result.warnings.emplace_back("ConSan fault dry run found no barrier pair to move");
     } else {
       const auto companion =
@@ -381,9 +399,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                    candidate.sync_event_identity &&
                    owned_by_requested_kernel(candidate.execution_owners, selection, options) &&
                    candidate.identity != primary->identity &&
-                   std::ranges::find(sequence->member_event_identities,
-                                     *candidate.sync_event_identity) !=
-                       sequence->member_event_identities.end();
+                   sync.find_event(*candidate.sync_event_identity) != nullptr &&
+                   sync.find_unique_sequence_containing(*candidate.sync_event_identity) == sequence;
           });
       if (companion == selection.fault_sites.end()) {
         result.warnings.emplace_back(
@@ -393,7 +410,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             make_plan(ConSanFaultMutationKind::MoveBarrierPair, *primary);
         plan.companion_identity = companion->identity;
         plan.logical_sequence_identity = sequence->identity;
-        plan.ordered_member_identities = sequence->member_event_identities;
+        if (!retain_member_identities(plan, sequence->member_semantic_ids))
+          return;
         plan.barrier_move_direction = options.fault_barrier_move_direction;
         if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::LegacyMarker) {
           targets.move_primary = primary;
@@ -492,7 +510,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                sequence->operation != ConSanSyncOperation::BarrierFull ||
                !consan_sync_confidence_meets(sequence->confidence,
                                              ConSanSemanticConfidence::Conservative) ||
-               sequence->member_event_identities.size() != 2u || !sequence->barrier_id ||
+               sequence->member_semantic_ids.size() != 2u || !sequence->barrier_id ||
                sequence->barrier_scope == ConSanBarrierSite::Scope::Unknown) {
       result.warnings.emplace_back(
           "ConSan barrier ID/scope dry run rejected an unqualified logical barrier sequence");
@@ -519,7 +537,10 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     } else {
       std::array<const ConSanFaultSite *, 2> members{};
       for (size_t i = 0; i < members.size(); ++i) {
-        const std::string &event_identity = sequence->member_event_identities[i];
+        const ConSanSyncEvent *event = sync.find_sequence_member(sequence->member_semantic_ids[i]);
+        if (event == nullptr)
+          continue;
+        const std::string &event_identity = event->identity;
         const auto member = std::ranges::find_if(selection.fault_sites, [&](const auto &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
                  candidate.sync_event_identity == event_identity;
@@ -539,8 +560,11 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             make_plan(ConSanFaultMutationKind::BarrierIdScope, *members[0]);
         plan.companion_identity = members[1]->identity;
         plan.logical_sequence_identity = group != nullptr ? group->identity : sequence->identity;
-        plan.ordered_member_identities =
-            group != nullptr ? group->member_event_identities : sequence->member_event_identities;
+        const std::span<const SemanticSiteId> plan_members =
+            group != nullptr ? std::span(group->member_semantic_ids)
+                             : std::span(sequence->member_semantic_ids);
+        if (!retain_member_identities(plan, plan_members))
+          return;
         plan.original_barrier_id = sequence->barrier_id;
         plan.target_barrier_id = options.fault_barrier_target_id;
         plan.original_barrier_scope = sequence->barrier_scope;
@@ -578,10 +602,16 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     } else {
       targets.participant_group = group;
       targets.participant_init = init;
-      ConSanFaultMutationPlan plan = make_named_plan(
-          ConSanFaultMutationKind::BarrierParticipantCount, group->member_event_identities.front());
+      auto identities = sync.sequence_member_identities(group->member_semantic_ids);
+      if (!identities || identities->empty()) {
+        result.errors.emplace_back(
+            "ConSan fault planning could not resolve typed synchronization members");
+        return;
+      }
+      ConSanFaultMutationPlan plan =
+          make_named_plan(ConSanFaultMutationKind::BarrierParticipantCount, identities->front());
       plan.logical_sequence_identity = group->identity;
-      plan.ordered_member_identities = group->member_event_identities;
+      plan.ordered_member_identities = std::move(*identities);
       plan.original_barrier_id = group->barrier_id;
       plan.target_barrier_id = group->barrier_id;
       plan.original_barrier_scope = group->barrier_scope;
@@ -651,7 +681,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
               : std::optional<std::string>(atomic_order_boundary.sequence->identity +
                                            "|release-wait-boundary");
       plan.logical_sequence_identity = atomic_order_boundary.sequence->identity;
-      plan.ordered_member_identities = atomic_order_boundary.sequence->member_event_identities;
+      if (!retain_member_identities(plan, atomic_order_boundary.sequence->member_semantic_ids))
+        return;
       result.fault_plans.push_back(std::move(plan));
     }
   }
@@ -705,7 +736,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         ConSanFaultMutationPlan plan = make_plan(kind, *target->site);
         plan.companion_identity = std::move(companion);
         plan.logical_sequence_identity = target->sequence->identity;
-        plan.ordered_member_identities = target->sequence->member_event_identities;
+        if (!retain_member_identities(plan, target->sequence->member_semantic_ids))
+          return;
         result.fault_plans.push_back(std::move(plan));
       };
       if (options.fault_ordinary_wrong_address)
@@ -928,13 +960,13 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     return;
   const SynchronizationInventoryView sync = result.program_inventory.sync();
 
-  const std::vector<std::string> &member_identities = lifecycle_group != nullptr
-                                                          ? lifecycle_group->member_event_identities
-                                                          : selected->member_event_identities;
+  const std::span<const SemanticSiteId> member_identities =
+      lifecycle_group != nullptr ? std::span(lifecycle_group->member_semantic_ids)
+                                 : std::span(selected->member_semantic_ids);
   std::vector<const ConSanSyncEvent *> members;
   members.reserve(member_identities.size());
-  for (const std::string &identity : member_identities) {
-    const ConSanSyncEvent *event = sync.find_event(identity);
+  for (SemanticSiteId identity : member_identities) {
+    const ConSanSyncEvent *event = sync.find_sequence_member(identity);
     if (event == nullptr) {
       result.errors.emplace_back(
           "ConSan barrier ID/scope mutation could not resolve every logical member");
@@ -1826,8 +1858,7 @@ find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
 
 void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                 ConSanTransformArtifacts &result) {
-  const ConSanProgramSite *site =
-      find_first_supported_lds_read_b32_site(result.program_inventory);
+  const ConSanProgramSite *site = find_first_supported_lds_read_b32_site(result.program_inventory);
   if (site == nullptr) {
     result.warnings.emplace_back("ConSan LDS endpgm proof found no supported ds_read_b32 site");
     return;

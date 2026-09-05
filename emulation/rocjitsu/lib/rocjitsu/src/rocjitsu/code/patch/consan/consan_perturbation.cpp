@@ -38,6 +38,8 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       continue;
     if (sequence.member_semantic_ids.empty())
       continue;
+    const auto member_identities =
+        program_inventory.sync().sequence_member_identities(sequence.member_semantic_ids);
     for (const ConSanPerturbationEdge edge :
          {ConSanPerturbationEdge::Release, ConSanPerturbationEdge::Acquire}) {
       const ConSanPerturbationRejectionReason rejection =
@@ -61,11 +63,13 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       candidate.anchor_event_identity = anchor == nullptr ? std::string{} : anchor->identity;
       candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset();
       candidate.anchor_size = anchor_source == nullptr ? 0 : anchor_source->size();
-      candidate.ordered_member_identities = sequence.member_event_identities;
-      candidate.eligible =
-          rejection == ConSanPerturbationRejectionReason::None && anchor != nullptr;
-      candidate.rejection_reason =
-          anchor == nullptr ? ConSanPerturbationRejectionReason::MissingAnchorEvent : rejection;
+      if (member_identities)
+        candidate.ordered_member_identities = *member_identities;
+      candidate.eligible = rejection == ConSanPerturbationRejectionReason::None &&
+                           anchor != nullptr && member_identities.has_value();
+      candidate.rejection_reason = anchor == nullptr || !member_identities
+                                       ? ConSanPerturbationRejectionReason::MissingAnchorEvent
+                                       : rejection;
       planning.candidates.push_back(std::move(candidate));
     }
   }

@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu {
@@ -91,13 +90,9 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
 
 [[nodiscard]] std::vector<PhysicalSiteId>
 ordinary_synchronization_reservations(const ProgramInventory &inventory) {
-  std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
-  events.reserve(inventory.sync().sync_events.size());
-  for (const ConSanSyncEvent &event : inventory.sync().sync_events)
-    events.emplace(event.identity, &event);
-
   std::vector<PhysicalSiteId> reservations;
-  for (const ConSanSyncSequence &sequence : inventory.sync().sync_sequences) {
+  const SynchronizationInventoryView sync = inventory.sync();
+  for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
          sequence.memory_role != ConSanSyncMemoryRole::Release) ||
@@ -108,15 +103,15 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
       continue;
     }
     const ConSanSyncEvent *communication = nullptr;
-    for (const std::string &identity : sequence.member_event_identities) {
-      const auto found = events.find(identity);
-      if (found == events.end() || found->second->kind != ConSanSyncEventKind::OrdinaryMemory)
+    for (SemanticSiteId identity : sequence.member_semantic_ids) {
+      const ConSanSyncEvent *event = sync.find_sequence_member(identity);
+      if (event == nullptr || event->kind != ConSanSyncEventKind::OrdinaryMemory)
         continue;
       if (communication != nullptr) {
         communication = nullptr;
         break;
       }
-      communication = found->second;
+      communication = event;
     }
     if (communication == nullptr || communication->container_name != sequence.container_name ||
         communication->in_kernel != sequence.in_kernel) {

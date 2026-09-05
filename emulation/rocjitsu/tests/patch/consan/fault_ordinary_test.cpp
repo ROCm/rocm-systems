@@ -244,7 +244,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryLoad);
-  EXPECT_EQ(sequence->member_event_identities.size(), 2u);
+  EXPECT_EQ(sequence->member_semantic_ids.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->end_text_offset, 8u * sizeof(uint32_t));
   EXPECT_NE(sequence->identity.find("|acquire-cache="), std::string::npos);
@@ -268,7 +268,7 @@ TEST(ConSan, AssociatesRetainedOrdinaryLoadSelfLoopExitAcquireSequence) {
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->memory_role_confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(sequence->member_event_identities.size(), 2u);
+  EXPECT_EQ(sequence->member_semantic_ids.size(), 2u);
   EXPECT_NE(sequence->identity.find("|acquire-cache="), std::string::npos);
 }
 
@@ -299,7 +299,7 @@ TEST(ConSan, AssociatesGfx1250BufferPollLoopWithBoundedAddressSetup) {
       result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(sequence->member_event_identities.size(), 2u);
+  EXPECT_EQ(sequence->member_semantic_ids.size(), 2u);
   EXPECT_NE(sequence->identity.find("|acquire-cache="), std::string::npos);
 }
 
@@ -328,7 +328,7 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
       result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(sequence->member_event_identities.size(), 2u);
+  EXPECT_EQ(sequence->member_semantic_ids.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
   const ConSanMoiFenceCandidate &fence =
       result.program_inventory.sync().moi_fence_candidates.front();
@@ -476,7 +476,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryStore);
-  EXPECT_EQ(sequence->member_event_identities.size(), 2u);
+  EXPECT_EQ(sequence->member_semantic_ids.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->end_text_offset, 8u * sizeof(uint32_t));
   EXPECT_NE(sequence->identity.find("|release-cache="), std::string::npos);
@@ -890,7 +890,7 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
     EXPECT_TRUE(site.sync_sequence_identity.has_value());
   }
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    ASSERT_EQ(sequence.member_event_identities.size(), 1u);
+    ASSERT_EQ(sequence.member_semantic_ids.size(), 1u);
     ASSERT_EQ(sequence.execution_owners.size(), 1u);
     EXPECT_EQ(sequence.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
   }

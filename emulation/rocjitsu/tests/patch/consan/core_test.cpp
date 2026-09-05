@@ -936,16 +936,31 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
 
   ConSanTransformArtifacts result;
   ProgramInventoryBuilder inventory;
+  ConSanSyncEvent event_a;
+  event_a.identity = "event-a";
+  event_a.semantic_id.physical.original_text_offset = 4;
+  event_a.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  ConSanSyncEvent event_b;
+  event_b.identity = "event-b";
+  event_b.semantic_id.physical.original_text_offset = 8;
+  event_b.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  inventory.synchronization().sync_events = {event_a, event_b};
+
+  const auto sequence_member = [](SemanticSiteId identity) {
+    identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+    return identity;
+  };
   ConSanSyncSequence sequence;
   sequence.identity = "sequence-a";
-  sequence.member_event_identities = {"event-a", "event-b"};
+  sequence.member_semantic_ids = {sequence_member(event_a.semantic_id),
+                                  sequence_member(event_b.semantic_id)};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
   ASSERT_NE(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);
   EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("missing"), nullptr);
 
   sequence.identity = "sequence-b";
-  sequence.member_event_identities = {"event-b"};
+  sequence.member_semantic_ids = {sequence_member(event_b.semantic_id)};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
   EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);

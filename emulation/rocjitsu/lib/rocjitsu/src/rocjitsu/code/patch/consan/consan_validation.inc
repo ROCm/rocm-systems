@@ -1556,6 +1556,11 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     }
     const auto sequence = std::ranges::find(pristine.program_inventory.sync().sync_sequences,
                                             proof_sequence_identity, &ConSanSyncSequence::identity);
+    const auto member_identities =
+        sequence == pristine.program_inventory.sync().sync_sequences.end()
+            ? std::optional<std::vector<std::string>>{}
+            : pristine.program_inventory.sync().sequence_member_identities(
+                  sequence->member_semantic_ids);
     if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
         !sequence->basic_block_index ||
         !consan_sync_confidence_meets(sequence->confidence,
@@ -1565,8 +1570,8 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
             ConSanPerturbationRejectionReason::None ||
         candidate->container_name != sequence->container_name ||
         candidate->in_kernel != sequence->in_kernel ||
-        candidate->basic_block_index != *sequence->basic_block_index ||
-        candidate->ordered_member_identities != sequence->member_event_identities) {
+        candidate->basic_block_index != *sequence->basic_block_index || !member_identities ||
+        candidate->ordered_member_identities != *member_identities) {
       errors.emplace_back("ConSan SC perturbation proof could not rederive sequence role, "
                           "confidence, container, and block");
       continue;
@@ -1574,9 +1579,10 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     const size_t outer_member_index = *patch.perturbation_edge == ConSanPerturbationEdge::Release
                                           ? 0u
                                           : sequence->member_semantic_ids.size() - 1u;
-    const std::string &outer_member = sequence->member_event_identities[outer_member_index];
     const ConSanSyncEvent *anchor_event = find_sequence_member_event(
         pristine_events, sequence->member_semantic_ids[outer_member_index]);
+    const std::string_view outer_member =
+        anchor_event == nullptr ? std::string_view{} : anchor_event->identity;
     const ConSanProgramSite *anchor_source =
         anchor_event == nullptr
             ? nullptr

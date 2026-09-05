@@ -190,8 +190,7 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
          static_id && sequence.barrier_id &&
          (sequence.barrier_scope == ConSanBarrierSite::Scope::Workgroup ||
           sequence.barrier_scope == ConSanBarrierSite::Scope::Cluster) &&
-         (sequence.member_event_identities.size() == 1u ||
-          sequence.member_event_identities.size() == 2u) &&
+         (sequence.member_semantic_ids.size() == 1u || sequence.member_semantic_ids.size() == 2u) &&
          sequence.begin_text_offset < sequence.end_text_offset;
 }
 

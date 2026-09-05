@@ -721,8 +721,10 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   EXPECT_EQ(dry_run.fault_plans.front().primary_identity, inventory.fault_sites.front().identity);
   EXPECT_EQ(dry_run.fault_plans.front().companion_identity, inventory.fault_sites.back().identity);
   EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity, sequence->identity);
-  EXPECT_EQ(dry_run.fault_plans.front().ordered_member_identities,
-            sequence->member_event_identities);
+  const auto member_identities =
+      inventory.program_inventory.sync().sequence_member_identities(sequence->member_semantic_ids);
+  ASSERT_TRUE(member_identities);
+  EXPECT_EQ(dry_run.fault_plans.front().ordered_member_identities, *member_identities);
 
   options.fault_dry_run = false;
   const ConSanTransformArtifacts execution = test_lower_consan(bytes, options);
@@ -858,7 +860,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
-  ASSERT_EQ(sequence->member_event_identities.size(), 2u);
+  ASSERT_EQ(sequence->member_semantic_ids.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->end_text_offset, 16u * sizeof(uint32_t));
   EXPECT_NE(sequence->confidence_reason.find("same-owner same-block"), std::string::npos);
@@ -1197,8 +1199,10 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   EXPECT_EQ(plan.companion_identity, inventory.fault_sites[1].identity);
   EXPECT_EQ(plan.logical_sequence_identity,
             inventory.program_inventory.sync().sync_sequences[0].identity);
-  EXPECT_EQ(plan.ordered_member_identities,
-            inventory.program_inventory.sync().sync_sequences[0].member_event_identities);
+  const auto member_identities = inventory.program_inventory.sync().sequence_member_identities(
+      inventory.program_inventory.sync().sync_sequences[0].member_semantic_ids);
+  ASSERT_TRUE(member_identities);
+  EXPECT_EQ(plan.ordered_member_identities, *member_identities);
   EXPECT_EQ(plan.original_barrier_id, -1);
   EXPECT_EQ(plan.target_barrier_id, -2);
   EXPECT_EQ(plan.original_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
