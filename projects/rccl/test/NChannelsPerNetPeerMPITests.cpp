@@ -454,11 +454,13 @@ TEST_F(NChannelsPerNetPeerMPITest, ConfigField_FunctionalAllReduceEndToEnd)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, MultiNode_NetPeer_HonoredEndToEnd)
 {
-    // Require >= 2 processes AND >= 2 nodes so real NET peers exist.
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                              kNoProcessLimit,
-                                              kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+    // Every rank evaluates the same node count, so they skip in unison.
+    if (!validateTestPrerequisites(kMinProcessesForMPI,
+                                   kNoProcessLimit,
+                                   kNoPowerOfTwoRequired,
+                                   /*min_nodes=*/2)) {
+        GTEST_SKIP() << "Requires >= 2 nodes so real NET peers exist";
+    }
 
     constexpr int kRequested = 4;
     configured_value_        = kRequested;
@@ -479,10 +481,13 @@ TEST_F(NChannelsPerNetPeerMPITest, MultiNode_NetPeer_HonoredEndToEnd)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, NetSendRecv_AcrossNodes_EndToEnd)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                              kNoProcessLimit,
-                                              kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+    // Every rank evaluates the same node count, so they skip in unison.
+    if (!validateTestPrerequisites(kMinProcessesForMPI,
+                                   kNoProcessLimit,
+                                   kNoPowerOfTwoRequired,
+                                   /*min_nodes=*/2)) {
+        GTEST_SKIP() << "Requires >= 2 nodes so real NET peers exist";
+    }
 
     configured_value_ = 4;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
@@ -508,10 +513,13 @@ TEST_F(NChannelsPerNetPeerMPITest, NetSendRecv_AcrossNodes_EndToEnd)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, NetTransport_SelectedForInterNodePeer)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                              kNoProcessLimit,
-                                              kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+    // Every rank evaluates the same node count, so they skip in unison.
+    if (!validateTestPrerequisites(kMinProcessesForMPI,
+                                   kNoProcessLimit,
+                                   kNoPowerOfTwoRequired,
+                                   /*min_nodes=*/2)) {
+        GTEST_SKIP() << "Requires >= 2 nodes so real NET peers exist";
+    }
 
     const int world_rank = MPIEnvironment::world_rank;
 
@@ -560,10 +568,13 @@ TEST_F(NChannelsPerNetPeerMPITest, NetTransport_SelectedForInterNodePeer)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, AutoTuneDivergence_Audit)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                              kNoProcessLimit,
-                                              kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+    // Every rank evaluates the same node count, so they skip in unison.
+    if (!validateTestPrerequisites(kMinProcessesForMPI,
+                                   kNoProcessLimit,
+                                   kNoPowerOfTwoRequired,
+                                   /*min_nodes=*/2)) {
+        GTEST_SKIP() << "Requires >= 2 nodes so real NET peers exist";
+    }
 
     const int world_rank = MPIEnvironment::world_rank;
     const int senderRank = 0;

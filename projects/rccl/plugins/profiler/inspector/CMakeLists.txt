@@ -22,7 +22,14 @@ option(NCCL_INSPECTOR_ENABLE_WARN "Emit inspector messages at WARN level (defaul
 # hip::host supplies the HIP headers, libamdhip64 and __HIP_PLATFORM_AMD__.
 # The main RCCL build already ran find_package(hip); resolve it for standalone.
 if(NOT TARGET hip::host)
-    find_package(hip QUIET)
+    find_package(hip QUIET CONFIG
+        HINTS
+            ${ROCM_PATH}
+            ${ROCM_PATH}/lib/cmake/hip
+    )
+endif()
+if(NOT TARGET hip::host)
+    message(FATAL_ERROR "HIP not found; set ROCM_PATH to the ROCm installation")
 endif()
 
 # version.cc is generated rather than checked in, matching the Makefile.

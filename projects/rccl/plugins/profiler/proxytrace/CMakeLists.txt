@@ -4,9 +4,8 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/proxytrace)
 #
-# Either way, fmt is resolved through the imported fmt::fmt-header-only target,
-# which provides the include path (e.g. an installed/conda fmt) and the
-# FMT_HEADER_ONLY definition automatically.
+# Both builds use the local proxy_trace.{h,cc} copies; no dependency on the
+# RCCL CMake build directory or external fmt.
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -17,36 +16,26 @@ else()
     set(PROXYTRACE_STANDALONE OFF)
 endif()
 
-# RCCL source root (this file lives at plugins/profiler/proxytrace).
-get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
-
-# fmt::fmt-header-only is already available when built in-tree (the main build
-# calls find_package / FetchContent for fmt). For standalone builds, resolve it.
-if(NOT TARGET fmt::fmt-header-only)
-    find_package(fmt REQUIRED)
-endif()
-
 add_library(rccl-profiler-proxytrace SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/proxytrace_plugin.cc
-    ${RCCL_ROOT}/src/misc/proxy_trace/proxy_trace.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/proxy_trace.cc
 )
 
 target_include_directories(rccl-profiler-proxytrace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_ROOT}/src/include/plugin
-    ${RCCL_ROOT}/src/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/nccl
+    ${ROCM_PATH}/include
 )
 
 target_compile_definitions(rccl-profiler-proxytrace PRIVATE
     RCCL_PROXYTRACE_PLUGIN_BUILD
+    NCCL_OS_LINUX
+    __HIP_PLATFORM_AMD__
 )
 
 target_compile_features(rccl-profiler-proxytrace PRIVATE cxx_std_17)
 
 target_compile_options(rccl-profiler-proxytrace PRIVATE -Wall -Wextra)
-
-# fmt-header-only supplies the fmt include directory and FMT_HEADER_ONLY=1.
-target_link_libraries(rccl-profiler-proxytrace PRIVATE fmt::fmt-header-only)
 
 # Match the legacy Makefile output name: librccl-profiler-proxytrace.so
 set_target_properties(rccl-profiler-proxytrace PROPERTIES
@@ -56,7 +45,8 @@ set_target_properties(rccl-profiler-proxytrace PROPERTIES
 )
 
 if(NOT PROXYTRACE_STANDALONE)
+    # ncclProfilerProxyTraceSiblingPath() looks for this plugin beside the library.
     set_target_properties(rccl-profiler-proxytrace PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
