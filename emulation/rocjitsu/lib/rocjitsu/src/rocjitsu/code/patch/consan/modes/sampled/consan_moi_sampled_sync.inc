@@ -498,9 +498,12 @@ void try_apply_sampled_barrier_sync_patch(
   }
   std::unordered_map<uint64_t, std::vector<const SelectedWindow *>> windows_by_descriptor;
   for (const SelectedWindow &window : selected_windows) {
-    if (!window.mapping->access.execution_owner_descriptor_file_offsets.empty()) {
-      for (uint64_t descriptor : window.mapping->access.execution_owner_descriptor_file_offsets)
-        windows_by_descriptor[descriptor].push_back(&window);
+    if (!window.mapping->access.execution_owner_kernel_ids.empty()) {
+      for (ConSanProgramContainerId owner : window.mapping->access.execution_owner_kernel_ids) {
+        const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
+        if (kernel != nullptr && kernel->is_kernel())
+          windows_by_descriptor[kernel->descriptor_file_offset].push_back(&window);
+      }
     } else if (window.access->kernel_descriptor_file_offset) {
       windows_by_descriptor[*window.access->kernel_descriptor_file_offset].push_back(&window);
     }
@@ -946,10 +949,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     canonicalize_owners(plan.owner_descriptor_file_offsets);
   for (ConSanPatchLoweringProduct &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
-  if (sampled_accesses != nullptr) {
-    for (ConSanSampledStaticAccessMapping &mapping : *sampled_accesses)
-      canonicalize_owners(mapping.access.execution_owner_descriptor_file_offsets);
-  }
 
   if (!moi_resource_is_valid(resource_state)) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync lacks a complete kernel CFG");
@@ -976,7 +975,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
         if (!moi_resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
           continue;
-        const auto &owners = mapping.access.execution_owner_descriptor_file_offsets;
+        const auto &owners = mapping.access.execution_owner_kernel_ids;
         const bool owns_mapping =
             owners.empty()
                 ? kernel.has_text_range &&
@@ -984,7 +983,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                           kernel.entry_text_offset &&
                       mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
                           kernel.code_size
-                : std::ranges::find(owners, kernel.descriptor_file_offset) != owners.end();
+                : std::ranges::find(owners, kernel.id) != owners.end();
         if (!owns_mapping)
           continue;
         // One physical access in a shared helper is one sampled slot, but it has

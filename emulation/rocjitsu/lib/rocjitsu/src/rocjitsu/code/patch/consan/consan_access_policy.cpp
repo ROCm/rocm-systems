@@ -430,12 +430,11 @@ bool runtime_static_mapping_matches_commit(const ConSanCommittedLowering &commit
             commit.original_physical_sites.end()) {
       return false;
     }
-    if (access.owner_provenance_complete &&
-        access.execution_owner_descriptor_file_offsets.empty()) {
+    if (access.owner_provenance_complete && access.execution_owner_kernel_ids.empty()) {
       return false;
     }
-    for (uint64_t owner : access.execution_owner_descriptor_file_offsets) {
-      if (std::ranges::count(access.execution_owner_descriptor_file_offsets, owner) != 1)
+    for (ConSanProgramContainerId owner : access.execution_owner_kernel_ids) {
+      if (!owner.valid() || std::ranges::count(access.execution_owner_kernel_ids, owner) != 1)
         return false;
     }
 
@@ -717,8 +716,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     (void)offset;
     const ConSanProgramSite &access = *aliases.front();
     const std::vector<SemanticSiteId> ids = semantic_ids(access);
-    const std::vector<std::string> names =
-        inventory.source_container_names(access.physical_id);
+    const std::vector<std::string> names = inventory.source_container_names(access.physical_id);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
 
@@ -729,8 +727,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     const ConSanCapabilityForm form =
         flat ? ConSanCapabilityForm::GroupFlatAccess : ConSanCapabilityForm::NativeLdsAccess;
     const bool enabled = flat ? request.group_flat_enabled : request.native_lds_enabled;
-    const std::vector<uint64_t> owner_descriptors =
-        inventory.execution_owner_descriptors(aliases);
+    const std::vector<uint64_t> owner_descriptors = inventory.execution_owner_descriptors(aliases);
 
     if (!contains_substring(aliases, request.container_filter) ||
         !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,

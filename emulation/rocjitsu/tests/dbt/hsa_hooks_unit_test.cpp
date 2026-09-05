@@ -3521,8 +3521,8 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
   EXPECT_EQ(sampled_conflict.first_conflict->second.index, 1u);
 
   std::array<rocjitsu::consan_hook::AutoMoiSampledStaticMapping, 2> mappings{};
-  mappings[0].owner_descriptor_file_offsets = {0x100};
-  mappings[1].owner_descriptor_file_offsets = {0x200};
+  mappings[0].owner_kernel_ids = {0x100};
+  mappings[1].owner_kernel_ids = {0x200};
   mappings[0].owner_provenance_complete = true;
   mappings[1].owner_provenance_complete = true;
   sampled[0].static_mapping = &mappings[0];
@@ -5869,16 +5869,15 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
 }
 
-rocjitsu::ConSanStaticAccessAttribution
-auto_report_static_access_attribution(const rocjitsu::ConSanTransformArtifacts &result,
-                                      size_t intent_index, std::vector<uint64_t> owners,
-                                      bool owner_provenance_complete) {
+rocjitsu::ConSanStaticAccessAttribution auto_report_static_access_attribution(
+    const rocjitsu::ConSanTransformArtifacts &result, size_t intent_index,
+    std::vector<rocjitsu::ConSanProgramContainerId> owners, bool owner_provenance_complete) {
   const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[intent_index];
   return {
       .intent_ids = {intent.id},
       .original_site = intent.physical_site,
       .original_semantic_sites = intent.covered_semantic_sites,
-      .execution_owner_descriptor_file_offsets = std::move(owners),
+      .execution_owner_kernel_ids = std::move(owners),
       .owner_provenance_complete = owner_provenance_complete,
   };
 }
@@ -5895,10 +5894,11 @@ rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
   for (size_t index = 0; index < instruction_offsets.size(); ++index) {
     const bool owner_provenance_complete = owner_scope != AutoReplayOwnerScope::NoProvenance &&
                                            owner_scope != AutoReplayOwnerScope::UnknownOwnerPair;
-    std::vector<uint64_t> owners;
+    std::vector<rocjitsu::ConSanProgramContainerId> owners;
     if (owner_provenance_complete) {
-      owners.push_back(
-          index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+      owners.push_back({index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair
+                            ? 0x200u
+                            : 0x100u});
     }
     rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
         rocjitsu::ConSanRuntimeStaticMapping::record_replay({
@@ -5943,10 +5943,11 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
   for (size_t index = 0; index < instruction_offsets.size(); ++index) {
     const bool owner_provenance_complete =
         !(index == 1u && owner_scope == AutoSampledOwnerScope::UnknownOwnerPair);
-    std::vector<uint64_t> owners;
+    std::vector<rocjitsu::ConSanProgramContainerId> owners;
     if (owner_provenance_complete) {
-      owners.push_back(
-          index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+      owners.push_back({index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair
+                            ? 0x200u
+                            : 0x100u});
     }
     rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
         rocjitsu::ConSanRuntimeStaticMapping::sampled({

@@ -19,22 +19,26 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_moi_detail::append_word_bytes;
 
-[[nodiscard]] std::optional<ConSanStaticAccessAttribution> make_moi_access_attribution(
-    const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
-    const ConSanPatchLoweringProduct &patch, ConSanProbeIntentKind expected_intent) {
-  if (patch.original_size == 0u)
+[[nodiscard]] std::optional<ConSanStaticAccessAttribution>
+make_moi_access_attribution(const ConSanObservationPlan &observation,
+                            const ConSanMoiCandidate &candidate,
+                            ConSanProbeIntentKind expected_intent) {
+  if (candidate.size() == 0u)
     return std::nullopt;
   ConSanStaticAccessAttribution access{
       .intent_ids = candidate.intent_ids,
       .original_site = candidate.physical_id,
       .original_semantic_sites = {},
-      .execution_owner_descriptor_file_offsets = patch.owner_descriptor_file_offsets,
-      .owner_provenance_complete = !patch.owner_descriptor_file_offsets.empty(),
+      .execution_owner_kernel_ids = {},
+      .owner_provenance_complete = !candidate.execution_owners.empty(),
   };
-  std::ranges::sort(access.execution_owner_descriptor_file_offsets);
-  access.execution_owner_descriptor_file_offsets.erase(
-      std::ranges::unique(access.execution_owner_descriptor_file_offsets).begin(),
-      access.execution_owner_descriptor_file_offsets.end());
+  access.execution_owner_kernel_ids.reserve(candidate.execution_owners.size());
+  for (const ConSanExecutionOwner &owner : candidate.execution_owners)
+    access.execution_owner_kernel_ids.push_back(owner.kernel);
+  std::ranges::sort(access.execution_owner_kernel_ids);
+  access.execution_owner_kernel_ids.erase(
+      std::ranges::unique(access.execution_owner_kernel_ids).begin(),
+      access.execution_owner_kernel_ids.end());
   for (ConSanProbeIntentId id : candidate.intent_ids) {
     const ConSanProbeIntent *intent = observation.intent(id);
     if (intent == nullptr || intent->kind != expected_intent)

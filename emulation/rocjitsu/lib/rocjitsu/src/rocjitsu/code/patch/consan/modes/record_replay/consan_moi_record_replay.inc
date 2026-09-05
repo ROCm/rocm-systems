@@ -244,7 +244,7 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
     patch.anchor_offset = candidate.anchor();
     patch.original_size = candidate.size();
     note_moi_probe_patch_info(patch, entry);
-    auto access = make_moi_access_attribution(result.observation_plan(), candidate, patch,
+    auto access = make_moi_access_attribution(result.observation_plan(), candidate,
                                               ConSanProbeIntentKind::AccessRecord);
     if (!access) {
       result.errors.emplace_back(

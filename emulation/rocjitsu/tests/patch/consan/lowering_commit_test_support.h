@@ -47,7 +47,7 @@ namespace rocjitsu {
         .intent_ids = {id},
         .original_site = intent->physical_site,
         .original_semantic_sites = intent->covered_semantic_sites,
-        .execution_owner_descriptor_file_offsets = {},
+        .execution_owner_kernel_ids = {},
         .owner_provenance_complete = false,
     };
     switch (intent->kind) {

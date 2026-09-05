@@ -388,8 +388,9 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
       std::ranges::find(result.observation_plan().site_decisions, ConSanSiteDecisionKind::Admitted,
                         &ConSanSiteDecision::kind);
   ASSERT_NE(access_decision, result.observation_plan().site_decisions.end());
-  EXPECT_EQ(result.program_inventory.source_container_names(access_decision->semantic_site.physical),
-            (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
+  EXPECT_EQ(
+      result.program_inventory.source_container_names(access_decision->semantic_site.physical),
+      (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(
       result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
@@ -420,10 +421,16 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_EQ(runtime_static_mapping.record_replay()->size(), 1u);
   const ConSanRecordReplayStaticAccessMapping &runtime_mapping =
       runtime_static_mapping.record_replay()->front();
+  const auto result_first = std::ranges::find(result.program_inventory.kernels(), "shared_owner_0",
+                                              &ConSanProgramContainer::name);
+  const auto result_alias = std::ranges::find(result.program_inventory.kernels(), "shared_owner_1",
+                                              &ConSanProgramContainer::name);
+  ASSERT_NE(result_first, result.program_inventory.kernels().end());
+  ASSERT_NE(result_alias, result.program_inventory.kernels().end());
   ASSERT_EQ(runtime_mapping.access.intent_ids.size(), 1u);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
-  EXPECT_EQ(runtime_mapping.access.execution_owner_descriptor_file_offsets,
-            access_patch->owner_descriptor_file_offsets);
+  EXPECT_EQ(runtime_mapping.access.execution_owner_kernel_ids,
+            (std::vector<ConSanProgramContainerId>{result_first->id, result_alias->id}));
   EXPECT_TRUE(runtime_mapping.access.owner_provenance_complete);
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);

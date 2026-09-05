@@ -236,7 +236,7 @@ public:
       for (const rocjitsu::ConSanRecordReplayStaticAccessMapping &static_access :
            *static_accesses) {
         if (static_access.access.owner_provenance_complete &&
-            static_access.access.execution_owner_descriptor_file_offsets.empty()) {
+            static_access.access.execution_owner_kernel_ids.empty()) {
           metadata.malformed = true;
         }
         if (static_access.access.original_site.original_text_offset >
@@ -254,18 +254,20 @@ public:
         if (mapping == metadata.mappings.end()) {
           metadata.mappings.push_back({
               .instruction_offset = instruction_offset,
-              .owner_descriptor_file_offsets =
-                  static_access.access.execution_owner_descriptor_file_offsets,
-              .owner_provenance_complete =
-                  static_access.access.owner_provenance_complete &&
-                  !static_access.access.execution_owner_descriptor_file_offsets.empty(),
+              .owner_kernel_ids = {},
+              .owner_provenance_complete = static_access.access.owner_provenance_complete &&
+                                           !static_access.access.execution_owner_kernel_ids.empty(),
           });
+          for (rocjitsu::ConSanProgramContainerId owner :
+               static_access.access.execution_owner_kernel_ids)
+            metadata.mappings.back().owner_kernel_ids.push_back(owner.ordinal);
         } else {
           mapping->owner_provenance_complete &= static_access.access.owner_provenance_complete;
-          for (uint64_t owner : static_access.access.execution_owner_descriptor_file_offsets) {
-            if (std::ranges::find(mapping->owner_descriptor_file_offsets, owner) ==
-                mapping->owner_descriptor_file_offsets.end()) {
-              mapping->owner_descriptor_file_offsets.push_back(owner);
+          for (rocjitsu::ConSanProgramContainerId owner :
+               static_access.access.execution_owner_kernel_ids) {
+            if (std::ranges::find(mapping->owner_kernel_ids, owner.ordinal) ==
+                mapping->owner_kernel_ids.end()) {
+              mapping->owner_kernel_ids.push_back(owner.ordinal);
             }
           }
         }
@@ -282,7 +284,7 @@ public:
       AutoMoiSampledStaticMetadata metadata;
       for (const rocjitsu::ConSanSampledStaticAccessMapping &static_access : *static_accesses) {
         if (static_access.access.owner_provenance_complete &&
-            static_access.access.execution_owner_descriptor_file_offsets.empty()) {
+            static_access.access.execution_owner_kernel_ids.empty()) {
           metadata.malformed = true;
         }
         const uint64_t slot_count =
@@ -298,12 +300,13 @@ public:
               .emitted_probe_offset = static_access.emitted_probe_text_offset,
               .relocated_guest_offset = static_access.relocated_guest_text_offset.value_or(0u),
               .scratch_vgpr = static_access.scratch_vgpr,
-              .owner_descriptor_file_offsets =
-                  static_access.access.execution_owner_descriptor_file_offsets,
-              .owner_provenance_complete =
-                  static_access.access.owner_provenance_complete &&
-                  !static_access.access.execution_owner_descriptor_file_offsets.empty(),
+              .owner_kernel_ids = {},
+              .owner_provenance_complete = static_access.access.owner_provenance_complete &&
+                                           !static_access.access.execution_owner_kernel_ids.empty(),
           });
+          for (rocjitsu::ConSanProgramContainerId owner :
+               static_access.access.execution_owner_kernel_ids)
+            metadata.mappings.back().owner_kernel_ids.push_back(owner.ordinal);
         } else {
           metadata.malformed = true;
         }

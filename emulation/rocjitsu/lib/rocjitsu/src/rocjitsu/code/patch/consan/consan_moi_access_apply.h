@@ -35,14 +35,14 @@ using consan_moi_detail::append_words_bytes;
 
 /// Bind common original-program attribution to one mode-owned runtime map.
 ///
-/// Shared access application owns the intent/semantic-site join and committed
-/// patch geometry. Each mode supplies the expected access intent and a
-/// callable that creates its typed runtime evidence representation from the
-/// common attribution. The callable closes over mode-local placement facts;
-/// common code never needs to add them to the generic patch product.
-[[nodiscard]] std::optional<ConSanStaticAccessAttribution> make_moi_access_attribution(
-    const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
-    const ConSanPatchLoweringProduct &patch, ConSanProbeIntentKind expected_intent);
+/// Shared access application owns the intent/semantic-site join. Each mode
+/// supplies the expected access intent and creates its typed runtime evidence
+/// representation from the common attribution. Physical patch geometry stays
+/// in the lowering product and does not enter this semantic projection.
+[[nodiscard]] std::optional<ConSanStaticAccessAttribution>
+make_moi_access_attribution(const ConSanObservationPlan &observation,
+                            const ConSanMoiCandidate &candidate,
+                            ConSanProbeIntentKind expected_intent);
 
 /// Complete target-state and composition contract for one relocated MOI
 /// access body.

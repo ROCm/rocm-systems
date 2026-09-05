@@ -3664,6 +3664,15 @@ if(NOT _runtime_mapping_contract MATCHES
 )
     message(FATAL_ERROR "ConSan runtime static attribution lost its discriminated mode product")
 endif()
+string(REGEX MATCH "struct ConSanStaticAccessAttribution [{][^}]*[}];"
+             _runtime_access_attribution_contract "${_runtime_mapping_contract}")
+if(NOT _runtime_access_attribution_contract MATCHES
+       "std::vector<ConSanProgramContainerId> execution_owner_kernel_ids" OR
+   _runtime_access_attribution_contract MATCHES "descriptor_file_offset")
+    message(FATAL_ERROR
+        "ConSan runtime static attribution must retain stable kernel handles, not physical descriptors"
+    )
+endif()
 set(_report_pipeline_contract
     "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.h"
 )

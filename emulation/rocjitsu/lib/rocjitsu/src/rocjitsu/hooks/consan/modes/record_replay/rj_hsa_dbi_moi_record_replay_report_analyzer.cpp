@@ -174,9 +174,8 @@ analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
     if (first == nullptr || second == nullptr || !first->owner_provenance_complete ||
         !second->owner_provenance_complete || static_mapping_malformed)
       return false;
-    return std::ranges::none_of(first->owner_descriptor_file_offsets, [&](uint64_t owner) {
-      return std::ranges::find(second->owner_descriptor_file_offsets, owner) !=
-             second->owner_descriptor_file_offsets.end();
+    return std::ranges::none_of(first->owner_kernel_ids, [&](uint32_t owner) {
+      return std::ranges::find(second->owner_kernel_ids, owner) != second->owner_kernel_ids.end();
     });
   };
   const auto visible_end = std::remove_if(result.diagnostics.begin(),

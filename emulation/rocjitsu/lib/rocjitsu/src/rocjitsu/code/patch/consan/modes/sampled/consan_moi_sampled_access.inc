@@ -421,7 +421,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     patch.anchor_offset = candidate.anchor();
     patch.original_size = candidate.size();
     note_moi_probe_patch_info(patch, planned_patch);
-    auto access = make_moi_access_attribution(result.observation_plan(), candidate, patch,
+    auto access = make_moi_access_attribution(result.observation_plan(), candidate,
                                               ConSanProbeIntentKind::SampledAccess);
     if (!access) {
       result.errors.emplace_back(

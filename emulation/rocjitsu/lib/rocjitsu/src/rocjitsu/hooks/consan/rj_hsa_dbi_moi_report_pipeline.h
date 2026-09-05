@@ -18,7 +18,7 @@ namespace rocjitsu::consan_hook {
 
 struct AutoMoiRecordReplayStaticMapping {
   uint32_t instruction_offset = 0;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
+  std::vector<uint32_t> owner_kernel_ids;
   bool owner_provenance_complete = false;
 };
 
@@ -30,7 +30,7 @@ struct AutoMoiSampledStaticMapping {
   uint64_t emitted_probe_offset = 0;
   uint64_t relocated_guest_offset = 0;
   std::optional<uint16_t> scratch_vgpr;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
+  std::vector<uint32_t> owner_kernel_ids;
   bool owner_provenance_complete = false;
 };
 

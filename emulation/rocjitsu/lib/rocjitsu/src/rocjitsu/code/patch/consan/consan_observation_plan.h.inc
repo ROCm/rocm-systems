@@ -731,9 +731,8 @@ struct ConSanAtomicFencePolicyResult {
 /// by the current Sampled barrier-epoch contract. The predicate is declared at
 /// the policy boundary because both pure admission and the temporary legacy
 /// lowerer must agree during incremental migration.
-[[nodiscard]] bool
-consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
-                                              bool owner_proven);
+[[nodiscard]] bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
+                                                                 bool owner_proven);
 
 /// Final mechanism state of one admitted probe intent.
 ///
@@ -757,13 +756,13 @@ enum class ConSanLoweringOutcomeKind : uint8_t {
 ///
 /// The intent IDs make this a forward product of semantic planning rather
 /// than a later offset join. `original_site` and `original_semantic_sites`
-/// retain pristine identities, while execution owners state the complete
-/// static kernel scope only when `owner_provenance_complete` is true.
+/// retain pristine identities, while execution-owner handles state the
+/// complete static kernel scope only when `owner_provenance_complete` is true.
 struct ConSanStaticAccessAttribution {
   std::vector<ConSanProbeIntentId> intent_ids;
   PhysicalSiteId original_site;
   std::vector<SemanticSiteId> original_semantic_sites;
-  std::vector<uint64_t> execution_owner_descriptor_file_offsets;
+  std::vector<ConSanProgramContainerId> execution_owner_kernel_ids;
   bool owner_provenance_complete = false;
 
   bool operator==(const ConSanStaticAccessAttribution &) const = default;

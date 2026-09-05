@@ -344,7 +344,7 @@ record_replay_runtime_mapping_for(const ConSanObservationPlan &plan,
       .intent_ids = std::vector(intent_ids.begin(), intent_ids.end()),
       .original_site = first->physical_site,
       .original_semantic_sites = {},
-      .execution_owner_descriptor_file_offsets = {},
+      .execution_owner_kernel_ids = {},
       .owner_provenance_complete = false,
   };
   for (ConSanProbeIntentId id : intent_ids) {
@@ -507,7 +507,7 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
               .intent_ids = {intent.id},
               .original_site = intent.physical_site,
               .original_semantic_sites = intent.covered_semantic_sites,
-              .execution_owner_descriptor_file_offsets = {192u},
+              .execution_owner_kernel_ids = {{0u}},
               .owner_provenance_complete = true,
           },
   });
@@ -542,6 +542,18 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
                                               ConSanLoweringOutcomeKind::Instrumented, {},
                                               std::move(malformed)));
+  malformed = expected_mapping;
+  malformed.record_replay()->front().access.execution_owner_kernel_ids.push_back({0u});
+  EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                              ConSanLoweringOutcomeKind::Instrumented, {},
+                                              std::move(malformed)))
+      << "runtime attribution must reject duplicate semantic owner handles";
+  malformed = expected_mapping;
+  malformed.record_replay()->front().access.execution_owner_kernel_ids.front() = {};
+  EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                              ConSanLoweringOutcomeKind::Instrumented, {},
+                                              std::move(malformed)))
+      << "runtime attribution must reject invalid semantic owner handles";
   EXPECT_FALSE(make_consan_committed_lowering(
       policy.plan, intent_ids, std::span<const ConSanCommittedLoweringLocation>{},
       ConSanLoweringOutcomeKind::PlacementRejected, {}, expected_mapping));

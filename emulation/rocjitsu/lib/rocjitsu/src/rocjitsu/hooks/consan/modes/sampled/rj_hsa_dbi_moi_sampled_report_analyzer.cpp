@@ -24,12 +24,10 @@ analyze_auto_moi_sampled_conflicts(std::span<const AutoMoiSampledEvidence> evide
       if (current.static_mapping != nullptr && prior.static_mapping != nullptr &&
           current.static_mapping->owner_provenance_complete &&
           prior.static_mapping->owner_provenance_complete &&
-          std::ranges::none_of(
-              current.static_mapping->owner_descriptor_file_offsets, [&](uint64_t owner) {
-                return std::ranges::find(prior.static_mapping->owner_descriptor_file_offsets,
-                                         owner) !=
-                       prior.static_mapping->owner_descriptor_file_offsets.end();
-              }))
+          std::ranges::none_of(current.static_mapping->owner_kernel_ids, [&](uint32_t owner) {
+            return std::ranges::find(prior.static_mapping->owner_kernel_ids, owner) !=
+                   prior.static_mapping->owner_kernel_ids.end();
+          }))
         continue;
       if (!consan_moi_sampled_watchpoints_conflict(current.entry, prior.entry))
         continue;
