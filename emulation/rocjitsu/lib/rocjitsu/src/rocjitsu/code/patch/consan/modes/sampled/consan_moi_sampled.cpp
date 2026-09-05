@@ -83,6 +83,7 @@ using consan_moi_detail::append_dynamic_record_address;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
+using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;
 using consan_moi_detail::append_store_u32_sgpr;

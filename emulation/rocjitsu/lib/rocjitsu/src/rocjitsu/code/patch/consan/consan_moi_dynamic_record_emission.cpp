@@ -61,13 +61,11 @@ namespace {
   return sequence.emit_all(zero, atomic_load) && append_moi_global_atomic_wait(words, arch);
 }
 
-bool append_select_first_active_lane(std::vector<uint32_t> &words, uint16_t lane_rank_vgpr,
-                                     uint16_t active_exec_sgpr, uint16_t saved_exec_sgpr,
-                                     rj_code_arch_t arch) {
+bool append_select_first_lane_in_exec_mask(std::vector<uint32_t> &words, uint16_t lane_rank_vgpr,
+                                           uint16_t active_exec_sgpr, uint16_t saved_exec_sgpr,
+                                           rj_code_arch_t arch) {
   InstructionSequence sequence(words);
   sequence.append(
-      instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch),
-      instrumentation::build_salu_to_valu_dependency_wait(arch),
       instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, active_exec_sgpr,
                                                 scalar_positive_inline_u32(0), arch),
       instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr,
@@ -75,6 +73,18 @@ bool append_select_first_active_lane(std::vector<uint32_t> &words, uint16_t lane
                                                 vector_source_vgpr(lane_rank_vgpr), arch),
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch),
       instrumentation::build_s_and_saveexec_b64(saved_exec_sgpr, kAmdGpuVccLo, arch));
+  return sequence.finish();
+}
+
+bool append_select_first_active_lane(std::vector<uint32_t> &words, uint16_t lane_rank_vgpr,
+                                     uint16_t active_exec_sgpr, uint16_t saved_exec_sgpr,
+                                     rj_code_arch_t arch) {
+  InstructionSequence sequence(words);
+  sequence
+      .append(instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch),
+              instrumentation::build_salu_to_valu_dependency_wait(arch))
+      .require(append_select_first_lane_in_exec_mask(words, lane_rank_vgpr, active_exec_sgpr,
+                                                     saved_exec_sgpr, arch));
   return sequence.finish();
 }
 

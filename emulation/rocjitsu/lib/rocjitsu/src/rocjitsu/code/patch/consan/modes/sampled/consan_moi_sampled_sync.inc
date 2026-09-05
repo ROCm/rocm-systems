@@ -262,15 +262,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch narrowing");
 
   require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank,
-                                                    static_cast<uint16_t>(temporary_exec + 1u),
-                                                    vector_source_vgpr(lane_rank), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      sequence.emit(instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch)) &&
+          append_select_first_lane_in_exec_mask(words, lane_rank, temporary_exec, temporary_exec,
+                                                arch),
       "ConSan MOI sampled barrier failed at lane election");
 
   require_emission(
@@ -399,16 +393,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   sequence.bind_label(collision_label);
   require_emission(
-      sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
-          instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank,
-                                                    static_cast<uint16_t>(temporary_exec + 1u),
-                                                    vector_source_vgpr(lane_rank), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      sequence.emit_all(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
+                        instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch)) &&
+          append_select_first_lane_in_exec_mask(words, lane_rank, temporary_exec, temporary_exec,
+                                                arch),
       "ConSan MOI sampled barrier failed at collision lane election");
   require_emission(
       append_atomic_fetch_add_one_u32(

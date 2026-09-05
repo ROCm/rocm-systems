@@ -42,6 +42,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_or_u32_literal;
+using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;
 using consan_moi_detail::ConSanMoiRecordEmitter;
@@ -548,32 +549,19 @@ namespace consan_moi_impl {
             instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, *lds_byte_offset_vgpr, arch),
             instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo,
                                                       arch),
-            instrumentation::build_s_mov_b64(address_group_exec_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_v_mbcnt_lo_u32_b32(record_value_vgpr, address_group_exec_sgpr,
-                                                      scalar_positive_inline_u32(0), arch),
-            instrumentation::build_v_mbcnt_hi_u32_b32(
-                record_value_vgpr, static_cast<uint16_t>(address_group_exec_sgpr + 1u),
-                vector_source_vgpr(record_value_vgpr), arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                    record_value_vgpr, arch),
+            instrumentation::build_s_mov_b64(address_group_exec_sgpr, kAmdGpuExecLo, arch)) &&
             // Keep the full group mask for replay provenance while one elected lane
             // performs the bounded table transaction.
-            instrumentation::build_s_and_saveexec_b64(address_group_exec_sgpr, kAmdGpuVccLo, arch)),
+            append_select_first_lane_in_exec_mask(words, record_value_vgpr, address_group_exec_sgpr,
+                                                  address_group_exec_sgpr, arch),
         "ConSan MOI first-light probe could not select one exact LDS address-group owner");
   } else {
-    require_emission(
-        sequence.emit_all(
-            instrumentation::build_s_mov_b64(*point.moi_exec_save_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_v_mbcnt_lo_u32_b32(record_value_vgpr, *point.moi_exec_save_sgpr,
-                                                      scalar_positive_inline_u32(0), arch),
-            instrumentation::build_v_mbcnt_hi_u32_b32(
-                record_value_vgpr, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u),
-                vector_source_vgpr(record_value_vgpr), arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                    record_value_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo,
-                                                      arch)),
-        "ConSan MOI first-light probe could not elect a representative lane");
+    require_emission(sequence.emit(instrumentation::build_s_mov_b64(*point.moi_exec_save_sgpr,
+                                                                    kAmdGpuExecLo, arch)) &&
+                         append_select_first_lane_in_exec_mask(words, record_value_vgpr,
+                                                               *point.moi_exec_save_sgpr,
+                                                               *point.moi_exec_save_sgpr, arch),
+                     "ConSan MOI first-light probe could not elect a representative lane");
   }
   if (automatic_banked_capture) {
     // The bounded bank hashes the complete persistent tuple. Descriptor SGPRs

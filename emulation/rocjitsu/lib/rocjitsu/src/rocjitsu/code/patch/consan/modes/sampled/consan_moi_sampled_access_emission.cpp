@@ -35,6 +35,7 @@ using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 
@@ -812,17 +813,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   sequence.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, arch))
       .branch(restore_label, InstructionSequence::BranchKind::Unconditional)
       .bind_label(different_identity_label);
-  require_emission(
-      sequence.emit_all(
-          instrumentation::build_v_mbcnt_lo_u32_b32(tmp_vgpr, publication_exec_save_sgpr,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(
-              tmp_vgpr, static_cast<uint16_t>(publication_exec_save_sgpr + 1u),
-              vector_source_vgpr(tmp_vgpr), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo,
-                                                    arch)),
-      "ConSan MOI sampled probe could not select a collision representative");
+  require_emission(append_select_first_lane_in_exec_mask(words, tmp_vgpr,
+                                                         publication_exec_save_sgpr,
+                                                         publication_exec_save_sgpr, arch),
+                   "ConSan MOI sampled probe could not select a collision representative");
   const uint64_t saturated_count_address =
       plan.report_buffer_address + offsetof(ConSanMoiReportHeader, sampled_saturated_window_count);
   require_emission(append_atomic_fetch_add_one_u32(words, saturated_count_address, tmp_vgpr,

@@ -47,6 +47,7 @@ using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::append_select_first_active_lane;
+using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
@@ -1284,17 +1285,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // by the next bounded loop iteration.
   const auto use_group_diagnostic_mask =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, group_exec_sgpr, arch);
-  sequence.append(
-      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch),
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-      instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, group_exec_sgpr,
-                                                scalar_positive_inline_u32(0), arch),
-      instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr,
-                                                static_cast<uint16_t>(group_exec_sgpr + 1u),
-                                                vector_source_vgpr(lane_rank_vgpr), arch),
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch),
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
-      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch));
+  sequence
+      .append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
+                                                      lane_rank_vgpr, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+              use_group_diagnostic_mask)
+      .require(append_select_first_lane_in_exec_mask(words, lane_rank_vgpr, group_exec_sgpr,
+                                                     temporary_exec_sgpr, arch))
+      .append(instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch));
   sequence.require(
       append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr));
   set_stage("composite-key transaction");

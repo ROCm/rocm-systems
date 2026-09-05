@@ -30,6 +30,7 @@ using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::range_overlaps;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 
@@ -395,17 +396,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
-  const auto active_mask = instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch);
-  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      value, temporary_exec, scalar_positive_inline_u32(0), arch);
-  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      value, static_cast<uint16_t>(temporary_exec + 1u), vector_source_vgpr(value), arch);
-  const auto first =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
-  const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  sequence.append(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch), active_mask,
-                  mbcnt_lo, mbcnt_hi, first, narrow_first);
+  sequence
+      .append(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch),
+              instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch))
+      .require(append_select_first_lane_in_exec_mask(words, value, temporary_exec, temporary_exec,
+                                                     arch));
 
   // BANK still names the causal-window slot stored in the pending payload.
   // Address the pending table through a separate (window, owner) index so all
@@ -528,8 +523,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   const auto append_counter_path = [&](size_t counter_offset) {
     sequence
-        .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), active_mask,
-                mbcnt_lo, mbcnt_hi, first, narrow_first)
+        .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
+                instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch))
+        .require(append_select_first_lane_in_exec_mask(words, value, temporary_exec, temporary_exec,
+                                                       arch))
         .require(
             append_atomic_fetch_add_one_u32(words, report_base + counter_offset, value, base, arch))
         .branch(restore_label, InstructionSequence::BranchKind::Unconditional);
@@ -767,14 +764,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
               instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch));
   narrow_current_vcc();
 
-  sequence.append(
-      instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
-      instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
-                                                scalar_positive_inline_u32(0), arch),
-      instrumentation::build_v_mbcnt_hi_u32_b32(value, static_cast<uint16_t>(temporary_exec + 1u),
-                                                vector_source_vgpr(value), arch),
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
+  sequence.append(instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch))
+      .require(append_select_first_lane_in_exec_mask(words, value, temporary_exec, temporary_exec,
+                                                     arch));
 
   const auto append_publication = [&](uint32_t descriptor) {
     sequence
@@ -852,14 +844,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   // lane so the collision counter is neither lost nor multiplied by wave size.
   sequence.bind_label(collision_label)
       .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
-              instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
-              instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
-                                                        scalar_positive_inline_u32(0), arch),
-              instrumentation::build_v_mbcnt_hi_u32_b32(value,
-                                                        static_cast<uint16_t>(temporary_exec + 1u),
-                                                        vector_source_vgpr(value), arch),
-              instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+              instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch))
+      .require(
+          append_select_first_lane_in_exec_mask(words, value, temporary_exec, temporary_exec, arch))
       .require(append_atomic_fetch_add_one_u32(
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_dropped_window_count), value,
           base, arch))
