@@ -152,58 +152,36 @@ struct BoolEnvBinding {
   return true;
 }
 
-[[nodiscard]] bool parse_optional_vgpr_env(const char *name, std::optional<uint16_t> *out) {
+[[nodiscard]] bool parse_optional_u16_env(const char *name, uint16_t maximum, bool require_even,
+                                          const char *expected, std::optional<uint16_t> *out) {
   const char *value = std::getenv(name);
+  out->reset();
   if (value == nullptr || *value == '\0') {
-    out->reset();
     return true;
   }
 
   uint32_t parsed = 0;
   if (!parse_u32_env(name, 0, &parsed))
     return false;
-  if (parsed > 255) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected 0..255\n", name, value);
+  if (parsed > maximum || (require_even && parsed % 2u != 0u)) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected %s\n", name, value,
+                 expected);
     return false;
   }
   *out = static_cast<uint16_t>(parsed);
   return true;
+}
+
+[[nodiscard]] bool parse_optional_vgpr_env(const char *name, std::optional<uint16_t> *out) {
+  return parse_optional_u16_env(name, 255u, false, "0..255", out);
 }
 
 [[nodiscard]] bool parse_optional_sgpr_env(const char *name, std::optional<uint16_t> *out) {
-  const char *value = std::getenv(name);
-  out->reset();
-  if (value == nullptr || *value == '\0')
-    return true;
-  uint32_t parsed = 0;
-  if (!parse_u32_env(name, 0, &parsed))
-    return false;
-  if (parsed > 105) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected SGPR 0..105\n", name,
-                 value);
-    return false;
-  }
-  *out = static_cast<uint16_t>(parsed);
-  return true;
+  return parse_optional_u16_env(name, 105u, false, "SGPR 0..105", out);
 }
 
 [[nodiscard]] bool parse_optional_sgpr_pair_env(const char *name, std::optional<uint16_t> *out) {
-  const char *value = std::getenv(name);
-  out->reset();
-  if (value == nullptr || *value == '\0')
-    return true;
-  uint32_t parsed = 0;
-  if (!parse_u32_env(name, 0, &parsed))
-    return false;
-  if (parsed > 104 || parsed % 2 != 0) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid %s='%s'; expected an even SGPR pair base "
-                 "in 0..104\n",
-                 name, value);
-    return false;
-  }
-  *out = static_cast<uint16_t>(parsed);
-  return true;
+  return parse_optional_u16_env(name, 104u, true, "an even SGPR pair base in 0..104", out);
 }
 
 [[nodiscard]] bool parse_u64_env(const char *name, uint64_t default_value, uint64_t *out,
