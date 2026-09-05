@@ -16,7 +16,6 @@ namespace rocjitsu::consan_moi_impl {
 /// being rediscovered by each evidence kind.
 struct MoiEvidenceContainerView {
   std::string qualified_name;
-  std::optional<uint64_t> kernel_descriptor_file_offset;
   uint64_t entry_text_offset = 0, text_file_offset = 0, code_size = 0;
   bool uses_cluster_workgroup_id = false;
 };

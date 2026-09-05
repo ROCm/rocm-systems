@@ -181,12 +181,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
-    rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
-    std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
+    const MoiAtomicEvidenceSitePlan &candidate, uint64_t owner_descriptor_file_offset,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
+    bool defer_guest, SampledAtomicPreludeState &state, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
+    uint32_t *emitted_guest_size) {
   const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas) {
     assert(candidate.site.data_vgpr && candidate.site.destination_vgpr);
@@ -253,9 +254,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     state.cas_result_vgpr = saved_result;
   }
   if (private_layout &&
-      !append_sampled_private_owner_epoch_load(
-          words, bytes, *candidate.kernel_descriptor_file_offset, plan.automatic_private_epoch,
-          plan.owner_epoch_vgprs, *private_layout, arch, errors))
+      !append_sampled_private_owner_epoch_load(words, bytes, owner_descriptor_file_offset,
+                                               plan.automatic_private_epoch, plan.owner_epoch_vgprs,
+                                               *private_layout, arch, errors))
     return false;
   if (plan.persistent_sgprs.complete()) {
     if (!consan_detail::validate_scalar_state_temporaries(
@@ -300,13 +301,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
-    uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
-    const ConSanMoiReportBufferLayout &layout, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
-    uint32_t *emitted_guest_size) {
+    uint64_t owner_descriptor_file_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
+    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
+    std::optional<uint32_t> release_selected_slot, const ConSanMoiReportBufferLayout &layout,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
   const uint32_t pending_owner_bank_count = consan_moi_sampled_pending_acquire_owner_bank_count(
       layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
   if (!plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
@@ -314,8 +315,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       bank_count == 0u || !std::has_single_bit(bank_count) || pending_owner_bank_count == 0u ||
       selected_slot > layout.sampled_causal_window_capacity ||
       bank_count > layout.sampled_causal_window_capacity - selected_slot ||
-      !address_plan.supported() || !candidate.site.scope || candidate.site.width_bits != 32u ||
-      !candidate.kernel_descriptor_file_offset)
+      !address_plan.supported() || !candidate.site.scope || candidate.site.width_bits != 32u)
     return std::nullopt;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
@@ -372,11 +372,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, plan, spill,
-                                     scalar_spill, private_layout, arch, saved_address,
-                                     /*defer_guest=*/false, prelude, errors,
-                                     guest_instruction_offset, trailing_guest_words,
-                                     emitted_guest_size))
+  if (!append_sampled_atomic_prelude(
+          words, bytes, candidate, owner_descriptor_file_offset, address_plan, plan, spill,
+          scalar_spill, private_layout, arch, saved_address, /*defer_guest=*/false, prelude, errors,
+          guest_instruction_offset, trailing_guest_words, emitted_guest_size))
     return std::nullopt;
   if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
@@ -553,12 +552,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
-    uint32_t bank_count, const ConSanMoiReportBufferLayout &layout,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
-    std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
+    uint64_t owner_descriptor_file_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
+    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
+    const ConSanMoiReportBufferLayout &layout, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
+    uint32_t *emitted_guest_size) {
   if (!plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
       static_cast<uint32_t>(plan.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
       bank_count == 0u || !std::has_single_bit(bank_count) ||
@@ -578,10 +578,6 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto scope = consan_moi_sampled_sync_scope(*candidate.site.scope);
   if (!role || !scope)
     return std::nullopt;
-  if (!candidate.kernel_descriptor_file_offset) {
-    errors.emplace_back("ConSan MOI sampled atomic metadata lacks an owning kernel descriptor");
-    return std::nullopt;
-  }
   if (candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset) {
     errors.emplace_back("ConSan MOI sampled atomic metadata site exceeds ELF bytes");
@@ -655,9 +651,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   InstructionSequence sequence(words);
   SampledAtomicPreludeState prelude;
   sequence.require(append_sampled_atomic_prelude(
-      words, bytes, candidate, address_plan, plan, spill, scalar_spill, private_layout, arch,
-      saved_address, defer_guest, prelude, errors, guest_instruction_offset, trailing_guest_words,
-      emitted_guest_size));
+      words, bytes, candidate, owner_descriptor_file_offset, address_plan, plan, spill,
+      scalar_spill, private_layout, arch, saved_address, defer_guest, prelude, errors,
+      guest_instruction_offset, trailing_guest_words, emitted_guest_size));
   if (sequence &&
       !append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {

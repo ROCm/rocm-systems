@@ -190,10 +190,6 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 [[nodiscard]] bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
                                                   uint64_t descriptor_offset);
 
-[[nodiscard]] bool moi_resource_owner_executes_offset(const MoiResourcePlanningState &state,
-                                                      uint64_t descriptor_offset,
-                                                      uint64_t text_offset);
-
 [[nodiscard]] MoiCfgForwardDistanceIndexPtr
 make_moi_cfg_forward_distance_index(const MoiResourcePlanningState &state,
                                     uint64_t descriptor_offset, uint64_t target_text_offset);
@@ -223,7 +219,7 @@ moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &semantic_request,
                        const ConSanDebugOverrides &debug, const ConSanMoiOperatingPoint &point,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
-                       uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
+                       uint64_t text_offset, std::optional<ConSanProgramSiteId> owner_site,
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
                        const ConSanAtomicLoweringForm *atomic_form = nullptr,
                        bool require_spill = false);

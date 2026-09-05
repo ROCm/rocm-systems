@@ -846,6 +846,10 @@ public:
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
     return owners;
   }
+  [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(ConSanProgramSiteId site) const {
+    const ConSanProgramSite *record = program_site(site);
+    return record == nullptr ? std::vector<uint64_t>{} : execution_owner_descriptors(*record);
+  }
   [[nodiscard]] std::vector<uint64_t>
   execution_owner_descriptors(std::span<const ConSanProgramSite *const> aliases) const {
     std::vector<uint64_t> owners;

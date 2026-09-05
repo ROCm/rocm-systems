@@ -681,8 +681,8 @@ struct MoiAtomicEvidenceSitePlan {
   /// ordering mechanism. Native lowerers consume it and never re-admit `site`.
   ConSanAtomicLoweringForm lowering_form;
 
-  /// Unique dispatchable owner descriptor, when graph ownership proved one.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Stable source site whose canonical execution owners scope lowering.
+  ConSanProgramSiteId owner_site;
 
   /// Normalized release/acquire role selected from the shared sequence.
   ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
@@ -705,9 +705,10 @@ struct MoiAtomicEvidenceSitePlan {
     return {address_capture_intent, evidence_intent};
   }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() && association.valid() && address_capture_intent.valid() &&
-           evidence_intent.valid() && address_capture_intent != evidence_intent &&
-           !container_name.empty() && site.size != 0u && site.width_bits != 0u &&
+    return semantic_site.valid() && owner_site.valid() && association.valid() &&
+           address_capture_intent.valid() && evidence_intent.valid() &&
+           address_capture_intent != evidence_intent && !container_name.empty() &&
+           site.size != 0u && site.width_bits != 0u &&
            lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            ordered_sequence_end_text_offset >= site.text_offset + site.size;
   }
@@ -752,8 +753,8 @@ struct MoiFenceEvidenceSitePlan {
   /// Release or acquire role already established by the graph association.
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
 
-  /// Unique dispatchable owner descriptor when graph ownership proved one.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Stable communication site whose canonical execution owners scope lowering.
+  ConSanProgramSiteId owner_site;
 
   /// Original text entry of the containing kernel or local function.
   uint64_t container_entry_text_offset = 0;
@@ -782,7 +783,7 @@ struct MoiFenceEvidenceSitePlan {
     return {address_capture_intent, evidence_intent};
   }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() &&
+    return semantic_site.valid() && owner_site.valid() &&
            semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
            association.valid() && evidence_intent.valid() && address_capture_intent.valid() &&
            evidence_intent != address_capture_intent && !container_name.empty() &&
@@ -824,8 +825,8 @@ struct MoiBarrierEvidenceSitePlan {
   /// Decoded completing barrier instruction used only for native lowering.
   ConSanBarrierSite site;
 
-  /// Unique dispatchable owner descriptor when graph ownership proved one.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Stable source site whose canonical execution owners scope lowering.
+  ConSanProgramSiteId owner_site;
 
   /// Original text entry of the containing kernel or local function.
   uint64_t container_entry_text_offset = 0;
@@ -840,7 +841,7 @@ struct MoiBarrierEvidenceSitePlan {
   /// form one complete barrier lowering operation.
   [[nodiscard]] std::array<ConSanProbeIntentId, 1> intent_ids() const { return {evidence_intent}; }
   [[nodiscard]] bool is_well_formed() const {
-    return semantic_site.valid() &&
+    return semantic_site.valid() && owner_site.valid() &&
            semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
            association.valid() && evidence_intent.valid() && !container_name.empty() &&
            site.size != 0u && site.text_offset == semantic_site.physical.original_text_offset;

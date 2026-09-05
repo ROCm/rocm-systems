@@ -269,6 +269,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
 
     MoiFenceEvidenceSitePlan plan;
     plan.semantic_site = decision.semantic_site;
+    plan.owner_site = communication->source_site;
     plan.association = *decision.association;
     plan.evidence_intent = evidence;
     plan.address_capture_intent = address_capture;
@@ -324,7 +325,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     if (sequence->scope)
       plan.communication_site.scope = sequence->scope;
     plan.communication_lowering_form = *decision.communication_lowering_form;
-    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
     plan.container_name = std::move(container->qualified_name);
     plan.container_entry_text_offset = container->entry_text_offset;
     plan.text_file_offset = container->text_file_offset;
@@ -441,6 +441,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
 
     MoiAtomicEvidenceSitePlan plan;
     plan.semantic_site = decision.semantic_site;
+    plan.owner_site = event->source_site;
     plan.association = *decision.association;
     plan.address_capture_intent = address_capture;
     plan.evidence_intent = evidence;
@@ -474,7 +475,6 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     if (sequence->scope)
       plan.site.scope = sequence->scope;
     plan.lowering_form = *decision.lowering_form;
-    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
     plan.container_name = std::move(container->qualified_name);
     plan.uses_cluster_workgroup_id = container->uses_cluster_workgroup_id;
     if (!plan.is_well_formed()) {

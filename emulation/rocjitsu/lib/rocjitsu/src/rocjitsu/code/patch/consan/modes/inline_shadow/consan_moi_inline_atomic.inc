@@ -1,17 +1,16 @@
 [[nodiscard]] std::optional<MoiInlineAtomicEmissionPlan> plan_inline_atomic_emission(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanOptions &options, const ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, const MoiObjectModeSemantics &semantics,
-    uint16_t scratch_vgpr, uint16_t scratch_count,
+    uint64_t owner_descriptor_file_offset, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &point, const ConSanMoiOperatingPoint &allocation,
+    const MoiObjectModeSemantics &semantics, uint16_t scratch_vgpr, uint16_t scratch_count,
     const ConSanMoiPrivateStateLayout *private_layout, const MoiTargetFacts &target_facts,
     rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
-      !candidate.kernel_descriptor_file_offset)
+  if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr)
     return std::nullopt;
   const MoiScalarAbiPlan scalar_abi =
       plan_moi_scalar_abi(options.moi_engine, moi_scalar_preservation_state(point));
-  const auto workgroup_sources = moi_descriptor_workgroup_sources(
-      bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+  const auto workgroup_sources =
+      moi_descriptor_workgroup_sources(bytes, owner_descriptor_file_offset, arch, errors);
   if (!scalar_abi.special_state || !workgroup_sources)
     return std::nullopt;
   if (!validate_inline_atomic_exec_save_sgpr(point.moi_exec_save_sgpr, errors) ||
@@ -57,7 +56,7 @@
     };
     if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
       const auto owner_shift =
-          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+          moi_descriptor_owner_shift(bytes, owner_descriptor_file_offset, arch, errors);
       if (!private_layout->owner_offset || !owner_shift)
         return std::nullopt;
       state.workitem_owner = consan_detail::MoiWorkitemOwnerDerivationPlan{
@@ -247,12 +246,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (existing_plan && existing_plan->scratch_vgpr_count != scratch_count)
       existing_plan = nullptr;
     ConSanCandidateResourcePlan plan =
-        existing_plan
-            ? *existing_plan
-            : plan_moi_resource_site(*resource_state, options, options, operating_point,
-                                     ConSanResourceSiteKind::Atomic, candidate_index,
-                                     site.text_offset, candidate.kernel_descriptor_file_offset,
-                                     scratch_count, nullptr, &candidate.lowering_form);
+        existing_plan ? *existing_plan
+                      : plan_moi_resource_site(*resource_state, options, options, operating_point,
+                                               ConSanResourceSiteKind::Atomic, candidate_index,
+                                               site.text_offset, candidate.owner_site,
+                                               scratch_count, nullptr, &candidate.lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
@@ -282,13 +280,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           (site.address_vgpr ? std::to_string(*site.address_vgpr) : std::string("missing")));
       continue;
     }
-    MoiAtomicEvidenceSitePlan planned_candidate = candidate;
-    if (!planned_candidate.kernel_descriptor_file_offset) {
-      planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-      if (!planned_candidate.kernel_descriptor_file_offset)
-        continue;
-    }
+    const std::optional<uint64_t> owner_descriptor =
+        common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+    if (!owner_descriptor)
+      continue;
     ConSanMoiOperatingPoint candidate_point = operating_point;
     if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
@@ -341,8 +336,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       }
     }
     auto emission = plan_inline_atomic_emission(
-        active_bytes, planned_candidate, options, candidate_point, result.moi_operating_point,
-        semantics, resources->base, address_plan.scratch_vgpr_count,
+        active_bytes, candidate, *owner_descriptor, options, candidate_point,
+        result.moi_operating_point, semantics, resources->base, address_plan.scratch_vgpr_count,
         private_layout ? &*private_layout : nullptr, target_facts, arch, result.errors);
     if (!emission)
       return;
@@ -356,9 +351,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, probe->resources);
     note_moi_sgpr_requirements(scalar_requirements, probe->resources, options, options,
                                candidate_point, semantics, arch);
-    planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,
-                                  std::move(*emission), relocated_guest_size,
-                                  std::move(trailing_guest_words)});
+    planned_candidates.push_back({std::move(*probe), candidate, address_plan, std::move(*emission),
+                                  relocated_guest_size, std::move(trailing_guest_words)});
   }
   // Retain every admitted release even when this code object contains no
   // acquire. Its consumer can live in another large code object, and pruning

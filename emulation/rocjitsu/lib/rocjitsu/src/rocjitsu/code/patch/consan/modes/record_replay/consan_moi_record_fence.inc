@@ -82,13 +82,12 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
         result.resource_plans, ConSanResourceSiteKind::Fence, fence_text_offset);
     ConSanCandidateResourcePlan plan =
-        existing_plan
-            ? *existing_plan
-            : plan_moi_resource_site(*resource_state, options, options, operating_point,
-                                     ConSanResourceSiteKind::Fence, candidate_index,
-                                     candidate.patch_text_offset,
-                                     candidate.kernel_descriptor_file_offset, scratch_count,
-                                     nullptr, &candidate.communication_lowering_form);
+        existing_plan ? *existing_plan
+                      : plan_moi_resource_site(*resource_state, options, options, operating_point,
+                                               ConSanResourceSiteKind::Fence, candidate_index,
+                                               candidate.patch_text_offset, candidate.owner_site,
+                                               scratch_count, nullptr,
+                                               &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan) {
       if (candidate.patch_text_offset != fence_text_offset)
@@ -143,15 +142,6 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
           "ConSan MOI fence record patch rejected communication address: " +
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
-    }
-    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
-        !candidate.kernel_descriptor_file_offset) {
-      if (resources->owner_descriptor_file_offsets.empty()) {
-        result.warnings.emplace_back(
-            "ConSan MOI fence record patch requires an owning kernel descriptor");
-        continue;
-      }
-      candidate.kernel_descriptor_file_offset = resources->owner_descriptor_file_offsets.front();
     }
     auto record_event = plan_moi_record_event(
         bytes, result.program_inventory, result.warnings, *resources, options, options,

@@ -82,8 +82,7 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(*resources, options, options, operating_point,
                                           ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                          candidate.kernel_descriptor_file_offset,
-                                          /*scratch_count=*/6u);
+                                          candidate.owner_site, /*scratch_count=*/6u);
     plan.intent_ids = {candidate.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
@@ -93,12 +92,6 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
           "ConSan MOI barrier record patch has no usable resource plan in " +
           candidate.container_name);
       continue;
-    }
-    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
-        !candidate.kernel_descriptor_file_offset) {
-      if (scratch->owner_descriptor_file_offsets.empty())
-        continue;
-      candidate.kernel_descriptor_file_offset = scratch->owner_descriptor_file_offsets.front();
     }
     auto event =
         plan_moi_record_event(bytes, result.program_inventory, result.warnings, *scratch, options,

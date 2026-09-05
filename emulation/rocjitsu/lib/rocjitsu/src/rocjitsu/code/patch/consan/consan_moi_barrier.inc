@@ -55,6 +55,7 @@
 
     MoiBarrierEvidenceSitePlan plan;
     plan.semantic_site = event->semantic_id;
+    plan.owner_site = event->source_site;
     plan.association = {.value = sequence->identity};
     plan.evidence_intent = id;
     plan.in_kernel = graph.in_kernel(*event);
@@ -68,7 +69,6 @@
     }
     plan.container_name = std::move(container->qualified_name);
     plan.site = *site;
-    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
     plan.container_entry_text_offset = container->entry_text_offset;
     plan.container_code_size = container->code_size;
     plan.text_file_offset = container->text_file_offset;
@@ -406,8 +406,8 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     if (plan) {
       owners = plan->owner_descriptor_file_offsets;
     }
-    if (owners.empty() && candidate.kernel_descriptor_file_offset)
-      owners.push_back(*candidate.kernel_descriptor_file_offset);
+    if (owners.empty())
+      owners = result.program_inventory.execution_owner_descriptors(candidate.owner_site);
     if ((operating_point.automatic_moi_persistent_vgprs ||
          operating_point.moi_persistent_sgprs.complete() ||
          operating_point.automatic_moi_private_epoch) &&

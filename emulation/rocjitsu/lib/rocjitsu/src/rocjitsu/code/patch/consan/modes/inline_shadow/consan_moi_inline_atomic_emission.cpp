@@ -1895,10 +1895,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     }
   }
   if (candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
-    if (!candidate.kernel_descriptor_file_offset) {
-      errors.emplace_back("ConSan MOI inline release transaction requires an owning descriptor");
-      return std::nullopt;
-    }
     // An ISA release RMW extends the claimed predecessor's release sequence.
     // A language-level ordinary release store starts a new publication: it
     // must reserve and stage metadata before the guest store, but must not

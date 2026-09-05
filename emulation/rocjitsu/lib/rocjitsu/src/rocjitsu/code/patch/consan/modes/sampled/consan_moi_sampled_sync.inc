@@ -8,6 +8,7 @@ struct SampledBarrierWindow {
 struct SampledBarrierCandidate {
   const ConSanSyncSequence *sequence = nullptr;
   MoiBarrierEvidenceSitePlan barrier;
+  uint64_t owner_descriptor_file_offset = 0;
   std::vector<SampledBarrierWindow> windows;
   bool uses_cluster_workgroup_id = false;
 };
@@ -86,7 +87,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     uint32_t *guest_instruction_offset = nullptr) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
-      !plan.workitem_owner || !candidate.barrier.kernel_descriptor_file_offset ||
+      !plan.workitem_owner || candidate.owner_descriptor_file_offset == 0u ||
       static_cast<uint32_t>(plan.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
       candidate.windows.empty() ||
       std::ranges::any_of(candidate.windows, [&](const SampledBarrierWindow &window) {
@@ -171,9 +172,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // workgroup which touched a selected address, leaving its recorded accesses
   // in one epoch with no synchronization metadata.
   if (private_layout &&
-      !append_sampled_private_owner_epoch_load(
-          words, bytes, *candidate.barrier.kernel_descriptor_file_offset,
-          plan.automatic_private_epoch, plan.owner_epoch_vgprs, *private_layout, arch, errors))
+      !append_sampled_private_owner_epoch_load(words, bytes, candidate.owner_descriptor_file_offset,
+                                               plan.automatic_private_epoch, plan.owner_epoch_vgprs,
+                                               *private_layout, arch, errors))
     return std::nullopt;
   if (scalar_persistent) {
     words.push_back(
@@ -615,11 +616,10 @@ void try_apply_sampled_barrier_sync_patch(
       result.errors.emplace_back("ConSan MOI sampled barrier evidence has no execution owner");
       return;
     }
-    MoiBarrierEvidenceSitePlan lowering_plan = barrier_plan;
-    lowering_plan.kernel_descriptor_file_offset =
+    const uint64_t owner_descriptor =
         result.program_inventory.kernel(sequence_owners.front())->descriptor_file_offset;
     candidates.push_back(
-        {&sequence, std::move(lowering_plan), std::move(windows), uses_cluster_workgroup_id});
+        {&sequence, barrier_plan, owner_descriptor, std::move(windows), uses_cluster_workgroup_id});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -696,7 +696,7 @@ void try_apply_sampled_barrier_sync_patch(
     } else {
       plan = plan_moi_resource_site(resource_state, options, options, operating_point,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                    candidate.barrier.kernel_descriptor_file_offset,
+                                    candidate.barrier.owner_site,
                                     operating_point.automatic_moi_private_epoch ? 9u : 7u);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans.push_back(plan);
@@ -719,7 +719,7 @@ void try_apply_sampled_barrier_sync_patch(
     if (plan.scratch_vgpr_count != scratch_count) {
       plan = plan_moi_resource_site(resource_state, options, options, candidate_point,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
-                                    candidate.barrier.kernel_descriptor_file_offset, scratch_count);
+                                    candidate.barrier.owner_site, scratch_count);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans[resource_plan_index] = plan;
     }
@@ -1002,16 +1002,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   std::vector<Association> proposed;
   const auto owner_executes_candidate = [&](uint64_t owner_descriptor_file_offset,
                                             const Candidate &candidate) {
-    if (candidate.atomic.kernel_descriptor_file_offset)
-      return *candidate.atomic.kernel_descriptor_file_offset == owner_descriptor_file_offset;
-    if (const ConSanCandidateResourcePlan *plan =
-            resource_plan_for_site(result.resource_plans, ConSanResourceSiteKind::Atomic,
-                                   candidate.atomic.site.text_offset)) {
-      return std::ranges::find(plan->owner_descriptor_file_offsets, owner_descriptor_file_offset) !=
-             plan->owner_descriptor_file_offsets.end();
-    }
-    return moi_resource_owner_executes_offset(resource_state, owner_descriptor_file_offset,
-                                              candidate.atomic.site.text_offset);
+    const ConSanProgramContainer *owner =
+        result.program_inventory.find_kernel_by_descriptor(owner_descriptor_file_offset);
+    const ConSanProgramSite *site =
+        result.program_inventory.program_site(candidate.atomic.owner_site);
+    return owner != nullptr && site != nullptr &&
+           std::ranges::find(site->execution_owners, owner->id, &ConSanExecutionOwner::kernel) !=
+               site->execution_owners.end();
   };
   for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
     const Window &window = windows[window_index];
@@ -1205,6 +1202,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   struct Planned : MoiPlannedProbeResources {
     Candidate candidate;
+    uint64_t owner_descriptor_file_offset = 0;
     ConSanMoiAtomicAddressPlan address_plan;
     uint64_t physical_anchor_offset = 0;
     uint32_t relocated_guest_size = 0;
@@ -1277,8 +1275,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(resource_state, options, options, operating_point,
                                           ConSanResourceSiteKind::Atomic, index, site.text_offset,
-                                          candidate.atomic.kernel_descriptor_file_offset,
-                                          scratch_count, nullptr, &candidate.atomic.lowering_form);
+                                          candidate.atomic.owner_site, scratch_count, nullptr,
+                                          &candidate.atomic.lowering_form);
     plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
@@ -1309,12 +1307,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }
-    if (!candidate.atomic.kernel_descriptor_file_offset) {
-      candidate.atomic.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-      if (!candidate.atomic.kernel_descriptor_file_offset)
-        continue;
-    }
+    const std::optional<uint64_t> owner_descriptor =
+        common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+    if (!owner_descriptor)
+      continue;
     std::optional<ConSanMoiPrivateStateLayout> private_layout;
     if (operating_point.automatic_moi_private_epoch) {
       private_layout = build_moi_private_state_layout(
@@ -1332,7 +1328,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
     note_descriptor_requirements(descriptor_requirements, probe->resources);
-    selected.push_back({std::move(*probe), std::move(candidate), address_plan,
+    selected.push_back({std::move(*probe), std::move(candidate), *owner_descriptor, address_plan,
                         physical_anchor_offset, relocated_guest_size,
                         std::move(trailing_guest_words), std::move(candidate_point),
                         composed_access_fragment != result.staged_text_fragments.end()});
@@ -1365,16 +1361,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     auto words =
         planned.candidate.deferred_acquire
             ? build_sampled_pending_acquire_cave_words(
-                  bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
-                  planned.spill ? &*planned.spill : nullptr,
+                  bytes, planned.candidate.atomic, planned.owner_descriptor_file_offset,
+                  planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
                   planned.candidate.selected_slot, planned.candidate.bank_count,
                   planned.candidate.release_selected_slot, layout, result.errors,
                   &guest_instruction_offset, planned.trailing_guest_words, &emitted_guest_size)
             : build_sampled_atomic_sync_cave_words(
-                  bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
-                  planned.spill ? &*planned.spill : nullptr,
+                  bytes, planned.candidate.atomic, planned.owner_descriptor_file_offset,
+                  planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
                   planned.candidate.selected_slot, planned.candidate.bank_count, layout,

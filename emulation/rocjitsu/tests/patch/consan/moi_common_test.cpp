@@ -442,6 +442,7 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16u},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
+  plan.owner_site = {0u};
   plan.association = {.value = "atomic-sequence"};
   plan.address_capture_intent = {.value = 3u};
   plan.evidence_intent = {.value = 4u};
@@ -453,6 +454,9 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   plan.ordered_sequence_end_text_offset = 20u;
   EXPECT_TRUE(plan.is_well_formed());
 
+  consan_detail::MoiAtomicEvidenceSitePlan missing_owner_site = plan;
+  missing_owner_site.owner_site = {};
+  EXPECT_FALSE(missing_owner_site.is_well_formed());
   consan_detail::MoiAtomicEvidenceSitePlan missing_association = plan;
   missing_association.association = {};
   EXPECT_FALSE(missing_association.is_well_formed());
@@ -477,6 +481,7 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 40u},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
+  plan.owner_site = {0u};
   plan.association = {.value = "ordinary-acquire-sequence"};
   plan.address_capture_intent = {.value = 6u};
   plan.evidence_intent = {.value = 7u};
@@ -489,6 +494,9 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   plan.patch_size = 20u;
   EXPECT_TRUE(plan.is_well_formed());
 
+  consan_detail::MoiFenceEvidenceSitePlan missing_owner_site = plan;
+  missing_owner_site.owner_site = {};
+  EXPECT_FALSE(missing_owner_site.is_well_formed());
   consan_detail::MoiFenceEvidenceSitePlan missing_intent = plan;
   missing_intent.evidence_intent = {};
   EXPECT_FALSE(missing_intent.is_well_formed());
@@ -519,6 +527,7 @@ TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 64u},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
+  plan.owner_site = {0u};
   plan.association = {.value = "barrier-sequence"};
   plan.evidence_intent = {.value = 9u};
   plan.container_name = "kernel:barrier";
@@ -526,6 +535,9 @@ TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
   plan.site.size = 4u;
   EXPECT_TRUE(plan.is_well_formed());
 
+  consan_detail::MoiBarrierEvidenceSitePlan missing_owner_site = plan;
+  missing_owner_site.owner_site = {};
+  EXPECT_FALSE(missing_owner_site.is_well_formed());
   consan_detail::MoiBarrierEvidenceSitePlan missing_sequence = plan;
   missing_sequence.association = {};
   EXPECT_FALSE(missing_sequence.is_well_formed());

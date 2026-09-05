@@ -740,6 +740,7 @@ struct MoiOwnerRegisterReferenceSummary {
 struct MoiResourcePlanningState {
   std::span<const uint8_t> bytes;
   rj_code_arch_t arch;
+  ProgramInventory inventory;
   /// Register allocation selected by this lowering attempt. The referenced
   /// operating point is stable for the lifetime of the planning context even
   /// while placement appends owner-local assignments to its vectors.
@@ -761,7 +762,8 @@ struct MoiResourcePlanningState {
   MoiResourcePlanningState(const MoiResourceProblem &problem,
                            const ConSanMoiOperatingPoint &allocation,
                            std::span<const ConSanCandidateResourcePlan> prior_site_plans = {})
-      : bytes(problem.image()), arch(problem.arch()), register_allocation(allocation),
+      : bytes(problem.image()), arch(problem.arch()), inventory(problem.inventory()),
+        register_allocation(allocation),
         reserved_ranges(problem.inventory().preapplied_mutation().reserved_ranges),
         code_object(bytes.data(), bytes.size()), decoder(Decoder::create(arch)) {
     if (!code_object.is_valid() || !decoder)
@@ -958,16 +960,6 @@ bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
                                     uint64_t descriptor_offset) {
   const auto found = state.context_by_descriptor.find(descriptor_offset);
   return found != state.context_by_descriptor.end() && found->second != nullptr;
-}
-
-bool moi_resource_owner_executes_offset(const MoiResourcePlanningState &state,
-                                        uint64_t descriptor_offset, uint64_t text_offset) {
-  const auto found = state.context_by_descriptor.find(descriptor_offset);
-  if (found == state.context_by_descriptor.end() || found->second == nullptr)
-    return false;
-  BasicBlock *block = block_for_offset(state.block_index, text_offset);
-  return block != nullptr && found->second->block_set.contains(block) &&
-         instruction_at(block, text_offset) != nullptr;
 }
 
 void MoiCfgForwardDistanceIndexDeleter::operator()(MoiCfgForwardDistanceIndex *index) const {
@@ -1638,7 +1630,7 @@ void forbid_moi_persistent_vgprs(RegisterSet &forbidden, const ConSanMoiOperatin
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &semantic_request,
                        const ConSanDebugOverrides &debug, const ConSanMoiOperatingPoint &point,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
-                       uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
+                       uint64_t text_offset, std::optional<ConSanProgramSiteId> owner_site,
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate,
                        const ConSanAtomicLoweringForm *atomic_form, bool require_spill) {
   ConSanCandidateResourcePlan plan;
@@ -1667,16 +1659,19 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     owners.push_back(&context);
     plan.owner_descriptor_file_offsets.push_back(context.kernel->descriptor_file_offset);
   };
-  if (access_candidate != nullptr) {
-    for (const ConSanExecutionOwner &execution_owner : access_candidate->execution_owners) {
+  const auto add_execution_owners = [&](std::span<const ConSanExecutionOwner> execution_owners) {
+    for (const ConSanExecutionOwner &execution_owner : execution_owners) {
       const auto owner = state.context_by_kernel_id.find(execution_owner.kernel.ordinal);
       if (owner != state.context_by_kernel_id.end())
         add_owner(*owner->second);
     }
-  } else if (kernel_descriptor_file_offset) {
-    const auto owner = state.context_by_descriptor.find(*kernel_descriptor_file_offset);
-    if (owner != state.context_by_descriptor.end())
-      add_owner(*owner->second);
+  };
+  if (access_candidate != nullptr) {
+    add_execution_owners(access_candidate->execution_owners);
+  } else if (owner_site) {
+    const ConSanProgramSite *site = state.inventory.program_site(*owner_site);
+    if (site != nullptr)
+      add_execution_owners(site->execution_owners);
   } else {
     for (MoiKernelResourceContext &context : state.contexts)
       add_owner(context);

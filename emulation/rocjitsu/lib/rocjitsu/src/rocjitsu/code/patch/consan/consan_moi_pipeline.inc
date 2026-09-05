@@ -25,7 +25,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       const uint16_t scratch_count = scratch_count_for(site_point);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, site_point, ConSanResourceSiteKind::Barrier, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count);
+          candidate.site.text_offset, candidate.owner_site, scratch_count);
       ConSanMoiOperatingPoint owner_point = site_point;
       if (apply_moi_persistent_vgpr_assignment(owner_point, point,
                                                plan.owner_descriptor_file_offsets)) {
@@ -33,8 +33,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
         if (owner_scratch_count != scratch_count) {
           plan = plan_moi_resource_site(
               state, request, debug, owner_point, ConSanResourceSiteKind::Barrier, index,
-              candidate.site.text_offset, candidate.kernel_descriptor_file_offset,
-              owner_scratch_count);
+              candidate.site.text_offset, candidate.owner_site, owner_scratch_count);
         }
       }
       plan.intent_ids = {candidate.evidence_intent};
@@ -51,10 +50,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
       const uint16_t scratch_count =
           mode.atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
-      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, request, debug, point, ConSanResourceSiteKind::Atomic, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count,
-          nullptr, &candidate.lowering_form);
+      ConSanCandidateResourcePlan plan =
+          plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Atomic,
+                                 index, candidate.site.text_offset, candidate.owner_site,
+                                 scratch_count, nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
@@ -66,11 +65,11 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiFenceEvidenceSitePlan &candidate = candidates[index];
-      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, request, debug, point, ConSanResourceSiteKind::Fence, index,
-          candidate.patch_text_offset, candidate.kernel_descriptor_file_offset,
-          fence_record_scratch_count(candidate.communication_lowering_form), nullptr,
-          &candidate.communication_lowering_form);
+      ConSanCandidateResourcePlan plan =
+          plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Fence, index,
+                                 candidate.patch_text_offset, candidate.owner_site,
+                                 fence_record_scratch_count(candidate.communication_lowering_form),
+                                 nullptr, &candidate.communication_lowering_form);
       if (candidate.patch_text_offset != candidate.semantic_site.physical.original_text_offset)
         plan.semantic_text_offset = candidate.semantic_site.physical.original_text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};

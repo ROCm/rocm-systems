@@ -96,12 +96,11 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
         result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
     const uint16_t scratch_count = atomic_record_scratch_count(candidate.lowering_form);
     ConSanCandidateResourcePlan plan =
-        existing_plan
-            ? *existing_plan
-            : plan_moi_resource_site(*resource_state, options, options, operating_point,
-                                     ConSanResourceSiteKind::Atomic, candidate_index,
-                                     site.text_offset, candidate.kernel_descriptor_file_offset,
-                                     scratch_count, nullptr, &candidate.lowering_form);
+        existing_plan ? *existing_plan
+                      : plan_moi_resource_site(*resource_state, options, options, operating_point,
+                                               ConSanResourceSiteKind::Atomic, candidate_index,
+                                               site.text_offset, candidate.owner_site,
+                                               scratch_count, nullptr, &candidate.lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
@@ -122,25 +121,13 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }
-    MoiAtomicEvidenceSitePlan planned_candidate = candidate;
-    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
-        !planned_candidate.kernel_descriptor_file_offset) {
-      if (resources->owner_descriptor_file_offsets.empty()) {
-        result.warnings.emplace_back(
-            "ConSan MOI atomic record patch requires an owning kernel descriptor");
-        continue;
-      }
-      planned_candidate.kernel_descriptor_file_offset =
-          resources->owner_descriptor_file_offsets.front();
-    }
     auto record_event =
         plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
                               options, operating_point, result.moi_operating_point, mode_semantics,
                               spill_managers, arch, "ConSan MOI atomic record patch");
     if (!record_event)
       continue;
-    selected_candidates.push_back(
-        {std::move(*record_event), std::move(planned_candidate), address_plan});
+    selected_candidates.push_back({std::move(*record_event), candidate, address_plan});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and

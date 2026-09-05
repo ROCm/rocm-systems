@@ -216,6 +216,29 @@ if(NOT _moi_candidate_contract MATCHES "ConSanMoiCandidate : ConSanProgramSite" 
         "ConSan MOI access candidates must inherit stable semantic owners, not cache a physical descriptor"
     )
 endif()
+file(READ "${_consan_dir}/consan_moi_internal.h" _moi_evidence_contract)
+foreach(_plan IN ITEMS
+    MoiAtomicEvidenceSitePlan
+    MoiFenceEvidenceSitePlan
+    MoiBarrierEvidenceSitePlan
+)
+    string(REGEX MATCH "struct ${_plan} [{][^}]*" _site_plan_contract
+                 "${_moi_evidence_contract}")
+    if(NOT _site_plan_contract MATCHES "ConSanProgramSiteId owner_site" OR
+       _site_plan_contract MATCHES "kernel_descriptor_file_offset")
+        message(FATAL_ERROR
+            "ConSan ${_plan} must retain a semantic owner site, not cache a physical descriptor"
+        )
+    endif()
+endforeach()
+file(READ "${_consan_dir}/consan_moi_placement_contracts.h"
+     _moi_placement_contract)
+if(_moi_placement_contract MATCHES
+   "plan_moi_resource_site[^;]*kernel_descriptor_file_offset")
+    message(FATAL_ERROR
+        "ConSan resource planning must resolve semantic owners before selecting physical descriptors"
+    )
+endif()
 string(REGEX MATCH "struct ConSanFaultSite [{][^}]*[}];" _fault_site_contract
              "${_fault_presentation_contract}")
 if(NOT _fault_site_contract MATCHES "ConSanProgramSiteId source_site")
