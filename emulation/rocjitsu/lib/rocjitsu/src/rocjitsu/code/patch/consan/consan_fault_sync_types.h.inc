@@ -231,9 +231,26 @@ combine_consan_sync_confidence(ConSanSemanticConfidence lhs, ConSanSemanticConfi
   return static_cast<uint8_t>(lhs) >= static_cast<uint8_t>(rhs) ? lhs : rhs;
 }
 
+/// Semantic claim shared by one decoded synchronization event and the logical
+/// sequence derived from it. Sequence association may refine this value, but
+/// never maintains a second field vocabulary or projects its members one fact
+/// at a time.
+struct ConSanSyncSemantics {
+  ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
+  ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
+  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
+  ConSanSyncRmwOutcome rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
+  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
+  ConSanSemanticConfidence memory_role_confidence = ConSanSemanticConfidence::Unsupported;
+  std::string confidence_reason;
+  std::optional<ConSanMemoryScope> scope;
+
+  bool operator==(const ConSanSyncSemantics &) const = default;
+};
+
 /// Flavor-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
-struct ConSanSyncEvent {
+struct ConSanSyncEvent : ConSanSyncSemantics {
   /// Stable original-program identity shared by every symbol alias that
   /// decodes this same physical synchronization instruction.
   SemanticSiteId semantic_id;
@@ -242,19 +259,11 @@ struct ConSanSyncEvent {
   /// several symbols alias one physical instruction.
   ConSanProgramSiteId source_site;
   ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
-  ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
-  ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
-  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
-  ConSanSyncRmwOutcome rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanSemanticConfidence memory_role_confidence = ConSanSemanticConfidence::Unsupported;
-  std::string confidence_reason;
   std::string identity;
   /// Every symbol-container name through which this physical event was
   /// decoded. Analysis canonicalizes equivalent aliases into one event while
   /// preserving this attribution for policy diagnostics and filtering.
   std::vector<std::string> source_containers;
-  std::optional<ConSanMemoryScope> scope;
   /// Original text position is part of the event's canonical physical
   /// identity. Keeping a second mutable copy allowed the two identities to
   /// disagree after an event was assembled or copied.
@@ -271,15 +280,8 @@ enum class ConSanSyncSequenceKind : uint8_t {
 /// A logical synchronization operation associated from one or more decoded
 /// events. Member identities stay ordered and the sequence confidence cannot
 /// exceed its least-certain member.
-struct ConSanSyncSequence {
+struct ConSanSyncSequence : ConSanSyncSemantics {
   ConSanSyncSequenceKind kind = ConSanSyncSequenceKind::Fence;
-  ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
-  ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
-  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
-  ConSanSyncRmwOutcome rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanSemanticConfidence memory_role_confidence = ConSanSemanticConfidence::Unsupported;
-  std::string confidence_reason;
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
@@ -303,7 +305,6 @@ struct ConSanSyncSequence {
   /// order. Diagnostic and mutation-selection names are resolved from the
   /// event arena only when crossing those presentation boundaries.
   std::vector<SemanticSiteId> member_semantic_ids;
-  std::optional<ConSanMemoryScope> scope;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;

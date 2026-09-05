@@ -470,10 +470,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
       lhs_source->container.kind != rhs_source->container.kind ||
       !lhs_source->same_payload(*rhs_source))
     return false;
-  return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
-                  lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.scope) ==
-         std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
-                  rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason, rhs.scope);
+  return lhs.kind == rhs.kind && static_cast<const ConSanSyncSemantics &>(lhs) == rhs;
 }
 
 [[nodiscard]] bool
@@ -589,13 +586,7 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     const ConSanProgramSite &source = inventory.program_sites[event.source_site.ordinal];
     ConSanSyncSequence sequence;
     sequence.kind = sync_sequence_kind(event.kind);
-    sequence.operation = event.operation;
-    sequence.address_source = event.address_source;
-    sequence.memory_role = event.memory_role;
-    sequence.rmw_outcome = event.rmw_outcome;
-    sequence.confidence = event.confidence;
-    sequence.memory_role_confidence = event.memory_role_confidence;
-    sequence.confidence_reason = event.confidence_reason;
+    static_cast<ConSanSyncSemantics &>(sequence) = event;
     sequence.identity = event.identity + "|sequence=singleton";
     sequence.container_name = source.container.name;
     sequence.in_kernel = source.container.is_kernel();
@@ -603,7 +594,6 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.end_text_offset = event.text_offset() + source.size();
     sequence.member_semantic_ids.push_back(
         event.semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember));
-    sequence.scope = event.scope;
     if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
       sequence.barrier_id = site->barrier_id;
       sequence.barrier_operand_source = site->operand_source;
