@@ -291,6 +291,7 @@ struct ConSanMoiAccessCapability {
   bool dynamic_stack_uses_scalar_reservoir = false;
   bool native_lds_spill_recovery = false;
   bool clobbered_address_spill_reload = false;
+  bool lazy_workgroup_shadow = false;
 
   bool operator==(const ConSanMoiAccessCapability &) const = default;
 };

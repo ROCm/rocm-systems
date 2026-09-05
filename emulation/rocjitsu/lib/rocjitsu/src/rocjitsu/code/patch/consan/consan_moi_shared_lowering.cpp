@@ -123,6 +123,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
     const RuntimeCapabilities &capabilities, std::vector<std::string> &warnings) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
   const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(capabilities, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     const auto descriptor = read_kernel_descriptor(image, descriptor_offset);
@@ -138,10 +139,11 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       return std::nullopt;
     }
     // Exact-byte provenance uses the canonical full-width cell on every
-    // target. CDNA entry clearing completes before any instrumented access;
-    // RDNA4 can instead use its packed first-use bitmap. If either full layout
-    // does not fit, the caller uses the semantically equivalent external table.
-    if (consan_arch_is_rdna4_or_cdna5(arch)) {
+    // target. Eager entry clearing completes before any instrumented access;
+    // capable targets can instead use a packed first-use bitmap. If either full
+    // layout does not fit, the caller uses the semantically equivalent external
+    // table.
+    if (target && target->moi_access.lazy_workgroup_shadow) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor->group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;

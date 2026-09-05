@@ -387,10 +387,15 @@ foreach(_inline_shadow_profile_client IN ITEMS
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_inline_shadow_profile_client}"
-        "consan_arch_is_cdna3_or_cdna4"
+        "consan_arch_is_(cdna3_or_cdna4|rdna4_or_cdna5)"
         "InlineShadow resource geometry must consume exact target-profile facts"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shared_lowering.cpp"
+    "consan_arch_is_rdna4_or_cdna5"
+    "shared MOI workgroup-shadow planning must consume its target capability"
+)
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

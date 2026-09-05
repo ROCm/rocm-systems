@@ -1346,9 +1346,11 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::vector<std::string> &errors) {
   if (!workgroup_shadow.lazy_initialization)
     return true;
-  if ((!consan_arch_is_rdna4_or_cdna5(arch)) || !plan.scalar_state.exec_save_sgpr ||
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!target || !target->moi_access.lazy_workgroup_shadow || !plan.scalar_state.exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
-    errors.emplace_back("ConSan MOI lazy local shadow requires RDNA4 packed validity state");
+    errors.emplace_back(
+        "ConSan MOI lazy local shadow requires target-supported packed validity state");
     return false;
   }
 

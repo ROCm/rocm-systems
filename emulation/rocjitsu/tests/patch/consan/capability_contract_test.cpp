@@ -297,6 +297,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             {
                 .dynamic_stack_uses_scalar_reservoir = true,
                 .native_lds_spill_recovery = true,
+                .lazy_workgroup_shadow = true,
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
         .moi_access_reports_need_explicit_dispatch_identity = true,
@@ -367,7 +368,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Supported,
             },
-        .moi_access = {.dynamic_stack_uses_scalar_reservoir = true},
+        .moi_access =
+            {
+                .dynamic_stack_uses_scalar_reservoir = true,
+                .lazy_workgroup_shadow = true,
+            },
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
         .moi_access_reports_need_explicit_dispatch_identity = false,
