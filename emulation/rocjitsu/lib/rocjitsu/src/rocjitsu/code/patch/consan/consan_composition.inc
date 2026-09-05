@@ -483,8 +483,11 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   if (extent == ConSanLoweringExtent::ThroughProgramInventory)
     return result;
   if (options.fault_dry_run) {
-    resolve_consan_fault_mutations(*code_object, arch, options, apply_fault_plan, apply_fault_plan,
-                                   require_exactly_one_applied_fault, result);
+    resolve_consan_fault_mutations(
+        *code_object, arch, static_cast<const MutationRequest &>(options),
+        static_cast<const ConSanDebugOverrides &>(options),
+        static_cast<const TransformPolicy &>(options), apply_fault_plan, apply_fault_plan,
+        require_exactly_one_applied_fault, result);
     build_perturbation_plan(result.program_inventory, options, perturbation,
                             result.mutation.perturbation, result.errors, carried_plans);
     return result;

@@ -359,6 +359,18 @@ foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp 
         "analysis may not depend on transformation, validation, or orchestration"
     )
 endforeach()
+foreach(_source IN ITEMS
+    consan_fault_selection.h
+    consan_fault_selection.cpp
+    consan_fault_injection.h
+    consan_fault_injection.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "ConSanOptions"
+        "fault planning and application must consume mutation, debug, and transform-policy contracts directly"
+    )
+endforeach()
 
 file(READ "${_consan_dir}/consan_perturbation.h" _perturbation_contract)
 if(NOT _perturbation_contract MATCHES
@@ -3831,7 +3843,7 @@ if(_fault_planning_contract MATCHES
 endif()
 file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
 if(NOT _fault_application_contract MATCHES
-   "resolve_consan_fault_mutations[^;]*ConSanOptions[^;]*ConSanTransformArtifacts" OR
+   "resolve_consan_fault_mutations[^;]*MutationRequest[^;]*ConSanDebugOverrides[^;]*TransformPolicy[^;]*ConSanTransformArtifacts" OR
    _fault_application_contract MATCHES
    "apply_consan_fault_mutations|compose_consan_fault_mutation")
     message(FATAL_ERROR

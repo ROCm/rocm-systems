@@ -18,7 +18,9 @@ class AmdGpuCodeObject;
 /// publishes only diagnostic plans; an applicable transaction continues from
 /// those exact resolutions into mutation before returning.
 void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    const ConSanOptions &options, bool apply,
+                                    const MutationRequest &mutation,
+                                    const ConSanDebugOverrides &debug,
+                                    const TransformPolicy &transform_policy, bool apply,
                                     bool require_applicable_plan, bool require_exactly_one_applied,
                                     ConSanTransformArtifacts &result);
 

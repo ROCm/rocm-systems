@@ -115,7 +115,7 @@ struct ExactBarrierDropGroupResolution {
 /// proof and explicit request opt-in required by barrier-move mutation.
 [[nodiscard]] bool
 consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
-                                             const ConSanOptions &options);
+                                             const MutationRequest &mutation);
 
 [[nodiscard]] const ConSanFaultSite *
 find_fault_site_by_identity(const ConSanFaultSelectionView &inventory, std::string_view identity,

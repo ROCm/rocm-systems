@@ -64,8 +64,8 @@ constexpr auto kExactBarrierDropPairIssues = make_consan_enum_vocabulary(
 } // namespace
 
 bool consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
-                                                  const ConSanOptions &options) {
-  if (options.fault_barrier_move_direction != ConSanBarrierMoveDirection::Earlier ||
+                                                  const MutationRequest &mutation) {
+  if (mutation.fault_barrier_move_direction != ConSanBarrierMoveDirection::Earlier ||
       !destination.structured_guard_block_index || !destination.structured_source_block_index ||
       !destination.structured_guard_offset || !destination.structured_source_offset) {
     return false;
@@ -74,9 +74,9 @@ bool consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestina
   case ConSanBarrierMoveCfgContract::SameBlock:
     return false;
   case ConSanBarrierMoveCfgContract::CompletingStructuredDiamond:
-    return options.fault_allow_completing_conditional_barrier_move;
+    return mutation.fault_allow_completing_conditional_barrier_move;
   case ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
-    return options.fault_allow_destructive_divergent_barrier_move;
+    return mutation.fault_allow_destructive_divergent_barrier_move;
   }
   return false;
 }
