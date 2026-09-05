@@ -38,8 +38,10 @@ namespace sdma_anvil {
 
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
-  if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
-    LOG_ERROR_EXIT("%s", #call);                                              \
+  const HSAKMT_STATUS _hsakmt_status = (call);                                \
+  if (_hsakmt_status != HSAKMT_STATUS_SUCCESS)                                \
+    LOG_ERROR_EXIT("%s: %s status=%d", (msg), #call,                          \
+                   static_cast<int>(_hsakmt_status));                         \
 } while (0)
 
 // HSA agents discovered via hsa_iterate_agents (unordered).
@@ -149,10 +151,19 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
-                                            DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
-                                            queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
-                       "hsaKmtCreateQueueExt failed");
+  const HSAKMT_STATUS qstatus =
+      hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE,
+                           DEFAULT_PRIORITY, engineId, queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+  if (qstatus != HSAKMT_STATUS_SUCCESS) {
+    // gfx1250 reports "No more SDMA queue to allocate for target ID 0 (128 total
+    // queues)" when every GIN dest lands on engine 0 (HIP already holds many).
+    LOG_ERROR("hsaKmtCreateQueueExt failed: node=%u engine=%u status=%d", localNodeId, engineId,
+              static_cast<int>(qstatus));
+    CHECK_HSAKMT_SUCCESS(hsaKmtUnmapMemoryToGPU(queueBuffer_), "unmap after CreateQueueExt fail");
+    CHECK_HSAKMT_SUCCESS(hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE), "free after CreateQueueExt fail");
+    queueBuffer_ = nullptr;
+    throw std::runtime_error("hsaKmtCreateQueueExt failed");
+  }
 
   // Populate Device Handle
   ANVIL_CHECK_HIP_ERROR(hipMalloc(&deviceHandle_, sizeof(SdmaQueueDeviceHandle)));
@@ -425,11 +436,30 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
-            srcDeviceId, dstDeviceId, numChannels, engineId);
+  const uint32_t baseEngine = getSdmaEngineId(srcDeviceId, dstDeviceId);
+  const uint32_t nEng = numSdmaEnginesTotal_ > 0 ? numSdmaEnginesTotal_ : 1;
+  LOG_TRACE("SDMA: Connect from %d to %d with %d channels baseEngine=%u nEng=%u", srcDeviceId,
+            dstDeviceId, numChannels, baseEngine, nEng);
   for (int c = 0; c < numChannels; ++c) {
-    createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+    bool created = false;
+    for (uint32_t i = 0; i < nEng; ++i) {
+      const uint32_t engineId =
+          nEng > 1 ? (baseEngine + static_cast<uint32_t>(dstDeviceId) + static_cast<uint32_t>(c) + i) % nEng
+                   : baseEngine;
+      try {
+        createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+        created = true;
+        break;
+      } catch (const std::exception& e) {
+        LOG_WARN("anvil: SDMA queue %d->%d engine %u failed: %s", srcDeviceId, dstDeviceId, engineId,
+                 e.what());
+      }
+    }
+    if (!created) {
+      LOG_ERROR("anvil: connect(%d -> %d) failed: no SDMA engine accepted a queue", srcDeviceId,
+                dstDeviceId);
+      return false;
+    }
   }
   return true;
 }
