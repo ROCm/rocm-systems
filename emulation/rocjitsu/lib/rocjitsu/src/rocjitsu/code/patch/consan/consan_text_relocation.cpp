@@ -369,36 +369,34 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
       continue;
     }
     const DbiPatchPlacement &placement = *item.placement;
-    std::vector<uint32_t> body = fragment.before_words;
-    const size_t guest_word = body.size();
-    body.resize(guest_word + fragment.patch.original_size / sizeof(uint32_t));
-    std::memcpy(body.data() + guest_word, source_text.data() + fragment.patch.anchor_offset,
+    TrampolinePlan trampoline;
+    trampoline.arch = arch;
+    trampoline.anchor_offset = placement.anchor_offset;
+    trampoline.original_size = fragment.patch.original_size;
+    trampoline.trampoline_offset = placement.body_offset;
+    trampoline.return_target = placement.return_target;
+    trampoline.original_words.resize(fragment.patch.original_size / sizeof(uint32_t));
+    std::memcpy(trampoline.original_words.data(), source_text.data() + fragment.patch.anchor_offset,
                 fragment.patch.original_size);
-    body.insert(body.end(), fragment.after_words.begin(), fragment.after_words.end());
-    const auto return_branch =
-        compute_sopp_branch_simm16(placement.return_branch_offset, placement.return_target);
-    const auto forward_branch =
-        compute_sopp_branch_simm16(placement.anchor_offset, placement.body_offset);
-    if (!return_branch || !forward_branch) {
-      result.errors.emplace_back("ConSan local text transaction branch is out of range");
+    trampoline.before_items = {InlineAsmItem{fragment.before_words}};
+    trampoline.after_items = {InlineAsmItem{fragment.after_words}};
+    std::string trampoline_error;
+    auto emitted = TrampolineBuilder::build(trampoline, &trampoline_error);
+    if (!emitted) {
+      result.errors.emplace_back("ConSan local text transaction failed: " + trampoline_error);
       return std::nullopt;
     }
-    body.push_back(build_s_branch(*return_branch, arch));
-    const uint32_t forward = build_s_branch(*forward_branch, arch);
-    const uint32_t nop = build_s_nop(0u, arch);
-    std::memcpy(new_text.data() + placement.anchor_offset, &forward, sizeof(forward));
-    for (uint32_t offset = sizeof(uint32_t); offset < fragment.patch.original_size;
-         offset += sizeof(uint32_t))
-      std::memcpy(new_text.data() + placement.anchor_offset + offset, &nop, sizeof(nop));
+    std::memcpy(new_text.data() + placement.anchor_offset, emitted->patched_anchor_bytes.data(),
+                emitted->patched_anchor_bytes.size());
     if (placement.kind == DbiPatchPlacementKind::AppendedCave) {
       if (new_text.size() != placement.body_offset) {
         result.errors.emplace_back("ConSan local text transaction lost its appended cursor");
         return std::nullopt;
       }
-      append_consan_patch_words(new_text, body);
+      append_consan_patch_words(new_text, emitted->trampoline_words);
     } else {
-      std::memcpy(new_text.data() + placement.body_offset, body.data(),
-                  body.size() * sizeof(uint32_t));
+      std::memcpy(new_text.data() + placement.body_offset, emitted->trampoline_words.data(),
+                  emitted->trampoline_words.size() * sizeof(uint32_t));
     }
     rewritten.placements.push_back({.source_offset = fragment.patch.anchor_offset,
                                     .target_offset = placement.body_offset,
@@ -413,12 +411,13 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
     rewritten.marker_placements.push_back(
         {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::Guest),
          .source_offset = fragment.patch.anchor_offset,
-         .target_offset = placement.body_offset + guest_word * sizeof(uint32_t),
+         .target_offset = placement.body_offset + fragment.before_words.size() * sizeof(uint32_t),
          .owner_descriptor_file_offset = owner});
     rewritten.marker_placements.push_back(
         {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::End),
          .source_offset = fragment.patch.anchor_offset,
-         .target_offset = placement.body_offset + body.size() * sizeof(uint32_t),
+         .target_offset =
+             placement.body_offset + emitted->trampoline_words.size() * sizeof(uint32_t),
          .owner_descriptor_file_offset = owner});
   }
   CodeObjectPatcher patcher(source);

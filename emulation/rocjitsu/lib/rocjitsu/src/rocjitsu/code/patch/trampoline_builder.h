@@ -5,7 +5,7 @@
 /// @brief Plans relay placement and lowers DBI trampolines into patched bytes.
 ///
 /// This module owns SOPP branch math, bounded relay routing, transactional
-/// placement, and basic plan well-formedness checks (original_size 4 or 8,
+/// placement, and basic plan well-formedness checks (nonzero aligned original span,
 /// original_words count matches, branch ranges fit). It does not touch the
 /// ELF and does not enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the
@@ -68,7 +68,7 @@ struct TrampolinePlan {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
   uint64_t anchor_offset = 0;
-  uint32_t original_size = 0; // 4 or 8 for the inline-nop smoke build.
+  uint32_t original_size = 0;
   uint64_t trampoline_offset = 0;
   uint64_t return_target = 0; // Typically anchor_offset + original_size.
 
@@ -141,7 +141,7 @@ public:
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
   ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
-  ///   - original_size other than 4 or 8
+  ///   - original_size zero or not dword-aligned
   ///   - original_words size mismatch with original_size
   ///   - Forward or return branch outside s_branch simm16 range
   ///

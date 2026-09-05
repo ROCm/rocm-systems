@@ -108,6 +108,28 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
   EXPECT_EQ(bytes->trampoline_words[3], build_s_branch(-66, kArch));
 }
 
+TEST(TrampolineBuilder, EmitsArbitraryAlignedRelocationAnchorPatch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  TrampolinePlan plan;
+  plan.arch = kArch;
+  plan.anchor_offset = 0x100;
+  plan.original_size = 12;
+  plan.trampoline_offset = 0x200;
+  plan.return_target = 0x10c;
+  plan.original_words = {0xaaaa1111u, 0xbbbb2222u, 0xcccc3333u};
+
+  auto bytes = TrampolineBuilder::build(plan);
+  ASSERT_TRUE(bytes.has_value());
+  ASSERT_EQ(bytes->patched_anchor_bytes.size(), 12u);
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), build_s_branch(63, kArch));
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 4), build_s_nop(0, kArch));
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 8), build_s_nop(0, kArch));
+  ASSERT_EQ(bytes->trampoline_words.size(), 4u);
+  EXPECT_TRUE(std::ranges::equal(bytes->trampoline_words.begin(),
+                                 bytes->trampoline_words.begin() + 3, plan.original_words.begin(),
+                                 plan.original_words.end()));
+}
+
 // build_s_branch uses opcode 32 on RDNA3/3.5/4 and opcode 2 on CDNA1-4. If the
 // builder hard-coded one of those, this test would catch it.
 TEST(TrampolineBuilder, RespectsTargetArchForBranchEncoding) {

@@ -28,8 +28,8 @@ namespace {
     report(err, "trampoline plan: arch was not set");
     return false;
   }
-  if (plan.original_size != 4 && plan.original_size != 8) {
-    report(err, "trampoline plan: original_size must be 4 or 8");
+  if (plan.original_size == 0u || plan.original_size % sizeof(uint32_t) != 0u) {
+    report(err, "trampoline plan: original_size must be nonzero and dword-aligned");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -215,7 +215,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   TrampolineBytes out;
   out.patched_anchor_bytes.reserve(plan.original_size);
   append_word(out.patched_anchor_bytes, build_s_branch(*fwd, plan.arch));
-  if (plan.original_size == 8)
+  for (uint32_t offset = sizeof(uint32_t); offset < plan.original_size; offset += sizeof(uint32_t))
     append_word(out.patched_anchor_bytes, build_s_nop(0, plan.arch));
 
   out.trampoline_words = std::move(body);
