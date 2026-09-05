@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 
 namespace rocjitsu::consan_hook {
@@ -51,6 +52,18 @@ namespace rocjitsu::consan_hook {
   }
   *out = *parsed;
   return true;
+}
+
+struct BoolEnvBinding {
+  const char *name;
+  bool default_value;
+  bool *output;
+};
+
+[[nodiscard]] bool parse_bool_envs(std::initializer_list<BoolEnvBinding> bindings) {
+  return std::ranges::all_of(bindings, [](const BoolEnvBinding &binding) {
+    return parse_bool_env(binding.name, binding.default_value, binding.output);
+  });
 }
 
 [[nodiscard]] bool parse_kernel_allowlist_env(std::vector<std::string> *out) {
@@ -708,18 +721,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_moi_owner_source_env(&config.moi_owner_source))
     return std::nullopt;
   const bool strict_policy = config.policy == HookPolicy::Strict;
-  if (!parse_bool_env("RJ_CONSAN_FAIL_CLOSED", strict_policy, &config.fail_closed))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_REQUIRE_PATCH", strict_policy, &config.require_patch))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_NOP", false, &config.probe_nop))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_TRAMPOLINE_NOP", false, &config.probe_trampoline_nop))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_ENDPGM", false, &config.probe_endpgm))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_LDS_ENDPGM", false, &config.probe_lds_endpgm))
-    return std::nullopt;
   if (!parse_check_trap_mode_env(&config.check_trap_mode))
     return std::nullopt;
   if (!parse_sc_report_mode_env(&config.sc_report_mode))
@@ -728,14 +729,61 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       config.sc_report_mode == ScReportMode::Trap
           ? rocjitsu::ConSanSuperColliderEvidenceMode::TrapOnly
           : rocjitsu::ConSanSuperColliderEvidenceMode::StickyMarker;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_LDS_CHECK_TRAP", false, &config.probe_lds_check_trap))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_FLAT_CHECK_TRAP", false, &config.probe_flat_check_trap))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT", false,
-                      &config.abort_unmatched_barrier_wait))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_PROBE_FLAT_TRAP", false, &config.probe_flat_trap))
+  const auto moi_mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
+  // Synchronization implemented by an MOI engine is part of its ordinary
+  // profile, not an expert opt-in. Explicit false values remain useful for
+  // focused compatibility and bring-up tests.
+  const bool persistent_owner_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi &&
+                                         moi_mode_policy.initialize_owner_epoch_by_default;
+  const bool ordinary_moi_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi;
+  const bool strict_moi_policy = strict_policy && ordinary_moi_defaults;
+  if (!parse_bool_envs({
+          {"RJ_CONSAN_FAIL_CLOSED", strict_policy, &config.fail_closed},
+          {"RJ_CONSAN_REQUIRE_PATCH", strict_policy, &config.require_patch},
+          {"RJ_CONSAN_PROBE_NOP", false, &config.probe_nop},
+          {"RJ_CONSAN_PROBE_TRAMPOLINE_NOP", false, &config.probe_trampoline_nop},
+          {"RJ_CONSAN_PROBE_ENDPGM", false, &config.probe_endpgm},
+          {"RJ_CONSAN_PROBE_LDS_ENDPGM", false, &config.probe_lds_endpgm},
+          {"RJ_CONSAN_PROBE_LDS_CHECK_TRAP", false, &config.probe_lds_check_trap},
+          {"RJ_CONSAN_PROBE_FLAT_CHECK_TRAP", false, &config.probe_flat_check_trap},
+          {"RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT", false, &config.abort_unmatched_barrier_wait},
+          {"RJ_CONSAN_PROBE_FLAT_TRAP", false, &config.probe_flat_trap},
+          {"RJ_CONSAN_FAULT_DROP_BARRIER", false, &config.fault_drop_barrier},
+          {"RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP", false,
+           &config.fault_allow_destructive_incomplete_barrier_drop},
+          {"RJ_CONSAN_FAULT_MOVE_BARRIER", false, &config.fault_move_barrier},
+          {"RJ_CONSAN_FAULT_ALLOW_COMPLETING_CONDITIONAL_BARRIER_MOVE", false,
+           &config.fault_allow_completing_conditional_barrier_move},
+          {"RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE", false,
+           &config.fault_allow_destructive_divergent_barrier_move},
+          {"RJ_CONSAN_FAULT_MUTATE_BARRIER_ID_SCOPE", false, &config.fault_mutate_barrier_id_scope},
+          {"RJ_CONSAN_FAULT_MUTATE_BARRIER_PARTICIPANTS", false,
+           &config.fault_mutate_barrier_participants},
+          {"RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS", false, &config.fault_atomic_wrong_address},
+          {"RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER", false, &config.fault_atomic_weaken_order},
+          {"RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE", false, &config.fault_atomic_weaken_scope},
+          {"RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS", false, &config.fault_lds_wrong_address},
+          {"RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER", false, &config.fault_ordinary_weaken_order},
+          {"RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE", false, &config.fault_ordinary_weaken_scope},
+          {"RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS", false, &config.fault_ordinary_wrong_address},
+          {"RJ_CONSAN_FAULT_DRY_RUN", false, &config.fault_dry_run},
+          {"RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", false, &config.fault_require_exactly_one},
+          {"RJ_CONSAN_MOI_INIT_OWNER_EPOCH", persistent_owner_defaults,
+           &config.moi_init_owner_epoch},
+          {"RJ_CONSAN_MOI_TRACK_BARRIERS", ordinary_moi_defaults, &config.moi_track_barriers},
+          {"RJ_CONSAN_MOI_TRACK_ATOMICS", ordinary_moi_defaults, &config.moi_track_atomics},
+          {"RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false, &config.moi_dynamic_access_records},
+          {"RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check},
+          // Deliberately test-only: these are not part of the public ConSan knob set.
+          {"RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill},
+          {"RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false, &config.test_force_private_epoch},
+          {"RJ_CONSAN_TEST_SEED_INLINE_EXACT_ODD", false, &config.test_seed_inline_exact_odd},
+          {"RJ_CONSAN_MOI_REQUIRE_RECORDS", strict_moi_policy, &config.moi_require_records},
+          {"RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS", false, &config.moi_require_diagnostics},
+          {"RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", false, &config.moi_forbid_diagnostics},
+          {"RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT", false, &config.moi_require_replay_conflict},
+          {"RJ_CONSAN_MOI_FORBID_OVERFLOW", strict_moi_policy, &config.moi_forbid_overflow},
+      }))
     return std::nullopt;
   if (!parse_sc_perturb_kind_env(&config.sc_perturb_kind) ||
       !parse_sc_perturb_edge_env(&config.sc_perturb_edge) ||
@@ -766,23 +814,13 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     config.probe_flat_check_trap = config.check_trap_mode == CheckTrapMode::All ||
                                    config.check_trap_mode == CheckTrapMode::Flat;
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_DROP_BARRIER", false, &config.fault_drop_barrier))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP", false,
-                      &config.fault_allow_destructive_incomplete_barrier_drop))
-    return std::nullopt;
   if (config.fault_allow_destructive_incomplete_barrier_drop && !config.fault_drop_barrier) {
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] "
                          "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP requires "
                          "RJ_CONSAN_FAULT_DROP_BARRIER=1\n");
     return std::nullopt;
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_MOVE_BARRIER", false, &config.fault_move_barrier))
-    return std::nullopt;
   if (!parse_barrier_move_direction_env(&config.fault_barrier_move_direction))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ALLOW_COMPLETING_CONDITIONAL_BARRIER_MOVE", false,
-                      &config.fault_allow_completing_conditional_barrier_move))
     return std::nullopt;
   if (config.fault_allow_completing_conditional_barrier_move &&
       (!config.fault_move_barrier ||
@@ -794,9 +832,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
         "RJ_CONSAN_FAULT_MOVE_BARRIER=1 and RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION=earlier\n");
     return std::nullopt;
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE", false,
-                      &config.fault_allow_destructive_divergent_barrier_move))
-    return std::nullopt;
   if (config.fault_allow_destructive_divergent_barrier_move &&
       (!config.fault_move_barrier ||
        config.fault_barrier_move_direction != rocjitsu::ConSanBarrierMoveDirection::Earlier)) {
@@ -809,9 +844,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
   if (const char *identity = std::getenv("RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY"))
     config.fault_barrier_destination_identity = identity;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_MUTATE_BARRIER_ID_SCOPE", false,
-                      &config.fault_mutate_barrier_id_scope))
-    return std::nullopt;
   if (const char *identity = std::getenv("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"))
     config.fault_barrier_sequence_identity = identity;
   if (const char *identity = std::getenv("RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY"))
@@ -834,9 +866,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                          "RJ_CONSAN_FAULT_BARRIER_TARGET_ID\n");
     return std::nullopt;
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_MUTATE_BARRIER_PARTICIPANTS", false,
-                      &config.fault_mutate_barrier_participants))
-    return std::nullopt;
   if (std::getenv("RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_COUNT") != nullptr) {
     uint32_t count = 0;
     if (!parse_u32_env("RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_COUNT", 0, &count))
@@ -849,27 +878,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     config.fault_barrier_target_participant_mask = mask;
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS", false,
-                      &config.fault_atomic_wrong_address))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER", false,
-                      &config.fault_atomic_weaken_order))
-    return std::nullopt;
   if (!parse_atomic_order_edge_env(&config.fault_atomic_order_edge))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE", false,
-                      &config.fault_atomic_weaken_scope))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS", false, &config.fault_lds_wrong_address))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER", false,
-                      &config.fault_ordinary_weaken_order))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE", false,
-                      &config.fault_ordinary_weaken_scope))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS", false,
-                      &config.fault_ordinary_wrong_address))
     return std::nullopt;
   if (config.fault_atomic_wrong_address) {
     if (std::getenv("RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA") == nullptr) {
@@ -917,11 +926,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
   }
-  if (!parse_bool_env("RJ_CONSAN_FAULT_DRY_RUN", false, &config.fault_dry_run))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", false,
-                      &config.fault_require_exactly_one))
-    return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS",
                      kConSanDefaultFaultReservationTimeoutMs, &config.fault_reservation_timeout_ms))
     return std::nullopt;
@@ -930,37 +934,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                          "expected >=1\n");
     return std::nullopt;
   }
-  // Synchronization implemented by an MOI engine is part of its ordinary
-  // profile, not an expert opt-in. Engine-specific lowering still reports
-  // unsupported sites honestly. Explicit false values remain useful for
-  // focused compatibility and bring-up tests.
-  const auto moi_mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
-  const bool persistent_owner_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi &&
-                                         moi_mode_policy.initialize_owner_epoch_by_default;
-  const bool ordinary_moi_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi;
-  if (!parse_bool_env("RJ_CONSAN_MOI_INIT_OWNER_EPOCH", persistent_owner_defaults,
-                      &config.moi_init_owner_epoch))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_TRACK_BARRIERS", ordinary_moi_defaults,
-                      &config.moi_track_barriers))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_TRACK_ATOMICS", ordinary_moi_defaults,
-                      &config.moi_track_atomics))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false,
-                      &config.moi_dynamic_access_records))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check))
-    return std::nullopt;
-  // Deliberately test-only: this is not part of the public ConSan knob set.
-  if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false,
-                      &config.test_force_private_epoch))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_TEST_SEED_INLINE_EXACT_ODD", false,
-                      &config.test_seed_inline_exact_odd))
-    return std::nullopt;
   if (config.test_seed_inline_exact_odd &&
       (config.flavor != rocjitsu::ConSanFlavor::Moi ||
        config.moi_engine != rocjitsu::ConSanMoiEngine::InlineShadow)) {
@@ -971,20 +944,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
   if (!parse_kernel_allowlist_env(&config.kernel_name_allowlist))
-    return std::nullopt;
-  const bool strict_moi_policy = strict_policy && config.flavor == rocjitsu::ConSanFlavor::Moi;
-  if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", strict_moi_policy,
-                      &config.moi_require_records))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS", false, &config.moi_require_diagnostics))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", false, &config.moi_forbid_diagnostics))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT", false,
-                      &config.moi_require_replay_conflict))
-    return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_FORBID_OVERFLOW", strict_moi_policy,
-                      &config.moi_forbid_overflow))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_BARRIER_INDEX", 0, &config.fault_barrier_index))
     return std::nullopt;
