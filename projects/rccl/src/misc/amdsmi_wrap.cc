@@ -640,19 +640,21 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     } else {
       amdSmiFabricInfoBuffer probeBuffer;
       amdSmiPrepareFabricInfoBuffer(probeBuffer);
-      // A failed call returns before writing anything, leaving a buffer indistinguishable from one
-      // a runtime chose not to fill, so the status has to gate the classification.
+      // A failed call may have written nothing, or part of the struct before bailing. Either way the
+      // extent says nothing about the layout, so the status has to gate the classification.
       const amdsmi_status_t probeStatus =
         pfn_amdsmi_get_gpu_fabric_info(probeHandle, amdSmiFabricInfoBufferAsInfo(probeBuffer));
-      const amdSmiFabricRuntimeLayout runtimeLayout =
-        probeStatus == AMDSMI_STATUS_SUCCESS ? amdSmiDetectFabricRuntimeLayout(probeBuffer)
-                                             : amdSmiFabricRuntimeLayout::Unknown;
+      const amdSmiFabricRuntimeLayout runtimeLayout = probeStatus == AMDSMI_STATUS_SUCCESS
+                                                        ? amdSmiDetectFabricRuntimeLayout(probeBuffer)
+                                                        : amdSmiFabricRuntimeLayout::Unknown;
       const bool runtimeLayoutIs8Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::EightGpu;
       const bool runtimeLayoutIs16Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::SixteenGpu;
       // Both bits, not just the 8-GPU one: an extended-union build against a 16-GPU runtime agrees
       // on false != false and would otherwise fall through to the typed path unwarned.
-      const bool layoutsAgree =
-        runtimeLayoutIs8Gpu == amdSmiFabricLayoutIs8Gpu && runtimeLayoutIs16Gpu == amdSmiFabricLayoutIs16Gpu;
+      const bool runtimeLayoutIsExtended = runtimeLayout == amdSmiFabricRuntimeLayout::ExtendedUnion;
+      const bool layoutsAgree = runtimeLayoutIs8Gpu == amdSmiFabricLayoutIs8Gpu &&
+                                runtimeLayoutIs16Gpu == amdSmiFabricLayoutIs16Gpu &&
+                                runtimeLayoutIsExtended == amdSmiFabricLayoutIsExtendedUnion;
       if (runtimeLayout == amdSmiFabricRuntimeLayout::Unknown) {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
         useSysfs = true;
@@ -664,8 +666,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
              "falling back to sysfs");
         useSysfs = true;
       } else if (!layoutsAgree) {
-        // Name all three on both sides. Reporting an extended-union build as "16-GPU" sends
-        // whoever debugs this next after the wrong mismatch.
+        // Name the build layout exactly. Reporting an extended-union build as "16-GPU" sends whoever
+        // debugs this next after the wrong mismatch. The runtime side is one of the two named, since
+        // ExtendedUnion and Unknown are intercepted above.
         WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %s layout, but the loaded library uses the %s "
              "layout; falling back to sysfs",
              amdSmiFabricLayoutIs8Gpu ? "8-GPU" : (amdSmiFabricLayoutIs16Gpu ? "16-GPU" : "extended-union"),

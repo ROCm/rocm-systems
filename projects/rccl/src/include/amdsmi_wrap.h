@@ -487,10 +487,10 @@ constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 // The v1 payload in the 16-GPU shape sits after bdf (8) and fabric_version (4) and runs 244 bytes.
 // amd_smi 27.x writes exactly up to its end on the v1 path, which is what separates it at runtime
 // from the older libraries that assign the whole object.
-constexpr size_t kAmdSmiFabricV1PayloadBegin = 12;
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
+constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
 
-// The one fact the guard, the buffer and the detector all turn on.
+// The one fact the guard and the buffer both turn on.
 constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
 
 constexpr bool amdSmiFabricLayoutIs8Gpu =
@@ -509,8 +509,8 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
 // so the outer struct grows and reserved moves, but the v1 window we read keeps its 16-GPU
 // offsets. Recognize it by those offsets plus an outer struct that outgrew the 16-GPU size, rather
 // than by a third hardcoded size, so a later v2 growth does not break the build again. The
-// reserved clause keeps the anchor both siblings have: without it nothing pins where the v1 window
-// sits in the outer struct, and reserved could overlap the bytes the detector reads as v1. RCCL
+// reserved clause keeps the anchor both siblings have: it does not locate the v1 window, but it
+// does keep reserved from overlapping the bytes the detector reads as v1. RCCL
 // does not read v2, and a runtime on this layout is classified by amdSmiDetectFabricRuntimeLayout
 // and routed to sysfs by amd_smi_ensureFabricInitialized.
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
@@ -605,8 +605,10 @@ constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
 // Never smaller than the struct our header declares, because amdSmiFabricInfoBufferAsInfo
 // reinterpret_casts the array to amdsmi_fabric_info_t* and a 320-byte array cannot name a
-// 552-byte object. The floor is also never below the largest layout we know how to classify, so
-// the probe can still tell an over-writing runtime from a 16-GPU one on a smaller build header.
+// 552-byte object. The floor is also never below the largest layout we classify. Note it carries
+// no slack beyond that, so on a 16-GPU header the detector's upper window is empty and a runtime
+// that wrote past 320 would not be distinguished from one that stopped there. Reaching that case
+// means the library already overran a stack buffer, which no shipped runtime does.
 constexpr size_t kAmdSmiFabricInfoBufferSize =
   kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
 
@@ -634,9 +636,8 @@ inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer
   return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
 }
 
-// Canary intact means the runtime did not write that far. Written means it did, whatever the
-// bytes say, so this does not assume the tail is zero-filled.
-inline bool amdSmiFabricWindowUntouched(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+// All bytes still canary: the runtime did not write anywhere in this window.
+inline bool amdSmiFabricWindowAllCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
   for (size_t i = begin; i < end; ++i) {
     if (buffer.bytes[i] != kAmdSmiFabricBufferCanary) {
       return false;
@@ -645,9 +646,10 @@ inline bool amdSmiFabricWindowUntouched(const amdSmiFabricInfoBuffer& buffer, si
   return true;
 }
 
-// The complement: no canary left anywhere in the window, so the runtime wrote all of it. Used to
-// confirm a layout rather than infer it from the absence of the others.
-inline bool amdSmiFabricWindowWritten(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+// No byte still canary: the runtime wrote all of this window, whatever the bytes say. Not the
+// negation of the predicate above; for a window wider than one byte both can be false, and on an
+// empty window both are true.
+inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
   for (size_t i = begin; i < end; ++i) {
     if (buffer.bytes[i] == kAmdSmiFabricBufferCanary) {
       return false;
@@ -656,31 +658,40 @@ inline bool amdSmiFabricWindowWritten(const amdSmiFabricInfoBuffer& buffer, size
   return true;
 }
 
+// Windows must stay ordered and non-empty, or an arm silently stops discriminating.
+static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
+                kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricInfo8GpuSize &&
+                kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricInfo16GpuSize &&
+                kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
+              "fabric probe windows are out of order");
+
 // Identify the runtime by its write extent, which is the only thing all three shipped libraries
 // differ in observably:
 //
-//   nothing written : the call failed without touching the buffer, so nothing can be concluded
-//   256 bytes       : 27.x, field-wise up to the end of the v1 payload
-//   288 bytes       : 8-GPU, whole-object assign
-//   320 bytes       : 16-GPU, whole-object assign
+//   256 bytes : 27.x, field-wise up to the end of the v1 payload
+//   288 bytes : 8-GPU, whole-object assign
+//   320 bytes : 16-GPU, whole-object assign
 //
-// Every arm is positive, including the last: an extent that matches none of the three is Unknown
-// and falls back to sysfs. Concluding SixteenGpu by elimination would send an unrecognized runtime
-// down the typed path, which is the one outcome the probe exists to prevent.
+// Each arm confirms a layout instead of inferring it: everything below the boundary must have been
+// written and everything above it must not have been. Anything else, including a sparse or short
+// write and a call that wrote nothing, is Unknown and falls back to sysfs. Identifying a layout by
+// elimination would send an unrecognized runtime down the typed path, which is the one outcome the
+// probe exists to prevent.
+//
+// The upper window of the last arm is empty when the build header is not extended, so an
+// over-writing runtime is only rejected on an extended build. Reaching that case at all means the
+// library already overran the buffer, which no shipped runtime does.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd)) {
-    return amdSmiFabricRuntimeLayout::Unknown;
-  }
-  if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
+  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd) &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
     return amdSmiFabricRuntimeLayout::ExtendedUnion;
   }
-  if (amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
+  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricInfo8GpuSize) &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
-  // A 16-GPU runtime fills through 320 and stops there. Requiring both halves rejects a writer that
-  // stopped partway into [288, 320) or ran past the end of the layout.
-  if (amdSmiFabricWindowWritten(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize) &&
-      amdSmiFabricWindowUntouched(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
+  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricInfo16GpuSize) &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
     return amdSmiFabricRuntimeLayout::SixteenGpu;
   }
   return amdSmiFabricRuntimeLayout::Unknown;

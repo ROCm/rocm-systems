@@ -173,7 +173,7 @@ TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
 {
     amdSmiFabricInfoBuffer buffer;
     amdSmiPrepareFabricInfoBuffer(buffer);
-    buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
+    buffer.bytes[kAmdSmiFabricV1PayloadEnd - 1] = 0;
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
@@ -200,6 +200,54 @@ TEST(AmdSmiFabricRuntimeLayout, PartialSixteenGpuWriteIsUnknown)
     memset(buffer.bytes, 0, kAmdSmiFabricInfo16GpuSize - 1);
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// A real fabric payload is not all-zero. Every other case here fills with zeros,
+// so without this one a detector that tested for zero rather than for the absence
+// of the canary would pass the whole suite.
+TEST(AmdSmiFabricRuntimeLayout, ClassifiesNonZeroWrites)
+{
+    amdSmiFabricInfoBuffer buffer;
+
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0xFF, kAmdSmiFabricV1PayloadEnd);
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::ExtendedUnion);
+
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0xFF, kAmdSmiFabricInfo8GpuSize);
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::EightGpu);
+
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0xFF, kAmdSmiFabricInfo16GpuSize);
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
+}
+
+// A sparse write touches the v1 payload without filling it, so no layout is
+// confirmed. Reached only by concluding a layout from the windows above it.
+TEST(AmdSmiFabricRuntimeLayout, SparseWriteIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    buffer.bytes[kAmdSmiFabricV1PayloadBegin] = 0;
+    buffer.bytes[kAmdSmiFabricV1PayloadEnd] = 0;
+    memset(buffer.bytes + kAmdSmiFabricInfo8GpuSize, 0,
+           kAmdSmiFabricInfo16GpuSize - kAmdSmiFabricInfo8GpuSize);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// The probe must send the same request the per-device call sends: a zeroed bdf and
+// fabric_version, canary from the v1 payload on. Spelled with literals so a change
+// to kAmdSmiFabricV1PayloadBegin cannot move the boundary and the test with it.
+TEST(AmdSmiFabricRuntimeLayout, PreparedBufferZeroesTheRequestHeader)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+
+    for (size_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(buffer.bytes[i], 0) << "request header byte " << i << " must be zeroed";
+    }
+    EXPECT_EQ(buffer.bytes[12], kAmdSmiFabricBufferCanary) << "the v1 payload must start as canary";
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +360,11 @@ TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
     EXPECT_EQ(sizeof(MockNestedFabricInfo), sizeof(MockFlatFabricInfo));
     EXPECT_GE(sizeof(amdSmiFabricInfoBuffer), sizeof(amdsmi_fabric_info_t))
         << "the probe buffer must be able to name the struct it is cast to";
+    if (!kAmdSmiFabricHeaderIsExtended) {
+        // Only the non-extended headers are the shape the mocks model, but there the mocks
+        // must track the real struct: nothing else catches them drifting apart.
+        EXPECT_EQ(sizeof(MockFlatFabricInfo), sizeof(amdsmi_fabric_info_t));
+    }
 
     EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, version),
               offsetof(MockFlatFabricInfo, fabric_version));
