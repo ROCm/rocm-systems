@@ -723,6 +723,11 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u), arch);
   MoiPublicationExec other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u), arch);
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success && !message.empty())
+      errors.emplace_back(message);
+    sequence.require(success);
+  };
   // The low/high address-match journals are dead once owner qualification
   // begins. Reuse them for the longer-lived same-owner and validated masks.
   // InlineShadow reserves +8:+9 for guest VCC and +10 for guest SCC; using
@@ -731,86 +736,68 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t same_owner_exec = static_cast<uint16_t>(exec_base + 2u);
   const uint16_t validated_exec = static_cast<uint16_t>(exec_base + 4u);
 
-  if (!append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load release version");
-    return false;
-  }
+  require_emission(append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch),
+                   "ConSan MOI inline atomic acquire patch could not load release version");
   const uint16_t version_before = static_cast<uint16_t>(scratch_vgpr + 20u);
-  if (source_slot_claimed) {
-    if (!sequence.emit(instrumentation::build_v_add_u32(
-            temporary_vgpr, scalar_positive_inline_u32(1), version_before, arch)))
-      return false;
-  }
-  if (!valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+  if (source_slot_claimed)
+    sequence.append(instrumentation::build_v_add_u32(temporary_vgpr, scalar_positive_inline_u32(1),
+                                                     version_before, arch));
+  require_emission(
+      valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
           vector_source_vgpr(source_slot_claimed ? temporary_vgpr : version_before), value_vgpr,
-          arch)) ||
-      !sequence.emit(
-          instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, value_vgpr, arch)) ||
-      !valid_exec_masks.narrow(source_slot_claimed
-                                   ? instrumentation::build_v_cmp_ne_u32_vcc(
-                                         scalar_positive_inline_u32(0), temporary_vgpr, arch)
-                                   : instrumentation::build_v_cmp_eq_u32_vcc(
-                                         scalar_positive_inline_u32(0), temporary_vgpr, arch)) ||
-      !valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), value_vgpr, arch))) {
-    errors.emplace_back(
-        "ConSan MOI inline atomic acquire patch could not classify release version");
-    return false;
-  }
+          arch)) &&
+          sequence.emit(
+              instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, value_vgpr, arch)) &&
+          valid_exec_masks.narrow(source_slot_claimed
+                                      ? instrumentation::build_v_cmp_ne_u32_vcc(
+                                            scalar_positive_inline_u32(0), temporary_vgpr, arch)
+                                      : instrumentation::build_v_cmp_eq_u32_vcc(
+                                            scalar_positive_inline_u32(0), temporary_vgpr, arch)) &&
+          valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
+              scalar_positive_inline_u32(0), value_vgpr, arch)),
+      "ConSan MOI inline atomic acquire patch could not classify release version");
 
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                                      value_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load address low");
-    return false;
-  }
-  if (!low_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(address_vgpr), value_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not compare address low");
-    return false;
-  }
+  require_emission(
+      append_load_u32_vgpr_at_offset(words, scratch_vgpr,
+                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
+                                     value_vgpr, arch),
+      "ConSan MOI inline atomic acquire patch could not load address low");
+  require_emission(low_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+                       vector_source_vgpr(address_vgpr), value_vgpr, arch)),
+                   "ConSan MOI inline atomic acquire patch could not compare address low");
 
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                                          sizeof(uint32_t),
-                                      value_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load address high");
-    return false;
-  }
-  if (!high_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), value_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not compare address high");
-    return false;
-  }
+  require_emission(
+      append_load_u32_vgpr_at_offset(words, scratch_vgpr,
+                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
+                                         sizeof(uint32_t),
+                                     value_vgpr, arch),
+      "ConSan MOI inline atomic acquire patch could not load address high");
+  require_emission(
+      high_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), value_vgpr, arch)),
+      "ConSan MOI inline atomic acquire patch could not compare address high");
 
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
-                                      value_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load workgroup key");
-    return false;
-  }
-  if (!workgroup_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(workgroup_key_vgpr), value_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not compare workgroup key");
-    return false;
-  }
+  require_emission(append_load_u32_vgpr_at_offset(
+                       words, scratch_vgpr,
+                       offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key), value_vgpr, arch),
+                   "ConSan MOI inline atomic acquire patch could not load workgroup key");
+  require_emission(workgroup_match_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+                       vector_source_vgpr(workgroup_key_vgpr), value_vgpr, arch)),
+                   "ConSan MOI inline atomic acquire patch could not compare workgroup key");
 
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                                      producer_owner_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load owner");
-    return false;
-  }
-  if (!other_owner_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(plan.owner_epoch_vgprs.owner), producer_owner_vgpr, arch)) ||
-      !sequence.emit_all(instrumentation::build_s_andn2_b64(same_owner_exec,
-                                                            static_cast<uint16_t>(exec_base + 14u),
-                                                            kAmdGpuExecLo, arch),
-                         instrumentation::build_s_mov_b64(
-                             kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 14u), arch))) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not compare owner");
-    return false;
-  }
+  require_emission(append_load_u32_vgpr_at_offset(
+                       words, scratch_vgpr, offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
+                       producer_owner_vgpr, arch),
+                   "ConSan MOI inline atomic acquire patch could not load owner");
+  require_emission(
+      other_owner_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
+          vector_source_vgpr(plan.owner_epoch_vgprs.owner), producer_owner_vgpr, arch)) &&
+          sequence.emit_all(
+              instrumentation::build_s_andn2_b64(
+                  same_owner_exec, static_cast<uint16_t>(exec_base + 14u), kAmdGpuExecLo, arch),
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo,
+                                               static_cast<uint16_t>(exec_base + 14u), arch)),
+      "ConSan MOI inline atomic acquire patch could not compare owner");
 
   // A polling acquire can observe an empty, unstable, mismatched, or
   // otherwise unusable predecessor. Its validated EXEC mask is then empty.
@@ -818,38 +805,31 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // can carry the head of a release sequence. Skip the complete causal-import
   // transaction when no lane has either form of authority.
   const InstructionSequence::Label restore_workgroup = sequence.make_label();
-  if (!sequence.emit_branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero))
-    return false;
+  sequence.branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero);
 
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
-                                      token_value_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not load epoch_plus_one");
-    return false;
-  }
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
-                                      value_vgpr, arch))
-    return false;
+  require_emission(
+      append_load_u32_vgpr_at_offset(words, scratch_vgpr,
+                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
+                                     token_value_vgpr, arch),
+      "ConSan MOI inline atomic acquire patch could not load epoch_plus_one");
+  sequence.require(append_load_u32_vgpr_at_offset(
+      words, scratch_vgpr, offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id), value_vgpr,
+      arch));
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
-  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, value_vgpr,
-                                                  temporary_vgpr,
-                                                  /*high_word=*/false, arch))
-    return false;
-  if (!valid_exec_masks.narrow_vcc())
-    return false;
-  if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) +
-                                          sizeof(uint32_t),
-                                      value_vgpr, arch))
-    return false;
-  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, value_vgpr,
-                                                  temporary_vgpr,
-                                                  /*high_word=*/true, arch))
-    return false;
-  if (!valid_exec_masks.narrow_vcc())
-    return false;
+  sequence
+      .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, value_vgpr,
+                                                          temporary_vgpr,
+                                                          /*high_word=*/false, arch))
+      .require(valid_exec_masks.narrow_vcc())
+      .require(append_load_u32_vgpr_at_offset(
+          words, scratch_vgpr,
+          offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) + sizeof(uint32_t), value_vgpr,
+          arch))
+      .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, value_vgpr,
+                                                          temporary_vgpr,
+                                                          /*high_word=*/true, arch))
+      .require(valid_exec_masks.narrow_vcc());
   // Swap address and temporary lifetimes when the target requires the address
   // pair to remain even-aligned. The token transaction reuses this space only
   // after the snapshot loads have completed.
@@ -867,65 +847,60 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // this immediate flags check and is overwritten below, so use it instead.
   const uint16_t snapshot_flags =
       source_slot_claimed ? value_vgpr : static_cast<uint16_t>(scratch_vgpr + 8u);
-  if (!append_inline_causal_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
-                                             address_vgpr, snapshot_address, snapshot_temporary,
-                                             snapshot_hash, arch) ||
-      !append_load_u32_vgpr_at_offset(words, snapshot_address,
-                                      offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
-                                      snapshot_count, arch) ||
-      !append_load_u32_vgpr_at_offset(words, snapshot_address,
-                                      offsetof(ConSanMoiInlineCausalSnapshot, flags),
-                                      snapshot_flags, arch))
-    return false;
-  if (!valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-          scalar_positive_inline_u32(0), snapshot_flags, arch)) ||
-      !valid_exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
+  sequence
+      .require(append_inline_causal_snapshot_address(
+          words, snapshot_table_base, snapshot_table_capacity, address_vgpr, snapshot_address,
+          snapshot_temporary, snapshot_hash, arch))
+      .require(append_load_u32_vgpr_at_offset(words, snapshot_address,
+                                              offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
+                                              snapshot_count, arch))
+      .require(append_load_u32_vgpr_at_offset(words, snapshot_address,
+                                              offsetof(ConSanMoiInlineCausalSnapshot, flags),
+                                              snapshot_flags, arch))
+      .require(valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+          scalar_positive_inline_u32(0), snapshot_flags, arch)))
+      .require(valid_exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
           scalar_positive_inline_u32(kConSanMoiInlineCausalSnapshotEntryCapacity + 1u),
-          snapshot_count, arch)))
-    return false;
+          snapshot_count, arch)));
   for (uint16_t i = 0; i < kConSanMoiInlineCausalSnapshotEntryCapacity; ++i) {
     const size_t entry_offset = offsetof(ConSanMoiInlineCausalSnapshot, entries) +
                                 i * sizeof(ConSanMoiInlineCausalSnapshotEntry);
-    if (!append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset,
-                                        static_cast<uint16_t>(scratch_vgpr + 9u + i), arch) ||
-        !append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset + sizeof(uint32_t),
-                                        static_cast<uint16_t>(scratch_vgpr + 13u + i), arch))
-      return false;
+    sequence
+        .require(append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset,
+                                                static_cast<uint16_t>(scratch_vgpr + 9u + i), arch))
+        .require(
+            append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset + sizeof(uint32_t),
+                                           static_cast<uint16_t>(scratch_vgpr + 13u + i), arch));
   }
-  if (!append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch))
-    return false;
-  if (source_slot_claimed) {
-    if (!sequence.emit(instrumentation::build_v_add_u32(
-            temporary_vgpr, scalar_positive_inline_u32(1), version_before, arch)))
-      return false;
-  }
-  if (!valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(source_slot_claimed ? temporary_vgpr : version_before), value_vgpr,
-          arch)) ||
-      !valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), token_value_vgpr, arch)) ||
-      !sequence.emit(instrumentation::build_v_mov_b32_literal(
-          value_vgpr, consan_moi_exact_shadow::max_epoch + 1u, arch)) ||
-      !valid_exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(value_vgpr), token_value_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI inline atomic acquire patch could not validate token epoch");
-    return false;
-  }
+  sequence.require(append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch));
+  if (source_slot_claimed)
+    sequence.append(instrumentation::build_v_add_u32(temporary_vgpr, scalar_positive_inline_u32(1),
+                                                     version_before, arch));
+  require_emission(valid_exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+                       vector_source_vgpr(source_slot_claimed ? temporary_vgpr : version_before),
+                       value_vgpr, arch)) &&
+                       valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
+                           scalar_positive_inline_u32(0), token_value_vgpr, arch)) &&
+                       sequence.emit(instrumentation::build_v_mov_b32_literal(
+                           value_vgpr, consan_moi_exact_shadow::max_epoch + 1u, arch)) &&
+                       valid_exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
+                           vector_source_vgpr(value_vgpr), token_value_vgpr, arch)),
+                   "ConSan MOI inline atomic acquire patch could not validate token epoch");
 
   // Convert a same-owner acquire into a snapshot-only import. Slot zero takes
   // the first inherited ancestor, the remaining canonical entries shift down,
   // and the self release is never published as a token. Other-owner lanes keep
   // their direct entry and unmodified snapshot. Empty same-owner snapshots do
   // not establish an inter-owner edge and are removed before publication.
-  if (!sequence.emit_all(
+  sequence
+      .append(
           instrumentation::build_s_mov_b64(validated_exec, kAmdGpuExecLo, arch),
           instrumentation::build_s_and_b64(same_owner_exec, same_owner_exec, kAmdGpuExecLo, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, same_owner_exec, arch)) ||
-      !valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), snapshot_count, arch)) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 14u),
-                                                      kAmdGpuExecLo, arch)))
-    return false;
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, same_owner_exec, arch))
+      .require(valid_exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(
+          scalar_positive_inline_u32(0), snapshot_count, arch)))
+      .append(instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 14u),
+                                               kAmdGpuExecLo, arch));
   words.push_back(build_v_mov_b32_e32(
       producer_owner_vgpr, vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 9u)), arch));
   words.push_back(build_v_mov_b32_e32(
@@ -938,29 +913,25 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         static_cast<uint16_t>(scratch_vgpr + 13u + i),
         vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 14u + i)), arch));
   }
-  if (!sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(temporary_vgpr,
-                                                   std::numeric_limits<uint32_t>::max(), arch),
-          instrumentation::build_v_add_u32(snapshot_count, vector_source_vgpr(temporary_vgpr),
-                                           snapshot_count, arch),
-          instrumentation::build_v_mov_b32_literal(temporary_vgpr, 0u, arch)))
-    return false;
+  sequence.append(instrumentation::build_v_mov_b32_literal(
+                      temporary_vgpr, std::numeric_limits<uint32_t>::max(), arch),
+                  instrumentation::build_v_add_u32(
+                      snapshot_count, vector_source_vgpr(temporary_vgpr), snapshot_count, arch),
+                  instrumentation::build_v_mov_b32_literal(temporary_vgpr, 0u, arch));
   words.push_back(build_v_mov_b32_e32(
       static_cast<uint16_t>(scratch_vgpr + 9u + kConSanMoiInlineCausalSnapshotEntryCapacity - 1u),
       vector_source_vgpr(temporary_vgpr), arch));
   words.push_back(build_v_mov_b32_e32(
       static_cast<uint16_t>(scratch_vgpr + 13u + kConSanMoiInlineCausalSnapshotEntryCapacity - 1u),
       vector_source_vgpr(temporary_vgpr), arch));
-  if (!sequence.emit_all(
+  sequence
+      .append(
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, validated_exec, same_owner_exec, arch),
           instrumentation::build_s_xor_b64(kAmdGpuExecLo, kAmdGpuExecLo,
                                            static_cast<uint16_t>(exec_base + 14u), arch),
           instrumentation::build_s_mov_b64(same_owner_exec, static_cast<uint16_t>(exec_base + 14u),
-                                           arch)))
-    return false;
-
-  if (!sequence.emit_branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero))
-    return false;
+                                           arch))
+      .branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero);
 
   if (!release_sequence_only) {
     // Only a fully validated acquire establishes a new consumer segment. In
@@ -977,58 +948,52 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     const bool widen_consumer_segment = inline_access_present && !plan.persistent_sgprs.epoch();
     std::vector<uint32_t> advance_words;
     InstructionSequence advance_sequence(advance_words);
-    if ((widen_consumer_segment && !advance_sequence.emit(instrumentation::build_s_mov_b64(
-                                       kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch))) ||
-        !advance_sequence.emit_all(
-            instrumentation::build_v_add_u32(plan.owner_epoch_vgprs.epoch,
-                                             scalar_positive_inline_u32(1),
-                                             plan.owner_epoch_vgprs.epoch, arch),
-            instrumentation::build_v_min_u32_literal(plan.owner_epoch_vgprs.epoch,
-                                                     consan_moi_exact_shadow::max_epoch,
-                                                     plan.owner_epoch_vgprs.epoch, arch)) ||
-        (widen_consumer_segment &&
-         !advance_sequence.emit(instrumentation::build_s_mov_b64(
-             kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 16u), arch)))) {
-      errors.emplace_back("ConSan MOI inline acquire could not advance its consumer segment");
-      return false;
-    }
+    if (widen_consumer_segment)
+      advance_sequence.append(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch));
+    advance_sequence.append(instrumentation::build_v_add_u32(plan.owner_epoch_vgprs.epoch,
+                                                             scalar_positive_inline_u32(1),
+                                                             plan.owner_epoch_vgprs.epoch, arch),
+                            instrumentation::build_v_min_u32_literal(
+                                plan.owner_epoch_vgprs.epoch, consan_moi_exact_shadow::max_epoch,
+                                plan.owner_epoch_vgprs.epoch, arch));
+    if (widen_consumer_segment)
+      advance_sequence.append(instrumentation::build_s_mov_b64(
+          kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 16u), arch));
+    require_emission(advance_sequence.finish(),
+                     "ConSan MOI inline acquire could not advance its consumer segment");
     if (plan.persistent_sgprs.epoch()) {
-      if (!advance_sequence.emit_all(
-              instrumentation::build_v_readfirstlane_b32(*plan.persistent_sgprs.epoch(),
-                                                         plan.owner_epoch_vgprs.epoch, arch),
-              instrumentation::build_valu_to_salu_dependency_wait(arch))) {
-        errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
-        return false;
-      }
+      require_emission(advance_sequence.emit_all(
+                           instrumentation::build_v_readfirstlane_b32(
+                               *plan.persistent_sgprs.epoch(), plan.owner_epoch_vgprs.epoch, arch),
+                           instrumentation::build_valu_to_salu_dependency_wait(arch)),
+                       "ConSan MOI inline acquire could not persist its consumer segment");
       // The next atomic/access cave rematerializes this scalar epoch into a
       // VGPR. Make the vector-to-scalar transfer architecturally visible
       // before returning to guest control, rather than relying on elapsed
       // instructions in this cave to resolve the dependency.
     }
-    if (widen_consumer_segment &&
-        !sequence.emit(instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 16u),
-                                                        kAmdGpuExecLo, arch))) {
-      errors.emplace_back("ConSan MOI inline acquire could not save its validated lanes");
-      return false;
-    }
+    if (widen_consumer_segment)
+      require_emission(sequence.emit(instrumentation::build_s_mov_b64(
+                           static_cast<uint16_t>(exec_base + 16u), kAmdGpuExecLo, arch)),
+                       "ConSan MOI inline acquire could not save its validated lanes");
     const InstructionSequence::Label consumer_segment_done = sequence.make_label();
-    if (!sequence.emit_branch(consumer_segment_done, InstructionSequence::BranchKind::ExecZero) ||
-        !sequence.emit(advance_words) || !sequence.bind(consumer_segment_done)) {
-      errors.emplace_back("ConSan MOI inline acquire could not guard its consumer segment");
-      return false;
-    }
+    require_emission(
+        sequence.emit_branch(consumer_segment_done, InstructionSequence::BranchKind::ExecZero) &&
+            sequence.emit(advance_words) && sequence.bind(consumer_segment_done),
+        "ConSan MOI inline acquire could not guard its consumer segment");
   }
 
-  if (!append_inline_acquired_token_transaction(
+  sequence
+      .require(append_inline_acquired_token_transaction(
           words, plan, scratch_vgpr, address_vgpr, workgroup_key_vgpr, producer_owner_vgpr,
           token_value_vgpr, version_before, snapshot_count,
           static_cast<uint16_t>(scratch_vgpr + 9u), static_cast<uint16_t>(scratch_vgpr + 13u),
           token_table_base, token_table_capacity, release_sequence_only, same_owner_exec, arch))
-    return false;
-  return sequence.bind(restore_workgroup) &&
-         sequence.emit(instrumentation::build_s_mov_b64(
-             kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 12u), arch)) &&
-         sequence.resolve_branches(arch);
+      .bind_label(restore_workgroup)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo,
+                                               static_cast<uint16_t>(exec_base + 12u), arch));
+  return sequence.finish(arch);
 }
 
 // Capture the complete stable causal frontier for the currently active
