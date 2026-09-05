@@ -259,17 +259,10 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
     if (!fragment)
       return;
     if (entry.runtime_gate && entry.runtime_sources) {
-      auto gate = build_moi_runtime_workgroup_gate_prefix(*entry.runtime_gate,
-                                                          *entry.runtime_sources, target.arch);
-      if (!gate) {
-        result.errors.emplace_back(
-            "ConSan MOI first-light probe could not encode its runtime workgroup gate");
+      if (!prepend_moi_runtime_workgroup_gate(*fragment, *entry.runtime_gate,
+                                              *entry.runtime_sources, target.arch, result.errors,
+                                              "MOI first-light probe"))
         return;
-      }
-      fragment->branch_fixups.push_back({.word_index = gate->bypass_branch_word,
-                                         .target = ConSanTextFragmentBranchTarget::Bypass});
-      fragment->before_words.insert(fragment->before_words.begin(), gate->words.begin(),
-                                    gate->words.end());
     }
     fragments.push_back(std::move(*fragment));
   }

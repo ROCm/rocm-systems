@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::consan_moi_impl {
@@ -59,6 +60,11 @@ plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
 build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
                                         const ConSanMoiWorkgroupSources &workgroup_sources,
                                         rj_code_arch_t arch);
+
+[[nodiscard]] bool prepend_moi_runtime_workgroup_gate(
+    ConSanTextFragment &fragment, const MoiRuntimeWorkgroupGatePlan &plan,
+    const ConSanMoiWorkgroupSources &workgroup_sources, rj_code_arch_t arch,
+    std::vector<std::string> &errors, std::string_view patch_name);
 
 [[nodiscard]] uint64_t
 moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,

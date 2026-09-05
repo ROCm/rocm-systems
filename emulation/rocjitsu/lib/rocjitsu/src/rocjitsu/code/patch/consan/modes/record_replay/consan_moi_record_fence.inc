@@ -209,17 +209,10 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
       return;
     if (!planned.candidate.capture_address_before_guest &&
         candidate_options.runtime_workgroup_gate) {
-      auto gate = build_moi_runtime_workgroup_gate_prefix(
-          *candidate_options.runtime_workgroup_gate, candidate_options.workgroup_sources, arch);
-      if (!gate) {
-        result.errors.emplace_back(
-            "ConSan MOI fence record patch could not encode its runtime workgroup gate");
+      if (!prepend_moi_runtime_workgroup_gate(*fragment, *candidate_options.runtime_workgroup_gate,
+                                              candidate_options.workgroup_sources, arch,
+                                              result.errors, "MOI fence record patch"))
         return;
-      }
-      fragment->branch_fixups.push_back({.word_index = gate->bypass_branch_word,
-                                         .target = ConSanTextFragmentBranchTarget::Bypass});
-      fragment->before_words.insert(fragment->before_words.begin(), gate->words.begin(),
-                                    gate->words.end());
     }
     fragments.push_back(std::move(*fragment));
     ++record_index;

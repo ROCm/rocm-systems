@@ -153,17 +153,10 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     if (!fragment)
       return;
     if (accesses_are_runtime_gated && planned.emission.runtime_workgroup_gate) {
-      auto gate = build_moi_runtime_workgroup_gate_prefix(*planned.emission.runtime_workgroup_gate,
-                                                          planned.emission.workgroup_sources, arch);
-      if (!gate) {
-        result.errors.emplace_back(
-            "ConSan MOI barrier record patch could not encode its runtime workgroup gate");
+      if (!prepend_moi_runtime_workgroup_gate(*fragment, *planned.emission.runtime_workgroup_gate,
+                                              planned.emission.workgroup_sources, arch,
+                                              result.errors, "MOI barrier record patch"))
         return;
-      }
-      fragment->branch_fixups.push_back({.word_index = gate->bypass_branch_word,
-                                         .target = ConSanTextFragmentBranchTarget::Bypass});
-      fragment->before_words.insert(fragment->before_words.begin(), gate->words.begin(),
-                                    gate->words.end());
     }
     fragments.push_back(std::move(*fragment));
   }

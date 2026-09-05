@@ -211,4 +211,22 @@ build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
   return result;
 }
 
+bool prepend_moi_runtime_workgroup_gate(ConSanTextFragment &fragment,
+                                        const MoiRuntimeWorkgroupGatePlan &plan,
+                                        const ConSanMoiWorkgroupSources &workgroup_sources,
+                                        rj_code_arch_t arch, std::vector<std::string> &errors,
+                                        std::string_view patch_name) {
+  auto gate = build_moi_runtime_workgroup_gate_prefix(plan, workgroup_sources, arch);
+  if (!gate) {
+    errors.emplace_back("ConSan " + std::string(patch_name) +
+                        " could not encode its runtime workgroup gate");
+    return false;
+  }
+  fragment.branch_fixups.push_back(
+      {.word_index = gate->bypass_branch_word, .target = ConSanTextFragmentBranchTarget::Bypass});
+  fragment.before_words.insert(fragment.before_words.begin(), gate->words.begin(),
+                               gate->words.end());
+  return true;
+}
+
 } // namespace rocjitsu::consan_moi_impl
