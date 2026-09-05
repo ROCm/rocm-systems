@@ -209,6 +209,7 @@ ncclResult_t g_ncclNetInitResult        = ncclSuccess;
 ncclResult_t g_ncclGinInitResult        = ncclSuccess;
 ncclResult_t g_ncclStrongStreamResult   = ncclSuccess;
 ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
+int g_ncclMemManagerInitCalls = 0;
 ncclResult_t g_amdSmiInitResult         = ncclSuccess;
 // Defaults to failure so the bootstrapAllGather call sites no test reaches stay fail-fast.
 std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather =
@@ -304,7 +305,6 @@ std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLin
     [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset =
     [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
-int g_ncclTopoPresetCalls                   = 0;
 ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
 int g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
 int g_rcclRomeConsensusNranks               = -1;
@@ -327,7 +327,10 @@ ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return 
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
 size_t ncclOsGetPageSize() { return 4096; }
-extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemManagerInitResult; }
+extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) {
+  g_ncclMemManagerInitCalls++;
+  return g_ncclMemManagerInitResult;
+}
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 
@@ -386,6 +389,7 @@ void ResetInitFakes() {
   g_ncclGinInitResult = ncclSuccess;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclMemManagerInitResult = ncclSuccess;
+  g_ncclMemManagerInitCalls = 0;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;
@@ -450,7 +454,6 @@ void ResetInitFakes() {
   };
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
-  g_ncclTopoPresetCalls = 0;
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
   g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
   g_rcclRomeConsensusNranks = -1;

@@ -201,6 +201,7 @@ hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 int        g_hipDirectManagedMemAccess   = 1;
 int        g_hipMemcpyAsyncCalls        = 0;
+std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
 // Restore every HIP hook to its default.
 void ResetHipFakes()
@@ -235,6 +236,7 @@ void ResetHipFakes()
     g_hipWarpSize                   = 64;
     g_hipDirectManagedMemAccess     = 1;
     g_hipMemcpyAsyncCalls           = 0;
+    g_hipMemcpyAsyncArgs.clear();
 }
 
 // ===========================================================================
@@ -408,10 +410,11 @@ hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t)
 
 hipError_t hipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
 
-hipError_t hipMemcpyAsync(void*, const void*, size_t, hipMemcpyKind,
+hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind,
                           hipStream_t)
 {
     g_hipMemcpyAsyncCalls++;
+    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes});
     return g_hipAsyncOpsResult;
 }
 

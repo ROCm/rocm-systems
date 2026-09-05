@@ -86,6 +86,8 @@ extern ncclResult_t g_ncclNetInitResult;
 extern ncclResult_t g_ncclGinInitResult;
 extern ncclResult_t g_ncclStrongStreamResult;
 extern ncclResult_t g_ncclMemManagerInitResult;
+// The fake writes nothing to comm->memManager, so the call count is the only proof init.cc:806 ran.
+extern int g_ncclMemManagerInitCalls;
 extern ncclResult_t g_amdSmiInitResult;
 
 // A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
@@ -205,7 +207,6 @@ extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTo
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
-extern int g_ncclTopoPresetCalls;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
 extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
 // What :1999's three lambdas answer for rank 0, i.e. the romeTopoModelIdx and hostname :1974-1975 marshalled.
