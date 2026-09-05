@@ -1,5 +1,42 @@
 # ConSan ninth refactoring: unify program identity and delete representation boundaries
 
+## Aggressive shrinkage steer
+
+At commit `97b7604c343`, the governing implementation contains **66,090
+lines**.  The next campaign is deliberately bounded to approximately twelve
+hours and seeks evidence for, and preferably realization of, another
+approximately **20,000 lines of responsible net deletion**.  This is an
+ambitious search mandate rather than permission to remove behavior, weaken
+validation, hide implementation outside the governing scope, or delete tests.
+All supported modes, targets, and established tests remain contractual.
+
+Shrinkage is now a key observable signal of architectural improvement.  A
+line-positive architectural change is acceptable only as the first part of a
+short, named replacement that deletes its displaced implementation in the
+same campaign.  It must not become another open-ended investment plateau.
+Local identity polishing, facade extraction, physical file movement, and
+one-off helper factoring are deferred unless they directly unlock that
+deletion.
+
+The search is intentionally aggressive and the candidate set remains open.
+It starts from the largest current regions and permits replacement of internal
+data structures, deliberately less domain-tailored shared representations,
+declarative tables, and subsystem-scale rewrites.  Each candidate receives a
+short hard-case investigation.  Work proceeds when the current code provides
+a credible path to deleting at least a substantial contiguous mechanism—not
+merely when two types or functions look similar.  A prototype that adds an
+adapter without making old code immediately removable is reverted or
+abandoned.
+
+The bounded campaign must not turn into an infinite sequence of increasingly
+small cleanups.  If repeated hard-case investigations across the largest
+remaining regions do not expose major deletion, that negative result is itself
+the requested signal: report the evidence and reassess the belief that another
+20,000 lines can be removed without changing ConSan's product scope.  The
+numeric aspiration does not redefine correctness or the ninth refactoring's
+ultimate exhaustion criterion; it changes prioritization, risk tolerance, and
+the time allowed before an explicit evidence-based reassessment.
+
 ## Governing continuation rule
 
 The ninth refactoring has two independent objectives: improve ConSan's actual
