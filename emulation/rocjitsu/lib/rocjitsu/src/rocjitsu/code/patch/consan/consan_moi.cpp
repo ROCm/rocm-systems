@@ -323,7 +323,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
   if (result.errors.empty() && !result.staged_text_fragments.empty() &&
-      !finalize_consan_text_rewrites(result.replacement, arch, effective_options,
+      !finalize_consan_text_rewrites(result.replacement, arch,
+                                     effective_options.patched_image_growth_limit,
                                      "MOI text programs", result)) {
     result.discard_candidate_modification();
   }

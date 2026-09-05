@@ -607,7 +607,8 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
                                          ? "SuperCollider access proof"
                                      : options.probe_lds_check_trap ? "LDS check/trap proof"
                                                                     : "flat check/trap proof";
-    if (!finalize_consan_text_rewrites(result.replacement, arch, options, subject, result))
+    if (!finalize_consan_text_rewrites(result.replacement, arch,
+                                       options.patched_image_growth_limit, subject, result))
       result.discard_candidate_modification();
   }
 

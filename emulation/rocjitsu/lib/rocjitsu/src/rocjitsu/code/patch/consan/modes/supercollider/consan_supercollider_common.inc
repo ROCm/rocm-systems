@@ -218,8 +218,8 @@ private:
     std::optional<uint16_t> allocation_limit, uint16_t required_vgprs, uint16_t alignment,
     uint16_t max_referenced_count = 0u) {
   if (options.scratch_vgpr)
-    return choose_scratch_vgpr(access, options, inst, nullptr, search_start, allocation_limit,
-                               required_vgprs);
+    return choose_scratch_vgpr(access, options.scratch_vgpr, inst, nullptr, search_start,
+                               allocation_limit, required_vgprs);
   if (!inst || owner_liveness.empty() || required_vgprs > UINT8_MAX ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return !liveness; }) ||
       !access.lowering.form)

@@ -366,11 +366,15 @@ foreach(_source IN ITEMS
     consan_fault_injection.inc
     consan_perturbation.h
     consan_perturbation.cpp
+    consan_placement.h
+    consan_placement.inc
+    consan_text_relocation.h
+    consan_text_relocation.cpp
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"
         "ConSanOptions"
-        "fault and perturbation transforms must consume semantic input contracts directly"
+        "transform mechanisms must consume exact input contracts rather than the orchestration aggregate"
     )
 endforeach()
 

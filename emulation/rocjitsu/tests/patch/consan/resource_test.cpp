@@ -29,9 +29,11 @@ TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
   ConSanOptions options;
   options.scratch_vgpr = 8u;
   EXPECT_FALSE(
-      choose_scratch_vgpr(access, options, nullptr, nullptr, std::nullopt, std::nullopt, 2u));
+      choose_scratch_vgpr(access, options.scratch_vgpr, nullptr, nullptr, std::nullopt,
+                          std::nullopt, 2u));
   options.scratch_vgpr = 10u;
-  EXPECT_EQ(choose_scratch_vgpr(access, options, nullptr, nullptr, std::nullopt, std::nullopt, 2u),
+  EXPECT_EQ(choose_scratch_vgpr(access, options.scratch_vgpr, nullptr, nullptr, std::nullopt,
+                               std::nullopt, 2u),
             10u);
   EXPECT_EQ(choose_spill_scratch_vgpr(access, 12u, 2u), 10u);
 }

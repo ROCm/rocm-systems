@@ -93,7 +93,8 @@ find_first_relocatable_anchor(const AmdGpuCodeObject &code_object, rj_code_arch_
 required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
                                                 uint16_t scratch_vgpr, uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access, const ConSanOptions &options,
+choose_scratch_vgpr(const ConSanProgramSite &access,
+                    std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *instruction, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs);

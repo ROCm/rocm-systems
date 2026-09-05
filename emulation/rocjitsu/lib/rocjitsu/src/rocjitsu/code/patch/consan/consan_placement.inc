@@ -515,15 +515,16 @@ find_liveness_scratch_vgpr(const ConSanProgramSite &access, const Instruction *i
 }
 
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access, const ConSanOptions &options,
+choose_scratch_vgpr(const ConSanProgramSite &access,
+                    std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *inst, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
-  if (options.scratch_vgpr) {
-    if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        access_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
-        !is_forbidden_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
-      return *options.scratch_vgpr;
+  if (requested_scratch_vgpr) {
+    if (static_cast<uint32_t>(*requested_scratch_vgpr) + required_vgprs <= 256 &&
+        access_scratch_tuple_base_is_valid(access, *requested_scratch_vgpr) &&
+        !is_forbidden_scratch_vgpr_run(access, *requested_scratch_vgpr, required_vgprs))
+      return *requested_scratch_vgpr;
     return std::nullopt;
   }
 

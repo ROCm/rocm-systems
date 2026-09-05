@@ -39,7 +39,8 @@ stage_consan_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t a
 
 /// Commit all staged access programs through one object-wide relocation.
 [[nodiscard]] bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
-                                                 rj_code_arch_t arch, const ConSanOptions &options,
+                                                 rj_code_arch_t arch,
+                                                 ConSanPatchedImageGrowthLimit growth_limit,
                                                  std::string_view subject,
                                                  ConSanTransformArtifacts &result);
 

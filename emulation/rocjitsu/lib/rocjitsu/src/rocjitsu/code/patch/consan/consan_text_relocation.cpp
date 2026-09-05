@@ -349,7 +349,7 @@ namespace {
 
 std::optional<ConSanRelocatedText>
 relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_arch_t arch,
-                     const ConSanOptions &consan_options, std::string_view operation,
+                     ConSanPatchedImageGrowthLimit growth_limit, std::string_view operation,
                      ConSanTransformArtifacts &result) {
   const auto &fragments = result.staged_text_fragments;
   const ConSanCodeObjectId &input_id = result.program_inventory.code_object_id();
@@ -439,9 +439,9 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
 
   const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
   const auto limit = consan_patched_image_growth_limit_bytes(
-      consan_options.patched_image_growth_limit, input_image_bytes);
+      growth_limit, input_image_bytes);
   const std::string policy = consan_patched_image_growth_policy_description(
-      consan_options.patched_image_growth_limit, input_image_bytes);
+      growth_limit, input_image_bytes);
   if (!limit) {
     errors.emplace_back(error_prefix + " has an invalid patched-image growth policy (" + policy +
                         ")");
@@ -528,12 +528,13 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
 } // namespace
 
 bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj_code_arch_t arch,
-                                   const ConSanOptions &options, std::string_view subject,
+                                   ConSanPatchedImageGrowthLimit growth_limit,
+                                   std::string_view subject,
                                    ConSanTransformArtifacts &result) {
   if (result.staged_text_fragments.empty())
     return true;
 
-  auto relocated = relocate_consan_text(descriptor_image, arch, options, subject, result);
+  auto relocated = relocate_consan_text(descriptor_image, arch, growth_limit, subject, result);
   if (!relocated)
     return false;
   std::vector<ConSanPatchInfo> placed_patches;
