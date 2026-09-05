@@ -138,14 +138,14 @@ ConSanEvidenceRequirements
 consan_moi_impl::plan_sampled_evidence_requirements(const MoiEvidencePlanningContext &context) {
   ConSanSampledEvidenceRequirements requirements;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      context.evidence_intents, ConSanCapabilityEngine::Sampled);
+      context.observation_plan, ConSanCapabilityEngine::Sampled);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::Sampled;
   (void)consan_moi_impl::accumulate_moi_evidence_counts(
-      context.evidence_intents, context.maximum_access_probe_count, inventory);
+      context.observation_plan, context.maximum_access_probe_count, inventory);
 
   constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
   const uint64_t access_banks =

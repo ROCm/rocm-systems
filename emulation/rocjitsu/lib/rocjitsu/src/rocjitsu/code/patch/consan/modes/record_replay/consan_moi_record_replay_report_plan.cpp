@@ -232,14 +232,14 @@ ConSanEvidenceRequirements consan_moi_impl::plan_record_replay_evidence_requirem
     const MoiEvidencePlanningContext &context) {
   ConSanRecordReplayEvidenceRequirements requirements;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      context.evidence_intents, ConSanCapabilityEngine::RecordReplay);
+      context.observation_plan, ConSanCapabilityEngine::RecordReplay);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
   (void)consan_moi_impl::accumulate_moi_evidence_counts(
-      context.evidence_intents, context.maximum_access_probe_count, inventory);
+      context.observation_plan, context.maximum_access_probe_count, inventory);
   const bool has_evidence = inventory.access_range_count != 0u ||
                             inventory.barrier_event_count != 0u ||
                             inventory.atomic_event_count != 0u || inventory.fence_event_count != 0u;

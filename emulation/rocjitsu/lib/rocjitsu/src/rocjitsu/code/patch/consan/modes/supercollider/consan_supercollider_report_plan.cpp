@@ -21,12 +21,12 @@ bool ConSanSuperColliderEvidenceRequirements::well_formed() const {
 }
 
 ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan,
                                    ConSanSuperColliderEvidenceMode mode) {
   ConSanSuperColliderEvidenceRequirements requirements;
   requirements.mode = mode;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      evidence_intents, ConSanCapabilityEngine::SuperCollider);
+      observation_plan, ConSanCapabilityEngine::SuperCollider);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
   if (mode != ConSanSuperColliderEvidenceMode::TrapOnly &&
@@ -40,7 +40,7 @@ plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_inte
     return requirements;
   }
 
-  requirements.marker_bytes = evidence_intents.intents.empty() ? 0u : sizeof(uint32_t);
+  requirements.marker_bytes = observation_plan.probe_intents.empty() ? 0u : sizeof(uint32_t);
   requirements.runtime_requirements.host_device_visible_memory = true;
   requirements.runtime_requirements.host_device_coherent_memory = true;
   requirements.runtime_requirements.minimum_report_allocation_bytes = requirements.marker_bytes;

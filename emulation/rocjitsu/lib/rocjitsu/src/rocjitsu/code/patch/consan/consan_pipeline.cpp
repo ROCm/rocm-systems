@@ -833,25 +833,23 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
   result.publish_lowering_artifacts(std::move(lowering));
 
   if (flavor != ConSanFlavor::None && result.observation_plan().valid()) {
-    const ConSanEvidenceIntentPlan evidence_intents =
-        plan_consan_evidence_intents(result.observation_plan());
     const std::optional<uint64_t> maximum_access_probe_count =
         transform_policy.max_patches_is_expert_limit
             ? std::optional<uint64_t>{transform_policy.max_patches}
             : std::nullopt;
     if (flavor == ConSanFlavor::SuperCollider) {
-      result.evidence_requirements =
-          plan_consan_supercollider_evidence(evidence_intents, request.supercollider_evidence_mode);
+      result.evidence_requirements = plan_consan_supercollider_evidence(
+          result.observation_plan(), request.supercollider_evidence_mode);
     } else if (flavor == ConSanFlavor::Moi) {
       result.evidence_requirements = consan_moi_impl::plan_moi_evidence_requirements(
           request.moi_engine, {.program_inventory = result.program_inventory,
-                               .evidence_intents = evidence_intents,
+                               .observation_plan = result.observation_plan(),
                                .requested_report_buffer_size = request.moi_auto_report_buffer_size,
                                .maximum_access_probe_count = maximum_access_probe_count,
                                .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes,
                                .dynamic_access_records = request.moi_dynamic_access_records});
     }
-    if (!evidence_intents.well_formed() || !result.evidence_requirements ||
+    if (!result.evidence_requirements ||
         !consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
       result.errors.emplace_back("ConSan produced invalid runtime evidence requirements");
       result.outcome = ConSanTransformOutcome::Invalid;

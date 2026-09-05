@@ -60,53 +60,6 @@ bool plan_moi_report_regions(std::initializer_list<MoiReportRegionPlan> regions,
   return true;
 }
 
-ConSanEvidenceRequirementReason
-validate_moi_evidence_intents(const ConSanEvidenceIntentPlan &plan,
-                              ConSanCapabilityEngine expected_engine) {
-  if (plan.reason != ConSanEvidenceRequirementReason::None)
-    return plan.reason;
-  if (!plan.well_formed())
-    return ConSanEvidenceRequirementReason::InvalidIntentPayload;
-  if (plan.engine != expected_engine)
-    return ConSanEvidenceRequirementReason::WrongEngine;
-  return ConSanEvidenceRequirementReason::None;
-}
-
-std::vector<const ConSanEvidenceIntent *>
-accumulate_moi_evidence_counts(const ConSanEvidenceIntentPlan &plan,
-                               std::optional<uint64_t> maximum_access_probe_count,
-                               ConSanMoiAutoReportInventory &inventory) {
-  std::vector<const ConSanEvidenceIntent *> retained_accesses;
-  uint64_t selected_access_probe_count = 0;
-  for (const ConSanEvidenceIntent &intent : plan.intents) {
-    switch (intent.kind) {
-    case ConSanEvidenceIntentKind::Access:
-      if (maximum_access_probe_count &&
-          selected_access_probe_count >= *maximum_access_probe_count) {
-        break;
-      }
-      ++selected_access_probe_count;
-      retained_accesses.push_back(&intent);
-      add_saturating(inventory.access_range_count, intent.element_count);
-      break;
-    case ConSanEvidenceIntentKind::Barrier:
-      add_saturating(inventory.barrier_event_count, intent.element_count);
-      break;
-    case ConSanEvidenceIntentKind::Atomic:
-      add_saturating(inventory.atomic_event_count, intent.element_count);
-      break;
-    case ConSanEvidenceIntentKind::Fence:
-      add_saturating(inventory.fence_event_count, intent.element_count);
-      break;
-    case ConSanEvidenceIntentKind::AddressCapture:
-    case ConSanEvidenceIntentKind::StickyMarker:
-    case ConSanEvidenceIntentKind::Count:
-      break;
-    }
-  }
-  return retained_accesses;
-}
-
 void publish_moi_evidence_requirements(ConSanMoiEvidenceRequirements &requirements,
                                        ConSanMoiAutoReportInventory inventory,
                                        uint64_t caller_ceiling_bytes) {
@@ -222,17 +175,6 @@ classify_evidence_intent(const ConSanEngineProbeVocabulary &vocabulary, Probe ki
   return std::nullopt;
 }
 
-[[nodiscard]] constexpr bool accepts_evidence_intent(const ConSanEngineProbeVocabulary &vocabulary,
-                                                     Evidence kind) {
-  const Evidence access_evidence =
-      vocabulary.sticky_access_evidence ? Evidence::StickyMarker : Evidence::Access;
-  return kind == access_evidence ||
-         (kind == Evidence::AddressCapture && vocabulary.address_capture) ||
-         (kind == Evidence::Barrier && vocabulary.barrier != Probe::Count) ||
-         (kind == Evidence::Atomic && vocabulary.atomic != Probe::Count) ||
-         (kind == Evidence::Fence && vocabulary.fence != Probe::Count);
-}
-
 [[nodiscard]] constexpr ConSanSemanticSiteDomain
 evidence_intent_domain(ConSanEvidenceIntentKind kind) {
   return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::StickyMarker
@@ -261,73 +203,80 @@ evidence_intent_domain(ConSanEvidenceIntentKind kind) {
 
 } // namespace
 
-bool ConSanEvidenceIntentPlan::well_formed() const {
+std::optional<ConSanEvidenceIntentKind> consan_evidence_intent_kind(ConSanCapabilityEngine engine,
+                                                                    ConSanProbeIntentKind kind) {
   const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(engine);
-  if (reason != ConSanEvidenceRequirementReason::None || vocabulary == nullptr)
-    return false;
-  for (size_t index = 0; index < intents.size(); ++index) {
-    const ConSanEvidenceIntent &intent = intents[index];
-    if (intent.source_intent.value != index || !intent.source_site.valid() ||
-        !accepts_evidence_intent(*vocabulary, intent.kind) || intent.semantic_sites.empty() ||
-        std::ranges::any_of(intent.semantic_sites,
-                            [](const SemanticSiteId &site) { return !site.valid(); }) ||
-        std::ranges::any_of(intent.semantic_sites,
-                            [&](const SemanticSiteId &site) {
-                              return site.domain != evidence_intent_domain(intent.kind);
-                            }) ||
-        intent.element_count !=
-            evidence_element_count(*vocabulary, intent.kind, intent.semantic_sites)) {
-      return false;
-    }
-  }
-  return true;
+  return vocabulary == nullptr ? std::nullopt : classify_evidence_intent(*vocabulary, kind);
 }
 
-ConSanEvidenceIntentPlan
-plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan) {
-  ConSanEvidenceIntentPlan plan;
-  plan.engine = observation_plan.engine;
-  if (!observation_plan.valid()) {
-    plan.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-    return plan;
-  }
-  const ConSanEngineProbeVocabulary *vocabulary =
-      consan_engine_probe_vocabulary(observation_plan.engine);
-  if (vocabulary == nullptr) {
-    plan.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-    return plan;
-  }
+std::optional<uint64_t> consan_evidence_element_count(ConSanCapabilityEngine engine,
+                                                      const ConSanProbeIntent &intent) {
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(engine);
+  const auto kind = consan_evidence_intent_kind(engine, intent.kind);
+  if (vocabulary == nullptr || !kind)
+    return std::nullopt;
+  return evidence_element_count(*vocabulary, *kind, intent.covered_semantic_sites);
+}
 
-  plan.intents.reserve(observation_plan.probe_intents.size());
-  for (const ConSanProbeIntent &probe : observation_plan.probe_intents) {
-    const std::optional<Evidence> kind = classify_evidence_intent(*vocabulary, probe.kind);
-    if (!kind) {
-      plan.intents.clear();
-      plan.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
-      return plan;
-    }
-    ConSanEvidenceIntent intent{
-        .source_intent = probe.id,
-        .source_site = probe.source_site,
-        .kind = *kind,
-        .semantic_sites = probe.covered_semantic_sites,
-    };
-    intent.element_count = evidence_element_count(*vocabulary, intent.kind, intent.semantic_sites);
-    if (std::ranges::any_of(intent.semantic_sites, [&](const SemanticSiteId &site) {
-          return site.domain != evidence_intent_domain(intent.kind);
-        })) {
-      plan.intents.clear();
-      plan.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-      return plan;
-    }
-    plan.intents.push_back(std::move(intent));
+ConSanEvidenceRequirementReason
+consan_moi_impl::validate_moi_evidence_intents(const ConSanObservationPlan &plan,
+                                               ConSanCapabilityEngine expected_engine) {
+  if (!plan.valid())
+    return ConSanEvidenceRequirementReason::InvalidObservationPlan;
+  if (plan.engine != expected_engine)
+    return ConSanEvidenceRequirementReason::WrongEngine;
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(plan.engine);
+  if (vocabulary == nullptr)
+    return ConSanEvidenceRequirementReason::InvalidObservationPlan;
+  for (const ConSanProbeIntent &probe : plan.probe_intents) {
+    const std::optional<Evidence> kind = consan_evidence_intent_kind(plan.engine, probe.kind);
+    if (!kind)
+      return ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+    if (std::ranges::any_of(probe.covered_semantic_sites, [&](const SemanticSiteId &site) {
+          return site.domain != evidence_intent_domain(*kind);
+        }))
+      return ConSanEvidenceRequirementReason::InvalidIntentPayload;
   }
-  plan.reason = ConSanEvidenceRequirementReason::None;
-  if (!plan.well_formed()) {
-    plan.intents.clear();
-    plan.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+  return ConSanEvidenceRequirementReason::None;
+}
+
+std::vector<const ConSanProbeIntent *>
+consan_moi_impl::accumulate_moi_evidence_counts(const ConSanObservationPlan &plan,
+                                                std::optional<uint64_t> maximum_access_probe_count,
+                                                ConSanMoiAutoReportInventory &inventory) {
+  std::vector<const ConSanProbeIntent *> retained_accesses;
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(plan.engine);
+  if (vocabulary == nullptr)
+    return retained_accesses;
+  uint64_t selected_access_probe_count = 0;
+  for (const ConSanProbeIntent &intent : plan.probe_intents) {
+    const Evidence kind =
+        consan_evidence_intent_kind(plan.engine, intent.kind).value_or(Evidence::Count);
+    const uint64_t element_count = consan_evidence_element_count(plan.engine, intent).value_or(0u);
+    switch (kind) {
+    case Evidence::Access:
+      if (maximum_access_probe_count && selected_access_probe_count >= *maximum_access_probe_count)
+        break;
+      ++selected_access_probe_count;
+      retained_accesses.push_back(&intent);
+      add_saturating(inventory.access_range_count, element_count);
+      break;
+    case Evidence::Barrier:
+      add_saturating(inventory.barrier_event_count, element_count);
+      break;
+    case Evidence::Atomic:
+      add_saturating(inventory.atomic_event_count, element_count);
+      break;
+    case Evidence::Fence:
+      add_saturating(inventory.fence_event_count, element_count);
+      break;
+    case Evidence::AddressCapture:
+    case Evidence::StickyMarker:
+    case Evidence::Count:
+      break;
+    }
   }
-  return plan;
+  return retained_accesses;
 }
 
 bool consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements) {

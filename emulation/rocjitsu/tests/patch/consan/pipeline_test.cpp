@@ -697,8 +697,7 @@ TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCa
                            ConSanDebugOverrides{}, capabilities, BoundRuntimeResources{});
 
       ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
-      const ConSanEvidenceIntentPlan evidence_intents =
-          plan_consan_evidence_intents(result.observation_plan());
+      const ConSanObservationPlan &evidence_intents = result.observation_plan();
       switch (engine) {
       case ConSanMoiEngine::RecordReplay:
         EXPECT_EQ(

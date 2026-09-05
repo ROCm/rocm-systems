@@ -322,60 +322,15 @@ enum class ConSanEvidenceIntentKind : uint8_t {
   Count,
 };
 
-/// One admitted policy observation translated into report-facing meaning.
-///
-/// `source_intent` preserves the stable link to the observation plan.
-/// `semantic_sites` retains the exact logical facts being evidenced, while
-/// `element_count` states the number of ABI-level evidence elements required
-/// by this role. It is zero only for address capture, one for single-event or
-/// sticky-marker evidence, and may exceed one for coalesced access ranges or
-/// barrier sequences. The value owns no buffer address, byte offset, target
-/// encoding, allocation lifetime, or hook state.
-struct ConSanEvidenceIntent {
-  /// Plan-local observation intent from which this evidence was derived.
-  ConSanProbeIntentId source_intent;
-  /// Exact decoded site supplying immutable sizing facts for this evidence.
-  ConSanProgramSiteId source_site;
-  /// Flavor-neutral role consumed by report sizing and interpretation.
-  ConSanEvidenceIntentKind kind = ConSanEvidenceIntentKind::Count;
-  /// Stable semantic identities whose behavior this evidence represents.
-  std::vector<SemanticSiteId> semantic_sites;
-  /// Number of retained evidence elements required by the current protocol.
-  uint64_t element_count = 0;
+/// Evidence planning reads the authoritative observation intents directly.
+/// The evidence role and element count are deterministic views of an intent;
+/// retaining a second copied intent sequence would create another identity
+/// and synchronization boundary without owning any new fact.
+[[nodiscard]] std::optional<ConSanEvidenceIntentKind>
+consan_evidence_intent_kind(ConSanCapabilityEngine engine, ConSanProbeIntentKind kind);
 
-  bool operator==(const ConSanEvidenceIntent &) const = default;
-};
-
-/// Complete address-free evidence-policy output consumed by report planning.
-///
-/// Construction accepts exactly one valid `ConSanObservationPlan` and maps
-/// its flavor-specific probe vocabulary to the smaller evidence-role
-/// vocabulary above. A successful plan is deterministic and ordered by source
-/// intent. A failed plan carries a typed reason and no partial intents, so ABI
-/// sizing cannot accidentally proceed from a truncated policy result.
-struct ConSanEvidenceIntentPlan {
-  /// Engine whose evidence contract owns every intent in this plan.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
-  /// Deterministically ordered, buffer-independent evidence intents.
-  std::vector<ConSanEvidenceIntent> intents;
-  /// Construction result; `None` denotes a complete usable plan.
-  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-
-  /// Return whether identities, roles, domains, and element counts form the
-  /// complete schema for the selected engine.
-  [[nodiscard]] bool well_formed() const;
-
-  bool operator==(const ConSanEvidenceIntentPlan &) const = default;
-};
-
-/// Translate flavor policy into the sole report-facing intent authority.
-///
-/// The function reads no program bytes or runtime resources. Semantic facts
-/// remain stable identities from the observation plan; later layout code may
-/// join those identities to `ProgramInventory` only where a capacity depends
-/// on an immutable program property such as an InlineShadow LDS aperture.
-[[nodiscard]] ConSanEvidenceIntentPlan
-plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan);
+[[nodiscard]] std::optional<uint64_t>
+consan_evidence_element_count(ConSanCapabilityEngine engine, const ConSanProbeIntent &intent);
 
 /// Report-backed evidence contract shared by the three MOI engines.
 ///
@@ -514,7 +469,7 @@ consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requi
 /// Derive the fixed SuperCollider marker contract from a typed observation
 /// plan. No report-layout or allocation mechanism participates.
 [[nodiscard]] ConSanSuperColliderEvidenceRequirements plan_consan_supercollider_evidence(
-    const ConSanEvidenceIntentPlan &evidence_intents,
+    const ConSanObservationPlan &observation_plan,
     ConSanSuperColliderEvidenceMode mode = ConSanSuperColliderEvidenceMode::StickyMarker);
 
 /// Revalidates a caller-carried layout against the canonical planner and the

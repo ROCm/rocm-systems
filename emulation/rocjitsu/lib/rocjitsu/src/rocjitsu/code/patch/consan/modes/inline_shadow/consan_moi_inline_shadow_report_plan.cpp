@@ -133,20 +133,20 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
     const MoiEvidencePlanningContext &context) {
   ConSanInlineShadowEvidenceRequirements requirements;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      context.evidence_intents, ConSanCapabilityEngine::InlineShadow);
+      context.observation_plan, ConSanCapabilityEngine::InlineShadow);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::InlineShadow;
-  const std::vector<const ConSanEvidenceIntent *> retained_accesses =
+  const std::vector<const ConSanProbeIntent *> retained_accesses =
       consan_moi_impl::accumulate_moi_evidence_counts(
-          context.evidence_intents, context.maximum_access_probe_count, inventory);
+          context.observation_plan, context.maximum_access_probe_count, inventory);
   bool requires_full_lds_aperture = false;
   uint64_t declared_lds_extent = 0;
   uint64_t native_static_extent = 0;
-  for (const ConSanEvidenceIntent *intent : retained_accesses) {
-    for (const SemanticSiteId &range_id : intent->semantic_sites) {
+  for (const ConSanProbeIntent *intent : retained_accesses) {
+    for (const SemanticSiteId &range_id : intent->covered_semantic_sites) {
       const ConSanProgramSite *site = context.program_inventory.program_site(intent->source_site);
       if (site == nullptr || !site->has_access()) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;

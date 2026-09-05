@@ -285,14 +285,14 @@ struct ConSanInlineShadowCapacityPolicy {
 };
 
 [[nodiscard]] inline ConSanRecordReplayEvidenceRequirements
-plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
                                    const ConSanRecordReplayCapacityPolicy &policy = {}) {
   ProgramInventory unused_inventory;
   return std::get<ConSanRecordReplayEvidenceRequirements>(
       consan_moi_impl::plan_moi_evidence_requirements(
           ConSanMoiEngine::RecordReplay,
           {.program_inventory = unused_inventory,
-           .evidence_intents = evidence_intents,
+           .observation_plan = observation_plan,
            .requested_report_buffer_size = policy.caller_ceiling_bytes,
            .maximum_access_probe_count = policy.maximum_access_probe_count,
            .maximum_workgroup_lds_bytes = std::nullopt,
@@ -300,14 +300,14 @@ plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_inte
 }
 
 [[nodiscard]] inline ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
                              const ConSanSampledCapacityPolicy &policy = {}) {
   ProgramInventory unused_inventory;
   return std::get<ConSanSampledEvidenceRequirements>(
       consan_moi_impl::plan_moi_evidence_requirements(
           ConSanMoiEngine::Sampled,
           {.program_inventory = unused_inventory,
-           .evidence_intents = evidence_intents,
+           .observation_plan = observation_plan,
            .requested_report_buffer_size = policy.caller_ceiling_bytes,
            .maximum_access_probe_count = policy.maximum_access_probe_count,
            .maximum_workgroup_lds_bytes = std::nullopt,
@@ -316,13 +316,13 @@ plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
 
 [[nodiscard]] inline ConSanInlineShadowEvidenceRequirements
 plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
-                                   const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanObservationPlan &observation_plan,
                                    const ConSanInlineShadowCapacityPolicy &policy = {}) {
   return std::get<ConSanInlineShadowEvidenceRequirements>(
       consan_moi_impl::plan_moi_evidence_requirements(
           ConSanMoiEngine::InlineShadow,
           {.program_inventory = inventory,
-           .evidence_intents = evidence_intents,
+           .observation_plan = observation_plan,
            .requested_report_buffer_size = policy.caller_ceiling_bytes,
            .maximum_access_probe_count = policy.maximum_access_probe_count,
            .maximum_workgroup_lds_bytes = policy.maximum_workgroup_lds_bytes,
@@ -339,22 +339,21 @@ plan_test_moi_evidence_inventory(const ConSanTransformArtifacts &result,
   const std::optional<uint64_t> maximum_access_probe_count =
       options.max_patches_is_expert_limit ? std::optional<uint64_t>{options.max_patches}
                                           : std::nullopt;
-  const ConSanEvidenceIntentPlan evidence_intents =
-      plan_consan_evidence_intents(result.observation_plan());
+  const ConSanObservationPlan &observation_plan = result.observation_plan();
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return plan_consan_record_replay_evidence(
-               evidence_intents, {.caller_ceiling_bytes = caller_ceiling_bytes,
+               observation_plan, {.caller_ceiling_bytes = caller_ceiling_bytes,
                                   .maximum_access_probe_count = maximum_access_probe_count})
         .sizing_inventory;
   case ConSanMoiEngine::Sampled:
-    return plan_consan_sampled_evidence(evidence_intents,
+    return plan_consan_sampled_evidence(observation_plan,
                                         {.caller_ceiling_bytes = caller_ceiling_bytes,
                                          .maximum_access_probe_count = maximum_access_probe_count})
         .sizing_inventory;
   case ConSanMoiEngine::InlineShadow:
     return plan_consan_inline_shadow_evidence(
-               result.program_inventory, evidence_intents,
+               result.program_inventory, observation_plan,
                {.caller_ceiling_bytes = caller_ceiling_bytes,
                 .maximum_access_probe_count = maximum_access_probe_count,
                 .maximum_workgroup_lds_bytes = options.max_workgroup_lds_bytes})

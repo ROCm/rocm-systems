@@ -30,11 +30,11 @@ template <typename Element>
                                            ConSanMoiAutoReportPlan &plan, uint64_t &cursor);
 
 [[nodiscard]] ConSanEvidenceRequirementReason
-validate_moi_evidence_intents(const ConSanEvidenceIntentPlan &plan,
+validate_moi_evidence_intents(const ConSanObservationPlan &plan,
                               ConSanCapabilityEngine expected_engine);
 
-[[nodiscard]] std::vector<const ConSanEvidenceIntent *>
-accumulate_moi_evidence_counts(const ConSanEvidenceIntentPlan &plan,
+[[nodiscard]] std::vector<const ConSanProbeIntent *>
+accumulate_moi_evidence_counts(const ConSanObservationPlan &plan,
                                std::optional<uint64_t> maximum_access_probe_count,
                                ConSanMoiAutoReportInventory &inventory);
 

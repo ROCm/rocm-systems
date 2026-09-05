@@ -162,7 +162,7 @@ struct MoiScalarAbiPlan {
 /// capacity policies beside their report implementation.
 struct MoiEvidencePlanningContext {
   const ProgramInventory &program_inventory;
-  const ConSanEvidenceIntentPlan &evidence_intents;
+  const ConSanObservationPlan &observation_plan;
   uint64_t requested_report_buffer_size = 0;
   std::optional<uint64_t> maximum_access_probe_count;
   std::optional<uint32_t> maximum_workgroup_lds_bytes;
