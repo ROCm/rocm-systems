@@ -51,6 +51,8 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   };
   profile.moi_access.dynamic_stack_uses_scalar_reservoir = true;
   profile.moi_access.lazy_workgroup_shadow = true;
+  profile.moi_placement.scalar_model = ConSanMoiScalarPlacementModel::SpillBacked;
+  profile.moi_placement.branch_only_spill_embeds_setup_state = true;
   profile.moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector;
   profile.moi_access_reports_need_explicit_dispatch_identity = false;

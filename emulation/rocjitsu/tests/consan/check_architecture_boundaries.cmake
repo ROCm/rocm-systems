@@ -3012,8 +3012,8 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
-    "ROCJITSU_CODE_ARCH_"
-    "common placement must consume typed target facts"
+    "ROCJITSU_CODE_ARCH_|consan_arch_is_"
+    "common placement must consume typed target placement strategies"
 )
 if(NOT _moi_placement_contract MATCHES "validate_moi_scalar_state")
     message(FATAL_ERROR

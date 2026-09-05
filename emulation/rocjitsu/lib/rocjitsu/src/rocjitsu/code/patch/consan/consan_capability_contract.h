@@ -317,6 +317,30 @@ struct ConSanMoiAccessCapability {
   bool operator==(const ConSanMoiAccessCapability &) const = default;
 };
 
+/// Heuristic scalar-placement strategy used by the shared MOI solver.
+///
+/// `DescriptorPartitioned` protects the compiler's physical-VCC and AccVGPR
+/// boundaries and permits owner-component recovery around those boundaries.
+/// `LivenessOnly` has neither a partitioned scalar ABI nor an entry-backed
+/// spill mechanism. `SpillBacked` may preserve borrowed scalar state at entry
+/// and use private storage across full-pressure probes. The model deliberately
+/// captures the solver-relevant behavior instead of reproducing architecture
+/// families inside placement.
+enum class ConSanMoiScalarPlacementModel : uint8_t {
+  Unsupported,
+  DescriptorPartitioned,
+  LivenessOnly,
+  SpillBacked,
+};
+
+struct ConSanMoiPlacementCapability {
+  ConSanMoiScalarPlacementModel scalar_model = ConSanMoiScalarPlacementModel::Unsupported;
+  uint8_t scratch_vgpr_alignment = 1;
+  bool branch_only_spill_embeds_setup_state = false;
+
+  bool operator==(const ConSanMoiPlacementCapability &) const = default;
+};
+
 /// Target-owned strategy for placing the dispatch identity consumed by MOI
 /// reports. The common solver owns register search; this contract selects the
 /// target-neutral search and lossless overflow representation without
@@ -388,6 +412,7 @@ struct ConSanTargetProfile {
   ConSanVectorMemoryCapability vector_memory;
   ConSanNativeLdsCapability native_lds;
   ConSanMoiAccessCapability moi_access;
+  ConSanMoiPlacementCapability moi_placement;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
   bool moi_access_reports_need_explicit_dispatch_identity = true;
@@ -589,6 +614,11 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          profile.native_lds.single_range_atomic_offset_bits != 16u) ||
         (profile.moi_access.clobbered_address_spill_reload &&
          !profile.moi_access.native_lds_spill_recovery) ||
+        profile.moi_placement.scalar_model == ConSanMoiScalarPlacementModel::Unsupported ||
+        static_cast<uint8_t>(profile.moi_placement.scalar_model) >
+            static_cast<uint8_t>(ConSanMoiScalarPlacementModel::SpillBacked) ||
+        (profile.moi_placement.scratch_vgpr_alignment != 1u &&
+         profile.moi_placement.scratch_vgpr_alignment != 2u) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||

@@ -39,6 +39,7 @@ struct ExpectedTargetProfile {
   ConSanVectorMemoryCapability vector_memory;
   ConSanNativeLdsCapability native_lds;
   ConSanMoiAccessCapability moi_access;
+  ConSanMoiPlacementCapability moi_placement;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
   bool moi_access_reports_need_explicit_dispatch_identity;
   bool supports_wave32;
@@ -109,6 +110,12 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .native_lds_spill_recovery = true,
                 .clobbered_address_spill_reload = true,
             },
+        .moi_placement =
+            {
+                .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
+                .scratch_vgpr_alignment = 2,
+                .branch_only_spill_embeds_setup_state = true,
+            },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
@@ -177,6 +184,12 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .native_lds_spill_recovery = true,
                 .clobbered_address_spill_reload = true,
             },
+        .moi_placement =
+            {
+                .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
+                .scratch_vgpr_alignment = 2,
+                .branch_only_spill_embeds_setup_state = true,
+            },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
@@ -241,6 +254,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .single_range_atomic_offset_bits = 16,
             },
         .moi_access = {.native_lds_spill_recovery = true},
+        .moi_placement =
+            {
+                .scalar_model = ConSanMoiScalarPlacementModel::LivenessOnly,
+                .scratch_vgpr_alignment = 1,
+            },
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
         .moi_access_reports_need_explicit_dispatch_identity = true,
@@ -319,6 +337,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .dynamic_stack_uses_scalar_reservoir = true,
                 .native_lds_spill_recovery = true,
                 .lazy_workgroup_shadow = true,
+            },
+        .moi_placement =
+            {
+                .scalar_model = ConSanMoiScalarPlacementModel::SpillBacked,
+                .scratch_vgpr_alignment = 1,
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
         .moi_access_reports_need_explicit_dispatch_identity = true,
@@ -399,6 +422,12 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .dynamic_stack_uses_scalar_reservoir = true,
                 .lazy_workgroup_shadow = true,
             },
+        .moi_placement =
+            {
+                .scalar_model = ConSanMoiScalarPlacementModel::SpillBacked,
+                .scratch_vgpr_alignment = 1,
+                .branch_only_spill_embeds_setup_state = true,
+            },
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
         .moi_access_reports_need_explicit_dispatch_identity = false,
@@ -451,6 +480,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.vector_memory, expected.vector_memory);
   EXPECT_EQ(actual.native_lds, expected.native_lds);
   EXPECT_EQ(actual.moi_access, expected.moi_access);
+  EXPECT_EQ(actual.moi_placement, expected.moi_placement);
   EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
   EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
             expected.moi_access_reports_need_explicit_dispatch_identity);
@@ -576,6 +606,14 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   });
   expect_invalid("clobbered-address reload without native spill recovery",
                  [](auto &profiles) { profiles[0].moi_access.native_lds_spill_recovery = false; });
+  expect_invalid("unsupported scalar placement model", [](auto &profiles) {
+    profiles[0].moi_placement.scalar_model = ConSanMoiScalarPlacementModel::Unsupported;
+  });
+  expect_invalid("unknown scalar placement model", [](auto &profiles) {
+    profiles[0].moi_placement.scalar_model = static_cast<ConSanMoiScalarPlacementModel>(255u);
+  });
+  expect_invalid("unsupported scratch VGPR alignment",
+                 [](auto &profiles) { profiles[0].moi_placement.scratch_vgpr_alignment = 4u; });
   expect_invalid("unsupported FLAT compare-swap data-pair alignment",
                  [](auto &profiles) { profiles[0].flat_compare_swap_data_pair_alignment = 4u; });
   expect_invalid("nonnegative minimum branch displacement",

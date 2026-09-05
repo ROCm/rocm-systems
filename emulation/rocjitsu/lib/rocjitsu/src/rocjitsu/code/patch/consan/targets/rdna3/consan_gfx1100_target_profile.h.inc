@@ -10,6 +10,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1100TargetProfile = [] {
   profile.address_free_private_limit_bytes = 0x1000u;
   profile.private_allocation_granularity_bytes = 16;
   profile.atomic_address_materialization.flat_and_global = true;
+  profile.moi_placement.scalar_model = ConSanMoiScalarPlacementModel::LivenessOnly;
   profile.supports_kernarg_preload_overflow_recovery = true;
   return profile;
 }();

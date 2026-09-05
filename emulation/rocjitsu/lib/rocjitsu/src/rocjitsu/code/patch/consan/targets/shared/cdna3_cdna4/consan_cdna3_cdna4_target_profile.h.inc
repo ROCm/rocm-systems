@@ -23,6 +23,11 @@
   };
   profile.moi_access.native_lds_spill_recovery = true;
   profile.moi_access.clobbered_address_spill_reload = true;
+  profile.moi_placement = {
+      .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
+      .scratch_vgpr_alignment = 2,
+      .branch_only_spill_embeds_setup_state = true,
+  };
   profile.supports_kernarg_preload_overflow_recovery = true;
   profile.requires_even_vgpr_tuples = true;
   profile.moi_visible_evidence_address_precedes_result = true;
