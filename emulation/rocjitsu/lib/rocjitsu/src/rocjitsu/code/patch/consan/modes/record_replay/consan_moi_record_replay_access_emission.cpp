@@ -42,6 +42,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_or_u32_literal;
+using consan_moi_detail::append_reserve_bounded_dynamic_record_slot;
 using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;
@@ -294,18 +295,14 @@ namespace consan_moi_impl {
             "ConSan MOI dynamic access-record probe could not materialize FLAT address");
       }
 
-      require_emission(append_atomic_fetch_add_one_u32(
-                           words, base + offsetof(ConSanMoiReportHeader, access_record_count),
-                           slot_vgpr, scratch_vgpr, arch),
-                       "ConSan MOI dynamic access-record probe could not reserve a record slot");
-
-      require_emission(sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                                             value_vgpr, access_record_capacity, arch),
-                                         instrumentation::build_v_cmp_gt_u32_vcc(
-                                             vector_source_vgpr(value_vgpr), slot_vgpr, arch),
-                                         instrumentation::build_s_and_saveexec_b64(
-                                             *point.moi_exec_save_sgpr, kAmdGpuVccLo, arch)),
-                       "ConSan MOI dynamic access-record probe could not encode capacity guard");
+      require_emission(
+          append_reserve_bounded_dynamic_record_slot(
+              words, base + offsetof(ConSanMoiReportHeader, access_record_count),
+              access_record_capacity, slot_vgpr, value_vgpr, scratch_vgpr, arch),
+          "ConSan MOI dynamic access-record probe could not reserve a bounded record slot");
+      require_emission(sequence.emit(instrumentation::build_s_and_saveexec_b64(
+                           *point.moi_exec_save_sgpr, kAmdGpuVccLo, arch)),
+                       "ConSan MOI dynamic access-record probe could not apply its capacity guard");
 
       DynamicRecordEmitter record(words, kAccessRecordLayout, dynamic_record_base, slot_vgpr,
                                   scratch_vgpr, arch);

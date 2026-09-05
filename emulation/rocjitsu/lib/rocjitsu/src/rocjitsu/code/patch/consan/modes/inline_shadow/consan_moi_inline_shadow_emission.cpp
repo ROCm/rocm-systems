@@ -46,6 +46,7 @@ using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
+using consan_moi_detail::append_reserve_bounded_dynamic_record_slot;
 using consan_moi_detail::append_select_first_active_lane;
 using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_u32_sgpr;
@@ -484,14 +485,11 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                 static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
   } else {
     sequence
-        .require(append_atomic_fetch_add_one_u32(
-            words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), slot_vgpr,
-            plan.scratch_vgpr, arch))
-        .append(
-            instrumentation::build_v_mov_b32_literal(tmp_vgpr, layout.diagnostic_capacity, arch),
-            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch),
-            instrumentation::build_s_and_saveexec_b64(
-                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
+        .require(append_reserve_bounded_dynamic_record_slot(
+            words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count),
+            layout.diagnostic_capacity, slot_vgpr, tmp_vgpr, plan.scratch_vgpr, arch))
+        .append(instrumentation::build_s_and_saveexec_b64(
+            static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
   }
 
   // SLOT is dead once capacity admission has selected this record. Form its
