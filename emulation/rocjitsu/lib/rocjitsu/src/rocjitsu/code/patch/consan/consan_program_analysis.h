@@ -40,7 +40,9 @@ struct ConSanProgramAnalysisResult {
 /// mutation. `result` receives the published analysis product; `perturbation`
 /// receives only analysis candidates used by the subsequent planner.
 [[nodiscard]] bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes,
-                                                    const ConSanOptions &options,
+                                                    const ConSanRequest &request,
+                                                    const ConSanDebugOverrides &debug,
+                                                    const MutationRequest &mutation,
                                                     std::unique_ptr<AmdGpuCodeObject> &code_object,
                                                     ProgramInventoryBuilder &inventory_builder,
                                                     ConSanPerturbationPlanningState &perturbation,

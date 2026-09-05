@@ -463,7 +463,10 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   std::unique_ptr<AmdGpuCodeObject> code_object;
   ConSanProgramAnalysisResult analysis;
   const bool analysis_succeeded = analyze_consan_program_inventory(
-      code_object_bytes, options, code_object, inventory_builder, perturbation, analysis);
+      code_object_bytes, static_cast<const ConSanRequest &>(options),
+      static_cast<const ConSanDebugOverrides &>(options),
+      static_cast<const MutationRequest &>(options), code_object, inventory_builder, perturbation,
+      analysis);
   result.program_inventory = std::move(analysis.program_inventory);
   result.fault_sites = std::move(analysis.fault_sites);
   result.barrier_move_destinations = std::move(analysis.barrier_move_destinations);

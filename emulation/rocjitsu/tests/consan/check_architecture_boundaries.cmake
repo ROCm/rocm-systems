@@ -383,6 +383,19 @@ foreach(_source IN ITEMS
         "program and synchronization analysis must publish their narrow forward product"
     )
 endforeach()
+foreach(_source IN ITEMS
+    consan_program_analysis.h
+    consan_program_analysis.cpp
+    consan_sync_analysis.h
+    consan_sync_analysis.inc
+    consan_validation_inventory.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "ConSanOptions"
+        "program and synchronization analysis must consume typed semantic inputs, not the lowering aggregate"
+    )
+endforeach()
 file(READ "${_consan_dir}/consan_program_analysis.h" _program_analysis_contract)
 foreach(_field IN ITEMS
     program_inventory

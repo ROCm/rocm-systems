@@ -15,13 +15,15 @@ namespace {
 
 [[nodiscard]] ConSanProgramAnalysisResult
 rederive_pristine_program_inventory(std::span<const uint8_t> original_image,
-                                    const ConSanOptions &options,
+                                    const ConSanRequest &request,
+                                    const ConSanDebugOverrides &debug,
+                                    const MutationRequest &mutation,
                                     ConSanPerturbationPlanningState &perturbation) {
   ConSanProgramAnalysisResult analysis;
   ProgramInventoryBuilder inventory_builder(original_image);
   std::unique_ptr<AmdGpuCodeObject> code_object;
-  (void)analyze_consan_program_inventory(original_image, options, code_object, inventory_builder,
-                                         perturbation, analysis);
+  (void)analyze_consan_program_inventory(original_image, request, debug, mutation, code_object,
+                                         inventory_builder, perturbation, analysis);
   return analysis;
 }
 
@@ -29,13 +31,15 @@ rederive_pristine_program_inventory(std::span<const uint8_t> original_image,
 
 ConSanPristineValidationInventory rederive_consan_pristine_validation_inventory(
     std::span<const uint8_t> original_image, bool require_mutation_semantics) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_drop_barrier = require_mutation_semantics;
-  options.fault_dry_run = true;
+  ConSanRequest request;
+  request.flavor = ConSanFlavor::SuperCollider;
+  ConSanDebugOverrides debug;
+  MutationRequest mutation;
+  mutation.fault_drop_barrier = require_mutation_semantics;
+  mutation.fault_dry_run = true;
   ConSanPerturbationPlanningState perturbation;
   ConSanProgramAnalysisResult analysis =
-      rederive_pristine_program_inventory(original_image, options, perturbation);
+      rederive_pristine_program_inventory(original_image, request, debug, mutation, perturbation);
   return {
       .program_inventory = std::move(analysis.program_inventory),
       .fault_sites = std::move(analysis.fault_sites),

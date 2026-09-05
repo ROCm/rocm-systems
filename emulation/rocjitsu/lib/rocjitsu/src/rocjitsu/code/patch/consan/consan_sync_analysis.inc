@@ -2191,15 +2191,17 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
 
 bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_bytes,
                                        const AmdGpuCodeObject &code_object, Decoder &decoder,
-                                       rj_code_arch_t arch, const ConSanOptions &options,
+                                       rj_code_arch_t arch, const ConSanRequest &request,
+                                       const ConSanDebugOverrides &debug,
+                                       const MutationRequest &mutation,
                                        ProgramInventoryBuilder &inventory_builder,
                                        ConSanPerturbationPlanningState &perturbation,
                                        ConSanProgramAnalysisResult &result) {
   SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
-  const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
-                                        options.fault_dry_run || options.has_fault_mutation() ||
-                                        options.sc_perturb_kind != ConSanPerturbationKind::None ||
-                                        options.abort_unmatched_barrier_wait;
+  const bool needs_semantic_inventory = request.flavor == ConSanFlavor::Moi ||
+                                        mutation.fault_dry_run || mutation.has_fault_mutation() ||
+                                        mutation.sc_perturb_kind != ConSanPerturbationKind::None ||
+                                        debug.abort_unmatched_barrier_wait;
   if (!needs_semantic_inventory) {
     if (std::ranges::any_of(result.program_inventory.access_sites(),
                             [](const ConSanProgramSite &site) {
@@ -2229,14 +2231,12 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
   associate_barrier_sync_sequences(
       sync_blocks,
-      consan_requires_extended_barrier_pairs(static_cast<const ConSanRequest &>(options),
-                                             static_cast<const ConSanDebugOverrides &>(options),
-                                             static_cast<const MutationRequest &>(options)),
+      consan_requires_extended_barrier_pairs(request, debug, mutation),
       synchronization_inventory);
   associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
                                   result.program_inventory);
   build_barrier_lifecycle_group_inventory(synchronization_inventory, sync_events);
-  if (options.fault_move_barrier) {
+  if (mutation.fault_move_barrier) {
     build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
                                              synchronization_inventory.sync_sequences, result);
   }

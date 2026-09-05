@@ -23,7 +23,9 @@ struct ConSanProgramAnalysisResult;
 [[nodiscard]] bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_bytes,
                                                      const AmdGpuCodeObject &code_object,
                                                      Decoder &decoder, rj_code_arch_t arch,
-                                                     const ConSanOptions &options,
+                                                     const ConSanRequest &request,
+                                                     const ConSanDebugOverrides &debug,
+                                                     const MutationRequest &mutation,
                                                      ProgramInventoryBuilder &inventory_builder,
                                                      ConSanPerturbationPlanningState &perturbation,
                                                      ConSanProgramAnalysisResult &result);

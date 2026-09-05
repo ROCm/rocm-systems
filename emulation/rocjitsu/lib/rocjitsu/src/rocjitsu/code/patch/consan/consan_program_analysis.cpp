@@ -92,7 +92,9 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 } // namespace
 
 bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes,
-                                      const ConSanOptions &options,
+                                      const ConSanRequest &request,
+                                      const ConSanDebugOverrides &debug,
+                                      const MutationRequest &mutation,
                                       std::unique_ptr<AmdGpuCodeObject> &code_object,
                                       ProgramInventoryBuilder &inventory_builder,
                                       ConSanPerturbationPlanningState &perturbation,
@@ -236,8 +238,8 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
       inventory_builder.functions(), function_sites, result.warnings);
   publish_decoded_sites();
   publish_access_inventory();
-  if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
-      options.sc_perturb_kind == ConSanPerturbationKind::None) {
+  if (request.flavor == ConSanFlavor::SuperCollider && !mutation.fault_dry_run &&
+      mutation.sc_perturb_kind == ConSanPerturbationKind::None) {
     for (ConSanProgramContainer &kernel : inventory_builder.kernels())
       preflight_kernel(kernel, result.warnings);
   }
@@ -247,8 +249,8 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
   prune_unreachable_inferred_ranges(*code_object, *decoder, arch,
                                     result.program_inventory.preapplied_mutation().code_ranges,
                                     inventory_builder);
-  return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, options,
-                                           inventory_builder, perturbation, result);
+  return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, request,
+                                           debug, mutation, inventory_builder, perturbation, result);
 }
 
 } // namespace rocjitsu
