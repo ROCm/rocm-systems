@@ -282,6 +282,14 @@ struct ConSanVectorMemoryCapability {
   bool operator==(const ConSanVectorMemoryCapability &) const = default;
 };
 
+/// Mnemonic vocabulary used by one target's native LDS instructions. The
+/// distinction is semantic only where the common classifier admits a bounded
+/// spelling set; exact opcode decoding remains target-owned.
+enum class ConSanNativeLdsMnemonicDialect : uint8_t {
+  LoadStore,
+  ReadWrite,
+};
+
 /// Target-native LDS encoding facts needed after instruction decoding has
 /// classified an access but has deliberately not classified it as a
 /// synchronization operation. Most single-range DS/VDS offsets occupy sixteen
@@ -289,6 +297,7 @@ struct ConSanVectorMemoryCapability {
 /// `offset0` field. Keeping that exception here prevents the common inventory
 /// from reconstructing an encoding family from a product set.
 struct ConSanNativeLdsCapability {
+  ConSanNativeLdsMnemonicDialect mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore;
   uint8_t single_range_atomic_offset_bits = 16;
 
   bool operator==(const ConSanNativeLdsCapability &) const = default;
@@ -574,6 +583,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanScaleOffsetCapability::Supported) ||
         (profile.vector_memory.instruction_word_count == 2u &&
          profile.vector_memory.scale_offset != ConSanScaleOffsetCapability::Absent) ||
+        static_cast<uint8_t>(profile.native_lds.mnemonic_dialect) >
+            static_cast<uint8_t>(ConSanNativeLdsMnemonicDialect::ReadWrite) ||
         (profile.native_lds.single_range_atomic_offset_bits != 8u &&
          profile.native_lds.single_range_atomic_offset_bits != 16u) ||
         (profile.moi_access.clobbered_address_spill_reload &&

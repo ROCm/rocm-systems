@@ -59,11 +59,12 @@ template <typename Range>
 
 [[nodiscard]] bool is_replayable_single_range_native_lds(std::string_view mnemonic,
                                                          const ConSanTargetProfile &target) {
-  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
-  if (!legacy_cdna && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
+  const bool read_write_dialect =
+      target.native_lds.mnemonic_dialect == ConSanNativeLdsMnemonicDialect::ReadWrite;
+  if (!read_write_dialect && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
     return true;
   }
-  if (legacy_cdna && (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
+  if (read_write_dialect && (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
     return true;
   }
   constexpr std::array always = {
@@ -80,12 +81,12 @@ template <typename Range>
   };
   if (named(mnemonic, always))
     return true;
-  constexpr std::array legacy_cdna_forms = {
+  constexpr std::array read_write_d16_forms = {
       "ds_read_i8",         "ds_read_u8_d16",     "ds_read_u8_d16_hi",
       "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
       "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
   };
-  return legacy_cdna && named(mnemonic, legacy_cdna_forms);
+  return read_write_dialect && named(mnemonic, read_write_d16_forms);
 }
 
 [[nodiscard]] bool is_replayable_flat_access(std::string_view mnemonic) {

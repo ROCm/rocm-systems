@@ -377,8 +377,8 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_access_classifier.cpp"
-    "consan_arch_is_rdna4_or_cdna5"
-    "common flat-access classification must consume the target-owned vector-memory model"
+    "consan_arch_is_"
+    "common access classification must consume target-owned semantic models"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_access_target.cpp"

@@ -99,7 +99,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
-        .native_lds = {.single_range_atomic_offset_bits = 8},
+        .native_lds =
+            {
+                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::ReadWrite,
+                .single_range_atomic_offset_bits = 8,
+            },
         .moi_access =
             {
                 .native_lds_spill_recovery = true,
@@ -163,7 +167,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
-        .native_lds = {.single_range_atomic_offset_bits = 8},
+        .native_lds =
+            {
+                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::ReadWrite,
+                .single_range_atomic_offset_bits = 8,
+            },
         .moi_access =
             {
                 .native_lds_spill_recovery = true,
@@ -227,7 +235,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
-        .native_lds = {.single_range_atomic_offset_bits = 16},
+        .native_lds =
+            {
+                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
+                .single_range_atomic_offset_bits = 16,
+            },
         .moi_access = {.native_lds_spill_recovery = true},
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
@@ -297,7 +309,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Disabled,
             },
-        .native_lds = {.single_range_atomic_offset_bits = 16},
+        .native_lds =
+            {
+                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
+                .single_range_atomic_offset_bits = 16,
+            },
         .moi_access =
             {
                 .dynamic_stack_uses_scalar_reservoir = true,
@@ -373,7 +389,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Supported,
             },
-        .native_lds = {.single_range_atomic_offset_bits = 16},
+        .native_lds =
+            {
+                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
+                .single_range_atomic_offset_bits = 16,
+            },
         .moi_access =
             {
                 .dynamic_stack_uses_scalar_reservoir = true,
@@ -549,6 +569,10 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   });
   expect_invalid("unsupported native LDS atomic offset width", [](auto &profiles) {
     profiles[0].native_lds.single_range_atomic_offset_bits = 12u;
+  });
+  expect_invalid("unknown native LDS mnemonic dialect", [](auto &profiles) {
+    profiles[0].native_lds.mnemonic_dialect =
+        static_cast<ConSanNativeLdsMnemonicDialect>(255u);
   });
   expect_invalid("clobbered-address reload without native spill recovery",
                  [](auto &profiles) { profiles[0].moi_access.native_lds_spill_recovery = false; });

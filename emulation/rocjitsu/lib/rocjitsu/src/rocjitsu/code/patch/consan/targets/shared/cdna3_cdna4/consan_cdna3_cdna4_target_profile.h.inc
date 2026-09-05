@@ -17,7 +17,10 @@
   profile.max_group_segment_bytes = 64u * 1024u;
   profile.atomic_address_materialization.flat_and_global = true;
   profile.vector_memory.vector_offset_extension = ConSanVectorOffsetExtension::Sign;
-  profile.native_lds.single_range_atomic_offset_bits = 8;
+  profile.native_lds = {
+      .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::ReadWrite,
+      .single_range_atomic_offset_bits = 8,
+  };
   profile.moi_access.native_lds_spill_recovery = true;
   profile.moi_access.clobbered_address_spill_reload = true;
   profile.supports_kernarg_preload_overflow_recovery = true;
