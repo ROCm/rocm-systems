@@ -469,6 +469,33 @@ struct SynchronizationInventoryView {
     return identities;
   }
 
+  /// Resolve the sole initialization event that owns a barrier lifecycle's
+  /// identity and static attributes. Malformed test or stale builder state
+  /// fails closed instead of selecting one of several contradictory members.
+  [[nodiscard]] const ConSanSyncEvent *
+  barrier_lifecycle_initialization(const ConSanBarrierLifecycleGroup &group) const {
+    const ConSanSyncEvent *initialization = nullptr;
+    for (ConSanSyncEventId member : group.member_event_ids) {
+      const ConSanSyncEvent *event = find_event(member);
+      if (event == nullptr)
+        return nullptr;
+      if (event->operation != ConSanSyncOperation::BarrierInit)
+        continue;
+      if (initialization != nullptr)
+        return nullptr;
+      initialization = event;
+    }
+    return initialization;
+  }
+
+  [[nodiscard]] std::optional<std::string>
+  barrier_lifecycle_identity(const ConSanBarrierLifecycleGroup &group) const {
+    const ConSanSyncEvent *initialization = barrier_lifecycle_initialization(group);
+    if (initialization == nullptr)
+      return std::nullopt;
+    return initialization->identity + "|lifecycle-group=static-run";
+  }
+
   /// Resolve one unique synchronization event by physical site and kind.
   ///
   /// This is the graph-side join used by a target-neutral probe intent, whose

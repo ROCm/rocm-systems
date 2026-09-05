@@ -274,8 +274,10 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   const ConSanTransformArtifacts dry_run = test_lower_consan(bytes, options);
   ASSERT_TRUE(dry_run.errors.empty()) << (dry_run.errors.empty() ? "" : dry_run.errors.front());
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
-  EXPECT_EQ(dry_run.fault_plans[0].logical_sequence_identity,
-            inventory.program_inventory.sync().barrier_lifecycle_groups[0].identity);
+  const auto lifecycle_identity = inventory.program_inventory.sync().barrier_lifecycle_identity(
+      inventory.program_inventory.sync().barrier_lifecycle_groups[0]);
+  ASSERT_TRUE(lifecycle_identity);
+  EXPECT_EQ(dry_run.fault_plans[0].logical_sequence_identity, *lifecycle_identity);
   EXPECT_EQ(dry_run.fault_plans[0].ordered_member_identities.size(), 5u);
 
   options.fault_dry_run = false;
@@ -366,8 +368,10 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   ASSERT_EQ(dry_run.outcome, ConSanTransformOutcome::Unchanged);
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
   EXPECT_EQ(dry_run.fault_plans.front().kind, ConSanFaultMutationKind::BarrierParticipantCount);
-  EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity,
-            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
+  const auto lifecycle_identity = inventory.program_inventory.sync().barrier_lifecycle_identity(
+      inventory.program_inventory.sync().barrier_lifecycle_groups.front());
+  ASSERT_TRUE(lifecycle_identity);
+  EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity, *lifecycle_identity);
 
   options.fault_dry_run = false;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -376,8 +380,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
-  EXPECT_EQ(result.mutation.applied_fault_logical_identity,
-            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
+  EXPECT_EQ(result.mutation.applied_fault_logical_identity, lifecycle_identity);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineBarrierParticipantCountRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -488,10 +491,19 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_TRUE(result.mutation.applied_fault_logical_identity);
-  EXPECT_EQ(*result.mutation.applied_fault_logical_identity,
-            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
+  const auto lifecycle_identity = inventory.program_inventory.sync().barrier_lifecycle_identity(
+      inventory.program_inventory.sync().barrier_lifecycle_groups.front());
+  ASSERT_TRUE(lifecycle_identity);
+  EXPECT_EQ(*result.mutation.applied_fault_logical_identity, *lifecycle_identity);
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.front().barrier_id, 2);
+  const ConSanSyncEvent *rewritten_initialization =
+      result.program_inventory.sync().barrier_lifecycle_initialization(
+          result.program_inventory.sync().barrier_lifecycle_groups.front());
+  ASSERT_NE(rewritten_initialization, nullptr);
+  const ConSanBarrierSite *rewritten_source =
+      result.program_inventory.sync().source_as<ConSanBarrierSite>(*rewritten_initialization);
+  ASSERT_NE(rewritten_source, nullptr);
+  EXPECT_EQ(rewritten_source->barrier_id, 2);
 
   const size_t mutation_count =
       std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {

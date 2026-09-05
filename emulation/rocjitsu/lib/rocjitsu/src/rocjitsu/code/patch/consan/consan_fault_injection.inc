@@ -173,16 +173,10 @@ find_lifecycle_group_for_sequence(const ProgramInventory &program_inventory,
 find_static_participant_init(const ProgramInventory &program_inventory,
                              const ConSanBarrierLifecycleGroup &group) {
   const SynchronizationInventoryView sync = program_inventory.sync();
-  const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
-    const ConSanSyncEventId member = sync.event_id(event);
-    const ConSanProgramContainerRef *container = sync.container(event);
-    return event.operation == ConSanSyncOperation::BarrierInit && container != nullptr &&
-           container->name == group.container_name && container->is_kernel() == group.in_kernel &&
-           std::ranges::find(group.member_event_ids, member) != group.member_event_ids.end();
-  });
-  if (init_event == sync.sync_events.end())
-    return nullptr;
-  return program_inventory.program_site<ConSanBarrierSite>(init_event->source_site);
+  const ConSanSyncEvent *init_event = sync.barrier_lifecycle_initialization(group);
+  return init_event == nullptr ? nullptr
+                               : program_inventory.program_site<ConSanBarrierSite>(
+                                     init_event->source_site);
 }
 
 template <typename State>
@@ -549,7 +543,14 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         ConSanFaultMutationPlan plan =
             make_plan(ConSanFaultMutationKind::BarrierIdScope, *members[0]);
         plan.companion_identity = members[1]->identity;
-        plan.logical_sequence_identity = group != nullptr ? group->identity : sequence->identity;
+        const std::optional<std::string> group_identity =
+            group != nullptr ? sync.barrier_lifecycle_identity(*group) : std::nullopt;
+        if (group != nullptr && !group_identity) {
+          result.errors.emplace_back(
+              "ConSan fault planning could not resolve barrier lifecycle initialization");
+          return;
+        }
+        plan.logical_sequence_identity = group_identity.value_or(sequence->identity);
         const std::span<const ConSanSyncEventId> plan_members =
             group != nullptr ? std::span(group->member_event_ids)
                              : std::span(sequence->member_event_ids);
@@ -600,12 +601,18 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
       }
       ConSanFaultMutationPlan plan =
           make_named_plan(ConSanFaultMutationKind::BarrierParticipantCount, identities->front());
-      plan.logical_sequence_identity = group->identity;
+      const std::optional<std::string> group_identity = sync.barrier_lifecycle_identity(*group);
+      if (!group_identity) {
+        result.errors.emplace_back(
+            "ConSan fault planning could not resolve barrier lifecycle initialization");
+        return;
+      }
+      plan.logical_sequence_identity = *group_identity;
       plan.ordered_member_identities = std::move(*identities);
-      plan.original_barrier_id = group->barrier_id;
-      plan.target_barrier_id = group->barrier_id;
-      plan.original_barrier_scope = group->barrier_scope;
-      plan.target_barrier_scope = group->barrier_scope;
+      plan.original_barrier_id = init->barrier_id;
+      plan.target_barrier_id = init->barrier_id;
+      plan.original_barrier_scope = init->scope;
+      plan.target_barrier_scope = init->scope;
       result.fault_plans.push_back(std::move(plan));
     }
   }
@@ -949,6 +956,13 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   if (selected == nullptr)
     return;
   const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const std::optional<std::string> lifecycle_identity =
+      lifecycle_group != nullptr ? sync.barrier_lifecycle_identity(*lifecycle_group) : std::nullopt;
+  if (lifecycle_group != nullptr && !lifecycle_identity) {
+    result.errors.emplace_back(
+        "ConSan barrier ID/scope mutation lost its lifecycle initialization");
+    return;
+  }
 
   const std::span<const ConSanSyncEventId> member_identities =
       lifecycle_group != nullptr ? std::span(lifecycle_group->member_event_ids)
@@ -1063,7 +1077,7 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   }
   result.mark_modified();
   result.mutation.applied_fault_logical_identity =
-      lifecycle_group != nullptr ? lifecycle_group->identity : selected->identity;
+      lifecycle_identity.value_or(selected->identity);
   result.warnings.emplace_back(
       std::string("ConSan barrier ID/scope mutation rewrote one logical ") +
       (lifecycle_group != nullptr ? "lifecycle" : "pair") + " from " +
@@ -1077,6 +1091,13 @@ static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &co
                                                       FaultApplicationState &result) {
   if (group == nullptr || init == nullptr)
     return;
+  const std::optional<std::string> group_identity =
+      result.program_inventory.sync().barrier_lifecycle_identity(*group);
+  if (!group_identity) {
+    result.errors.emplace_back(
+        "ConSan barrier participant mutation lost its lifecycle initialization");
+    return;
+  }
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
@@ -1104,7 +1125,7 @@ static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &co
   patch.target_participant_count = target_participant_count;
   result.patches.push_back(std::move(patch));
   result.mark_modified();
-  result.mutation.applied_fault_logical_identity = group->identity;
+  result.mutation.applied_fault_logical_identity = *group_identity;
   result.warnings.emplace_back("ConSan barrier participant mutation rewrote one proven static "
                                "lifecycle count from " +
                                std::to_string(*init->participant_count) + " to " +

@@ -427,14 +427,11 @@ consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue);
 /// admissible only when its ordered typed member identities and one matching
 /// static join prove that association. Rejected groups remain in inventory so
 /// later policy can explain the unsupported lifecycle without rediscovery.
+/// The initialization member remains authoritative for the lifecycle's stable
+/// name, source container, barrier ID, and scope.
 struct ConSanBarrierLifecycleGroup {
-  std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
   /// Inventory-local handles of every event in lifecycle order.
   std::vector<ConSanSyncEventId> member_event_ids;
-  std::optional<int32_t> barrier_id;
-  ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
   ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::Count;
 
   [[nodiscard]] bool admissible() const { return issue == ConSanBarrierLifecycleIssue::None; }

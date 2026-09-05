@@ -4695,8 +4695,14 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
   const ConSanBarrierLifecycleGroup &group =
       result.program_inventory.sync().barrier_lifecycle_groups.front();
   EXPECT_TRUE(group.admissible());
-  EXPECT_EQ(group.barrier_id, 1);
-  EXPECT_EQ(group.barrier_scope, ConSanBarrierSite::Scope::Workgroup);
+  const ConSanSyncEvent *initialization =
+      result.program_inventory.sync().barrier_lifecycle_initialization(group);
+  ASSERT_NE(initialization, nullptr);
+  const ConSanBarrierSite *initialization_source =
+      result.program_inventory.sync().source_as<ConSanBarrierSite>(*initialization);
+  ASSERT_NE(initialization_source, nullptr);
+  EXPECT_EQ(initialization_source->barrier_id, 1);
+  EXPECT_EQ(initialization_source->scope, ConSanBarrierSite::Scope::Workgroup);
   EXPECT_EQ(group.member_event_ids.size(), 5u);
   EXPECT_EQ(group.issue, ConSanBarrierLifecycleIssue::None);
 }

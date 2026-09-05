@@ -378,6 +378,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ProgramInventoryBuilder builder(bytes);
   SynchronizationInventoryBuildView build = builder.synchronization();
   ConSanSyncEvent event;
+  event.operation = ConSanSyncOperation::BarrierInit;
   event.identity = "event";
   event.semantic_id = {
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16},
@@ -391,7 +392,6 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   sequence.member_event_ids.push_back(member);
   build.sync_sequences.push_back(sequence);
   ConSanBarrierLifecycleGroup lifecycle;
-  lifecycle.identity = "lifecycle";
   lifecycle.member_event_ids = {member};
   build.barrier_lifecycle_groups.push_back(lifecycle);
   ConSanMoiFenceCandidate fence;
@@ -433,7 +433,9 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ConSanTransformArtifacts moved = std::move(copied);
   EXPECT_EQ(moved.program_inventory.sync().sync_events.front().identity, "event");
   EXPECT_EQ(moved.program_inventory.sync().sync_sequences.front().identity, "sequence");
-  EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_groups.front().identity, "lifecycle");
+  EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_identity(
+                moved.program_inventory.sync().barrier_lifecycle_groups.front()),
+            "event|lifecycle-group=static-run");
   EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().fence_event,
             ConSanSyncEventId{0});
 }
@@ -506,7 +508,6 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   sequence.identity = "original-sequence";
   original.synchronization().sync_sequences.push_back(sequence);
   ConSanBarrierLifecycleGroup group;
-  group.identity = "original-group";
   original.synchronization().barrier_lifecycle_groups.push_back(group);
   ConSanMoiFenceCandidate fence;
   fence.fence_event = {0};

@@ -873,12 +873,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
       continue;
 
     ConSanBarrierLifecycleGroup group;
-    group.identity = init.identity + "|lifecycle-group=static-run";
-    group.container_name = init.container_name;
-    group.in_kernel = init.in_kernel;
     group.member_event_ids = init.member_event_ids;
-    group.barrier_id = init.barrier_id;
-    group.barrier_scope = init.barrier_scope;
     const std::optional<uint32_t> basic_block_index = init.basic_block_index;
     uint64_t end_text_offset = init.end_text_offset;
 
@@ -889,19 +884,19 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     };
     const auto is_contiguous = [&](const ConSanSyncSequence &sequence) {
       return basic_block_index && sequence.basic_block_index == basic_block_index &&
-             sequence.container_name == group.container_name &&
-             sequence.in_kernel == group.in_kernel && sequence.begin_text_offset == end_text_offset;
+             sequence.container_name == init.container_name && sequence.in_kernel == init.in_kernel &&
+             sequence.begin_text_offset == end_text_offset;
     };
     const auto has_matching_static_id = [&](const ConSanSyncSequence &sequence) {
-      return group.barrier_id && sequence.barrier_id == group.barrier_id &&
-             group.barrier_scope != ConSanBarrierSite::Scope::Unknown &&
-             sequence.barrier_scope == group.barrier_scope &&
+      return init.barrier_id && sequence.barrier_id == init.barrier_id &&
+             init.barrier_scope != ConSanBarrierSite::Scope::Unknown &&
+             sequence.barrier_scope == init.barrier_scope &&
              (sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate ||
               sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32);
     };
 
-    if (!basic_block_index || !group.barrier_id ||
-        group.barrier_scope == ConSanBarrierSite::Scope::Unknown ||
+    if (!basic_block_index || !init.barrier_id ||
+        init.barrier_scope == ConSanBarrierSite::Scope::Unknown ||
         (init.barrier_operand_source != ConSanBarrierSite::OperandSource::Immediate &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::StaticM0Literal32 &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::Literal32)) {
