@@ -255,8 +255,8 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (size_t plan_index = 0; plan_index < result.resource_plans.size(); ++plan_index) {
     const ConSanCandidateResourcePlan &plan = result.resource_plans[plan_index];
-    ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 1u);
-    EXPECT_EQ(plan.owner_descriptor_file_offsets.front(), kernel.descriptor_file_offset);
+    ASSERT_EQ(plan.owner_kernel_ids.size(), 1u);
+    EXPECT_EQ(plan.owner_kernel_ids.front(), result.program_inventory.kernels().front().id);
     EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
     EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
     EXPECT_EQ(plan.scratch_vgpr, 1);
@@ -398,11 +398,11 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
       }));
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
-    EXPECT_NE(std::ranges::find(plan.owner_descriptor_file_offsets, first->descriptor_file_offset),
-              plan.owner_descriptor_file_offsets.end());
-    EXPECT_NE(std::ranges::find(plan.owner_descriptor_file_offsets, alias->descriptor_file_offset),
-              plan.owner_descriptor_file_offsets.end());
+    ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
+    const auto descriptors = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+    ASSERT_TRUE(descriptors);
+    EXPECT_NE(std::ranges::find(*descriptors, first->descriptor_file_offset), descriptors->end());
+    EXPECT_NE(std::ranges::find(*descriptors, alias->descriptor_file_offset), descriptors->end());
   }
   const auto is_access_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
@@ -2160,7 +2160,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
-  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().owner_kernel_ids.size(), 1u);
 }
 
 TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
@@ -2882,7 +2882,7 @@ TEST(ConSanMoi, Rdna4RecordReplayRejectsMixedStackOwnersWhenSharedHelperNeedsSpi
   const auto shared_plan =
       std::ranges::find_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Access &&
-               plan.owner_descriptor_file_offsets.size() == 2u;
+               plan.owner_kernel_ids.size() == 2u;
       });
   ASSERT_NE(shared_plan, result.resource_plans.end());
   EXPECT_EQ(shared_plan->source, ConSanRegisterAllocationSource::Unsupported);
@@ -3816,8 +3816,7 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
   EXPECT_TRUE(*unrelated->uses_dynamic_stack);
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [&](const auto &plan) {
     return plan.source == ConSanRegisterAllocationSource::Unsupported &&
-           plan.owner_descriptor_file_offsets ==
-               std::vector<uint64_t>{unrelated->descriptor_file_offset};
+           plan.owner_kernel_ids == std::vector<ConSanProgramContainerId>{unrelated->id};
   })) << testing::PrintToString(result.resource_plans);
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
@@ -5830,8 +5829,7 @@ TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   const auto shared_plan = std::ranges::find_if(result.resource_plans, [](const auto &plan) {
-    return plan.site_kind == ConSanResourceSiteKind::Access &&
-           plan.owner_descriptor_file_offsets.size() == 2u;
+    return plan.site_kind == ConSanResourceSiteKind::Access && plan.owner_kernel_ids.size() == 2u;
   });
   ASSERT_NE(shared_plan, result.resource_plans.end());
   EXPECT_NE(shared_plan->source, ConSanRegisterAllocationSource::Unsupported);
@@ -5840,7 +5838,10 @@ TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
   // The shared helper's semantic site is cloned once per execution owner. Its
   // callers must still agree on one spill-backed transient window.
   std::optional<uint16_t> common_exec_save_sgpr;
-  for (uint64_t owner : shared_plan->owner_descriptor_file_offsets) {
+  const auto shared_owner_descriptors =
+      result.program_inventory.kernel_descriptors(shared_plan->owner_kernel_ids);
+  ASSERT_TRUE(shared_owner_descriptors);
+  for (uint64_t owner : *shared_owner_descriptors) {
     const auto assignment = test_moi_transient_sgpr_assignment(result, owner);
     ASSERT_TRUE(assignment);
     EXPECT_TRUE(assignment->spill_backed);
@@ -8678,7 +8679,7 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
     EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
         << "site=" << static_cast<uint32_t>(plan.site_kind) << " offset=" << plan.text_offset
         << " reason=" << consan_register_plan_reason_name(plan.reason)
-        << " owners=" << testing::PrintToString(plan.owner_descriptor_file_offsets);
+        << " owner_ids=" << testing::PrintToString(plan.owner_kernel_ids);
   }
 
   const auto private_prologue = std::ranges::find(
@@ -8747,7 +8748,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFail
         << "site=" << static_cast<uint32_t>(plan.site_kind) << " offset=" << plan.text_offset
         << " reason=" << consan_register_plan_reason_name(plan.reason)
         << " scratch_count=" << plan.scratch_vgpr_count
-        << " owners=" << testing::PrintToString(plan.owner_descriptor_file_offsets);
+        << " owner_ids=" << testing::PrintToString(plan.owner_kernel_ids);
   }
   EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
                                   [](const ConSanIntentCoverageEntry &entry) {

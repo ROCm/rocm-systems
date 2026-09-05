@@ -710,11 +710,15 @@ void try_apply_sampled_barrier_sync_patch(
       resource_plan_index = result.resource_plans.size() - 1u;
       barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
     }
+    const auto owner_descriptors =
+        result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+    if (!owner_descriptors)
+      continue;
     ConSanMoiOperatingPoint candidate_point = operating_point;
     if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
-                                             plan.owner_descriptor_file_offsets) ||
+                                             *owner_descriptors) ||
         !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
-                                              plan.owner_descriptor_file_offsets)) {
+                                              *owner_descriptors)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier lost its owner-local persistent or transient assignment");
       continue;
@@ -730,8 +734,8 @@ void try_apply_sampled_barrier_sync_patch(
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans[resource_plan_index] = plan;
     }
-    const auto resources =
-        resolve_moi_scratch_plan(plan, candidate_point, result.moi_operating_point, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, result.program_inventory, candidate_point,
+                                                    result.moi_operating_point, scratch_count);
     if (!resources)
       continue;
     std::optional<ConSanMoiPrivateStateLayout> private_layout;
@@ -878,17 +882,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             std::string(sampled_atomic_semantics_reason_name(semantics.reason)));
         return;
       }
-      candidates.push_back({std::move(atomic), std::move(*source), *semantics.semantics, 0, 1,
-                            false, std::nullopt});
+      candidates.push_back(
+          {std::move(atomic), std::move(*source), *semantics.semantics, 0, 1, false, std::nullopt});
       continue;
     }
     const auto event_kind = moi_atomic_event_kind(source->sequence->memory_role);
-    const auto role = event_kind ? sampled_atomic_role(*event_kind, /*is_rmw=*/false) : std::nullopt;
-    const auto scope = source->site.scope
-                           ? consan_moi_sampled_sync_scope(*source->site.scope)
-                           : std::nullopt;
-    if (!role || !scope || source->site.width_bits == 0u ||
-        source->site.width_bits % 8u != 0u) {
+    const auto role =
+        event_kind ? sampled_atomic_role(*event_kind, /*is_rmw=*/false) : std::nullopt;
+    const auto scope =
+        source->site.scope ? consan_moi_sampled_sync_scope(*source->site.scope) : std::nullopt;
+    if (!role || !scope || source->site.width_bits == 0u || source->site.width_bits % 8u != 0u) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync skipped an unqualified ordinary atomic sequence in " +
           moi_evidence_container_name(result.program_inventory, atomic.source_site));
@@ -917,8 +920,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       continue;
     }
     semantics.descriptor = encoded.packed.descriptor;
-    candidates.push_back({std::move(atomic), std::move(*source), semantics, 0, 1, false,
-                          std::nullopt});
+    candidates.push_back(
+        {std::move(atomic), std::move(*source), semantics, 0, 1, false, std::nullopt});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -954,8 +957,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         owner = canonical->second;
     }
   };
-  for (ConSanCandidateResourcePlan &plan : result.resource_plans)
-    canonicalize_owners(plan.owner_descriptor_file_offsets);
   for (ConSanPatchLoweringProduct &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
 
@@ -1299,8 +1300,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
-    const auto resources =
-        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, result.program_inventory, operating_point,
+                                                    result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync has no " + std::to_string(scratch_count) +
@@ -1365,8 +1366,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (!append_atomic_scalar_clause_patch(
             old_text, planned.candidate.source.site,
             planned.candidate.source.sequence->scalar_clause_text_offset, arch,
-            scalar_clause_patches,
-            result.errors))
+            scalar_clause_patches, result.errors))
       return;
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);
@@ -1385,8 +1385,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         planned.candidate.deferred_acquire
             ? build_sampled_pending_acquire_cave_words(
                   bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
-                  planned.owner_descriptor_file_offset,
-                  planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
+                  planned.owner_descriptor_file_offset, planned.address_plan, *emission_plan,
+                  planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
                   planned.candidate.selected_slot, planned.candidate.bank_count,
@@ -1394,8 +1394,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                   &guest_instruction_offset, planned.trailing_guest_words, &emitted_guest_size)
             : build_sampled_atomic_sync_cave_words(
                   bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
-                  planned.owner_descriptor_file_offset,
-                  planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
+                  planned.owner_descriptor_file_offset, planned.address_plan, *emission_plan,
+                  planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
                   planned.candidate.selected_slot, planned.candidate.bank_count, layout,

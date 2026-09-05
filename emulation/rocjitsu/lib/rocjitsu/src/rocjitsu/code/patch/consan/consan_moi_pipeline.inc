@@ -33,8 +33,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           plan_moi_resource_site(state, request, debug, site_point, ConSanResourceSiteKind::Barrier,
                                  index, text_offset, candidate.source_site, scratch_count);
       ConSanMoiOperatingPoint owner_point = site_point;
-      if (apply_moi_persistent_vgpr_assignment(owner_point, point,
-                                               plan.owner_descriptor_file_offsets)) {
+      const auto owner_descriptors = problem.inventory().kernel_descriptors(plan.owner_kernel_ids);
+      if (owner_descriptors &&
+          apply_moi_persistent_vgpr_assignment(owner_point, point, *owner_descriptors)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_point);
         if (owner_scratch_count != scratch_count) {
           plan = plan_moi_resource_site(state, request, debug, owner_point,
@@ -63,8 +64,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           mode.atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
       ConSanCandidateResourcePlan plan =
           plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Atomic,
-                                 index, source->text_offset(), candidate.source_site,
-                                 scratch_count, nullptr, &candidate.lowering_form);
+                                 index, source->text_offset(), candidate.source_site, scratch_count,
+                                 nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
@@ -84,11 +85,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       }
       const uint64_t fence_text_offset = source->fence_event->text_offset();
       const uint64_t patch_text_offset = source->patch_text_offset();
-      ConSanCandidateResourcePlan plan =
-          plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Fence, index,
-                                 patch_text_offset, candidate.source_site,
-                                 fence_record_scratch_count(candidate.communication_lowering_form),
-                                 nullptr, &candidate.communication_lowering_form);
+      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
+          state, request, debug, point, ConSanResourceSiteKind::Fence, index, patch_text_offset,
+          candidate.source_site, fence_record_scratch_count(candidate.communication_lowering_form),
+          nullptr, &candidate.communication_lowering_form);
       if (patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
@@ -118,15 +118,22 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
   if (target && target->moi_placement.automatic_dispatch_sgpr_requires_owner_admission &&
       point.moi_dispatch_identity.automatic_sgpr() && point.moi_dispatch_identity.sgpr()) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
+      const auto owner_descriptors = problem.inventory().kernel_descriptors(plan.owner_kernel_ids);
+      if (!owner_descriptors) {
+        plan.source = ConSanRegisterAllocationSource::Unsupported;
+        plan.reason = ConSanRegisterPlanReason::MissingOwner;
+        plan.scratch_vgpr.reset();
+        continue;
+      }
       ConSanMoiOperatingPoint owner_point = point;
       if (!attempted_point.owner_transient_sgprs.empty() &&
           !apply_moi_transient_sgpr_assignment(request, owner_point, attempted_point,
-                                               plan.owner_descriptor_file_offsets)) {
+                                               *owner_descriptors)) {
         if (target->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation)
           continue;
         owner_point.moi_dispatch_identity.reset_sgpr();
       }
-      if (plan.owner_descriptor_file_offsets.empty())
+      if (plan.owner_kernel_ids.empty())
         continue;
       // A component-local transient assignment may deliberately omit an
       // overlapping persistent dispatch pair. Its established fallback ABI
@@ -134,7 +141,7 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
       // that safe fallback specific to direct code transport even though the
       // report contract is target-neutral.
       if (!owner_point.moi_dispatch_identity.sgpr() &&
-          std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+          std::ranges::all_of(*owner_descriptors, [&](uint64_t descriptor_offset) {
             const ConSanMoiTransientSgprAssignment *assignment =
                 moi_transient_sgpr_assignment(attempted_point, descriptor_offset);
             return assignment != nullptr && !assignment->dispatch_id_sgpr;
@@ -144,8 +151,8 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
       const bool missing_dispatch = !owner_point.moi_dispatch_identity.sgpr();
       const uint16_t dispatch_base = owner_point.moi_dispatch_identity.sgpr().value_or(0u);
       const bool admitted = !missing_dispatch && moi_resource_owner_sgpr_window_admitted(
-                                                     state, plan.owner_descriptor_file_offsets,
-                                                     dispatch_base, kMoiDispatchStateSgprCount);
+                                                     state, plan.owner_kernel_ids, dispatch_base,
+                                                     kMoiDispatchStateSgprCount);
       if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
@@ -162,19 +169,26 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
                                                                    problem.mode_semantics()),
                                  arch);
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
+      const auto owner_descriptors = problem.inventory().kernel_descriptors(plan.owner_kernel_ids);
+      if (!owner_descriptors) {
+        plan.source = ConSanRegisterAllocationSource::Unsupported;
+        plan.reason = ConSanRegisterPlanReason::MissingOwner;
+        plan.scratch_vgpr.reset();
+        continue;
+      }
       const bool has_owner_override =
-          std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+          std::ranges::any_of(*owner_descriptors, [&](uint64_t descriptor_offset) {
             return moi_transient_sgpr_assignment(attempted_point, descriptor_offset) != nullptr;
           });
       if (has_owner_override) {
         ConSanMoiOperatingPoint owner_point = point;
         if (apply_moi_transient_sgpr_assignment(request, owner_point, attempted_point,
-                                                plan.owner_descriptor_file_offsets))
+                                                *owner_descriptors))
           continue;
       }
-      if (!plan.owner_descriptor_file_offsets.empty() &&
-          !moi_resource_owner_sgpr_window_admitted(state, plan.owner_descriptor_file_offsets,
-                                                   exec_base, exec_count)) {
+      if (!plan.owner_kernel_ids.empty() &&
+          !moi_resource_owner_sgpr_window_admitted(state, plan.owner_kernel_ids, exec_base,
+                                                   exec_count)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();

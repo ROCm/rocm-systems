@@ -76,8 +76,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
         std::ranges::any_of(result.staged_text_fragments, [&](const ConSanTextFragment &fragment) {
           const uint64_t fragment_end = fragment.patch.anchor_offset + fragment.patch.original_size;
           const uint64_t site_end = patch_text_offset + patch_size;
-          return patch_text_offset < fragment_end &&
-                 fragment.patch.anchor_offset < site_end &&
+          return patch_text_offset < fragment_end && fragment.patch.anchor_offset < site_end &&
                  (fragment.patch.anchor_offset != patch_text_offset ||
                   fragment.patch.original_size != patch_size);
         });
@@ -90,20 +89,20 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
         result.resource_plans, ConSanResourceSiteKind::Fence, fence_text_offset);
     ConSanCandidateResourcePlan plan =
-        existing_plan ? *existing_plan
-                      : plan_moi_resource_site(*resource_state, options, options, operating_point,
-                                               ConSanResourceSiteKind::Fence, candidate_index,
-                                               patch_text_offset, candidate.source_site,
-                                               scratch_count, nullptr,
-                                               &candidate.communication_lowering_form);
+        existing_plan
+            ? *existing_plan
+            : plan_moi_resource_site(*resource_state, options, options, operating_point,
+                                     ConSanResourceSiteKind::Fence, candidate_index,
+                                     patch_text_offset, candidate.source_site, scratch_count,
+                                     nullptr, &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan) {
       if (patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
       result.resource_plans.push_back(plan);
     }
-    const auto resources =
-        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, result.program_inventory, operating_point,
+                                                    result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI fence record patch has no usable resource plan");
       continue;
@@ -161,8 +160,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     note_descriptor_requirements(descriptor_requirements, record_event->resources);
     note_moi_sgpr_requirements(scalar_requirements, record_event->resources, record_event->emission,
                                arch);
-    selected.push_back({std::move(*record_event), std::move(candidate), std::move(*source),
-                        address_plan});
+    selected.push_back(
+        {std::move(*record_event), std::move(candidate), std::move(*source), address_plan});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");

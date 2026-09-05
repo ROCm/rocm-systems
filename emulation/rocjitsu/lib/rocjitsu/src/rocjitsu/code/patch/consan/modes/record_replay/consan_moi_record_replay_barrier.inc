@@ -94,7 +94,8 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     plan.intent_ids = {candidate.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
-    auto scratch = resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, 6u);
+    auto scratch = resolve_moi_scratch_plan(plan, result.program_inventory, operating_point,
+                                            result.moi_operating_point, 6u);
     if (!scratch) {
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch has no usable resource plan in " +

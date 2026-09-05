@@ -1554,9 +1554,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
             return plan.site_kind == ConSanResourceSiteKind::Access && plan.scratch_vgpr &&
                    *plan.scratch_vgpr == *access_patch->scratch_vgpr &&
                    plan.text_offset == access_patch->anchor_offset &&
-                   std::ranges::find(plan.owner_descriptor_file_offsets,
-                                     kernel.descriptor_file_offset) !=
-                       plan.owner_descriptor_file_offsets.end();
+                   std::ranges::find(plan.owner_kernel_ids, kernel.id) !=
+                       plan.owner_kernel_ids.end();
           });
       if (access_resource_plan == result.resource_plans.end() ||
           access_resource_plan->required_vgpr_count <
@@ -1586,9 +1585,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
       const uint16_t scalar_base = *kernel_point.moi_exec_save_sgpr;
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
           static_cast<uint32_t>(scalar_base) +
-              moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(request, resources, kernel_point, mode_semantics),
-                  arch),
+              moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                           request, resources, kernel_point, mode_semantics),
+                                       arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
         entry_scalar_spill =
@@ -1750,8 +1749,7 @@ moi_owner_epoch_prologue_uses_vgpr(const MoiOwnerEpochPrologueEmissionPlan &emis
 
 void try_apply_owner_epoch_prologue_patch(
     std::span<const uint8_t> bytes, const ConSanRequest &request,
-    const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &operating_point,
+    const BoundRuntimeResources &resources, const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     const MoiObjectModeSemantics &mode_semantics, const MoiPrologueModePolicy &mode_policy,
     rj_code_arch_t arch, ConSanTransformArtifacts &result) {
@@ -1768,8 +1766,8 @@ void try_apply_owner_epoch_prologue_patch(
     return;
   }
   if (operating_point.automatic_moi_private_epoch) {
-    try_apply_private_epoch_prologue_patch(request, resources, operating_point, mode_semantics, arch,
-                                           result);
+    try_apply_private_epoch_prologue_patch(request, resources, operating_point, mode_semantics,
+                                           arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
@@ -1830,9 +1828,8 @@ void try_apply_owner_epoch_prologue_patch(
                                     }) != nullptr;
     const bool owns_planned_site =
         std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-          return std::ranges::find(plan.owner_descriptor_file_offsets,
-                                   kernel.descriptor_file_offset) !=
-                     plan.owner_descriptor_file_offsets.end() &&
+          return std::ranges::find(plan.owner_kernel_ids, kernel.id) !=
+                     plan.owner_kernel_ids.end() &&
                  plan.source != ConSanRegisterAllocationSource::Unsupported;
         });
     // Automatic persistent state exists only to serve emitted instrumentation.

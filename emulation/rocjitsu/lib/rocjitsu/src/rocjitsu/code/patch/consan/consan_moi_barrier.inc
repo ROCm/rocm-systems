@@ -357,15 +357,21 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
         return;
       }
       const ConSanCandidateResourcePlan *plan = resource_plan_index.find(site->text_offset);
-      if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
+      if (plan == nullptr || plan->owner_kernel_ids.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no owned resource scope in " +
             moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
-      const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
+      const auto owners = result.program_inventory.kernel_descriptors(plan->owner_kernel_ids);
+      if (!owners) {
+        result.warnings.emplace_back(
+            "ConSan MOI private epoch barrier lost its kernel owner identity in " +
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
+        continue;
+      }
       ConSanMoiOperatingPoint owner_point = operating_point;
-      if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point, owners)) {
+      if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point, *owners)) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier lost its owner-local persistent assignment in " +
             moi_evidence_container_name(result.program_inventory, candidate.source_site));
@@ -374,12 +380,12 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (!owner_point.automatic_moi_private_epoch)
         continue;
       if (!apply_moi_transient_sgpr_assignment(options, owner_point, result.moi_operating_point,
-                                               owners)) {
+                                               *owners)) {
         result.warnings.emplace_back("ConSan MOI private epoch barrier lost its transient state");
         continue;
       }
       const ConSanPatchLoweringProduct *access_patch =
-          patch_owner_index.persistent_access_patch_for(owners);
+          patch_owner_index.persistent_access_patch_for(*owners);
       if (access_patch == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no common access-probe state in " +
@@ -419,7 +425,10 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     std::vector<uint64_t> owners;
     const ConSanCandidateResourcePlan *plan = resource_plan_index.find(site->text_offset);
     if (plan) {
-      owners = plan->owner_descriptor_file_offsets;
+      auto plan_owners = result.program_inventory.kernel_descriptors(plan->owner_kernel_ids);
+      if (!plan_owners)
+        continue;
+      owners = std::move(*plan_owners);
     }
     if (owners.empty())
       owners = result.program_inventory.execution_owner_descriptors(candidate.source_site);
@@ -455,8 +464,9 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
             moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
-      const auto resources = resolve_moi_scratch_plan(*plan, candidate_point,
-                                                      result.moi_operating_point, scratch_count);
+      const auto resources =
+          resolve_moi_scratch_plan(*plan, result.program_inventory, candidate_point,
+                                   result.moi_operating_point, scratch_count);
       if (!resources) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no usable resource plan in " +

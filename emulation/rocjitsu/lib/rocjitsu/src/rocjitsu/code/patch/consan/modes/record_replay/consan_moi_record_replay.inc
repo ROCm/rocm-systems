@@ -64,8 +64,8 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
         resolve_moi_access_resource_facts(operating_point, candidate, target.arch);
     const uint16_t scratch_count =
         record_replay_access_scratch_vgpr_count(options, options, facts, candidate);
-    auto scratch =
-        resolve_moi_scratch(result.resource_plans, candidate, operating_point, scratch_count);
+    auto scratch = resolve_moi_scratch(result.resource_plans, result.program_inventory, candidate,
+                                       operating_point, scratch_count);
     if (!scratch)
       continue;
     ConSanMoiOperatingPoint point = operating_point;

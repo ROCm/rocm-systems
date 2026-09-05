@@ -418,15 +418,15 @@ moi_transient_sgpr_assignment(MoiOwnerAssignments assignments, uint64_t descript
 [[nodiscard]] bool automatic_moi_scalar_spill_needs_dynamic_stack_planning(
     const ConSanMoiOperatingPoint &point, const ProgramInventory &inventory,
     std::span<const ConSanCandidateResourcePlan> site_plans) {
-  const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
+  const auto descriptor_owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
     const ConSanProgramContainer *kernel = inventory.find_kernel_by_descriptor(descriptor_offset);
     return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   };
-  if (std::ranges::any_of(point.owner_transient_sgprs,
-                          [&](const ConSanMoiTransientSgprAssignment &assignment) {
-                            return assignment.spill_backed &&
-                                   owner_uses_dynamic_stack(assignment.descriptor_file_offset);
-                          })) {
+  if (std::ranges::any_of(
+          point.owner_transient_sgprs, [&](const ConSanMoiTransientSgprAssignment &assignment) {
+            return assignment.spill_backed &&
+                   descriptor_owner_uses_dynamic_stack(assignment.descriptor_file_offset);
+          })) {
     return true;
   }
   if (!point.has_moi_scalar_spill()) {
@@ -434,7 +434,11 @@ moi_transient_sgpr_assignment(MoiOwnerAssignments assignments, uint64_t descript
   }
   return std::ranges::any_of(site_plans, [&](const ConSanCandidateResourcePlan &plan) {
     return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-           std::ranges::any_of(plan.owner_descriptor_file_offsets, owner_uses_dynamic_stack);
+           std::ranges::any_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
+             const ConSanProgramContainer *kernel = inventory.container(owner);
+             return kernel != nullptr && kernel->is_kernel() &&
+                    kernel->uses_dynamic_stack.value_or(false);
+           });
   });
 }
 
@@ -1152,23 +1156,23 @@ moi_resource_plan_can_be_recovered_by_persistent_placement(const ConSanCandidate
   // transient state become owner-local. Explicit scratch conflicts and
   // structural failures cannot be repaired here and must not make an unrelated
   // owner appear admitted.
-  return !plan.owner_descriptor_file_offsets.empty() &&
+  return !plan.owner_kernel_ids.empty() &&
          (plan.reason == ConSanRegisterPlanReason::NoLegalWindow ||
           (plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap && !debug.scratch_vgpr));
 }
 
-[[nodiscard]] std::vector<uint64_t>
-moi_scalar_owner_descriptors(std::span<const ConSanCandidateResourcePlan> site_plans) {
-  std::vector<uint64_t> owners;
+[[nodiscard]] std::vector<ConSanProgramContainerId>
+moi_scalar_owner_kernel_ids(std::span<const ConSanCandidateResourcePlan> site_plans) {
+  std::vector<ConSanProgramContainerId> owners;
   for (const ConSanCandidateResourcePlan &plan : site_plans) {
     // Scalar persistent state is code-object-wide and must be proven against
     // every semantically admitted owner, including a site whose provisional
     // resource plan failed. Persistent placement can change that site's ABI
     // and recover it on the subsequent resource-plan rebuild; omitting it here
     // would instead select SGPRs that clobber the very owner being recovered.
-    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      if (std::ranges::find(owners, descriptor_offset) == owners.end())
-        owners.push_back(descriptor_offset);
+    for (ConSanProgramContainerId owner : plan.owner_kernel_ids) {
+      if (std::ranges::find(owners, owner) == owners.end())
+        owners.push_back(owner);
     }
   }
   return owners;
@@ -1177,16 +1181,16 @@ moi_scalar_owner_descriptors(std::span<const ConSanCandidateResourcePlan> site_p
 /// Partition resource-plan owners into the connected components that must
 /// share one scalar ABI. A shared helper joins all kernels that can reach it;
 /// unrelated kernels remain independently placeable.
-[[nodiscard]] std::vector<std::vector<uint64_t>>
+[[nodiscard]] std::vector<std::vector<ConSanProgramContainerId>>
 moi_scalar_owner_components(std::span<const ConSanCandidateResourcePlan> plans) {
-  std::vector<std::vector<uint64_t>> components;
+  std::vector<std::vector<ConSanProgramContainerId>> components;
   for (const ConSanCandidateResourcePlan &plan : plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
+    if (plan.owner_kernel_ids.empty())
       continue;
     std::optional<size_t> destination;
     for (size_t index = 0; index < components.size();) {
       const bool intersects =
-          std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
+          std::ranges::any_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
             return std::ranges::find(components[index], owner) != components[index].end();
           });
       if (!intersects) {
@@ -1197,7 +1201,7 @@ moi_scalar_owner_components(std::span<const ConSanCandidateResourcePlan> plans) 
         destination = index++;
         continue;
       }
-      for (uint64_t owner : components[index]) {
+      for (ConSanProgramContainerId owner : components[index]) {
         if (std::ranges::find(components[*destination], owner) == components[*destination].end())
           components[*destination].push_back(owner);
       }
@@ -1207,7 +1211,7 @@ moi_scalar_owner_components(std::span<const ConSanCandidateResourcePlan> plans) 
       destination = components.size();
       components.emplace_back();
     }
-    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
+    for (ConSanProgramContainerId owner : plan.owner_kernel_ids) {
       if (std::ranges::find(components[*destination], owner) == components[*destination].end())
         components[*destination].push_back(owner);
     }
@@ -1253,9 +1257,37 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
   return result;
 }
 
+[[nodiscard]] std::optional<MoiScalarOwnerContextResolution>
+resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
+                                  std::span<const ConSanProgramContainerId> owners) {
+  if (!state.valid)
+    return std::nullopt;
+  MoiScalarOwnerContextResolution result;
+  result.contexts.reserve(owners.size());
+  result.summaries.reserve(owners.size());
+  for (ConSanProgramContainerId owner : owners) {
+    const auto found = state.context_by_kernel_id.find(owner.ordinal);
+    if (!owner.valid() || found == state.context_by_kernel_id.end() || found->second == nullptr ||
+        !found->second->descriptor_valid) {
+      return std::nullopt;
+    }
+    const MoiKernelResourceContext &context = *found->second;
+    result.contexts.push_back(&context);
+    result.summaries.push_back(context.scalar_summary());
+    result.tail_floor = std::max<uint32_t>(
+        result.tail_floor, consan_detail::scalar_owner_tail_floor(result.summaries.back()));
+    result.initialized_sgpr_count =
+        std::max<uint32_t>(result.initialized_sgpr_count, context.initialized_sgpr_count);
+    result.all_use_dynamic_stack &= context.uses_dynamic_stack.value_or(false);
+    result.all_use_fixed_stack &=
+        context.uses_dynamic_stack.has_value() && !*context.uses_dynamic_stack;
+  }
+  return result;
+}
+
 bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
-                                             std::span<const uint64_t> owners, uint16_t base,
-                                             uint16_t count) {
+                                             std::span<const ConSanProgramContainerId> owners,
+                                             uint16_t base, uint16_t count) {
   const auto contexts = resolve_moi_scalar_owner_contexts(state, owners);
   return contexts && consan_detail::scalar_owner_contexts_admit_reserved_window(
                          contexts->summaries, base, count,
@@ -1271,7 +1303,7 @@ struct MoiScalarOwnerContextGroup {
 struct MoiScalarOwnerContextGroupsResolution {
   bool planning_state_valid = false;
   std::vector<MoiScalarOwnerContextGroup> groups;
-  std::optional<uint64_t> unresolved_owner;
+  std::optional<ConSanProgramContainerId> unresolved_owner;
 };
 
 [[nodiscard]] MoiScalarOwnerContextGroupsResolution resolve_moi_resource_plan_scalar_owner_contexts(
@@ -1282,15 +1314,14 @@ struct MoiScalarOwnerContextGroupsResolution {
     return resolved;
   resolved.groups.reserve(plans.size());
   for (const ConSanCandidateResourcePlan &plan : plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
+    if (plan.owner_kernel_ids.empty())
       continue;
-    auto owners = resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
+    auto owners = resolve_moi_scalar_owner_contexts(state, plan.owner_kernel_ids);
     if (!owners) {
-      resolved.unresolved_owner = plan.owner_descriptor_file_offsets.front();
-      for (uint64_t owner : plan.owner_descriptor_file_offsets) {
-        const auto found = state.context_by_descriptor.find(owner);
-        if (found == state.context_by_descriptor.end() || found->second == nullptr ||
-            !found->second->descriptor_valid) {
+      for (ConSanProgramContainerId owner : plan.owner_kernel_ids) {
+        const auto found = state.context_by_kernel_id.find(owner.ordinal);
+        if (!owner.valid() || found == state.context_by_kernel_id.end() ||
+            found->second == nullptr || !found->second->descriptor_valid) {
           resolved.unresolved_owner = owner;
           break;
         }
@@ -1469,7 +1500,7 @@ void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
 }
 
 struct MoiScalarSiteAvailability {
-  std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
+  std::unordered_map<uint32_t, RegisterSet> unavailable_by_kernel_id;
   RegisterSet unavailable;
   bool saw_site = false;
 };
@@ -1512,7 +1543,7 @@ dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uin
         site_unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
       result.unavailable |= site_unavailable;
       if (context->kernel != nullptr)
-        result.unavailable_by_owner[context->kernel->descriptor_file_offset] |= site_unavailable;
+        result.unavailable_by_kernel_id[context->kernel->id.ordinal] |= site_unavailable;
     }
   };
   for (const ConSanCandidateResourcePlan &plan : site_plans)
@@ -1664,7 +1695,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     if (!context.block_set.contains(anchor_block))
       return;
     owners.push_back(&context);
-    plan.owner_descriptor_file_offsets.push_back(context.kernel->descriptor_file_offset);
+    plan.owner_kernel_ids.push_back(context.kernel->id);
   };
   const auto add_execution_owners = [&](std::span<const ConSanExecutionOwner> execution_owners) {
     for (const ConSanExecutionOwner &execution_owner : execution_owners) {
@@ -1687,9 +1718,13 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     plan.reason = ConSanRegisterPlanReason::MissingOwner;
     return plan;
   }
+  std::vector<uint64_t> owner_descriptor_offsets;
+  owner_descriptor_offsets.reserve(owners.size());
+  for (const MoiKernelResourceContext *owner : owners)
+    owner_descriptor_offsets.push_back(owner->kernel->descriptor_file_offset);
   const bool owners_have_spill_backed_scalar_state =
-      !plan.owner_descriptor_file_offsets.empty() &&
-      std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+      !owner_descriptor_offsets.empty() &&
+      std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
         const ConSanMoiTransientSgprAssignment *assignment =
             moi_transient_sgpr_assignment(point, descriptor_offset);
         return assignment != nullptr && assignment->spill_backed;
@@ -1812,7 +1847,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
       semantic_request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
     request.forbidden.expand({RegClass::VGPR, kAmdGpuWorkitemIdX, 1});
   forbid_moi_persistent_vgprs(request.forbidden, point, state.register_allocation,
-                              plan.owner_descriptor_file_offsets);
+                              owner_descriptor_offsets);
 
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
@@ -1867,7 +1902,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
       spill_request.architecture_limit = kMaxVgprs;
     spill_request.forbidden = {};
     forbid_moi_persistent_vgprs(spill_request.forbidden, point, state.register_allocation,
-                                plan.owner_descriptor_file_offsets);
+                                owner_descriptor_offsets);
     if (operand_overlap_spill.protected_vgpr) {
       spill_request.forbidden.expand({RegClass::VGPR, *operand_overlap_spill.protected_vgpr,
                                       operand_overlap_spill.protected_vgpr_count});
@@ -1978,8 +2013,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     // site's complete owner set; size and place its final scratch window for
     // that owner's actual ABI, rather than the code-object-wide fallback.
     ConSanMoiOperatingPoint owner_point = site_point;
-    if (apply_moi_persistent_vgpr_assignment(owner_point, state.register_allocation,
-                                             plan.owner_descriptor_file_offsets)) {
+    const auto owner_descriptors = state.inventory.kernel_descriptors(plan.owner_kernel_ids);
+    if (owner_descriptors && apply_moi_persistent_vgpr_assignment(
+                                 owner_point, state.register_allocation, *owner_descriptors)) {
       const MoiAccessResourceFacts owner_resource_facts =
           resolve_moi_access_resource_facts(owner_point, candidate, state.arch);
       const uint16_t owner_scratch_count =
@@ -2050,7 +2086,7 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
 }
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
+resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ProgramInventory &inventory,
                          const ConSanMoiOperatingPoint &site_point, MoiOwnerAssignments assignments,
                          uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
@@ -2063,7 +2099,10 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
     resolved.count = expected_count;
     resolved.required_vgpr_count = plan.required_vgpr_count;
     resolved.original_private_segment_size = plan.original_private_segment_size;
-    resolved.owner_descriptor_file_offsets = plan.owner_descriptor_file_offsets;
+    auto owner_descriptors = inventory.kernel_descriptors(plan.owner_kernel_ids);
+    if (!owner_descriptors)
+      return std::nullopt;
+    resolved.owner_descriptor_file_offsets = std::move(*owner_descriptors);
     resolved.source = plan.source;
     const auto include_in_required_count = [&](std::optional<uint16_t> reg, uint16_t width) {
       if (reg) {
@@ -2072,7 +2111,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
       }
     };
     moi_persistent_vgpr_state_view(site_point).for_each_range(include_in_required_count);
-    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+    for (uint64_t descriptor_offset : resolved.owner_descriptor_file_offsets) {
       const auto *assignment = moi_persistent_vgpr_assignment(assignments, descriptor_offset);
       if (!assignment)
         continue;
@@ -2086,12 +2125,12 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
-                    const ConSanMoiCandidate &candidate,
+                    const ProgramInventory &inventory, const ConSanMoiCandidate &candidate,
                     const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(plans, candidate);
-  return plan == nullptr
-             ? std::nullopt
-             : resolve_moi_scratch_plan(*plan, operating_point, operating_point, expected_count);
+  return plan == nullptr ? std::nullopt
+                         : resolve_moi_scratch_plan(*plan, inventory, operating_point,
+                                                    operating_point, expected_count);
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(
@@ -2116,7 +2155,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   const MoiResourcePlanningState &state = planning_state;
   if (!state.valid)
     return false;
-  const std::vector<std::vector<uint64_t>> owner_components =
+  const std::vector<std::vector<ConSanProgramContainerId>> owner_components =
       moi_scalar_owner_components(site_plans);
   // Inline's component-local transient window is established only inside an
   // access or synchronization body. Its frame setup uses separate scalar
@@ -2134,7 +2173,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
 
   bool assigned_any = false;
   bool missed_required_assignment = false;
-  for (const std::vector<uint64_t> &owners : owner_components) {
+  for (const std::vector<ConSanProgramContainerId> &owners : owner_components) {
     const auto component_contexts = resolve_moi_scalar_owner_contexts(state, owners);
     if (!component_contexts) {
       missed_required_assignment = true;
@@ -2163,9 +2202,9 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     if (!needs_override)
       continue;
     RegisterSet unavailable;
-    for (uint64_t owner : owners) {
-      if (const auto it = availability.unavailable_by_owner.find(owner);
-          it != availability.unavailable_by_owner.end())
+    for (ConSanProgramContainerId owner : owners) {
+      if (const auto it = availability.unavailable_by_kernel_id.find(owner.ordinal);
+          it != availability.unavailable_by_kernel_id.end())
         unavailable |= it->second;
     }
     // A code-object-wide EXEC window may already have a complete liveness
@@ -2356,7 +2395,12 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                 kMoiDispatchStateSgprCount)
             ? options.moi_dispatch_identity.sgpr()
             : std::nullopt;
-    for (uint64_t owner : owners) {
+    const auto owner_descriptors = state.inventory.kernel_descriptors(owners);
+    if (!owner_descriptors) {
+      missed_required_assignment = true;
+      continue;
+    }
+    for (uint64_t owner : *owner_descriptors) {
       owner_transient_sgprs.push_back(
           {.descriptor_file_offset = owner,
            .exec_save_sgpr = selected_sgpr,
@@ -2435,7 +2479,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     std::string warning = "ConSan MOI could not resolve an owner context for automatic EXEC-save "
                           "SGPR placement";
     if (plan_contexts.unresolved_owner)
-      warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
+      warning +=
+          " at kernel arena index " + std::to_string(plan_contexts.unresolved_owner->ordinal);
     warnings.push_back(std::move(warning));
     return false;
   }
@@ -2702,7 +2747,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic hw_id owner SGPR placement";
     if (plan_contexts.unresolved_owner)
-      warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
+      warning +=
+          " at kernel arena index " + std::to_string(plan_contexts.unresolved_owner->ordinal);
     diagnostics.push_back(std::move(warning));
     return false;
   }
@@ -2773,7 +2819,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
              : ConSanMoiDispatchIdentityPlacement::Unsupported;
   const bool has_access_or_atomic_consumer =
       std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return !plan.owner_descriptor_file_offsets.empty() &&
+        return !plan.owner_kernel_ids.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||
                 plan.site_kind == ConSanResourceSiteKind::Atomic);
       });
@@ -2790,7 +2836,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic dispatch-ID SGPR placement";
     if (plan_contexts.unresolved_owner)
-      warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
+      warning +=
+          " at kernel arena index " + std::to_string(plan_contexts.unresolved_owner->ordinal);
     update.diagnostics.push_back(std::move(warning));
     return update;
   }
@@ -2967,9 +3014,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                  std::ranges::any_of(site_plans, [&](const ConSanCandidateResourcePlan &plan) {
                    return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                           plan.site_kind == ConSanResourceSiteKind::Access &&
-                          std::ranges::find(plan.owner_descriptor_file_offsets,
-                                            kernel.descriptor_file_offset) !=
-                              plan.owner_descriptor_file_offsets.end();
+                          std::ranges::find(plan.owner_kernel_ids, kernel.id) !=
+                              plan.owner_kernel_ids.end();
                  });
         });
     // A non-dynamic owner can capture the hardware dispatch preload directly
@@ -3227,15 +3273,15 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   MoiPersistentStateFacts persistent_facts;
   for (const ConSanCandidateResourcePlan &plan : resource_plans) {
     if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
-        plan.owner_descriptor_file_offsets.empty()) {
+        plan.owner_kernel_ids.empty()) {
       continue;
     }
     persistent_facts.access_count += plan.site_kind == ConSanResourceSiteKind::Access;
     persistent_facts.atomic_count += plan.site_kind == ConSanResourceSiteKind::Atomic;
     persistent_facts.barrier_count += plan.site_kind == ConSanResourceSiteKind::Barrier;
     persistent_facts.fence_count += plan.site_kind == ConSanResourceSiteKind::Fence;
-    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
-      const ConSanProgramContainer *kernel = program_inventory.find_kernel_by_descriptor(owner);
+    for (ConSanProgramContainerId owner : plan.owner_kernel_ids) {
+      const ConSanProgramContainer *kernel = program_inventory.container(owner);
       persistent_facts.has_operational_dynamic_stack_owner |=
           kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
       persistent_facts.has_operational_dynamic_lds_owner |=
@@ -3286,7 +3332,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   uint32_t persistent_base = 0;
   bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : resource_plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
+    if (plan.owner_kernel_ids.empty())
       continue;
     found_owned_scope = true;
     // Persistent state crosses arbitrary guest code, so it must sit above
@@ -3323,7 +3369,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     uint32_t scratch_floor = 0;
     for (const ConSanCandidateResourcePlan &plan : resource_plans) {
       if (plan.source != ConSanRegisterAllocationSource::Unsupported &&
-          !plan.owner_descriptor_file_offsets.empty()) {
+          !plan.owner_kernel_ids.empty()) {
         const uint32_t scratch_end =
             plan.scratch_vgpr ? static_cast<uint32_t>(*plan.scratch_vgpr) + plan.scratch_vgpr_count
                               : plan.scratch_vgpr_count;
@@ -3364,9 +3410,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
                    return (plan.source != ConSanRegisterAllocationSource::Unsupported ||
                            moi_resource_plan_can_be_recovered_by_persistent_placement(plan, debug,
                                                                                       arch)) &&
-                          std::ranges::find(plan.owner_descriptor_file_offsets,
-                                            kernel.descriptor_file_offset) !=
-                              plan.owner_descriptor_file_offsets.end();
+                          std::ranges::find(plan.owner_kernel_ids, kernel.id) !=
+                              plan.owner_kernel_ids.end();
                  });
         });
   };
@@ -3389,7 +3434,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           ConSanScalarPlacementModel::DescriptorPartitioned &&
       std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-               !plan.owner_descriptor_file_offsets.empty() &&
+               !plan.owner_kernel_ids.empty() &&
                ((plan.ordinary_vgpr_limit != kMaxVgprs &&
                  persistent_end > plan.ordinary_vgpr_limit) ||
                 persistent_end > kMaxVgprs);
@@ -3440,7 +3485,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         !debug.test_force_private_epoch) {
       const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
       const MoiResourcePlanningState &scalar_state = planning_state;
-      const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(resource_plans);
+      const std::vector<ConSanProgramContainerId> scalar_owners =
+          moi_scalar_owner_kernel_ids(resource_plans);
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
       const std::vector<const MoiKernelResourceContext *> scalar_contexts =
           resolved_contexts ? resolved_contexts->contexts
@@ -3498,9 +3544,11 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // liveness is insufficient because the values cross arbitrary guest
       // code between the entry prologue and every probe.
       ConSanMoiOperatingPoint scalar_options = options;
+      const auto scalar_owner_descriptors = program_inventory.kernel_descriptors(scalar_owners);
       const bool scalar_state_valid =
-          resolved_contexts.has_value() &&
-          apply_moi_transient_sgpr_assignment(request, scalar_options, options, scalar_owners);
+          resolved_contexts.has_value() && scalar_owner_descriptors.has_value() &&
+          apply_moi_transient_sgpr_assignment(request, scalar_options, options,
+                                              *scalar_owner_descriptors);
       bool every_owner_resolved = scalar_state_valid;
       MoiOwnerRegisterReferenceSummary scalar_references =
           summarize_moi_owner_register_references(scalar_contexts);
@@ -3681,7 +3729,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     // Persistent placement and resource planning form a fixed point. Failed
     // plans still contribute ownership so a smaller component-local ABI can
     // recover them on the subsequent resource-plan rebuild.
-    const std::vector<std::vector<uint64_t>> components =
+    const std::vector<std::vector<ConSanProgramContainerId>> components =
         moi_scalar_owner_components(resource_plans);
 
     std::string scalar_persistence_failure;
@@ -3692,7 +3740,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // every barrier. Prove the choice across the complete owner union: this
       // is a code-object-wide representation, not a component-local shortcut.
       const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
-      const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(resource_plans);
+      const std::vector<ConSanProgramContainerId> scalar_owners =
+          moi_scalar_owner_kernel_ids(resource_plans);
       const MoiResourcePlanningState &state = planning_state;
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(state, scalar_owners);
       if (!resolved_contexts) {
@@ -3740,15 +3789,18 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     };
 
     bool assigned_private_component = false;
-    for (const std::vector<uint64_t> &component : components) {
+    for (const std::vector<ConSanProgramContainerId> &component : components) {
       uint32_t component_base = 0u;
       uint32_t component_limit = kMaxVgprs;
       uint32_t component_encoded_limit = kMaxVgprs;
       bool resolved_every_component_context = true;
       ConSanMoiOperatingPoint component_options = options;
+      const auto component_descriptors = program_inventory.kernel_descriptors(component);
       const bool component_transient_state_resolved =
-          options.owner_transient_sgprs.empty() ||
-          apply_moi_transient_sgpr_assignment(request, component_options, options, component);
+          component_descriptors &&
+          (options.owner_transient_sgprs.empty() ||
+           apply_moi_transient_sgpr_assignment(request, component_options, options,
+                                               *component_descriptors));
       const bool component_needs_persistent_dispatch_vgprs =
           (needs_persistent_dispatch_vgprs || options.moi_dispatch_identity.private_fallback()) &&
           component_transient_state_resolved &&
@@ -3756,9 +3808,10 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       const uint32_t component_persistent_count =
           persistent_count +
           (component_needs_persistent_dispatch_vgprs && !needs_persistent_dispatch_vgprs ? 2u : 0u);
-      for (uint64_t descriptor_offset : component) {
-        const auto found = planning_state.context_by_descriptor.find(descriptor_offset);
-        if (found == planning_state.context_by_descriptor.end() || found->second == nullptr) {
+      for (ConSanProgramContainerId owner : component) {
+        const auto found = planning_state.context_by_kernel_id.find(owner.ordinal);
+        if (!owner.valid() || found == planning_state.context_by_kernel_id.end() ||
+            found->second == nullptr) {
           resolved_every_component_context = false;
           continue;
         }
@@ -3774,8 +3827,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           component_limit = std::min<uint32_t>(component_limit, context.ordinary_vgpr_limit);
       }
       for (const ConSanCandidateResourcePlan &plan : resource_plans) {
-        if (std::ranges::none_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
-              return std::ranges::find(component, offset) != component.end();
+        if (std::ranges::none_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
+              return std::ranges::find(component, owner) != component.end();
             })) {
           continue;
         }
@@ -3803,9 +3856,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       }
       if (component_base + component_persistent_count > component_limit) {
         const bool has_dynamic_stack_owner =
-            std::ranges::any_of(component, [&](uint64_t descriptor_offset) {
-              const ConSanProgramContainer *kernel =
-                  program_inventory.find_kernel_by_descriptor(descriptor_offset);
+            std::ranges::any_of(component, [&](ConSanProgramContainerId owner) {
+              const ConSanProgramContainer *kernel = program_inventory.container(owner);
               return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
             });
         if (!crosses_encoded_component_boundary && persistent_demand.scalar_state_supported &&
@@ -3848,9 +3900,15 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         }
         return update;
       }
-      for (uint64_t descriptor_offset : component) {
+      for (ConSanProgramContainerId owner : component) {
+        const ConSanProgramContainer *kernel = program_inventory.container(owner);
+        if (kernel == nullptr || !kernel->is_kernel()) {
+          update.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;
+          diagnostics.emplace_back("ConSan MOI found a stale component owner during placement");
+          return update;
+        }
         ConSanMoiPersistentVgprAssignment assignment;
-        assignment.descriptor_file_offset = descriptor_offset;
+        assignment.descriptor_file_offset = kernel->descriptor_file_offset;
         uint16_t next = static_cast<uint16_t>(component_base);
         if (has_explicit_owner_epoch) {
           assignment.owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{
@@ -3899,7 +3957,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   }
   const bool would_grow_descriptor =
       std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return !plan.owner_descriptor_file_offsets.empty() &&
+        return !plan.owner_kernel_ids.empty() &&
                plan.source != ConSanRegisterAllocationSource::Unsupported &&
                persistent_end > plan.current_vgpr_count;
       });
@@ -3949,7 +4007,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     }
     const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
     const MoiResourcePlanningState &scalar_state = planning_state;
-    const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(resource_plans);
+    const std::vector<ConSanProgramContainerId> scalar_owners =
+        moi_scalar_owner_kernel_ids(resource_plans);
     const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
     if (!resolved_contexts) {
       if (has_dynamic_stack_owner) {

@@ -2078,7 +2078,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   ASSERT_TRUE(candidate.operands.raw_vdst);
   EXPECT_EQ(*candidate.operands.raw_vdst, 2u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_TRUE(result.resource_plans.front().owner_descriptor_file_offsets.empty());
+  EXPECT_TRUE(result.resource_plans.front().owner_kernel_ids.empty());
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
   EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 1u);
@@ -2113,7 +2113,7 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_lds_helper");
   ASSERT_EQ(result.resource_plans.size(), 1u);
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
-  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(plan.scratch_vgpr, 1);
@@ -2304,7 +2304,7 @@ TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(result.resource_plans.front().owner_kernel_ids.size(), 2u);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
@@ -2346,7 +2346,7 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   const ConSanCandidateResourcePlan &plan = *plan_it;
   EXPECT_EQ(plan.site_kind, ConSanResourceSiteKind::Atomic);
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
-  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_TRUE(test_moi_epoch_vgpr(result));
@@ -2356,7 +2356,9 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   });
   ASSERT_NE(atomic_patch, result.patches.end());
-  EXPECT_EQ(atomic_patch->owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+  const auto plan_owners = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+  ASSERT_TRUE(plan_owners);
+  EXPECT_EQ(atomic_patch->owner_descriptor_file_offsets, *plan_owners);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
                           [](const ConSanPatchInfo &patch) {
                             return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -2391,23 +2393,25 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   EXPECT_EQ(plan.site_kind, ConSanResourceSiteKind::Atomic);
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.original_private_segment_size, 20u);
-  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
   const auto patch_it = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   });
   ASSERT_NE(patch_it, result.patches.end());
   const ConSanPatchInfo &patch = *patch_it;
+  const auto plan_owners = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+  ASSERT_TRUE(plan_owners);
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAtomicRecord);
   EXPECT_EQ(patch.spilled_vgpr_count, 7u);
   EXPECT_EQ(patch.required_private_segment_size, 60u);
-  EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+  EXPECT_EQ(patch.owner_descriptor_file_offsets, *plan_owners);
   const auto fence_it = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                           &ConSanPatchInfo::kind);
   ASSERT_NE(fence_it, result.patches.end());
-  EXPECT_EQ(fence_it->owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+  EXPECT_EQ(fence_it->owner_descriptor_file_offsets, *plan_owners);
   uint32_t shared_private_size = 0u;
   for (const ConSanPatchInfo &item : result.patches) {
-    if (item.owner_descriptor_file_offsets == plan.owner_descriptor_file_offsets) {
+    if (item.owner_descriptor_file_offsets == *plan_owners) {
       shared_private_size = std::max(shared_private_size, item.required_private_segment_size);
     }
   }
@@ -2453,8 +2457,10 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 20u);
   ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
-  EXPECT_EQ(patch.owner_descriptor_file_offsets,
-            result.resource_plans.front().owner_descriptor_file_offsets);
+  const auto plan_owners =
+      result.program_inventory.kernel_descriptors(result.resource_plans.front().owner_kernel_ids);
+  ASSERT_TRUE(plan_owners);
+  EXPECT_EQ(patch.owner_descriptor_file_offsets, *plan_owners);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2498,7 +2504,7 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
   EXPECT_EQ(plan.scratch_vgpr, 4);
   EXPECT_EQ(plan.required_vgpr_count, 10u);
-  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2579,10 +2585,11 @@ TEST(ConSanMoi, IndirectSharedHelperSpillUsesEveryRecoveredOwner) {
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
-  EXPECT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(plan.owner_kernel_ids.size(), 2u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 2u);
-  EXPECT_EQ(result.patches.front().owner_descriptor_file_offsets,
-            plan.owner_descriptor_file_offsets);
+  const auto plan_owners = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+  ASSERT_TRUE(plan_owners);
+  EXPECT_EQ(result.patches.front().owner_descriptor_file_offsets, *plan_owners);
 }
 
 TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
@@ -2641,7 +2648,7 @@ TEST(ConSanMoi, SharedHelperRejectsAssignmentLiveInAnyOwnerScope) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::ExplicitLive);
-  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(result.resource_plans.front().owner_kernel_ids.size(), 2u);
 }
 
 TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity) {
@@ -2674,7 +2681,7 @@ TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(result.resource_plans.front().owner_kernel_ids.size(), 2u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -4000,11 +4007,16 @@ TEST(ConSanMoi, AutomaticPersistentProloguesOnlyTargetEmittedProbeOwners) {
 
   const auto omitted_planned_owner =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return std::ranges::any_of(plan.owner_descriptor_file_offsets,
-                                   [&](uint64_t owner) { return !owns_access_patch(owner); });
+        return std::ranges::any_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
+          const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
+          return kernel != nullptr && !owns_access_patch(kernel->descriptor_file_offset);
+        });
       });
   ASSERT_NE(omitted_planned_owner, result.resource_plans.end());
-  for (uint64_t owner : omitted_planned_owner->owner_descriptor_file_offsets) {
+  const auto omitted_owner_descriptors =
+      result.program_inventory.kernel_descriptors(omitted_planned_owner->owner_kernel_ids);
+  ASSERT_TRUE(omitted_owner_descriptors);
+  for (uint64_t owner : *omitted_owner_descriptors) {
     if (owns_access_patch(owner))
       continue;
     EXPECT_FALSE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {

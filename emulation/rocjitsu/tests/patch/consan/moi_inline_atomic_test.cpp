@@ -1413,14 +1413,16 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan->scratch_vgpr_count, 26u);
-  ASSERT_EQ(plan->owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(plan->owner_kernel_ids.size(), 2u);
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
   });
   ASSERT_NE(atomic_patch, result.patches.end());
+  const auto plan_owners = result.program_inventory.kernel_descriptors(plan->owner_kernel_ids);
+  ASSERT_TRUE(plan_owners);
   EXPECT_EQ(atomic_patch->spilled_vgpr_count, 26u);
   EXPECT_EQ(atomic_patch->required_private_segment_size, 136u);
-  EXPECT_EQ(atomic_patch->owner_descriptor_file_offsets, plan->owner_descriptor_file_offsets);
+  EXPECT_EQ(atomic_patch->owner_descriptor_file_offsets, *plan_owners);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5425,7 +5427,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
   });
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
-  EXPECT_EQ(plan->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(plan->owner_kernel_ids.size(), 2u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());

@@ -2100,11 +2100,10 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_publication_loop ? 1u : 0u);
-      const uint16_t alignment =
-          environment.target_profile->flat_compare_swap_data_pair_alignment;
+      const uint16_t alignment = environment.target_profile->flat_compare_swap_data_pair_alignment;
       const uint16_t old_value_candidate = static_cast<uint16_t>(scratch + 5u);
-      const uint16_t old_value_offset = static_cast<uint16_t>(
-          5u + (alignment - old_value_candidate % alignment) % alignment);
+      const uint16_t old_value_offset =
+          static_cast<uint16_t>(5u + (alignment - old_value_candidate % alignment) % alignment);
       const auto expected_local_exchange_b64 = instrumentation::build_ds_storexchg_rtn_b64(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
           static_cast<uint16_t>(scratch + 2u), 0u, arch);
@@ -2404,8 +2403,8 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
         snapshot_candidate + (alignment - snapshot_candidate % alignment) % alignment);
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_candidate = static_cast<uint16_t>(scratch + 5u);
-    const uint16_t version_cas_value = static_cast<uint16_t>(
-        version_cas_candidate - version_cas_candidate % alignment);
+    const uint16_t version_cas_value =
+        static_cast<uint16_t>(version_cas_candidate - version_cas_candidate % alignment);
     const auto version_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
@@ -2592,10 +2591,15 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   for (const AmdGpuKernelInfo &kernel : replacement.kernels())
     owner_names.emplace(kernel.descriptor_file_offset, kernel.name);
   std::vector<uint64_t> referenced_owner_offsets;
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
-    referenced_owner_offsets.insert(referenced_owner_offsets.end(),
-                                    plan.owner_descriptor_file_offsets.begin(),
-                                    plan.owner_descriptor_file_offsets.end());
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    const auto descriptors = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+    if (!descriptors) {
+      errors.emplace_back("ConSan final validation found a stale resource-plan kernel owner");
+      continue;
+    }
+    referenced_owner_offsets.insert(referenced_owner_offsets.end(), descriptors->begin(),
+                                    descriptors->end());
+  }
   for (const ConSanPatchInfo &patch : result.patches)
     referenced_owner_offsets.insert(referenced_owner_offsets.end(),
                                     patch.owner_descriptor_file_offsets.begin(),
@@ -2665,7 +2669,12 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (!plan_has_emitted_patch(plan))
       continue;
-    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
+    const auto descriptors = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
+    if (!descriptors) {
+      errors.emplace_back("ConSan final validation found a stale emitted resource-plan owner");
+      continue;
+    }
+    for (uint64_t owner : *descriptors) {
       apply_to_owner(owner, [&](DescriptorRequirement &requirement) {
         requirement.allow_resource_delta = true;
         requirement.required_vgpr_count =
@@ -2764,7 +2773,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   uint16_t unscoped_required_vgprs = 0;
   uint32_t unscoped_required_private_bytes = 0;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.empty() && plan_has_emitted_patch(plan))
+    if (plan.owner_kernel_ids.empty() && plan_has_emitted_patch(plan))
       unscoped_required_vgprs = std::max(unscoped_required_vgprs, plan.required_vgpr_count);
   }
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -2784,13 +2793,13 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   // Computing it inside the kernel loop made final validation quadratic in a
   // large library's kernel and patch counts.
   const bool has_unscoped_resource_growth =
-      std::ranges::any_of(
-          result.resource_plans,
-          [&](const ConSanCandidateResourcePlan &plan) {
-            return plan.owner_descriptor_file_offsets.empty() && plan_has_emitted_patch(plan) &&
-                   (plan.source == ConSanRegisterAllocationSource::DescriptorGrowth ||
-                    plan.source == ConSanRegisterAllocationSource::SpillRequired);
-          }) ||
+      std::ranges::any_of(result.resource_plans,
+                          [&](const ConSanCandidateResourcePlan &plan) {
+                            return plan.owner_kernel_ids.empty() && plan_has_emitted_patch(plan) &&
+                                   (plan.source ==
+                                        ConSanRegisterAllocationSource::DescriptorGrowth ||
+                                    plan.source == ConSanRegisterAllocationSource::SpillRequired);
+                          }) ||
       std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
       });

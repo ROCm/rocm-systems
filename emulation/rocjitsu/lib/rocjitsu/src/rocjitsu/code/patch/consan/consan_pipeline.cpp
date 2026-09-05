@@ -409,8 +409,8 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
             .max_ordinary_vgpr_limit = plan.ordinary_vgpr_limit,
             .min_required_vgprs = plan.required_vgpr_count,
             .max_required_vgprs = plan.required_vgpr_count,
-            .min_owners = plan.owner_descriptor_file_offsets.size(),
-            .max_owners = plan.owner_descriptor_file_offsets.size(),
+            .min_owners = plan.owner_kernel_ids.size(),
+            .max_owners = plan.owner_kernel_ids.size(),
             .has_indirect_vgpr_access = plan.has_indirect_vgpr_access,
         });
       } else {
@@ -426,8 +426,7 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         include(failure->min_ordinary_vgpr_limit, failure->max_ordinary_vgpr_limit,
                 plan.ordinary_vgpr_limit);
         include(failure->min_required_vgprs, failure->max_required_vgprs, plan.required_vgpr_count);
-        include(failure->min_owners, failure->max_owners,
-                plan.owner_descriptor_file_offsets.size());
+        include(failure->min_owners, failure->max_owners, plan.owner_kernel_ids.size());
         failure->has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
       }
     }

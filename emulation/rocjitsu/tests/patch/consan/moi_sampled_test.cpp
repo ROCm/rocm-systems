@@ -2885,10 +2885,9 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
     if (plan.site_kind == ConSanResourceSiteKind::Access) {
       EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
           << consan_register_plan_reason_name(plan.reason) << " at " << plan.text_offset
-          << " owner "
-          << (plan.owner_descriptor_file_offsets.empty()
-                  ? 0u
-                  : plan.owner_descriptor_file_offsets.front())
+          << " owner_id "
+          << (plan.owner_kernel_ids.empty() ? ConSanProgramContainerId::kInvalidOrdinal
+                                            : plan.owner_kernel_ids.front().ordinal)
           << " scratch " << plan.scratch_vgpr.value_or(0u) << " current-vgprs "
           << plan.current_vgpr_count << " required-vgprs " << plan.required_vgpr_count;
     }
@@ -3359,12 +3358,14 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   EXPECT_EQ(assignment.owner_epoch_vgprs.owner, 251u);
   EXPECT_EQ(assignment.owner_epoch_vgprs.epoch, 252u);
   EXPECT_FALSE(assignment.dispatch_id_vgpr);
+  const ConSanProgramContainer *dynamic_owner =
+      result.program_inventory.find_kernel_by_name(dynamic->name);
+  ASSERT_NE(dynamic_owner, nullptr);
   const auto dynamic_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Access &&
-               std::ranges::find(plan.owner_descriptor_file_offsets,
-                                 dynamic->descriptor_file_offset) !=
-                   plan.owner_descriptor_file_offsets.end();
+               std::ranges::find(plan.owner_kernel_ids, dynamic_owner->id) !=
+                   plan.owner_kernel_ids.end();
       });
   ASSERT_NE(dynamic_plan, result.resource_plans.end());
   // This owner's persistent VGPR tuple supplies owner/epoch, so its native LDS
@@ -3379,9 +3380,8 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   const auto dynamic_barrier_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Barrier &&
-               std::ranges::find(plan.owner_descriptor_file_offsets,
-                                 dynamic->descriptor_file_offset) !=
-                   plan.owner_descriptor_file_offsets.end();
+               std::ranges::find(plan.owner_kernel_ids, dynamic_owner->id) !=
+                   plan.owner_kernel_ids.end();
       });
   ASSERT_NE(dynamic_barrier_plan, result.resource_plans.end());
   EXPECT_EQ(dynamic_barrier_plan->scratch_vgpr_count, 7u);
@@ -3441,6 +3441,9 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   EXPECT_EQ(persistent.descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_EQ(persistent.owner_epoch_vgprs.owner, 251u);
   EXPECT_EQ(persistent.owner_epoch_vgprs.epoch, 252u);
+  const ConSanProgramContainer *dynamic_owner =
+      result.program_inventory.find_kernel_by_name(dynamic->name);
+  ASSERT_NE(dynamic_owner, nullptr);
 
   // No scalar window is legal for the union of the two owners. The resource
   // planner must therefore keep the initially failed dynamic component in the
@@ -3459,9 +3462,8 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   const auto dynamic_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Access &&
-               std::ranges::find(plan.owner_descriptor_file_offsets,
-                                 dynamic->descriptor_file_offset) !=
-                   plan.owner_descriptor_file_offsets.end();
+               std::ranges::find(plan.owner_kernel_ids, dynamic_owner->id) !=
+                   plan.owner_kernel_ids.end();
       });
   ASSERT_NE(dynamic_plan, result.resource_plans.end());
   EXPECT_NE(dynamic_plan->source, ConSanRegisterAllocationSource::Unsupported);
@@ -3469,9 +3471,8 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   const auto dynamic_barrier_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Barrier &&
-               std::ranges::find(plan.owner_descriptor_file_offsets,
-                                 dynamic->descriptor_file_offset) !=
-                   plan.owner_descriptor_file_offsets.end();
+               std::ranges::find(plan.owner_kernel_ids, dynamic_owner->id) !=
+                   plan.owner_kernel_ids.end();
       });
   ASSERT_NE(dynamic_barrier_plan, result.resource_plans.end());
   EXPECT_NE(dynamic_barrier_plan->source, ConSanRegisterAllocationSource::Unsupported);

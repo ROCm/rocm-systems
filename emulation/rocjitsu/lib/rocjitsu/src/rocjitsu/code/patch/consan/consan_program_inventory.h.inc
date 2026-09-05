@@ -789,6 +789,21 @@ public:
     const ConSanProgramContainer *record = container(owner.kernel);
     return record != nullptr && record->is_kernel() ? record : nullptr;
   }
+  /// Materialize kernel handles as physical descriptor locations at a
+  /// byte-oriented boundary. Unlike the presentation-oriented execution-owner
+  /// queries below, this fails closed if any handle is stale or is not a kernel.
+  [[nodiscard]] std::optional<std::vector<uint64_t>>
+  kernel_descriptors(std::span<const ConSanProgramContainerId> kernels) const {
+    std::vector<uint64_t> descriptors;
+    descriptors.reserve(kernels.size());
+    for (ConSanProgramContainerId id : kernels) {
+      const ConSanProgramContainer *record = container(id);
+      if (record == nullptr || !record->is_kernel())
+        return std::nullopt;
+      descriptors.push_back(record->descriptor_file_offset);
+    }
+    return descriptors;
+  }
   /// Materialize physical descriptor locations at a byte-oriented boundary.
   /// Semantic analysis and policy retain kernel handles instead.
   [[nodiscard]] std::vector<uint64_t>

@@ -111,8 +111,8 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
-    const auto resources =
-        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, result.program_inventory, operating_point,
+                                                    result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable resource plan in " +
@@ -167,8 +167,7 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, planned.source, candidate.lowering_form, planned.address_plan,
-        planned.emission,
-        planned.spill ? &*planned.spill : nullptr,
+        planned.emission, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, guest_instruction_offset,
         result.errors);

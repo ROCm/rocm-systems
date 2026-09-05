@@ -102,8 +102,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                        access_resource_facts, candidate)
             : inline_shadow_scratch_count(options.moi_track_atomics, access_resource_facts,
                                           candidate);
-    const auto resources = resolve_moi_scratch_plan(
-        *resource_plan, operating_point, result.moi_operating_point, expected_scratch_count);
+    const auto resources =
+        resolve_moi_scratch_plan(*resource_plan, result.program_inventory, operating_point,
+                                 result.moi_operating_point, expected_scratch_count);
     if (!resources)
       continue;
 

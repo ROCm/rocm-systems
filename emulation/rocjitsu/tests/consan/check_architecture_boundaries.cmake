@@ -3961,6 +3961,14 @@ foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)
     endif()
 endforeach()
 file(READ "${_consan_dir}/consan_composition.inc" _fault_composition_body)
+file(READ "${_consan_dir}/consan_resource_types.h.inc" _resource_plan_contract)
+if(NOT _resource_plan_contract MATCHES
+       "std::vector<ConSanProgramContainerId>[ 	]+owner_kernel_ids" OR
+   _resource_plan_contract MATCHES "owner_descriptor_file_offsets")
+    message(FATAL_ERROR
+        "ConSan resource plans must retain kernel handles and leave descriptor offsets to byte lowering"
+    )
+endif()
 if(_fault_composition_body MATCHES "find_fault_plan" OR
    _fault_composition_body MATCHES "try_apply_.*fault_patch")
     message(FATAL_ERROR

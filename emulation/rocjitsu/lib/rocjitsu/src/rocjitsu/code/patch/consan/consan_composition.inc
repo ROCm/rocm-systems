@@ -312,23 +312,19 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     instrument_result.outcome = ConSanTransformOutcome::Unsupported;
   const major_image_ownership::ScopedOwner instrument_result_owner(
       major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
-  // Lowering materializes descriptor locations in its current mutation image.
-  // Translate those byte coordinates through stable kernel handles before
-  // merging proof from the pristine and staged revisions.
+  // Patch ABI materializes descriptor locations in its current mutation image.
+  // Resource plans retain stable kernel handles, so only byte-oriented patch
+  // coordinates require translation before merging revision-local proof.
   uint64_t stale_owner_offset = 0;
   const auto translate_owners = [&](std::vector<uint64_t> &offsets) {
     return translate_owner_descriptors(instrument_result.program_inventory,
                                        pristine_program_inventory, offsets, &stale_owner_offset);
   };
-  const bool resource_owners_valid =
-      std::ranges::all_of(instrument_result.resource_plans, [&](ConSanCandidateResourcePlan &plan) {
-        return translate_owners(plan.owner_descriptor_file_offsets);
-      });
   const bool patch_owners_valid =
       std::ranges::all_of(instrument_result.patches, [&](ConSanPatchAbiEffects &patch) {
         return translate_owners(patch.owner_descriptor_file_offsets);
       });
-  if (!resource_owners_valid || !patch_owners_valid) {
+  if (!patch_owners_valid) {
     instrument_result.errors.emplace_back(
         "ConSan staged composition found stale execution-owner identity at descriptor offset " +
         std::to_string(stale_owner_offset));
@@ -483,24 +479,22 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   if (extent == ConSanLoweringExtent::ThroughProgramInventory)
     return result;
   if (options.fault_dry_run) {
-    resolve_consan_fault_mutations(
-        *code_object, arch, static_cast<const MutationRequest &>(options),
-        static_cast<const ConSanDebugOverrides &>(options),
-        static_cast<const TransformPolicy &>(options), apply_fault_plan, apply_fault_plan,
-        require_exactly_one_applied_fault, result);
-    build_perturbation_plan(
-        result.program_inventory, static_cast<const ConSanRequest &>(options),
-        static_cast<const MutationRequest &>(options),
-        static_cast<const ConSanDebugOverrides &>(options), perturbation,
-        result.mutation.perturbation, result.errors, carried_plans);
+    resolve_consan_fault_mutations(*code_object, arch,
+                                   static_cast<const MutationRequest &>(options),
+                                   static_cast<const ConSanDebugOverrides &>(options),
+                                   static_cast<const TransformPolicy &>(options), apply_fault_plan,
+                                   apply_fault_plan, require_exactly_one_applied_fault, result);
+    build_perturbation_plan(result.program_inventory, static_cast<const ConSanRequest &>(options),
+                            static_cast<const MutationRequest &>(options),
+                            static_cast<const ConSanDebugOverrides &>(options), perturbation,
+                            result.mutation.perturbation, result.errors, carried_plans);
     return result;
   }
   if (has_perturbation) {
-    build_perturbation_plan(
-        result.program_inventory, static_cast<const ConSanRequest &>(options),
-        static_cast<const MutationRequest &>(options),
-        static_cast<const ConSanDebugOverrides &>(options), perturbation,
-        result.mutation.perturbation, result.errors, carried_plans);
+    build_perturbation_plan(result.program_inventory, static_cast<const ConSanRequest &>(options),
+                            static_cast<const MutationRequest &>(options),
+                            static_cast<const ConSanDebugOverrides &>(options), perturbation,
+                            result.mutation.perturbation, result.errors, carried_plans);
     if (!result.errors.empty())
       return result;
   }
@@ -540,9 +534,8 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
     try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
 
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(*code_object, arch,
-                                   static_cast<const TransformPolicy &>(options), perturbation,
-                                   result);
+    try_apply_perturbation_patches(
+        *code_object, arch, static_cast<const TransformPolicy &>(options), perturbation, result);
     if (result.mutation.perturbation.applied != perturbation.plans.size()) {
       if (result.outcome == ConSanTransformOutcome::ModifiedValid)
         result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
@@ -607,8 +600,8 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
                                          ? "SuperCollider access proof"
                                      : options.probe_lds_check_trap ? "LDS check/trap proof"
                                                                     : "flat check/trap proof";
-    if (!finalize_consan_text_rewrites(result.replacement, arch,
-                                       options.patched_image_growth_limit, subject, result))
+    if (!finalize_consan_text_rewrites(result.replacement, arch, options.patched_image_growth_limit,
+                                       subject, result))
       result.discard_candidate_modification();
   }
 

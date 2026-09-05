@@ -156,7 +156,11 @@ void append_inline_shadow_barrier_epilogue(std::vector<uint32_t> &words,
 plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   auto &[bytes, options, point, candidate, site, resource_plan, access_patch, semantics,
          spill_managers, arch, inventory, assignments, warnings] = context;
-  const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
+  const auto owners = inventory.kernel_descriptors(resource_plan.owner_kernel_ids);
+  if (!owners) {
+    warnings.emplace_back("ConSan MOI private barrier lost its kernel owner identity");
+    return std::nullopt;
+  }
   const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
   const auto private_limit = consan_address_free_private_limit(arch);
@@ -174,7 +178,7 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   const uint32_t required_private_bytes =
       std::max(access_patch.required_private_segment_size, spill->total_private_bytes);
   ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
-      owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
+      *owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
   return PlannedBarrierLowering{
       .candidate = candidate,
       .site = &site,

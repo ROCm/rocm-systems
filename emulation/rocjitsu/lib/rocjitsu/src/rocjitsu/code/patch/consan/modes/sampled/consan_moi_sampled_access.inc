@@ -118,13 +118,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         resource_plan_for_candidate(result.resource_plans, candidate);
     if (candidate_resource_plan == nullptr)
       continue;
+    const auto owner_descriptors =
+        result.program_inventory.kernel_descriptors(candidate_resource_plan->owner_kernel_ids);
+    if (!owner_descriptors)
+      continue;
     ConSanMoiOperatingPoint candidate_point = operating_point;
-    if (!apply_moi_transient_sgpr_assignment(
-            options, candidate_point, result.moi_operating_point,
-            candidate_resource_plan->owner_descriptor_file_offsets) ||
-        !apply_moi_persistent_vgpr_assignment(
-            candidate_point, result.moi_operating_point,
-            candidate_resource_plan->owner_descriptor_file_offsets)) {
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
+                                             *owner_descriptors) ||
+        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
+                                              *owner_descriptors)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled probe lost its owner-local persistent or transient assignment");
       continue;
@@ -139,8 +141,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         resolve_moi_access_resource_facts(candidate_point, candidate, arch);
     const uint16_t expected_scratch_count =
         direct_sampled_scratch_count(options, access_resource_facts);
-    const auto resources = resolve_moi_scratch(result.resource_plans, candidate, candidate_point,
-                                               expected_scratch_count);
+    const auto resources = resolve_moi_scratch(result.resource_plans, result.program_inventory,
+                                               candidate, candidate_point, expected_scratch_count);
     if (!resources) {
       continue;
     }

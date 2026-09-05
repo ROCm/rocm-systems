@@ -231,9 +231,10 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
                                std::span<const ConSanMoiCandidate> candidates,
                                std::vector<ConSanCandidateResourcePlan> &plans);
 
-[[nodiscard]] bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
-                                                           std::span<const uint64_t> owners,
-                                                           uint16_t base, uint16_t count);
+[[nodiscard]] bool
+moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
+                                        std::span<const ConSanProgramContainerId> owners,
+                                        uint16_t base, uint16_t count);
 
 [[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(
     ConSanMoiOperatingPoint &options, const MoiResourceProblem &problem,
@@ -258,8 +259,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     std::span<const ConSanCandidateResourcePlan> site_plans, const MoiResourcePlanningState &state);
 
 [[nodiscard]] ConSanMoiOperatingPointAttempt
-plan_moi_dispatch_id_fallback(const ConSanRequest &request,
-                              const BoundRuntimeResources &resources,
+plan_moi_dispatch_id_fallback(const ConSanRequest &request, const BoundRuntimeResources &resources,
                               const ConSanMoiOperatingPoint &base,
                               const MoiResourceProblem &problem,
                               std::span<const ConSanCandidateResourcePlan> site_plans);
@@ -282,13 +282,13 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
                        ConSanResourceSiteKind site_kind, uint64_t text_offset);
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
+resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ProgramInventory &inventory,
                          const ConSanMoiOperatingPoint &site_point, MoiOwnerAssignments assignments,
                          uint16_t expected_count);
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
-                    const ConSanMoiCandidate &candidate,
+                    const ProgramInventory &inventory, const ConSanMoiCandidate &candidate,
                     const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count);
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *

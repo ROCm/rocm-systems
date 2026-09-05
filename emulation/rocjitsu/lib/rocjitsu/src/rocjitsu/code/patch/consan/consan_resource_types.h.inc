@@ -52,7 +52,11 @@ struct ConSanCandidateResourcePlan {
   /// preserve an address that the load overwrites. Absent when both sites are
   /// identical.
   std::optional<uint64_t> semantic_text_offset;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
+  /// Stable kernel identities whose dispatches can reach this site. The plan
+  /// remains bound to the immutable inventory that produced it; descriptor byte
+  /// offsets are materialized only by lowering that reads or mutates descriptor
+  /// fields.
+  std::vector<ConSanProgramContainerId> owner_kernel_ids;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
   ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
   std::optional<uint16_t> scratch_vgpr;

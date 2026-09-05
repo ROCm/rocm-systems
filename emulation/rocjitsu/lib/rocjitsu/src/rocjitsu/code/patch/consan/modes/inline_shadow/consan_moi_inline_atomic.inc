@@ -257,8 +257,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
-    const auto resources =
-        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, result.program_inventory, operating_point,
+                                                    result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch has no usable resource plan in " +

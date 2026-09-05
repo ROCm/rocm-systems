@@ -176,9 +176,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;
-        return std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
-          const ConSanProgramContainer *kernel =
-              result.program_inventory.find_kernel_by_descriptor(offset);
+        return std::ranges::any_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
+          const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
       });
@@ -223,9 +222,9 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
   result.moi_operating_point = effective_point;
-  ConSanMoiOperatingPointAttempt dispatch_fallback = plan_moi_dispatch_id_fallback(
-      effective_options, effective_options, effective_point, resource_problem,
-      result.resource_plans);
+  ConSanMoiOperatingPointAttempt dispatch_fallback =
+      plan_moi_dispatch_id_fallback(effective_options, effective_options, effective_point,
+                                    resource_problem, result.resource_plans);
   if (dispatch_fallback.accepted()) {
     effective_point = std::move(dispatch_fallback.attempted_operating_point);
     result.warnings.insert(result.warnings.end(),
@@ -312,9 +311,9 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
                            resource_planning_state, moi_candidates, object_facts,
                            mode_plan.semantics, result);
   if (result.errors.empty() && (!mode_plan.prologue_requires_consumer || result.modified()))
-    try_apply_owner_epoch_prologue_patch(
-        code_object_bytes, effective_options, effective_options, effective_point,
-        prologue_scratch_assignments, mode_plan.semantics, mode_plan.prologue, arch, result);
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_options,
+                                         effective_point, prologue_scratch_assignments,
+                                         mode_plan.semantics, mode_plan.prologue, arch, result);
   if (result.errors.empty())
     result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
