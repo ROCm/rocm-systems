@@ -17,7 +17,10 @@ namespace rocjitsu {
 /// instruction. The resulting bytes and patch proof remain part of the same
 /// lowering transaction and are independently validated before publication.
 void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanOptions &options,
+                                            const ConSanRequest &request,
+                                            const ConSanDebugOverrides &debug,
+                                            const MutationRequest &mutation,
+                                            const TransformPolicy &transform_policy,
                                             ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu

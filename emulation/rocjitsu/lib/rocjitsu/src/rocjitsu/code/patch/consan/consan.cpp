@@ -88,7 +88,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       ConSanTransformArtifacts result =
           compose_consan_lowering(code_object_bytes, options, initial_operating_point, nullptr, {},
                                   ConSanLoweringExtent::Complete, nullptr);
-      try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+      try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
+                                             result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id);
     }
@@ -99,7 +100,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     }
     ConSanTransformArtifacts result = try_patch_consan_moi(
         std::move(inventory), options, initial_operating_point, code_object_bytes, arch);
-    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
+                                           result);
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id);
   } catch (const std::exception &error) {
@@ -130,7 +132,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
         result.outcome = ConSanTransformOutcome::Invalid;
       return result;
     }
-    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
+                                           result);
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id);
   } catch (const std::exception &error) {

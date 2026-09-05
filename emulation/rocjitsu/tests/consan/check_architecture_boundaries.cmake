@@ -375,6 +375,8 @@ foreach(_source IN ITEMS
     consan_fault_injection.inc
     consan_perturbation.h
     consan_perturbation.cpp
+    consan_unmatched_barrier_abort.h
+    consan_unmatched_barrier_abort.cpp
     consan_placement.h
     consan_placement.inc
     consan_text_relocation.h

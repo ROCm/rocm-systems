@@ -25,11 +25,13 @@ struct UnmatchedBarrierWait {
   std::optional<uint64_t> owner_descriptor_file_offset;
 };
 
-void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSanOptions &options,
+void append_unmatched_barrier_wait(const ConSanProgramSite &decoded,
+                                   const ConSanRequest &request,
+                                   const ConSanDebugOverrides &debug,
                                    const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
   const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
-  if (site == nullptr || !consan_container_selected(options, decoded.container.name))
+  if (site == nullptr || !consan_container_selected(request, debug, decoded.container.name))
     return;
   const SynchronizationInventoryView synchronization = inventory.sync();
   if (site->operation != ConSanBarrierSite::Operation::Wait || site->size != sizeof(uint32_t) ||
@@ -58,13 +60,16 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
 } // namespace
 
 void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanOptions &options,
+                                            const ConSanRequest &request,
+                                            const ConSanDebugOverrides &debug,
+                                            const MutationRequest &mutation,
+                                            const TransformPolicy &transform_policy,
                                             ConSanTransformArtifacts &result) {
-  if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
+  if (!debug.abort_unmatched_barrier_wait || mutation.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
   for (const ConSanProgramSite &site : result.program_inventory.program_sites())
-    append_unmatched_barrier_wait(site, options, result.program_inventory, waits);
+    append_unmatched_barrier_wait(site, request, debug, result.program_inventory, waits);
   if (waits.empty())
     return;
 
@@ -112,7 +117,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
       patch.owner_descriptor_file_offsets.push_back(*wait.owner_descriptor_file_offset);
     patches.push_back(std::move(patch));
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+  if (!replace_consan_text(patcher, new_text, transform_policy.patched_image_growth_limit,
                            "unmatched barrier abort", result.program_inventory.code_object_id(),
                            result.errors, &result.transform_failure_cause)) {
     return;

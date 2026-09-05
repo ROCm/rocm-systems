@@ -3,6 +3,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          const ConSanOptions &options,
                                          ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
+  const ConSanRequest &request = options;
+  const ConSanDebugOverrides &debug = options;
 
   const auto delay_words = consan_sc_build_delay_words(
       arch, options, result.errors, "ConSan LDS check/trap proof");
@@ -123,7 +125,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const LdsSitePlanningContext &site_context : site_contexts) {
     if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       const bool container_matches =
-          consan_container_selected(options, site_context.site->container.name);
+          consan_container_selected(request, debug, site_context.site->container.name);
       const bool owner_matches =
           !site_context.owners.descriptor_file_offsets.empty() &&
           (options.kernel_name_allowlist.empty()
@@ -132,12 +134,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                        const ConSanProgramContainer *kernel =
                                            owner_analysis.kernel(owner);
                                        return kernel &&
-                                              consan_container_selected(options, kernel->name);
+                                              consan_container_selected(request, debug,
+                                                                        kernel->name);
                                      })
                : std::ranges::all_of(
                      site_context.owners.descriptor_file_offsets, [&](uint64_t owner) {
                        const ConSanProgramContainer *kernel = owner_analysis.kernel(owner);
-                       return kernel && consan_container_selected(options, kernel->name);
+                       return kernel && consan_container_selected(request, debug, kernel->name);
                      }));
       if (!container_matches && !owner_matches)
         continue;

@@ -878,15 +878,16 @@ struct ConSanOptions : ConSanRequest,
   return name;
 }
 
-[[nodiscard]] inline bool consan_container_selected(const ConSanOptions &options,
+[[nodiscard]] inline bool consan_container_selected(const ConSanRequest &request,
+                                                    const ConSanDebugOverrides &debug,
                                                     std::string_view container_name) {
-  if (!options.test_kernel_name_filter.empty() &&
-      container_name.find(options.test_kernel_name_filter) == std::string_view::npos)
+  if (!debug.test_kernel_name_filter.empty() &&
+      container_name.find(debug.test_kernel_name_filter) == std::string_view::npos)
     return false;
-  if (options.kernel_name_allowlist.empty())
+  if (request.kernel_name_allowlist.empty())
     return true;
   const std::string_view normalized = consan_normalize_kernel_name(container_name);
-  return std::ranges::any_of(options.kernel_name_allowlist, [&](std::string_view allowed) {
+  return std::ranges::any_of(request.kernel_name_allowlist, [&](std::string_view allowed) {
     return consan_normalize_kernel_name(allowed) == normalized;
   });
 }
