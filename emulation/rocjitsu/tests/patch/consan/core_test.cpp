@@ -360,10 +360,10 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
 
 TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {
   ConSanOptions options;
-  EXPECT_FALSE(initial_consan_moi_operating_point(options).moi_initialize_owner_epoch);
+  EXPECT_FALSE(initial_consan_moi_operating_point(options, options).moi_initialize_owner_epoch);
 
   options.moi_init_owner_epoch = true;
-  ConSanMoiOperatingPoint point = initial_consan_moi_operating_point(options);
+  ConSanMoiOperatingPoint point = initial_consan_moi_operating_point(options, options);
   EXPECT_TRUE(point.moi_initialize_owner_epoch);
 
   options.moi_init_owner_epoch = false;

@@ -32,7 +32,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.size());
   try {
     const ConSanMoiOperatingPoint initial_operating_point =
-        initial_consan_moi_operating_point(options);
+        initial_consan_moi_operating_point(options, options);
     ConSanTransformArtifacts inventory;
     inventory.program_inventory = std::move(retry_inventory.program_inventory);
     inventory.coverage_ledger = std::move(retry_inventory.coverage_ledger);
@@ -149,7 +149,8 @@ ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes
                                       const ConSanOptions &options, ConSanLoweringExtent extent,
                                       const ConSanLoweringObservation *observation) {
   return complete_consan_lowering_with_operating_point(code_object_bytes, options,
-                                                       initial_consan_moi_operating_point(options),
+                                                       initial_consan_moi_operating_point(options,
+                                                                                       options),
                                                        nullptr, {}, extent, observation);
 }
 

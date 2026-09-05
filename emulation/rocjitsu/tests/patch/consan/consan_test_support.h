@@ -63,7 +63,7 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   MoiOptions() = default;
   MoiOptions(const ConSanOptions &options)
       : ConSanOptions(options),
-        ConSanMoiOperatingPoint(initial_consan_moi_operating_point(options)) {}
+        ConSanMoiOperatingPoint(initial_consan_moi_operating_point(options, options)) {}
 
   /// Focused fixtures commonly assign request fields after default
   /// construction. Recreate production's one request-to-point resolution at

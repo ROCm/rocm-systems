@@ -1558,12 +1558,18 @@ if(NOT _moi_record_planning_contract MATCHES
     )
 endif()
 if(NOT _consan_options_contract MATCHES
-       "point[.]moi_initialize_owner_epoch[ \t]*=[ \t]*options[.]moi_init_owner_epoch")
+       "point[.]moi_initialize_owner_epoch[ \t]*=[ \t]*request[.]moi_init_owner_epoch")
     message(FATAL_ERROR
         "ConSan initial operating-point construction must resolve owner/epoch initialization"
     )
 endif()
 file(READ "${_consan_dir}/consan_capability_contract.h" _target_neutral_abi_contract)
+if(NOT _consan_options_contract MATCHES
+   "initial_consan_moi_operating_point[(]const ConSanRequest &request,[\n ]+const ConSanDebugOverrides &debug[)]")
+    message(FATAL_ERROR
+        "ConSan initial MOI operating point must consume request and debug facets, not the orchestration aggregate"
+    )
+endif()
 foreach(_operand IN ITEMS ExecLo ExecHi VccLo VccHi WorkitemIdX ScopeDevice)
     if(NOT _target_neutral_abi_contract MATCHES "kAmdGpu${_operand}")
         message(FATAL_ERROR

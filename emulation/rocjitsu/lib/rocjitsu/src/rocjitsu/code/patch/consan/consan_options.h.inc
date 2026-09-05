@@ -1007,14 +1007,15 @@ struct ConSanMoiOperatingPoint {
 /// prevents immutable request state and solver output from becoming one
 /// inherited attempt bus.
 [[nodiscard]] inline ConSanMoiOperatingPoint
-initial_consan_moi_operating_point(const ConSanOptions &options) {
+initial_consan_moi_operating_point(const ConSanRequest &request,
+                                   const ConSanDebugOverrides &debug) {
   ConSanMoiOperatingPoint point;
-  point.moi_initialize_owner_epoch = options.moi_init_owner_epoch;
-  point.moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
-  point.moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
-  if (options.requested_moi_owner_vgpr && options.requested_moi_epoch_vgpr) {
-    point.set_moi_owner_epoch_vgprs(*options.requested_moi_owner_vgpr,
-                                    *options.requested_moi_epoch_vgpr);
+  point.moi_initialize_owner_epoch = request.moi_init_owner_epoch;
+  point.moi_exec_save_sgpr = debug.requested_moi_exec_save_sgpr;
+  point.moi_owner_sgpr.set(debug.requested_moi_owner_sgpr);
+  if (debug.requested_moi_owner_vgpr && debug.requested_moi_epoch_vgpr) {
+    point.set_moi_owner_epoch_vgprs(*debug.requested_moi_owner_vgpr,
+                                    *debug.requested_moi_epoch_vgpr);
   }
   return point;
 }
