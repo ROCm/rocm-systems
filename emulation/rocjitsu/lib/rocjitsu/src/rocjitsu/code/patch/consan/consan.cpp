@@ -132,7 +132,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     }
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes,
-                                  options.moi_report_dispatch_id, false, inspected_perturbation);
+                                  options.moi_report_dispatch_id);
   } catch (const std::exception &error) {
     return finalize_consan_exception(
         code_object_bytes, std::string("ConSan transform threw an exception: ") + error.what());

@@ -1366,13 +1366,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
                                            patch.anchor_offset + patch.original_size};
           return validation_ranges_overlap(mutation_body, anchor);
         });
-    // A staged composition validates pristine -> mutation and mutation ->
-    // instrumentation independently before combining their inventories. If
-    // the second validated stage replaced an instruction inside this body, the
-    // final image cannot also retain the intermediate raw bytes. Cross-phase
-    // nesting is checked by byte accounting; retain the source-NOP and
-    // entry-branch checks above and rely on both recorded stage proofs for the
-    // nested rewrite.
+    // A staged composition validates pristine -> mutation before lowering the
+    // instrumentation stage, then validates the complete pristine -> final
+    // transaction. If instrumentation replaced an instruction inside this
+    // body, the final image cannot also retain the intermediate raw bytes.
+    // Cross-phase nesting is checked by byte accounting; retain the source-NOP
+    // and entry-branch checks above and rely on final instrumentation proof for
+    // the nested rewrite.
     if (body_reinstrumented && staged_composition)
       return;
     const uint64_t barrier_body_offset =
@@ -1413,8 +1413,6 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
 void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
                                         const FinalValidationEnvironment &environment,
                                         const ConSanFinalValidationInput &result,
-                                        bool validating_carried_composite_stage,
-                                        const ConSanPerturbationPlanningState *carried_perturbation,
                                         std::vector<std::string> &errors) {
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
@@ -1447,13 +1445,9 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
 
   const ConSanPerturbationValidationInventory pristine =
       rederive_consan_perturbation_validation_inventory(original_image);
-  if (!validating_carried_composite_stage && !pristine.analysis_succeeded) {
+  if (!pristine.analysis_succeeded) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
-    return;
-  }
-  if (validating_carried_composite_stage && carried_perturbation == nullptr) {
-    errors.emplace_back("ConSan SC perturbation proof is missing carried planning evidence");
     return;
   }
 
@@ -1521,10 +1515,8 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       continue;
     }
 
-    const ProgramInventory &semantic_inventory =
-        validating_carried_composite_stage ? result.program_inventory : pristine.program_inventory;
-    const std::span<const ConSanPerturbationCandidate> semantic_candidates =
-        validating_carried_composite_stage ? carried_perturbation->candidates : pristine.candidates;
+    const ProgramInventory &semantic_inventory = pristine.program_inventory;
+    const std::span<const ConSanPerturbationCandidate> semantic_candidates = pristine.candidates;
     const auto candidate_matches = [&](const ConSanPerturbationCandidate &candidate) {
       return candidate.eligible && candidate.sequence_identity == proof_sequence_identity &&
              candidate.edge == *patch.perturbation_edge &&
@@ -1562,48 +1554,45 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
           "ConSan SC perturbation proof attached a kernel owner to a local function");
       continue;
     }
-    if (!validating_carried_composite_stage) {
-      const auto sequence =
-          std::ranges::find(pristine.program_inventory.sync().sync_sequences,
-                            proof_sequence_identity, &ConSanSyncSequence::identity);
-      if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
-          !sequence->basic_block_index ||
-          !consan_sync_confidence_meets(sequence->confidence,
-                                        ConSanSemanticConfidence::Conservative) ||
-          perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
-                                        *patch.perturbation_edge) !=
-              ConSanPerturbationRejectionReason::None ||
-          candidate->container_name != sequence->container_name ||
-          candidate->in_kernel != sequence->in_kernel ||
-          candidate->basic_block_index != *sequence->basic_block_index ||
-          candidate->ordered_member_identities != sequence->member_event_identities) {
-        errors.emplace_back("ConSan SC perturbation proof could not rederive sequence role, "
-                            "confidence, container, and block");
-        continue;
-      }
-      const size_t outer_member_index = *patch.perturbation_edge == ConSanPerturbationEdge::Release
-                                            ? 0u
-                                            : sequence->member_semantic_ids.size() - 1u;
-      const std::string &outer_member = sequence->member_event_identities[outer_member_index];
-      const ConSanSyncEvent *anchor_event = find_sequence_member_event(
-          pristine_events, sequence->member_semantic_ids[outer_member_index]);
-      const ConSanProgramSite *anchor_source =
-          anchor_event == nullptr
-              ? nullptr
-              : pristine.program_inventory.program_site(anchor_event->source_site);
-      if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
-          anchor_source == nullptr ||
-          (composite && patch.perturbation_source_anchor_identity != outer_member) ||
-          anchor_event->container_name != sequence->container_name ||
-          anchor_event->in_kernel != sequence->in_kernel ||
-          candidate->anchor_text_offset != anchor_event->text_offset() ||
-          candidate->anchor_size != anchor_source->size() ||
-          proof_anchor_offset != anchor_event->text_offset() ||
-          proof_anchor_size != anchor_source->size() || patch.original_size != proof_anchor_size) {
-        errors.emplace_back(
-            "ConSan SC perturbation proof did not target the rederived outer sequence member");
-        continue;
-      }
+    const auto sequence = std::ranges::find(pristine.program_inventory.sync().sync_sequences,
+                                            proof_sequence_identity, &ConSanSyncSequence::identity);
+    if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
+        !sequence->basic_block_index ||
+        !consan_sync_confidence_meets(sequence->confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
+                                      *patch.perturbation_edge) !=
+            ConSanPerturbationRejectionReason::None ||
+        candidate->container_name != sequence->container_name ||
+        candidate->in_kernel != sequence->in_kernel ||
+        candidate->basic_block_index != *sequence->basic_block_index ||
+        candidate->ordered_member_identities != sequence->member_event_identities) {
+      errors.emplace_back("ConSan SC perturbation proof could not rederive sequence role, "
+                          "confidence, container, and block");
+      continue;
+    }
+    const size_t outer_member_index = *patch.perturbation_edge == ConSanPerturbationEdge::Release
+                                          ? 0u
+                                          : sequence->member_semantic_ids.size() - 1u;
+    const std::string &outer_member = sequence->member_event_identities[outer_member_index];
+    const ConSanSyncEvent *anchor_event = find_sequence_member_event(
+        pristine_events, sequence->member_semantic_ids[outer_member_index]);
+    const ConSanProgramSite *anchor_source =
+        anchor_event == nullptr
+            ? nullptr
+            : pristine.program_inventory.program_site(anchor_event->source_site);
+    if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
+        anchor_source == nullptr ||
+        (composite && patch.perturbation_source_anchor_identity != outer_member) ||
+        anchor_event->container_name != sequence->container_name ||
+        anchor_event->in_kernel != sequence->in_kernel ||
+        candidate->anchor_text_offset != anchor_event->text_offset() ||
+        candidate->anchor_size != anchor_source->size() ||
+        proof_anchor_offset != anchor_event->text_offset() ||
+        proof_anchor_size != anchor_source->size() || patch.original_size != proof_anchor_size) {
+      errors.emplace_back(
+          "ConSan SC perturbation proof did not target the rederived outer sequence member");
+      continue;
     }
     const auto forward = compute_sopp_branch_simm16(patch.anchor_offset, patch.trampoline_offset);
     uint32_t anchor_word = 0;
@@ -3035,11 +3024,11 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   return;
 }
 
-[[nodiscard]] std::vector<std::string> validate_final_consan_elf(
-    std::span<const uint8_t> original_bytes, const ConSanFinalValidationInput &result,
-    uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage = false,
-    const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
-    std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
+[[nodiscard]] std::vector<std::string>
+validate_final_consan_elf(std::span<const uint8_t> original_bytes,
+                          const ConSanFinalValidationInput &result,
+                          uint64_t expected_moi_report_dispatch_id,
+                          std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
   std::vector<std::string> errors;
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
@@ -3103,9 +3092,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
   validate_mutation_semantics(environment, result, errors);
-  validate_sc_perturbation_semantics(original_bytes, environment, result,
-                                     validating_carried_composite_stage, carried_perturbation,
-                                     errors);
+  validate_sc_perturbation_semantics(original_bytes, environment, result, errors);
   validate_resource_and_metadata_deltas(environment, result, errors);
   validate_entry_scalar_backup_semantics(environment, result, errors);
   validate_dispatch_id_prologue_semantics(environment, result, errors);
@@ -3115,10 +3102,10 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   return errors;
 }
 
-[[nodiscard]] ConSanTransformArtifacts finalize_consan_result_impl(
-    ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
-    uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage,
-    const ConSanPerturbationPlanningState *carried_perturbation) {
+[[nodiscard]] ConSanTransformArtifacts
+finalize_consan_result_impl(ConSanTransformArtifacts result,
+                            std::span<const uint8_t> original_bytes,
+                            uint64_t expected_moi_report_dispatch_id) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.program_inventory.empty()) {
@@ -3154,7 +3141,6 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     } else {
       std::vector<std::string> validation_errors = validate_final_consan_elf(
           original_bytes, ConSanFinalValidationInput(result), expected_moi_report_dispatch_id,
-          validating_carried_composite_stage, carried_perturbation,
           &result.transform_failure_cause);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
@@ -3180,14 +3166,11 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 
 } // namespace
 
-ConSanTransformArtifacts
-finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
-                       uint64_t expected_moi_report_dispatch_id,
-                       bool validating_carried_composite_stage,
-                       const ConSanPerturbationPlanningState *carried_perturbation) {
+ConSanTransformArtifacts finalize_consan_result(ConSanTransformArtifacts result,
+                                                std::span<const uint8_t> original_bytes,
+                                                uint64_t expected_moi_report_dispatch_id) {
   return finalize_consan_result_impl(std::move(result), original_bytes,
-                                     expected_moi_report_dispatch_id,
-                                     validating_carried_composite_stage, carried_perturbation);
+                                     expected_moi_report_dispatch_id);
 }
 
 std::vector<std::string>

@@ -256,31 +256,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                       ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
   const bool has_fault = options.has_fault_mutation();
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
-  const bool has_atomic_fault = options.fault_atomic_wrong_address ||
-                                options.fault_atomic_weaken_order ||
-                                options.fault_atomic_weaken_scope;
-  const bool has_ordinary_fault = options.fault_ordinary_wrong_address ||
-                                  options.fault_ordinary_weaken_order ||
-                                  options.fault_ordinary_weaken_scope;
-  const auto unsupported_composition = [&](std::string warning) {
-    ConSanTransformArtifacts result;
-    result.mutation.fault.requested = options.fault_mutation_count();
-    ProgramInventoryBuilder inventory_builder(code_object_bytes, preapplied_mutation);
-    result.program_inventory = inventory_builder.view();
-    result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.push_back(std::move(warning));
-    return result;
-  };
-  if (has_ordinary_fault && has_perturbation)
-    return unsupported_composition(
-        "ConSan ordinary fault/perturbation composition is not yet qualified");
-  if (has_atomic_fault && has_perturbation &&
-      (options.sc_perturb_kind != ConSanPerturbationKind::Atomic || options.fault_drop_barrier ||
-       options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
-       options.fault_mutate_barrier_participants)) {
-    return unsupported_composition(
-        "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
-  }
   if (!has_fault || options.fault_dry_run) {
     return lower_consan_stage(code_object_bytes, options, initial_operating_point, {},
                               inspected_perturbation, preapplied_mutation, false, false, extent,
@@ -300,6 +275,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   ConSanTransformArtifacts pristine_mutation_plan = lower_consan_stage(
       code_object_bytes, planning_options, initial_operating_point, {}, &pristine_perturbation, {},
       true, options.fault_require_exactly_one, ConSanLoweringExtent::Complete, nullptr);
+  if (pristine_mutation_plan.outcome == ConSanTransformOutcome::Unsupported)
+    return pristine_mutation_plan;
   const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
   const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
       pristine_mutation_plan.fault_plans;
@@ -375,12 +352,14 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     staged_carried = std::move(*carried);
   }
   const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
-  ConSanTransformArtifacts instrument_result = finalize_consan_result(
-      lower_consan_stage(mutation_stage.image, instrument_options, initial_operating_point,
-                         instrument_carried, &perturbation, instrument_preapplied, false, false,
-                         ConSanLoweringExtent::Complete, nullptr),
-      mutation_stage.image, instrument_options.moi_report_dispatch_id,
-      /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
+  ConSanTransformArtifacts instrument_result = lower_consan_stage(
+      mutation_stage.image, instrument_options, initial_operating_point, instrument_carried,
+      &perturbation, instrument_preapplied, false, false, ConSanLoweringExtent::Complete, nullptr);
+  if (!instrument_result.errors.empty())
+    instrument_result.outcome = ConSanTransformOutcome::Invalid;
+  else if (instrument_result.outcome != ConSanTransformOutcome::ModifiedValid &&
+           summarize_consan_resource_plans(instrument_result.resource_plans).unsupported_plans != 0)
+    instrument_result.outcome = ConSanTransformOutcome::Unsupported;
   const major_image_ownership::ScopedOwner instrument_result_owner(
       major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
   // Resource ownership is a logical kernel identity, but instrumentation of
@@ -517,6 +496,27 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   ProgramInventoryBuilder inventory_builder(code_object_bytes, preapplied_mutation);
   result.program_inventory = inventory_builder.view();
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
+  const bool has_atomic_fault = options.fault_atomic_wrong_address ||
+                                options.fault_atomic_weaken_order ||
+                                options.fault_atomic_weaken_scope;
+  const bool has_ordinary_fault = options.fault_ordinary_wrong_address ||
+                                  options.fault_ordinary_weaken_order ||
+                                  options.fault_ordinary_weaken_scope;
+  if (has_ordinary_fault && has_perturbation) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.emplace_back(
+        "ConSan ordinary fault/perturbation composition is not yet qualified");
+    return result;
+  }
+  if (has_atomic_fault && has_perturbation &&
+      (options.sc_perturb_kind != ConSanPerturbationKind::Atomic || options.fault_drop_barrier ||
+       options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
+       options.fault_mutate_barrier_participants)) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.emplace_back(
+        "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
+    return result;
+  }
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
 
