@@ -87,7 +87,10 @@ plan_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context
 ConSanMoiReportDispatchIdSource
 moi_target_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
                                rj_code_arch_t arch) {
-  return plan_dispatch_id_sources(context, consan_arch_uses_literal_dispatch_identity(arch));
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return plan_dispatch_id_sources(context,
+                                  target && target->dispatch_identity ==
+                                                ConSanDispatchIdentitySource::CodeObjectLiteral);
 }
 
 ConSanMoiReportDispatchIdSource

@@ -850,19 +850,9 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
               expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
                   expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
     EXPECT_EQ(consan_arch_is_cdna5(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
-    EXPECT_EQ(consan_arch_is_rdna3_rdna4_or_cdna5(expected.arch),
-              expected.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                  expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                  expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
-    EXPECT_EQ(consan_arch_has_s_call_i64(expected.arch),
-              expected.direct_call_form == ConSanDirectCallForm::SCallI64);
-    EXPECT_EQ(consan_arch_uses_per_kernel_owner_translation(expected.arch),
-              expected.code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation);
     EXPECT_EQ(consan_arch_has_cluster_facilities(expected.arch), expected.has_cluster_facilities);
     EXPECT_EQ(consan_arch_has_selectable_vgpr_bank(expected.arch),
               expected.has_selectable_vgpr_bank);
-    EXPECT_EQ(consan_arch_uses_literal_dispatch_identity(expected.arch),
-              expected.dispatch_identity == ConSanDispatchIdentitySource::CodeObjectLiteral);
   }
 
   constexpr rj_code_arch_t unsupported = ROCJITSU_CODE_ARCH_CDNA2;
@@ -870,12 +860,8 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   EXPECT_FALSE(consan_arch_is_rdna3(unsupported));
   EXPECT_FALSE(consan_arch_is_rdna4_or_cdna5(unsupported));
   EXPECT_FALSE(consan_arch_is_cdna5(unsupported));
-  EXPECT_FALSE(consan_arch_is_rdna3_rdna4_or_cdna5(unsupported));
-  EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));
-  EXPECT_FALSE(consan_arch_uses_per_kernel_owner_translation(unsupported));
   EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));
   EXPECT_FALSE(consan_arch_has_selectable_vgpr_bank(unsupported));
-  EXPECT_FALSE(consan_arch_uses_literal_dispatch_identity(unsupported));
 }
 
 TEST(ConSanCapabilityContract, ProfileResourceAndCallFactsAgreeWithSharedBuilders) {

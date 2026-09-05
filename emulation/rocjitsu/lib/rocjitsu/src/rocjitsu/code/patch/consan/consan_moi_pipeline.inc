@@ -122,7 +122,7 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
       if (!attempted_point.owner_transient_sgprs.empty() &&
           !apply_moi_transient_sgpr_assignment(request, owner_point, attempted_point,
                                                plan.owner_descriptor_file_offsets)) {
-        if (consan_arch_uses_per_kernel_owner_translation(arch))
+        if (target->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation)
           continue;
         owner_point.moi_dispatch_identity.reset_sgpr();
       }

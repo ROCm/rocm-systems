@@ -67,7 +67,7 @@ std::optional<uint32_t> consan_sc_build_v_cmp_ne_u16(uint16_t src0, uint16_t vsr
 
 std::optional<uint32_t> consan_sc_build_ds_load_word0(const ConSanAccessLoweringForm &form,
                                                       uint32_t word0, rj_code_arch_t arch) {
-  if (consan_arch_is_rdna3_rdna4_or_cdna5(arch))
+  if (consan_arch_is_rdna3(arch) || consan_arch_is_rdna4_or_cdna5(arch))
     return consan_sc_target_detail::build_rdna3_rdna4_cdna5_ds_load_word0(form, word0);
   if (consan_arch_is_cdna3_or_cdna4(arch))
     return consan_sc_target_detail::build_cdna3_cdna4_ds_load_word0(form, word0);

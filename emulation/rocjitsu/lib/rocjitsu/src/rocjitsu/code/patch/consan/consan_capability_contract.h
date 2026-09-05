@@ -757,24 +757,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
   return consan_is_capability_arch(arch) && arch == ROCJITSU_CODE_ARCH_RDNA3;
 }
 
-[[nodiscard]] constexpr bool consan_arch_is_rdna3_rdna4_or_cdna5(rj_code_arch_t arch) {
-  return consan_arch_is_rdna3(arch) || consan_arch_is_rdna4_or_cdna5(arch);
-}
-
-[[nodiscard]] constexpr bool consan_arch_has_s_call_i64(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->direct_call_form == ConSanDirectCallForm::SCallI64;
-}
-
-/// Return whether post-instrumentation translation may independently relocate
-/// generated regions for each kernel owner. Placement uses this fact when it
-/// must choose between a shared raw branch and an owner-local route whose
-/// meaning survives translation.
-[[nodiscard]] constexpr bool consan_arch_uses_per_kernel_owner_translation(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation;
-}
-
 [[nodiscard]] constexpr bool consan_arch_has_cluster_facilities(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->has_cluster_facilities;
@@ -783,14 +765,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 [[nodiscard]] constexpr bool consan_arch_has_selectable_vgpr_bank(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->has_selectable_vgpr_bank;
-}
-
-/// Some ConSan probes use the code-object dispatch identity literal instead of
-/// reserving a guest SGPR pair. The availability is an immutable target fact;
-/// the decision to consume it remains engine policy.
-[[nodiscard]] constexpr bool consan_arch_uses_literal_dispatch_identity(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->dispatch_identity == ConSanDispatchIdentitySource::CodeObjectLiteral;
 }
 
 [[nodiscard]] constexpr ConSanCapabilityDomain consan_capability_domain(ConSanCapabilityForm form) {
