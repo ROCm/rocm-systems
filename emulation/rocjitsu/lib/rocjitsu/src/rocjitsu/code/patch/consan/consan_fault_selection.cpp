@@ -161,12 +161,14 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
         !same_execution_owners(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
     const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_identities.back());
-    if (cache == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
-        cache->cache_operation != ConSanCacheOperation::Acquire ||
-        !cache->ordinary_acquire_mutation_supported ||
+    const ConSanFenceSite *cache_source =
+        cache == nullptr ? nullptr : sync.source_as<ConSanFenceSite>(*cache);
+    if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
+        cache_source->cache_operation != ConSanCacheOperation::Acquire ||
+        !cache_source->ordinary_acquire_mutation_supported ||
         cache->container_name != load->container_name || cache->in_kernel != load->in_kernel ||
         !same_execution_owners(cache->execution_owners, load->execution_owners) ||
-        cache->size == 0u || cache->size % sizeof(uint32_t) != 0u)
+        cache_source->size == 0u || cache_source->size % sizeof(uint32_t) != 0u)
       return std::nullopt;
     return OrdinaryAcquireMutationTarget{&site, load, cache, sequence};
   };

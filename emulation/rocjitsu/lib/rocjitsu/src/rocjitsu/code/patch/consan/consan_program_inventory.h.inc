@@ -172,6 +172,10 @@ struct ConSanDecodedProgramSite {
   [[nodiscard]] std::string_view mnemonic() const {
     return std::visit([](const auto &site) -> std::string_view { return site.mnemonic; }, payload);
   }
+
+  [[nodiscard]] bool same_payload(const ConSanDecodedProgramSite &other) const {
+    return payload == other.payload;
+  }
 };
 
 /// Immutable synchronization and ownership projection produced by semantic
@@ -184,10 +188,22 @@ struct ConSanDecodedProgramSite {
 /// owner is alive. Fault planning and engine policy may query this projection
 /// but cannot modify or rebuild sanitizer semantics through it.
 struct SynchronizationInventoryView {
+  std::span<const ConSanDecodedProgramSite> decoded_sites;
   std::span<const ConSanSyncEvent> sync_events;
   std::span<const ConSanSyncSequence> sync_sequences;
   std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
+
+  [[nodiscard]] const ConSanDecodedProgramSite *source(const ConSanSyncEvent &event) const {
+    return event.source_site.valid() && event.source_site.ordinal < decoded_sites.size()
+               ? &decoded_sites[event.source_site.ordinal]
+               : nullptr;
+  }
+
+  template <typename Site> [[nodiscard]] const Site *source_as(const ConSanSyncEvent &event) const {
+    const ConSanDecodedProgramSite *decoded = source(event);
+    return decoded == nullptr ? nullptr : decoded->get_if<Site>();
+  }
 
   /// Resolve one typed event identity to its sole authoritative record. An
   /// absent identity returns null; physical aliases have already been
@@ -326,6 +342,7 @@ struct SynchronizationInventoryView {
 /// view must not escape analysis; published consumers receive only
 /// `SynchronizationInventoryView`.
 struct SynchronizationInventoryBuildView {
+  const std::vector<ConSanDecodedProgramSite> &decoded_sites;
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
@@ -473,6 +490,7 @@ public:
     if (!storage_)
       return {};
     return {
+        .decoded_sites = storage_->decoded_sites,
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
@@ -547,6 +565,7 @@ public:
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
     return {
+        .decoded_sites = storage_->decoded_sites,
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,

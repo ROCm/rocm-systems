@@ -96,8 +96,10 @@ static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
     });
     if (event != sync.sync_events.end() &&
         (edge == ConSanAtomicOrderEdge::Any ||
-         (edge == ConSanAtomicOrderEdge::Release && is_release_cache_event(&*event)) ||
-         (edge == ConSanAtomicOrderEdge::Acquire && is_acquire_cache_event(&*event)))) {
+         (edge == ConSanAtomicOrderEdge::Release &&
+          is_release_cache_event(sync.decoded_sites, &*event)) ||
+         (edge == ConSanAtomicOrderEdge::Acquire &&
+          is_acquire_cache_event(sync.decoded_sites, &*event)))) {
       result.fence = &*event;
       break;
     }
@@ -957,9 +959,14 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   }
 
   for (const ConSanSyncEvent *member : members) {
+    const ConSanBarrierSite *source = sync.source_as<ConSanBarrierSite>(*member);
+    if (source == nullptr) {
+      result.errors.emplace_back("ConSan barrier ID/scope mutation lost its decoded source member");
+      return;
+    }
     if (member->operation == ConSanSyncOperation::BarrierLeave) {
-      if (lifecycle_group == nullptr || member->size != sizeof(uint32_t) ||
-          member->barrier_raw_simm16 != 0u) {
+      if (lifecycle_group == nullptr || source->size != sizeof(uint32_t) ||
+          source->raw_simm16 != 0u) {
         result.errors.emplace_back(
             "ConSan barrier ID/scope mutation found an unsupported leave member");
         return;
@@ -970,17 +977,15 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
                                  member->operation == ConSanSyncOperation::BarrierJoin ||
                                  member->operation == ConSanSyncOperation::BarrierSignal;
     const bool inline_member =
-        selector_member &&
-        member->barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate &&
-        member->size == sizeof(uint32_t);
+        selector_member && source->operand_source == ConSanBarrierSite::OperandSource::Immediate &&
+        source->size == sizeof(uint32_t);
     const bool literal32_member =
-        selector_member &&
-        member->barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32 &&
-        member->size == 2u * sizeof(uint32_t);
+        selector_member && source->operand_source == ConSanBarrierSite::OperandSource::Literal32 &&
+        source->size == 2u * sizeof(uint32_t);
     const bool wait_member =
         member->operation == ConSanSyncOperation::BarrierWait &&
-        member->barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate &&
-        member->size == sizeof(uint32_t);
+        source->operand_source == ConSanBarrierSite::OperandSource::Immediate &&
+        source->size == sizeof(uint32_t);
     if (!inline_member && !literal32_member && !wait_member) {
       result.errors.emplace_back(
           "ConSan barrier ID/scope mutation cannot preserve a logical member encoding");
@@ -991,31 +996,33 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   for (const ConSanSyncEvent *member : members) {
-    if (member->file_offset > original_bytes.size() ||
-        member->size > original_bytes.size() - member->file_offset) {
+    const ConSanBarrierSite *source = sync.source_as<ConSanBarrierSite>(*member);
+    if (source == nullptr || source->file_offset > original_bytes.size() ||
+        source->size > original_bytes.size() - source->file_offset) {
       result.errors.emplace_back("ConSan barrier ID/scope mutation exceeds ELF bytes");
       return;
     }
   }
   std::vector<uint8_t> replacement(original_bytes.begin(), original_bytes.end());
   for (const ConSanSyncEvent *member : members) {
+    const ConSanBarrierSite &source = *sync.source_as<ConSanBarrierSite>(*member);
     if (member->operation == ConSanSyncOperation::BarrierLeave)
       continue;
     if (member->operation == ConSanSyncOperation::BarrierWait) {
       uint32_t word = 0;
-      std::memcpy(&word, replacement.data() + member->file_offset, sizeof(word));
+      std::memcpy(&word, replacement.data() + source.file_offset, sizeof(word));
       word = (word & 0xffff0000u) | static_cast<uint16_t>(target_id);
-      std::memcpy(replacement.data() + member->file_offset, &word, sizeof(word));
+      std::memcpy(replacement.data() + source.file_offset, &word, sizeof(word));
       continue;
     }
-    if (member->barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate) {
+    if (source.operand_source == ConSanBarrierSite::OperandSource::Immediate) {
       uint32_t word = 0;
-      std::memcpy(&word, replacement.data() + member->file_offset, sizeof(word));
+      std::memcpy(&word, replacement.data() + source.file_offset, sizeof(word));
       word = (word & ~0xffu) | *inline_selector;
-      std::memcpy(replacement.data() + member->file_offset, &word, sizeof(word));
+      std::memcpy(replacement.data() + source.file_offset, &word, sizeof(word));
     } else {
       const uint32_t literal = static_cast<uint32_t>(target_id);
-      std::memcpy(replacement.data() + member->file_offset + sizeof(uint32_t), &literal,
+      std::memcpy(replacement.data() + source.file_offset + sizeof(uint32_t), &literal,
                   sizeof(literal));
     }
   }
@@ -1029,7 +1036,7 @@ try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     patch.kind = ConSanPatchKind::InlineBarrierIdScopeRewrite;
     patch.anchor_offset = member->text_offset();
     patch.trampoline_offset = member->text_offset();
-    patch.original_size = member->size;
+    patch.original_size = sync.source_as<ConSanBarrierSite>(*member)->size;
     result.patches.push_back(std::move(patch));
   }
   result.mark_modified();
@@ -1419,18 +1426,22 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     info.fault_sequence_identity = sequence != nullptr ? sequence->identity : selected->identity;
     std::string removed_boundary;
     if (fence != nullptr) {
-      if (fence->size == 0 || fence->size % sizeof(uint32_t) != 0) {
+      const ConSanFenceSite *fence_source =
+          result.program_inventory.decoded_site<ConSanFenceSite>(fence->source_site);
+      if (fence_source == nullptr || fence_source->size == 0 ||
+          fence_source->size % sizeof(uint32_t) != 0) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order mutation found malformed associated cache operation");
         return;
       }
-      for (uint32_t offset = 0; offset < fence->size; offset += sizeof(uint32_t))
-        std::memcpy(result.replacement.data() + fence->file_offset + offset, &nop, sizeof(nop));
+      for (uint32_t offset = 0; offset < fence_source->size; offset += sizeof(uint32_t))
+        std::memcpy(result.replacement.data() + fence_source->file_offset + offset, &nop,
+                    sizeof(nop));
       info.anchor_offset = fence->text_offset();
       info.trampoline_offset = fence->text_offset();
-      info.original_size = fence->size;
+      info.original_size = fence_source->size;
       result.patches.push_back(info);
-      removed_boundary = fence->mnemonic;
+      removed_boundary = fence_source->mnemonic;
     }
     // RDNA4 release lowering commonly pairs a cache operation with an exact
     // store wait. Once either is selected, remove the complete independently
@@ -1609,10 +1620,15 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
       result.replacement.empty()
           ? std::vector<uint8_t>(original_bytes.begin(), original_bytes.end())
           : result.replacement;
+  const ConSanOrdinaryMemorySite *load_source =
+      result.program_inventory.decoded_site<ConSanOrdinaryMemorySite>(target->load->source_site);
+  const ConSanFenceSite *cache_source =
+      result.program_inventory.decoded_site<ConSanFenceSite>(target->cache->source_site);
   if (target->site->file_offset > candidate.size() ||
       target->site->size > candidate.size() - target->site->file_offset ||
-      target->cache->file_offset > candidate.size() ||
-      target->cache->size > candidate.size() - target->cache->file_offset) {
+      cache_source == nullptr || load_source == nullptr ||
+      cache_source->file_offset > candidate.size() ||
+      cache_source->size > candidate.size() - cache_source->file_offset) {
     result.errors.emplace_back("ConSan ordinary fault found an invalid exact mutation range");
     return;
   }
@@ -1649,7 +1665,7 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
       return;
     }
     const int32_t original_offset = original_encoding->byte_offset;
-    if (!target->load->static_byte_offset || *target->load->static_byte_offset != original_offset ||
+    if (!load_source->raw_ioffset || *load_source->raw_ioffset != original_offset ||
         target->load->address_source != ConSanSyncAddressSource::GlobalScalarVector ||
         target->site->mnemonic != "global_load_b32" || target->site->width_bits != 32u) {
       result.errors.emplace_back(
@@ -1674,16 +1690,16 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
 
   if (mutate_order) {
     const uint32_t nop = build_s_nop(0, consan_arch_for_target(code_object.target_id()));
-    for (uint32_t offset = 0; offset < target->cache->size; offset += sizeof(uint32_t))
-      std::memcpy(candidate.data() + target->cache->file_offset + offset, &nop, sizeof(nop));
+    for (uint32_t offset = 0; offset < cache_source->size; offset += sizeof(uint32_t))
+      std::memcpy(candidate.data() + cache_source->file_offset + offset, &nop, sizeof(nop));
     patches.push_back(make_info(ConSanPatchKind::InlineOrdinaryOrderRewrite,
-                                target->cache->text_offset(), target->cache->size,
+                                target->cache->text_offset(), cache_source->size,
                                 target->cache->identity));
   }
   if (mutate_scope) {
     const auto current_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
-    if (!current_encoding || !target->load->raw_scope || !target->load->scope ||
-        current_encoding->scope != *target->load->raw_scope ||
+    if (!current_encoding || !load_source->raw_scope || !target->load->scope ||
+        current_encoding->scope != *load_source->raw_scope ||
         !consan_memory_scope_is_agent_or_system(*target->load->scope)) {
       result.errors.emplace_back(
           "ConSan ordinary scope fault found stale or already-wave decoded scope bits");

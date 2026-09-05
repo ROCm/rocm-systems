@@ -347,10 +347,13 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
       std::ranges::find(inventory.program_inventory.sync().sync_events,
                         ConSanSyncOperation::BarrierInit, &ConSanSyncEvent::operation);
   ASSERT_NE(init, inventory.program_inventory.sync().sync_events.end());
-  EXPECT_EQ(init->barrier_operand_source, ConSanBarrierSite::OperandSource::StaticM0Literal32);
-  EXPECT_EQ(init->barrier_id, 1);
-  EXPECT_EQ(init->participant_count, 12u);
-  EXPECT_FALSE(init->participant_mask);
+  const ConSanBarrierSite *init_source =
+      inventory.program_inventory.sync().source_as<ConSanBarrierSite>(*init);
+  ASSERT_NE(init_source, nullptr);
+  EXPECT_EQ(init_source->operand_source, ConSanBarrierSite::OperandSource::StaticM0Literal32);
+  EXPECT_EQ(init_source->barrier_id, 1);
+  EXPECT_EQ(init_source->participant_count, 12u);
+  EXPECT_FALSE(init_source->participant_mask);
   const auto barrier =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);

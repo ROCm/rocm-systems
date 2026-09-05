@@ -193,6 +193,8 @@ struct ConSanOrdinaryMemorySite {
   /// not reinterpret them by target family.
   bool workgroup_acquire_ordering = false;
   std::string mnemonic;
+
+  bool operator==(const ConSanOrdinaryMemorySite &) const = default;
 };
 
 struct ConSanBarrierSite {
@@ -238,6 +240,8 @@ struct ConSanBarrierSite {
   std::optional<uint64_t> participant_setup_file_offset;
   std::optional<uint32_t> participant_setup_literal;
   std::string mnemonic;
+
+  bool operator==(const ConSanBarrierSite &) const = default;
 };
 
 struct ConSanFenceSite {
@@ -247,6 +251,8 @@ struct ConSanFenceSite {
   ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
   bool ordinary_acquire_mutation_supported = false;
   std::string mnemonic;
+
+  bool operator==(const ConSanFenceSite &) const = default;
 };
 
 struct ConSanAtomicSite {
@@ -285,6 +291,8 @@ struct ConSanAtomicSite {
   std::optional<uint32_t> raw_th;
   std::optional<bool> returns_old_value;
   std::string mnemonic;
+
+  bool operator==(const ConSanAtomicSite &) const = default;
 };
 
 [[nodiscard]] constexpr bool consan_atomic_is_compare_exchange(const ConSanAtomicSite &site) {

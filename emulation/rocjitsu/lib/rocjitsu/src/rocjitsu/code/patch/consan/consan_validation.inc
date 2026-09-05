@@ -707,9 +707,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         continue;
       }
       if (patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite) {
+        const ConSanFenceSite *cache_source =
+            pristine_faults.program_inventory.decoded_site<ConSanFenceSite>(
+                target->cache->source_site);
         if (patch.fault_companion_identity != target->cache->identity ||
-            patch.anchor_offset != target->cache->text_offset() ||
-            patch.original_size != target->cache->size) {
+            patch.anchor_offset != target->cache->text_offset() || cache_source == nullptr ||
+            patch.original_size != cache_source->size) {
           errors.emplace_back(
               "ConSan mutation proof did not target the exact ordinary acquire cache boundary");
           continue;
@@ -1459,8 +1462,8 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
-  const SyncEventSemanticIndex pristine_events =
-      build_sync_event_semantic_index(pristine.program_inventory.sync().sync_events);
+  const SyncEventSemanticIndex pristine_events = build_sync_event_semantic_index(
+      pristine.program_inventory.sync().sync_events, pristine.program_inventory.decoded_sites());
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -1584,14 +1587,19 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       const std::string &outer_member = sequence->member_event_identities[outer_member_index];
       const ConSanSyncEvent *anchor_event = find_sequence_member_event(
           pristine_events, sequence->member_semantic_ids[outer_member_index]);
+      const ConSanDecodedProgramSite *anchor_source =
+          anchor_event == nullptr
+              ? nullptr
+              : pristine.program_inventory.decoded_site(anchor_event->source_site);
       if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
+          anchor_source == nullptr ||
           (composite && patch.perturbation_source_anchor_identity != outer_member) ||
           anchor_event->container_name != sequence->container_name ||
           anchor_event->in_kernel != sequence->in_kernel ||
           candidate->anchor_text_offset != anchor_event->text_offset() ||
-          candidate->anchor_size != anchor_event->size ||
+          candidate->anchor_size != anchor_source->size() ||
           proof_anchor_offset != anchor_event->text_offset() ||
-          proof_anchor_size != anchor_event->size || patch.original_size != proof_anchor_size) {
+          proof_anchor_size != anchor_source->size() || patch.original_size != proof_anchor_size) {
         errors.emplace_back(
             "ConSan SC perturbation proof did not target the rederived outer sequence member");
         continue;

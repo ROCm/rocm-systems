@@ -9,9 +9,9 @@
 namespace rocjitsu {
 namespace {
 
-template <typename FindEvent>
+template <typename FindEvent, typename FindSource>
 [[nodiscard]] bool sequence_has_exact_members_impl(const ConSanSyncSequence &sequence,
-                                                   FindEvent find_event) {
+                                                   FindEvent find_event, FindSource find_source) {
   if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
     return false;
   uint64_t prior_end = sequence.begin_text_offset;
@@ -19,14 +19,15 @@ template <typename FindEvent>
     SemanticSiteId event_identity = sequence.member_semantic_ids[index];
     event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     const ConSanSyncEvent *event = find_event(event_identity);
-    if (event == nullptr || event->container_name != sequence.container_name ||
+    const ConSanDecodedProgramSite *source = event == nullptr ? nullptr : find_source(*event);
+    if (event == nullptr || event->container_name != sequence.container_name || source == nullptr ||
         event->identity != sequence.member_event_identities[index] ||
         event->in_kernel != sequence.in_kernel || event->text_offset() < prior_end ||
         event->text_offset() < sequence.begin_text_offset ||
-        event->text_offset() + event->size > sequence.end_text_offset) {
+        event->text_offset() + source->size() > sequence.end_text_offset) {
       return false;
     }
-    prior_end = event->text_offset() + event->size;
+    prior_end = event->text_offset() + source->size();
   }
   return !sequence.member_semantic_ids.empty();
 }
@@ -48,32 +49,40 @@ size_t SyncEventSemanticIdHash::operator()(const SemanticSiteId &identity) const
 }
 
 SyncEventSemanticIndex
-build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events) {
+build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
+                                std::span<const ConSanDecodedProgramSite> decoded_sites) {
   SyncEventSemanticIndex index;
-  index.reserve(sync_events.size());
+  index.events.reserve(sync_events.size());
+  index.decoded_sites = decoded_sites;
   for (const ConSanSyncEvent &event : sync_events)
-    index.emplace(event.semantic_id, &event);
+    index.events.emplace(event.semantic_id, &event);
   return index;
 }
 
 const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
                                                   SemanticSiteId identity) {
   identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-  const auto event = index.find(identity);
-  return event == index.end() ? nullptr : event->second;
+  const auto event = index.events.find(identity);
+  return event == index.events.end() ? nullptr : event->second;
 }
 
 bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
                                 const ConSanSyncSequence &sequence) {
   return sequence_has_exact_members_impl(
-      sequence, [&](SemanticSiteId identity) { return inventory.find_event(identity); });
+      sequence, [&](SemanticSiteId identity) { return inventory.find_event(identity); },
+      [&](const ConSanSyncEvent &event) { return inventory.source(event); });
 }
 
 bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
                                 const ConSanSyncSequence &sequence) {
-  return sequence_has_exact_members_impl(sequence, [&](SemanticSiteId identity) {
-    return find_sequence_member_event(events, identity);
-  });
+  return sequence_has_exact_members_impl(
+      sequence,
+      [&](SemanticSiteId identity) { return find_sequence_member_event(events, identity); },
+      [&](const ConSanSyncEvent &event) -> const ConSanDecodedProgramSite * {
+        return event.source_site.valid() && event.source_site.ordinal < events.decoded_sites.size()
+                   ? &events.decoded_sites[event.source_site.ordinal]
+                   : nullptr;
+      });
 }
 
 } // namespace rocjitsu

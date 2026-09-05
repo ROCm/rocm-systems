@@ -64,17 +64,17 @@ build_event_index(std::span<const ConSanSyncEvent> events) {
   });
 }
 
-[[nodiscard]] bool event_policy_semantics_equal(const ConSanSyncEvent &lhs,
+[[nodiscard]] bool event_policy_semantics_equal(const SynchronizationInventoryView &inventory,
+                                                const ConSanSyncEvent &lhs,
                                                 const ConSanSyncEvent &rhs) {
-  return lhs.semantic_id.physical == rhs.semantic_id.physical &&
+  const ConSanDecodedProgramSite *lhs_source = inventory.source(lhs);
+  const ConSanDecodedProgramSite *rhs_source = inventory.source(rhs);
+  return lhs_source != nullptr && rhs_source != nullptr && lhs_source->same_payload(*rhs_source) &&
+         lhs.semantic_id.physical == rhs.semantic_id.physical &&
          std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
-                  lhs.confidence, lhs.memory_role_confidence, lhs.file_offset, lhs.size,
-                  lhs.width_bits, lhs.cache_operation, lhs.ordinary_acquire_mutation_supported,
-                  lhs.mnemonic, lhs.static_byte_offset, lhs.raw_scope, lhs.scope) ==
+                  lhs.confidence, lhs.memory_role_confidence, lhs.scope) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
-                      rhs.confidence, rhs.memory_role_confidence, rhs.file_offset, rhs.size,
-                      rhs.width_bits, rhs.cache_operation, rhs.ordinary_acquire_mutation_supported,
-                      rhs.mnemonic, rhs.static_byte_offset, rhs.raw_scope, rhs.scope) &&
+                      rhs.confidence, rhs.memory_role_confidence, rhs.scope) &&
          owner_semantics_equal(lhs.execution_owners, rhs.execution_owners);
 }
 
@@ -169,13 +169,15 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
 }
 
 [[nodiscard]] std::optional<ConSanCapabilityForm>
-atomic_capability_form(const ConSanSyncEvent &event) {
+atomic_capability_form(const SynchronizationInventoryView &inventory,
+                       const ConSanSyncEvent &event) {
   if (event.kind == ConSanSyncEventKind::OrdinaryMemory)
     return ConSanCapabilityForm::AddressedOrdinaryFence;
   if (event.kind != ConSanSyncEventKind::Atomic)
     return std::nullopt;
+  const ConSanDecodedProgramSite *source = inventory.source(event);
   if (event.address_source == ConSanSyncAddressSource::LdsVector ||
-      event.mnemonic.starts_with("ds_")) {
+      (source != nullptr && source->mnemonic().starts_with("ds_"))) {
     return ConSanCapabilityForm::OrderedLdsAtomic;
   }
   if (event.address_source == ConSanSyncAddressSource::FlatVector)
@@ -252,7 +254,6 @@ struct AtomicEncodingDecision {
   // Synchronization analysis owns normalized semantic scope. It may preserve
   // an encoded value or derive a stronger fact from address-space provenance
   // and sequence association; policy always classifies that single contract.
-  site.raw_scope = sequence.raw_scope;
   site.scope = sequence.scope;
 
   const ConSanAtomicLoweringClassification classification =
@@ -395,9 +396,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     const SemanticSiteId semantic_id = event_semantic_id(inventory, event);
     const std::vector<std::string> names = source_container_names(aliases);
     const bool conflicting_alias = std::ranges::any_of(aliases, [&](const ConSanSyncEvent *alias) {
-      return !event_policy_semantics_equal(event, *alias);
+      return !event_policy_semantics_equal(synchronization, event, *alias);
     });
-    const std::optional<ConSanCapabilityForm> form = atomic_capability_form(event);
+    const std::optional<ConSanCapabilityForm> form = atomic_capability_form(synchronization, event);
     const ConSanCapabilityDisposition capability =
         form ? consan_capability_disposition(inventory.target(), request.engine, *form)
              : ConSanCapabilityDisposition::OutOfContract;

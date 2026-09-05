@@ -138,11 +138,6 @@ ConSanSyncEvent make_atomic_event(
   event.identity = container + "|atomic=" + std::to_string(offset);
   event.container_name = std::move(container);
   event.in_kernel = true;
-  event.semantic_id.physical.original_text_offset = offset;
-  event.file_offset = offset;
-  event.size = 12;
-  event.width_bits = 32;
-  event.mnemonic = std::move(mnemonic);
   event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
                                                                      : ConSanMemoryScope::Agent;
   event.execution_owners.push_back({});
@@ -167,7 +162,6 @@ ConSanSyncEvent make_fence_event(uint64_t offset = 48) {
   event.operation = ConSanSyncOperation::Fence;
   event.memory_role = ConSanSyncMemoryRole::Release;
   event.identity = "atomic_kernel|fence=" + std::to_string(offset);
-  event.width_bits = 0;
   event.scope.reset();
   return event;
 }
@@ -188,13 +182,13 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.container_name = event.container_name;
   sequence.in_kernel = event.in_kernel;
   sequence.begin_text_offset = event.text_offset();
-  sequence.end_text_offset = event.text_offset() + event.size;
+  sequence.end_text_offset = event.text_offset() + 12u;
   sequence.basic_block_index = 0;
   SemanticSiteId member = event.semantic_id;
   member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   sequence.member_semantic_ids.push_back(member);
   sequence.member_event_identities.push_back(event.identity);
-  sequence.width_bits = event.width_bits;
+  sequence.width_bits = event.kind == ConSanSyncEventKind::Fence ? 0u : 32u;
   sequence.scope = event.scope;
   sequence.execution_owners = event.execution_owners;
   return sequence;
@@ -230,15 +224,33 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   for (ConSanOrdinaryMemorySite &site : ordinary_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
+  for (const ConSanSyncEvent &event : events) {
+    if (event.kind != ConSanSyncEventKind::Fence)
+      continue;
+    ConSanFenceSite site;
+    site.text_offset = event.text_offset();
+    site.file_offset = event.text_offset();
+    site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
+    site.cache_operation = event.memory_role == ConSanSyncMemoryRole::Acquire
+                               ? ConSanCacheOperation::Acquire
+                               : ConSanCacheOperation::Release;
+    site.mnemonic =
+        site.cache_operation == ConSanCacheOperation::Acquire ? "global_inv" : "global_wb";
+    stage_decoded_site(builder, builder.kernels().back(), std::move(site));
+  }
   const std::span<const ConSanDecodedProgramSite> decoded_sites = builder.view().decoded_sites();
   for (ConSanSyncEvent &event : events) {
+    if (event.source_site.valid())
+      continue;
     std::optional<ConSanProgramSiteId> match;
     for (size_t index = 0; index < decoded_sites.size(); ++index) {
       const ConSanDecodedProgramSite &decoded = decoded_sites[index];
       const bool kind_matches = (event.kind == ConSanSyncEventKind::Atomic &&
                                  decoded.get_if<ConSanAtomicSite>() != nullptr) ||
                                 (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
-                                 decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr);
+                                 decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr) ||
+                                (event.kind == ConSanSyncEventKind::Fence &&
+                                 decoded.get_if<ConSanFenceSite>() != nullptr);
       if (!kind_matches || decoded.text_offset() != event.text_offset())
         continue;
       if (match) {
@@ -474,7 +486,6 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope
   ConSanSyncEvent event = make_ordinary_store_event();
   event.operation = ConSanSyncOperation::OrdinaryLoad;
   event.memory_role = ConSanSyncMemoryRole::Acquire;
-  event.mnemonic = "flat_load_b32";
   event.scope = ConSanMemoryScope::Wavefront;
   ConSanSyncSequence sequence = make_atomic_sequence(event);
   sequence.memory_role = ConSanSyncMemoryRole::Acquire;
@@ -505,10 +516,8 @@ TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceC
   communication.operation = ConSanSyncOperation::OrdinaryLoad;
   communication.address_source = ConSanSyncAddressSource::BufferResource;
   communication.memory_role = ConSanSyncMemoryRole::Acquire;
-  communication.mnemonic = "buffer_load_b32";
   ConSanSyncEvent fence = make_fence_event();
   fence.memory_role = ConSanSyncMemoryRole::Acquire;
-  fence.mnemonic = "global_inv";
   ConSanSyncSequence sequence = make_atomic_sequence(communication);
   sequence.memory_role = ConSanSyncMemoryRole::Acquire;
   ConSanMoiFenceCandidate candidate = make_fence_candidate(communication, fence, sequence);
@@ -846,11 +855,15 @@ TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) 
   std::vector events{make_atomic_event()};
   ConSanSyncEvent alias = events.front();
   alias.container_name = "aliased_kernel";
-  alias.width_bits = 64;
+  events.front().source_site = {0};
+  alias.source_site = {1};
   events.push_back(std::move(alias));
   std::vector sequences{make_atomic_sequence(events.front())};
+  ConSanAtomicSite conflicting_site = make_global_atomic_site();
+  conflicting_site.width_bits = 64;
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      build_atomic_inventory(std::move(events), std::move(sequences), {make_global_atomic_site()}),
+      build_atomic_inventory(std::move(events), std::move(sequences),
+                             {make_global_atomic_site(), std::move(conflicting_site)}),
       atomic_request(ConSanCapabilityEngine::RecordReplay));
   EXPECT_FALSE(policy.valid());
   EXPECT_EQ(policy.atomic_errors,

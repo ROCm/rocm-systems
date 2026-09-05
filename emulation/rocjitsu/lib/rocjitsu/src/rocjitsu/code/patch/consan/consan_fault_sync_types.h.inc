@@ -1,3 +1,5 @@
+struct ConSanDecodedProgramSite;
+
 enum class ConSanFaultSiteKind : uint8_t {
   Barrier,
   Atomic,
@@ -256,25 +258,7 @@ struct ConSanSyncEvent {
   std::vector<std::string> source_containers;
   std::string container_name;
   bool in_kernel = true;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
-  bool ordinary_acquire_mutation_supported = false;
-  std::string mnemonic;
-  std::optional<int64_t> static_byte_offset;
-  std::optional<uint32_t> raw_scope;
   std::optional<ConSanMemoryScope> scope;
-  std::optional<int32_t> barrier_id;
-  ConSanBarrierSite::OperandSource barrier_operand_source =
-      ConSanBarrierSite::OperandSource::Unknown;
-  std::optional<uint32_t> barrier_raw_operand_selector;
-  std::optional<uint32_t> barrier_literal_width_bits;
-  std::optional<uint64_t> barrier_literal_value;
-  std::optional<uint16_t> barrier_raw_simm16;
-  ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  std::optional<uint32_t> participant_count;
-  std::optional<uint64_t> participant_mask;
   std::vector<ConSanExecutionOwner> execution_owners;
 
   /// Original text position is part of the event's canonical physical
@@ -329,7 +313,6 @@ struct ConSanSyncSequence {
   std::vector<std::string> member_event_identities;
   uint32_t width_bits = 0;
   std::optional<int64_t> static_byte_offset;
-  std::optional<uint32_t> raw_scope;
   std::optional<ConSanMemoryScope> scope;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
@@ -456,15 +439,17 @@ struct ConSanBarrierLifecycleGroup {
 /// corruption tests; production association additionally proves the exact
 /// intervening instruction run.
 [[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
-    const ConSanSyncEvent &load, const ConSanSyncSequence &load_sequence,
-    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence);
+    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &load,
+    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
+    const ConSanSyncSequence &cache_sequence);
 
 /// Checks the non-instruction metadata required before a `global_wb` and
 /// ordinary store may form a conservative release sequence. Production
 /// association additionally proves one exact same-block instruction run.
 [[nodiscard]] bool consan_ordinary_release_metadata_compatible(
-    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence,
-    const ConSanSyncEvent &store, const ConSanSyncSequence &store_sequence);
+    std::span<const ConSanDecodedProgramSite> decoded_sites, const ConSanSyncEvent &cache,
+    const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
+    const ConSanSyncSequence &store_sequence);
 
 /// One admitted sequence boundary. The anchor remains an original sequence
 /// member: release delays are placed before the first member and acquire

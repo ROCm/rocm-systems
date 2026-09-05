@@ -40,7 +40,8 @@ void append_unmatched_barrier_wait(const ConSanDecodedProgramSite &decoded,
                                         decoded.container.is_kernel(), site->text_offset);
   if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
       event->container_name != decoded.container.name ||
-      event->in_kernel != decoded.container.is_kernel() || event->size != site->size)
+      event->in_kernel != decoded.container.is_kernel() ||
+      synchronization.source(*event) != &decoded)
     return;
   const bool belongs_to_sequence =
       std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {

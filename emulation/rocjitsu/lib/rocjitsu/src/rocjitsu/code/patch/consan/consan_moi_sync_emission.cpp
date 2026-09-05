@@ -291,6 +291,12 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       errors.emplace_back("ConSan MOI admitted fence record lost its communication sequence");
       return {};
     }
+    const ConSanFenceSite *fence_source =
+        inventory.decoded_site<ConSanFenceSite>(fence_event->source_site);
+    if (fence_source == nullptr) {
+      errors.emplace_back("ConSan MOI admitted fence record lost its decoded source site");
+      return {};
+    }
 
     MoiFenceEvidenceSitePlan plan;
     plan.semantic_site = decision.semantic_site;
@@ -299,8 +305,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plan.address_capture_intent = address_capture;
     plan.memory_role = association->memory_role;
     plan.patch_text_offset = fence_event->text_offset();
-    plan.patch_file_offset = fence_event->file_offset;
-    plan.patch_size = fence_event->size;
+    plan.patch_file_offset = fence_source->file_offset;
+    plan.patch_size = fence_source->size;
     auto container = resolve_moi_evidence_container(inventory, fence_event->in_kernel,
                                                     fence_event->container_name,
                                                     communication->execution_owners);
@@ -332,7 +338,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
             sequence->begin_text_offset != site->text_offset ||
             sequence->end_text_offset <= sequence->begin_text_offset ||
-            sequence->end_text_offset < fence_event->text_offset() + fence_event->size ||
+            sequence->end_text_offset < fence_event->text_offset() + fence_source->size ||
             sequence->end_text_offset - sequence->begin_text_offset >
                 std::numeric_limits<uint32_t>::max()) {
           errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");

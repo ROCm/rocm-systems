@@ -27,8 +27,8 @@ namespace rocjitsu {
 void build_perturbation_candidate_inventory(const ProgramInventory &program_inventory,
                                             ConSanPerturbationPlanningState &planning) {
   planning.candidates.clear();
-  const SyncEventSemanticIndex events =
-      build_sync_event_semantic_index(program_inventory.sync().sync_events);
+  const SyncEventSemanticIndex events = build_sync_event_semantic_index(
+      program_inventory.sync().sync_events, program_inventory.decoded_sites());
   for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
@@ -46,6 +46,8 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
                                                 ? sequence.member_semantic_ids.front()
                                                 : sequence.member_semantic_ids.back();
       const ConSanSyncEvent *anchor = find_sequence_member_event(events, anchor_member);
+      const ConSanDecodedProgramSite *anchor_source =
+          anchor == nullptr ? nullptr : program_inventory.decoded_site(anchor->source_site);
       ConSanPerturbationCandidate candidate;
       candidate.kind = kind;
       candidate.edge = edge;
@@ -58,7 +60,7 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       candidate.basic_block_index = sequence.basic_block_index.value_or(0);
       candidate.anchor_event_identity = anchor == nullptr ? std::string{} : anchor->identity;
       candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset();
-      candidate.anchor_size = anchor == nullptr ? 0 : anchor->size;
+      candidate.anchor_size = anchor_source == nullptr ? 0 : anchor_source->size();
       candidate.ordered_member_identities = sequence.member_event_identities;
       candidate.eligible =
           rejection == ConSanPerturbationRejectionReason::None && anchor != nullptr;

@@ -1657,8 +1657,11 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(atomic_event.confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_FALSE(atomic_event.confidence_reason.empty());
   EXPECT_EQ(atomic_event.text_offset(), 16u);
-  EXPECT_EQ(atomic_event.width_bits, 32u);
-  EXPECT_EQ(atomic_event.static_byte_offset, 0);
+  const ConSanAtomicSite *atomic_source =
+      result.program_inventory.sync().source_as<ConSanAtomicSite>(atomic_event);
+  ASSERT_NE(atomic_source, nullptr);
+  EXPECT_EQ(atomic_source->width_bits, 32u);
+  EXPECT_EQ(atomic_source->raw_ioffset, 0);
   EXPECT_FALSE(atomic_event.scope);
 
   const ConSanSyncEvent &barrier_event = result.program_inventory.sync().sync_events[1];
@@ -1667,12 +1670,15 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(barrier_event.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(barrier_event.confidence, ConSanSemanticConfidence::Unsupported);
   EXPECT_EQ(barrier_event.text_offset(), 24u);
-  ASSERT_TRUE(barrier_event.barrier_id);
-  EXPECT_EQ(*barrier_event.barrier_id, 0);
-  EXPECT_EQ(barrier_event.barrier_operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(barrier_event.barrier_scope, ConSanBarrierSite::Scope::Unknown);
-  EXPECT_FALSE(barrier_event.participant_count);
-  EXPECT_FALSE(barrier_event.participant_mask);
+  const ConSanBarrierSite *barrier_source =
+      result.program_inventory.sync().source_as<ConSanBarrierSite>(barrier_event);
+  ASSERT_NE(barrier_source, nullptr);
+  ASSERT_TRUE(barrier_source->barrier_id);
+  EXPECT_EQ(*barrier_source->barrier_id, 0);
+  EXPECT_EQ(barrier_source->operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier_source->scope, ConSanBarrierSite::Scope::Unknown);
+  EXPECT_FALSE(barrier_source->participant_count);
+  EXPECT_FALSE(barrier_source->participant_mask);
 
   const ConSanSyncEvent &fence_event = result.program_inventory.sync().sync_events[2];
   EXPECT_EQ(fence_event.kind, ConSanSyncEventKind::Fence);
@@ -1693,9 +1699,11 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
               result.program_inventory.sync().sync_events[i].identity);
     EXPECT_EQ(sequence.begin_text_offset,
               result.program_inventory.sync().sync_events[i].text_offset());
+    const ConSanDecodedProgramSite *source =
+        result.program_inventory.sync().source(result.program_inventory.sync().sync_events[i]);
+    ASSERT_NE(source, nullptr);
     EXPECT_EQ(sequence.end_text_offset,
-              result.program_inventory.sync().sync_events[i].text_offset() +
-                  result.program_inventory.sync().sync_events[i].size);
+              result.program_inventory.sync().sync_events[i].text_offset() + source->size());
   }
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Atomic);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind,
@@ -3130,9 +3138,18 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[0].mnemonic, "buffer_wbl2");
-  EXPECT_EQ(result.program_inventory.sync().sync_events[1].mnemonic, "flat_atomic_add");
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].mnemonic, "buffer_inv");
+  EXPECT_EQ(result.program_inventory.sync()
+                .source(result.program_inventory.sync().sync_events[0])
+                ->mnemonic(),
+            "buffer_wbl2");
+  EXPECT_EQ(result.program_inventory.sync()
+                .source(result.program_inventory.sync().sync_events[1])
+                ->mnemonic(),
+            "flat_atomic_add");
+  EXPECT_EQ(result.program_inventory.sync()
+                .source(result.program_inventory.sync().sync_events[2])
+                ->mnemonic(),
+            "buffer_inv");
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
   EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
@@ -3208,8 +3225,11 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_EQ(event.memory_role, ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(event.rmw_outcome, ConSanSyncRmwOutcome::ReturnsOldValue);
   EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Conservative);
-  ASSERT_TRUE(event.static_byte_offset);
-  EXPECT_EQ(*event.static_byte_offset, 0);
+  const ConSanAtomicSite *source =
+      result.program_inventory.sync().source_as<ConSanAtomicSite>(event);
+  ASSERT_NE(source, nullptr);
+  ASSERT_TRUE(source->raw_ioffset);
+  EXPECT_EQ(*source->raw_ioffset, 0);
   ASSERT_TRUE(event.scope);
   EXPECT_EQ(*event.scope, ConSanMemoryScope::Agent);
   EXPECT_NE(event.identity.find("|kernel=lds_probe|event=atomic|"), std::string::npos);
@@ -3674,7 +3694,10 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
   const ConSanSyncEvent *communication =
       result.program_inventory.sync().find_event(*candidate.communication_event);
   ASSERT_NE(communication, nullptr);
-  EXPECT_EQ(communication->static_byte_offset, 4u);
+  const ConSanOrdinaryMemorySite *communication_source =
+      result.program_inventory.sync().source_as<ConSanOrdinaryMemorySite>(*communication);
+  ASSERT_NE(communication_source, nullptr);
+  EXPECT_EQ(communication_source->raw_ioffset, 4u);
   ASSERT_TRUE(communication->scope);
   EXPECT_EQ(*communication->scope, ConSanMemoryScope::Agent);
 }
@@ -3775,7 +3798,10 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
   ASSERT_NE(store_event, result.program_inventory.sync().sync_events.end())
       << testing::PrintToString(result.program_inventory.sync().sync_events);
   EXPECT_EQ(store_event->confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(store_event->width_bits, 32u);
+  const ConSanOrdinaryMemorySite *store_source =
+      result.program_inventory.sync().source_as<ConSanOrdinaryMemorySite>(*store_event);
+  ASSERT_NE(store_source, nullptr);
+  EXPECT_EQ(store_source->width_bits, 32u);
   ASSERT_TRUE(store_event->scope);
   EXPECT_EQ(*store_event->scope, ConSanMemoryScope::Agent);
   EXPECT_FALSE(store_event->execution_owners.empty());
@@ -3812,10 +3838,14 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u)
       << testing::PrintToString(result.program_inventory.sync().sync_events);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[1].cache_operation,
-            ConSanCacheOperation::AcquirePairPrefix);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].cache_operation,
-            ConSanCacheOperation::AcquirePairCompletion);
+  const ConSanFenceSite *prefix_site = result.program_inventory.sync().source_as<ConSanFenceSite>(
+      result.program_inventory.sync().sync_events[1]);
+  const ConSanFenceSite *completion = result.program_inventory.sync().source_as<ConSanFenceSite>(
+      result.program_inventory.sync().sync_events[2]);
+  ASSERT_NE(prefix_site, nullptr);
+  ASSERT_NE(completion, nullptr);
+  EXPECT_EQ(prefix_site->cache_operation, ConSanCacheOperation::AcquirePairPrefix);
+  EXPECT_EQ(completion->cache_operation, ConSanCacheOperation::AcquirePairCompletion);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
@@ -4366,14 +4396,18 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  ASSERT_TRUE(result.program_inventory.sync().sync_events[0].barrier_id);
-  ASSERT_TRUE(result.program_inventory.sync().sync_events[1].barrier_id);
-  EXPECT_EQ(*result.program_inventory.sync().sync_events[0].barrier_id, -1);
-  EXPECT_EQ(*result.program_inventory.sync().sync_events[1].barrier_id, -2);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[0].barrier_scope,
-            ConSanBarrierSite::Scope::Workgroup);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[1].barrier_scope,
-            ConSanBarrierSite::Scope::Workgroup);
+  const ConSanBarrierSite *signal = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+      result.program_inventory.sync().sync_events[0]);
+  const ConSanBarrierSite *wait = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+      result.program_inventory.sync().sync_events[1]);
+  ASSERT_NE(signal, nullptr);
+  ASSERT_NE(wait, nullptr);
+  ASSERT_TRUE(signal->barrier_id);
+  ASSERT_TRUE(wait->barrier_id);
+  EXPECT_EQ(*signal->barrier_id, -1);
+  EXPECT_EQ(*wait->barrier_id, -2);
+  EXPECT_EQ(signal->scope, ConSanBarrierSite::Scope::Workgroup);
+  EXPECT_EQ(wait->scope, ConSanBarrierSite::Scope::Workgroup);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
             ConSanSyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
@@ -4482,11 +4516,12 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  EXPECT_FALSE(result.program_inventory.sync().sync_events[0].barrier_id);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[0].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::DynamicM0);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[0].barrier_scope,
-            ConSanBarrierSite::Scope::Unknown);
+  const ConSanBarrierSite *dynamic = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+      result.program_inventory.sync().sync_events[0]);
+  ASSERT_NE(dynamic, nullptr);
+  EXPECT_FALSE(dynamic->barrier_id);
+  EXPECT_EQ(dynamic->operand_source, ConSanBarrierSite::OperandSource::DynamicM0);
+  EXPECT_EQ(dynamic->scope, ConSanBarrierSite::Scope::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
             ConSanSyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
@@ -4619,15 +4654,17 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
   EXPECT_FALSE(sites[3].barrier_id);
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), sites.size());
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].barrier_raw_operand_selector, 195u);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].barrier_id, -3);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[3].barrier_raw_simm16, 0x1234u);
+  EXPECT_EQ(sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(sites[2].raw_operand_selector, 195u);
+  EXPECT_EQ(sites[2].barrier_id, -3);
+  EXPECT_EQ(sites[3].raw_simm16, 0x1234u);
   for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
     EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Unsupported);
-    EXPECT_FALSE(event.participant_count);
-    EXPECT_FALSE(event.participant_mask);
+    const ConSanBarrierSite *source =
+        result.program_inventory.sync().source_as<ConSanBarrierSite>(event);
+    ASSERT_NE(source, nullptr);
+    EXPECT_FALSE(source->participant_count);
+    EXPECT_FALSE(source->participant_mask);
   }
 }
 
