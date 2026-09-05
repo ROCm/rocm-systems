@@ -41,8 +41,7 @@ void stage_policy_access(AccessInventoryInput &input, const Container &container
 }
 
 ConSanProgramSite make_policy_lds_site(std::string mnemonic = "ds_store_b32",
-                                               uint64_t text_offset = 32,
-                                               uint64_t file_offset = 32) {
+                                       uint64_t text_offset = 32, uint64_t file_offset = 32) {
   ConSanProgramSite site;
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
@@ -57,7 +56,7 @@ ConSanProgramSite make_policy_lds_site(std::string mnemonic = "ds_store_b32",
 }
 
 ConSanProgramSite make_policy_flat_site(ConSanFlatAddressSpaceHint hint,
-                                                uint64_t text_offset = 64) {
+                                        uint64_t text_offset = 64) {
   ConSanProgramSite site;
   site.origin = ConSanAccessOrigin::Flat;
   site.kind = ConSanLdsAccessKind::Write;
@@ -90,7 +89,8 @@ ProgramInventory build_policy_inventory(AccessInventoryInput input) {
     builder.add_kernel(std::move(kernel));
   for (ConSanProgramContainer &function : input.functions)
     builder.add_function(std::move(function));
-  builder.add_sites(std::move(input.accesses), {});
+  for (ConSanProgramSite &access : input.accesses)
+    builder.add_access_site(std::move(access));
   builder.publish_decoded_accesses(input.bytes);
   return builder.view();
 }
@@ -908,8 +908,7 @@ TEST(ConSanAccessPolicy, InventoryLimitationsBecomeTypedUnsupportedDecisions) {
   ConSanProgramSite missing_address = make_policy_lds_site("ds_store_b32", 48, 48);
   missing_address.operands.address_vgpr.reset();
   stage_policy_access(input, kernel, missing_address);
-  ConSanProgramSite unavailable_ranges =
-      make_policy_lds_site("ds_store_2addr_b32", 64, 255);
+  ConSanProgramSite unavailable_ranges = make_policy_lds_site("ds_store_2addr_b32", 64, 255);
   unavailable_ranges.decoded_width_bits = 64;
   stage_policy_access(input, kernel, unavailable_ranges);
   input.kernels.push_back(std::move(kernel));
@@ -1147,7 +1146,7 @@ TEST(ConSanObservationPolicy, ConflictingAliasesFailInTheAssembledProduct) {
 TEST(ConSanAccessPolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInventory) {
   const ProgramInventory inventory = one_native_access_inventory();
   const std::vector<ConSanProgramSite> before(inventory.access_sites().begin(),
-                                                      inventory.access_sites().end());
+                                              inventory.access_sites().end());
   const ConSanAccessPolicyRequest request = policy_request(ConSanCapabilityEngine::InlineShadow);
   const ConSanAccessPolicyResult first = plan_consan_access_observation(inventory, request);
   const ConSanAccessPolicyResult second = plan_consan_access_observation(inventory, request);

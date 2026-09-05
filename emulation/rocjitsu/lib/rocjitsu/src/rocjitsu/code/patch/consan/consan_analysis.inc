@@ -1053,8 +1053,7 @@ void classify_instruction(const Instruction &inst, ConSanKernelStats &stats) {
 }
 
 void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                     std::vector<ConSanProgramSite> &accesses,
-                     uint64_t instruction_text_offset) {
+                     ConSanProgramSiteArena &sites, uint64_t instruction_text_offset) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("ds_") || is_ds_register_lane_operation(mnemonic))
     return;
@@ -1082,13 +1081,12 @@ void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
   }
   site.mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
-  accesses.push_back(std::move(site));
+  sites.add_access(std::move(site));
 }
 
 [[nodiscard]] std::optional<ConSanLdsAccessKind>
 record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t> instruction_bytes,
-                                ConSanProgramContainer &kernel,
-                                std::vector<ConSanProgramSite> &accesses,
+                                ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
                                 uint64_t instruction_text_offset, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
   const std::optional<ConSanDirectLdsTransferEncoding> encoding =
@@ -1109,13 +1107,12 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   }
   site.mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
-  accesses.push_back(std::move(site));
-  return accesses.back().kind;
+  sites.add_access(std::move(site));
+  return sites.access_sites().back().kind;
 }
 
 void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                         std::vector<ConSanProgramSite> &program_sites,
-                         uint64_t instruction_text_offset,
+                         ConSanProgramSiteArena &sites, uint64_t instruction_text_offset,
                          std::span<const uint8_t> instruction_bytes, uint64_t previous_text_offset,
                          std::span<const uint8_t> previous_instruction_bytes, rj_code_arch_t arch) {
   if (!is_barrier_instruction(inst))
@@ -1175,13 +1172,13 @@ void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel
       site.participant_setup_literal = setup_literal;
     }
   }
-  program_sites.push_back(
+  sites.add_semantic(
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
 void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                       std::vector<ConSanProgramSite> &program_sites,
-                       uint64_t instruction_text_offset, rj_code_arch_t arch) {
+                       ConSanProgramSiteArena &sites, uint64_t instruction_text_offset,
+                       rj_code_arch_t arch) {
   if (!is_fence_like(inst.mnemonic()))
     return;
 
@@ -1193,12 +1190,11 @@ void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
   const ConSanCacheOperationEncoding cache = classify_consan_cache_operation(inst.mnemonic(), arch);
   site.cache_operation = cache.operation;
   site.ordinary_acquire_mutation_supported = cache.ordinary_acquire_mutation_supported;
-  program_sites.push_back(
+  sites.add_semantic(
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
-void apply_flat_memory_encoding(ConSanProgramSite &site,
-                                const ConSanVectorMemoryEncoding &encoding,
+void apply_flat_memory_encoding(ConSanProgramSite &site, const ConSanVectorMemoryEncoding &encoding,
                                 const FlatPointerTracker &tracker) {
   site.operands.raw_op = encoding.raw_op;
   site.operands.raw_saddr = encoding.raw_saddr;
@@ -1222,8 +1218,7 @@ void apply_flat_memory_encoding(ConSanProgramSite &site,
 }
 
 void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                      ConSanProgramContainer &kernel,
-                      std::vector<ConSanProgramSite> &accesses,
+                      ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
                       uint64_t instruction_text_offset, rj_code_arch_t arch,
                       std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
@@ -1258,7 +1253,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
   site.mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
-  accesses.push_back(std::move(site));
+  sites.add_access(std::move(site));
 }
 
 [[nodiscard]] bool is_bounded_ordinary_memory_instruction(std::string_view mnemonic) {
@@ -1336,8 +1331,7 @@ void apply_vector_memory_decode(ConSanOrdinaryMemorySite &site,
 }
 
 void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                                 ConSanProgramContainer &kernel,
-                                 std::vector<ConSanProgramSite> &program_sites,
+                                 ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
                                  uint64_t instruction_text_offset, rj_code_arch_t arch,
                                  std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
@@ -1385,7 +1379,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
     }
-    program_sites.push_back(
+    sites.add_semantic(
         make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
     return;
   }
@@ -1404,19 +1398,18 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
 
   if (mnemonic.starts_with("flat_")) {
     apply_vector_memory_decode(site, decode_consan_flat_memory_encoding(instruction_bytes, arch));
-    program_sites.push_back(
+    sites.add_semantic(
         make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
     return;
   }
 
   apply_vector_memory_decode(site, decode_consan_global_memory_encoding(instruction_bytes, arch));
-  program_sites.push_back(
+  sites.add_semantic(
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
 void record_atomic_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                        ConSanProgramContainer &kernel,
-                        std::vector<ConSanProgramSite> &program_sites,
+                        ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
                         uint64_t instruction_text_offset, rj_code_arch_t arch,
                         std::span<const uint8_t> instruction_bytes) {
   if (!is_atomic_instruction(inst))
@@ -1457,20 +1450,16 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
 
   site.mnemonic = std::string(mnemonic);
-  program_sites.push_back(
+  sites.add_semantic(
       make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
 }
 
 void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
                          rj_code_arch_t arch, ConSanProgramContainer &kernel,
-                         std::vector<ConSanProgramSite> &accesses,
-                         std::vector<ConSanProgramSite> &program_sites,
-                         std::vector<std::string> &warnings,
+                         ConSanProgramSiteArena &sites, std::vector<std::string> &warnings,
                          const FlatPointerTracker *entry_tracker = nullptr,
                          const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
                          std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
-  const size_t first_access = accesses.size();
-  const size_t first_decoded_site = program_sites.size();
   if (!kernel.has_text_range) {
     warnings.emplace_back("ConSan cannot decode kernel '" + kernel.name +
                           "': function text range is unavailable");
@@ -1587,31 +1576,30 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     const std::span<const uint8_t> instruction_bytes =
         text.subspan(offset, static_cast<size_t>(inst_size));
     if (const auto direct_lds_kind = record_direct_lds_transfer_site(
-            *inst, instruction_bytes, kernel, accesses,
+            *inst, instruction_bytes, kernel, sites,
             kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
       if (*direct_lds_kind == ConSanLdsAccessKind::Read)
         ++kernel.stats.lds_read_count;
       else if (*direct_lds_kind == ConSanLdsAccessKind::Write)
         ++kernel.stats.lds_write_count;
     }
-    record_lds_site(*inst, kernel, accesses,
-                    kernel.entry_text_offset + static_cast<uint64_t>(offset));
+    record_lds_site(*inst, kernel, sites, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     const std::span<const uint8_t> previous_instruction_bytes =
         previous_size == 0 ? std::span<const uint8_t>{}
                            : text.subspan(previous_offset, previous_size);
-    record_barrier_site(*inst, kernel, program_sites,
+    record_barrier_site(*inst, kernel, sites,
                         kernel.entry_text_offset + static_cast<uint64_t>(offset), instruction_bytes,
                         kernel.entry_text_offset + static_cast<uint64_t>(previous_offset),
                         previous_instruction_bytes, arch);
-    record_fence_site(*inst, kernel, program_sites,
+    record_fence_site(*inst, kernel, sites,
                       kernel.entry_text_offset + static_cast<uint64_t>(offset), arch);
-    record_flat_site(*inst, flat_pointer_tracker, kernel, accesses,
+    record_flat_site(*inst, flat_pointer_tracker, kernel, sites,
                      kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                      instruction_bytes);
-    record_ordinary_memory_site(*inst, flat_pointer_tracker, kernel, program_sites,
+    record_ordinary_memory_site(*inst, flat_pointer_tracker, kernel, sites,
                                 kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                                 instruction_bytes);
-    record_atomic_site(*inst, flat_pointer_tracker, kernel, program_sites,
+    record_atomic_site(*inst, flat_pointer_tracker, kernel, sites,
                        kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                        instruction_bytes);
     update_flat_pointer_tracker(*inst, flat_pointer_tracker, arch, instruction_bytes);
@@ -1619,24 +1607,13 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     previous_size = static_cast<size_t>(inst_size);
     offset += previous_size;
   }
-
   kernel.decoded = true;
-  // Container-wide facts such as cluster-coordinate use can be discovered
-  // after an earlier instruction has already emitted a site. Publish one
-  // final attribution snapshot for the complete decoded batch so consumers
-  // never have to guess which point-in-decode copy names the same container.
-  const ConSanProgramContainerRef container = consan_program_container_ref(kernel);
-  for (ConSanProgramSite &access : std::span(accesses).subspan(first_access))
-    access.container = container;
-  for (ConSanProgramSite &site : std::span(program_sites).subspan(first_decoded_site))
-    site.container = container;
 }
 
 void decode_function_stats(
     std::span<const uint8_t> code_object_bytes, Decoder &decoder, rj_code_arch_t arch,
-    ConSanProgramContainer &function, std::vector<ConSanProgramSite> &accesses,
-    std::vector<ConSanProgramSite> &program_sites, std::vector<std::string> &warnings,
-    const FlatPointerTracker *entry_tracker = nullptr,
+    ConSanProgramContainer &function, ConSanProgramSiteArena &sites,
+    std::vector<std::string> &warnings, const FlatPointerTracker *entry_tracker = nullptr,
     const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
     std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
   function.kind = ConSanProgramContainerKind::Function;
@@ -1648,10 +1625,9 @@ void decode_function_stats(
   range.code_size = function.code_size;
   range.has_text_range = true;
 
-  std::vector<ConSanProgramSite> range_accesses;
-  std::vector<ConSanProgramSite> range_decoded_sites;
-  decode_kernel_stats(code_object_bytes, decoder, arch, range, range_accesses, range_decoded_sites,
-                      warnings, entry_tracker, call_targets, call_states);
+  ConSanProgramSiteArena range_sites;
+  decode_kernel_stats(code_object_bytes, decoder, arch, range, range_sites, warnings, entry_tracker,
+                      call_targets, call_states);
 
   function.decoded = range.decoded;
   function.uses_cluster_workgroup_id = range.uses_cluster_workgroup_id;
@@ -1661,11 +1637,12 @@ void decode_function_stats(
   if (lds_load_api || lds_store_api) {
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
-    const auto terminal =
-        std::ranges::find_if(range_accesses.rbegin(), range_accesses.rend(), [&](const auto &site) {
+    const auto terminal = std::ranges::find_if(
+        range_sites.access_sites().rbegin(), range_sites.access_sites().rend(),
+        [&](const auto &site) {
           return site.origin == ConSanAccessOrigin::Flat && site.kind == expected_kind;
         });
-    if (terminal != range_accesses.rend() &&
+    if (terminal != range_sites.access_sites().rend() &&
         (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
          terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
       if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
@@ -1680,14 +1657,9 @@ void decode_function_stats(
     }
   }
   const ConSanProgramContainerRef container = consan_program_container_ref(function);
-  for (ConSanProgramSite &access : range_accesses)
-    access.container = container;
-  for (ConSanProgramSite &site : range_decoded_sites)
+  for (ConSanProgramSite &site : range_sites.sites())
     site.container = container;
-  accesses.insert(accesses.end(), std::make_move_iterator(range_accesses.begin()),
-                  std::make_move_iterator(range_accesses.end()));
-  program_sites.insert(program_sites.end(), std::make_move_iterator(range_decoded_sites.begin()),
-                       std::make_move_iterator(range_decoded_sites.end()));
+  sites.append(std::move(range_sites));
 }
 
 // Assembly kernels commonly leave STT_FUNC sizes at zero. The code-object
@@ -1769,11 +1741,13 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   return {};
 }
 
-void relay_flat_pointer_provenance_across_calls(
-    std::span<const uint8_t> code_object_bytes, const AmdGpuCodeObject &code_object,
-    rj_code_arch_t arch, std::span<ConSanProgramContainer> kernels,
-    std::span<ConSanProgramContainer> functions, std::vector<ConSanProgramSite> &accesses,
-    std::vector<ConSanProgramSite> &program_sites, std::vector<std::string> &warnings) {
+void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_object_bytes,
+                                                const AmdGpuCodeObject &code_object,
+                                                rj_code_arch_t arch,
+                                                std::span<ConSanProgramContainer> kernels,
+                                                std::span<ConSanProgramContainer> functions,
+                                                ConSanProgramSiteArena &sites,
+                                                std::vector<std::string> &warnings) {
   std::unique_ptr<Decoder> relay_decoder = Decoder::create(arch);
   if (!relay_decoder)
     return;
@@ -1809,33 +1783,28 @@ void relay_flat_pointer_provenance_across_calls(
     return;
 
   const std::vector<ConSanProgramContainer> original_functions(functions.begin(), functions.end());
-  const std::vector<ConSanProgramSite> original_accesses = accesses;
-  const std::vector<ConSanProgramSite> original_decoded_sites = program_sites;
+  const ConSanProgramSiteArena original_sites = sites;
   std::unordered_map<uint64_t, FlatPointerTracker> entry_trackers;
   constexpr uint32_t kMaxRelayPasses = 6u;
   for (uint32_t pass = 0; pass < kMaxRelayPasses; ++pass) {
     std::unordered_map<uint64_t, FlatPointerTracker> call_states;
     std::vector<std::string> pass_warnings;
-    std::vector<ConSanProgramSite> pass_accesses;
-    std::vector<ConSanProgramSite> pass_decoded_sites;
+    ConSanProgramSiteArena pass_sites;
     for (const ConSanProgramContainer &kernel : kernels) {
       ConSanProgramContainer decoded;
       decoded.kind = ConSanProgramContainerKind::Kernel;
-      std::vector<ConSanProgramSite> ignored_accesses;
-      std::vector<ConSanProgramSite> ignored_decoded_sites;
+      ConSanProgramSiteArena ignored_sites;
       decoded.name = kernel.name;
       decoded.entry_text_offset = kernel.entry_text_offset;
       decoded.text_file_offset = kernel.text_file_offset;
       decoded.code_size = kernel.code_size;
       decoded.has_text_range = kernel.has_text_range;
       try {
-        decode_kernel_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_accesses,
-                            ignored_decoded_sites, pass_warnings, nullptr, &call_targets,
-                            &call_states);
+        decode_kernel_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_sites,
+                            pass_warnings, nullptr, &call_targets, &call_states);
       } catch (...) {
         std::ranges::copy(original_functions, functions.begin());
-        accesses = original_accesses;
-        program_sites = original_decoded_sites;
+        sites = original_sites;
         return;
       }
     }
@@ -1849,20 +1818,17 @@ void relay_flat_pointer_provenance_across_calls(
       decoded.code_size = function.code_size;
       const auto entry = entry_trackers.find(function.entry_text_offset);
       try {
-        decode_function_stats(code_object_bytes, *relay_decoder, arch, decoded, pass_accesses,
-                              pass_decoded_sites, pass_warnings,
-                              entry == entry_trackers.end() ? nullptr : &entry->second,
-                              &call_targets, &call_states);
+        decode_function_stats(
+            code_object_bytes, *relay_decoder, arch, decoded, pass_sites, pass_warnings,
+            entry == entry_trackers.end() ? nullptr : &entry->second, &call_targets, &call_states);
       } catch (...) {
         std::ranges::copy(original_functions, functions.begin());
-        accesses = original_accesses;
-        program_sites = original_decoded_sites;
+        sites = original_sites;
         return;
       }
       function = std::move(decoded);
     }
-    accesses = std::move(pass_accesses);
-    program_sites = std::move(pass_decoded_sites);
+    sites = std::move(pass_sites);
 
     std::unordered_map<uint64_t, FlatPointerTracker> next_entry_trackers;
     std::unordered_set<uint64_t> initialized;

@@ -201,6 +201,103 @@ template <typename Site>
   return result;
 }
 
+/// One ordered owning arena for decoded program sites.
+///
+/// Access records occupy a contiguous prefix while synchronization/fault-only
+/// records occupy the suffix. A physical instruction with both facets remains
+/// one prefix record. The same arena is used for transactional decoder batches
+/// and for the published inventory, so neither path can recreate parallel
+/// access and semantic ownership.
+class ConSanProgramSiteArena {
+public:
+  [[nodiscard]] const std::vector<ConSanProgramSite> &sites() const { return sites_; }
+  [[nodiscard]] std::vector<ConSanProgramSite> &sites() { return sites_; }
+  [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
+    return std::span<const ConSanProgramSite>(sites_).first(access_site_count_);
+  }
+  [[nodiscard]] std::span<ConSanProgramSite> access_sites() {
+    return std::span<ConSanProgramSite>(sites_).first(access_site_count_);
+  }
+
+  void add_access(ConSanProgramSite site) {
+    sites_.insert(sites_.begin() + access_site_count_, std::move(site));
+    ++access_site_count_;
+  }
+
+  void add_semantic(ConSanProgramSite site) {
+    const auto same_source = [&](const ConSanProgramSite &candidate) {
+      return candidate.container == site.container &&
+             candidate.physical_id.original_text_offset == site.physical_id.original_text_offset;
+    };
+    const auto access = std::ranges::find_if(access_sites(), same_source);
+    if (access != access_sites().end() && std::holds_alternative<std::monostate>(access->payload)) {
+      access->payload = std::move(site.payload);
+      return;
+    }
+    sites_.push_back(std::move(site));
+  }
+
+  void append(ConSanProgramSiteArena batch) {
+    const size_t access_count = batch.access_site_count_;
+    for (size_t index = 0; index < access_count; ++index)
+      add_access(std::move(batch.sites_[index]));
+    for (size_t index = access_count; index < batch.sites_.size(); ++index)
+      add_semantic(std::move(batch.sites_[index]));
+  }
+
+  template <typename Predicate> void erase_if(Predicate predicate) {
+    auto access_end = sites_.begin() + access_site_count_;
+    access_end = std::remove_if(sites_.begin(), access_end, predicate);
+    const size_t retained_access_count = static_cast<size_t>(access_end - sites_.begin());
+    sites_.erase(access_end, sites_.begin() + access_site_count_);
+    access_site_count_ = retained_access_count;
+    sites_.erase(std::remove_if(sites_.begin() + access_site_count_, sites_.end(), predicate),
+                 sites_.end());
+  }
+
+  /// Transfer semantic facets in an installed code range to their final
+  /// owner without disturbing the access prefix. Symbol aliases can decode
+  /// the same semantic instruction more than once: retain one facet, but
+  /// retain every independently normalized access record.
+  void reattribute_semantic_range(uint64_t begin, uint32_t size,
+                                  const ConSanProgramContainerRef &owner) {
+    const uint64_t end = begin + size;
+    std::vector<std::pair<size_t, uint64_t>> seen;
+    const auto in_range = [&](const ConSanProgramSite &site) {
+      return site.text_offset() >= begin && site.text_offset() < end;
+    };
+    const auto first_semantic_facet = [&](const ConSanProgramSite &site) {
+      const std::pair key{site.payload.index(), site.text_offset()};
+      if (std::ranges::find(seen, key) != seen.end())
+        return false;
+      seen.push_back(key);
+      return true;
+    };
+
+    for (ConSanProgramSite &site : access_sites()) {
+      if (!in_range(site))
+        continue;
+      site.container = owner;
+      if (!std::holds_alternative<std::monostate>(site.payload) && !first_semantic_facet(site))
+        site.payload = std::monostate{};
+    }
+
+    auto semantic_begin = sites_.begin() + access_site_count_;
+    sites_.erase(std::remove_if(semantic_begin, sites_.end(),
+                                [&](ConSanProgramSite &site) {
+                                  if (!in_range(site))
+                                    return false;
+                                  site.container = owner;
+                                  return !first_semantic_facet(site);
+                                }),
+                 sites_.end());
+  }
+
+private:
+  std::vector<ConSanProgramSite> sites_;
+  size_t access_site_count_ = 0;
+};
+
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
 ///
@@ -403,8 +500,7 @@ struct ConSanProgramInventoryStorage {
   /// a contiguous prefix so the hot access-policy path keeps a zero-allocation
   /// span; synchronization and fault analysis traverse the complete arena and
   /// ignore records whose tagged payload is monostate.
-  std::vector<ConSanProgramSite> program_sites;
-  size_t access_site_count = 0;
+  ConSanProgramSiteArena program_sites;
   std::vector<ConSanSyncEvent> sync_events;
   std::vector<ConSanSyncSequence> sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
@@ -499,9 +595,7 @@ public:
     return function == records.end() ? nullptr : &*function;
   }
   [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
-    return storage_ ? std::span<const ConSanProgramSite>(storage_->program_sites)
-                          .first(storage_->access_site_count)
-                    : std::span<const ConSanProgramSite>{};
+    return storage_ ? storage_->program_sites.access_sites() : std::span<const ConSanProgramSite>{};
   }
   /// Return every kernel descriptor that can own execution of an access,
   /// including its containing kernel when symbol-range ownership did not
@@ -522,7 +616,7 @@ public:
   /// and fault analysis. Payloads remain decoder facts; policy and lowering
   /// products live in later phase-owned records.
   [[nodiscard]] std::span<const ConSanProgramSite> program_sites() const {
-    return storage_ ? std::span<const ConSanProgramSite>(storage_->program_sites)
+    return storage_ ? std::span<const ConSanProgramSite>(storage_->program_sites.sites())
                     : std::span<const ConSanProgramSite>{};
   }
 
@@ -542,7 +636,7 @@ public:
     if (!storage_)
       return {};
     return {
-        .program_sites = storage_->program_sites,
+        .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
@@ -629,45 +723,20 @@ public:
   /// This mutable capability stays on the builder so published
   /// `ProgramInventory` views remain read-only.
   [[nodiscard]] std::span<ConSanProgramSite> access_sites() {
-    return std::span(storage_->program_sites).first(storage_->access_site_count);
+    return storage_->program_sites.access_sites();
   }
-  [[nodiscard]] std::vector<ConSanProgramSite> &program_sites() { return storage_->program_sites; }
+  [[nodiscard]] std::vector<ConSanProgramSite> &program_sites() {
+    return storage_->program_sites.sites();
+  }
   void add_access_site(ConSanProgramSite site) {
-    const auto position = storage_->program_sites.begin() + storage_->access_site_count;
-    storage_->program_sites.insert(position, std::move(site));
-    ++storage_->access_site_count;
+    storage_->program_sites.add_access(std::move(site));
   }
   void add_semantic_site(ConSanProgramSite site) {
-    const auto same_source = [&](const ConSanProgramSite &candidate) {
-      return candidate.container == site.container &&
-             candidate.physical_id.original_text_offset == site.physical_id.original_text_offset;
-    };
-    const auto access = std::ranges::find_if(access_sites(), same_source);
-    if (access != access_sites().end() && std::holds_alternative<std::monostate>(access->payload)) {
-      access->payload = std::move(site.payload);
-      return;
-    }
-    storage_->program_sites.push_back(std::move(site));
+    storage_->program_sites.add_semantic(std::move(site));
   }
-  void add_sites(std::vector<ConSanProgramSite> accesses,
-                 std::vector<ConSanProgramSite> semantic_sites) {
-    for (ConSanProgramSite &access : accesses)
-      add_access_site(std::move(access));
-    for (ConSanProgramSite &site : semantic_sites)
-      add_semantic_site(std::move(site));
-  }
+  void add_sites(ConSanProgramSiteArena sites) { storage_->program_sites.append(std::move(sites)); }
   template <typename Predicate> void erase_sites_if(Predicate predicate) {
-    auto access_end = storage_->program_sites.begin() + storage_->access_site_count;
-    access_end = std::remove_if(storage_->program_sites.begin(), access_end, predicate);
-    const size_t retained_access_count =
-        static_cast<size_t>(access_end - storage_->program_sites.begin());
-    storage_->program_sites.erase(access_end,
-                                  storage_->program_sites.begin() + storage_->access_site_count);
-    storage_->access_site_count = retained_access_count;
-    storage_->program_sites.erase(
-        std::remove_if(storage_->program_sites.begin() + storage_->access_site_count,
-                       storage_->program_sites.end(), predicate),
-        storage_->program_sites.end());
+    storage_->program_sites.erase_if(predicate);
   }
   /// Transfer semantic facets in an installed code range to their final
   /// owner without disturbing the access prefix. Symbol aliases can decode
@@ -675,42 +744,13 @@ public:
   /// retain every independently normalized access record.
   void reattribute_semantic_range(uint64_t begin, uint32_t size,
                                   const ConSanProgramContainer &owner) {
-    const uint64_t end = begin + size;
-    const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
-    std::vector<std::pair<size_t, uint64_t>> seen;
-    const auto in_range = [&](const ConSanProgramSite &site) {
-      return site.text_offset() >= begin && site.text_offset() < end;
-    };
-    const auto first_semantic_facet = [&](const ConSanProgramSite &site) {
-      const std::pair key{site.payload.index(), site.text_offset()};
-      if (std::ranges::find(seen, key) != seen.end())
-        return false;
-      seen.push_back(key);
-      return true;
-    };
-
-    for (ConSanProgramSite &site : access_sites()) {
-      if (!in_range(site))
-        continue;
-      site.container = reference;
-      if (!std::holds_alternative<std::monostate>(site.payload) && !first_semantic_facet(site))
-        site.payload = std::monostate{};
-    }
-
-    auto semantic_begin = storage_->program_sites.begin() + storage_->access_site_count;
-    storage_->program_sites.erase(std::remove_if(semantic_begin, storage_->program_sites.end(),
-                                                 [&](ConSanProgramSite &site) {
-                                                   if (!in_range(site))
-                                                     return false;
-                                                   site.container = reference;
-                                                   return !first_semantic_facet(site);
-                                                 }),
-                                  storage_->program_sites.end());
+    storage_->program_sites.reattribute_semantic_range(begin, size,
+                                                       consan_program_container_ref(owner));
   }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
     return {
-        .program_sites = storage_->program_sites,
+        .program_sites = storage_->program_sites.sites(),
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
@@ -755,7 +795,7 @@ public:
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
     }
-    for (ConSanProgramSite &site : storage_->program_sites)
+    for (ConSanProgramSite &site : storage_->program_sites.sites())
       bind_container(site.container);
   }
 

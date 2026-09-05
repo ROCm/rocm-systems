@@ -46,31 +46,4 @@ struct ConSanProgramAnalysisResult {
                                                     ConSanPerturbationPlanningState &perturbation,
                                                     ConSanProgramAnalysisResult &result);
 
-void decode_consan_kernel_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                                    rj_code_arch_t arch, ConSanProgramContainer &kernel,
-                                    std::vector<ConSanProgramSite> &accesses,
-                                    std::vector<ConSanProgramSite> &program_sites,
-                                    std::vector<std::string> &warnings);
-
-void decode_consan_function_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                                      rj_code_arch_t arch, ConSanProgramContainer &function,
-                                      std::vector<ConSanProgramSite> &accesses,
-                                      std::vector<ConSanProgramSite> &program_sites,
-                                      std::vector<std::string> &warnings);
-
-void refine_consan_flat_pointer_provenance(std::span<const uint8_t> code_object_bytes,
-                                           const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                           std::span<ConSanProgramContainer> kernels,
-                                           std::span<ConSanProgramContainer> functions,
-                                           std::vector<ConSanProgramSite> &accesses,
-                                           std::vector<ConSanProgramSite> &program_sites,
-                                           std::vector<std::string> &warnings);
-
-void prune_consan_unreachable_inferred_ranges(
-    const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
-    std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
-    ProgramInventoryBuilder &inventory);
-
-void preflight_consan_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &warnings);
-
 } // namespace rocjitsu
