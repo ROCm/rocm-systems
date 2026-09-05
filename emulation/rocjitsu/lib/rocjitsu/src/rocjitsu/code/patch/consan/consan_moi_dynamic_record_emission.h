@@ -51,7 +51,6 @@ public:
   [[nodiscard]] bool finish() const { return sequence_.finish(); }
 
 private:
-  void require(bool success);
   DynamicRecordEmitter &private_value(size_t field_offset, uint32_t private_offset);
 
   std::vector<uint32_t> &words_;

@@ -64,8 +64,9 @@ bool append_reserve_bounded_dynamic_record_slot(std::vector<uint32_t> &words,
       static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true, kAmdGpuScopeDevice,
       arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or) &&
-         append_moi_global_atomic_wait(words, arch);
+  sequence.append(mov_address_lo, mov_address_hi, mov_value, atomic_or)
+      .require(append_moi_global_atomic_wait(words, arch));
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
@@ -74,7 +75,8 @@ bool append_reserve_bounded_dynamic_record_slot(std::vector<uint32_t> &words,
       address_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   const uint32_t zero = build_v_mov_b32_e32(result_vgpr, scalar_positive_inline_u32(0), arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(zero, atomic_load) && append_moi_global_atomic_wait(words, arch);
+  sequence.append(zero, atomic_load).require(append_moi_global_atomic_wait(words, arch));
+  return sequence.finish();
 }
 
 bool append_select_first_lane_in_exec_mask(std::vector<uint32_t> &words, uint16_t lane_rank_vgpr,
@@ -144,9 +146,10 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
       instrumentation::build_s_and_saveexec_b64(exec_save_sgpr, kAmdGpuVccLo, arch);
   const auto wait = instrumentation::build_s_wait_global_load0(arch);
   InstructionSequence sequence(words);
-  if (!sequence.emit_all(mov_address_lo, mov_address_hi, load, wait, is_zero, select_unpublished))
-    return false;
-  return append_atomic_fetch_add_one_u32(words, counter_address, result_vgpr, scratch_vgpr, arch);
+  sequence.append(mov_address_lo, mov_address_hi, load, wait, is_zero, select_unpublished)
+      .require(
+          append_atomic_fetch_add_one_u32(words, counter_address, result_vgpr, scratch_vgpr, arch));
+  return sequence.finish();
 }
 
 [[nodiscard]] MoiVisibleEvidencePublicationResult
@@ -188,20 +191,15 @@ DynamicRecordEmitter::DynamicRecordEmitter(std::vector<uint32_t> &words,
     : words_(words), layout_(layout), record_base_(record_base), slot_vgpr_(slot_vgpr),
       scratch_vgpr_(scratch_vgpr), arch_(arch), sequence_(words) {}
 
-void DynamicRecordEmitter::require(bool success) { sequence_.require(success); }
-
 DynamicRecordEmitter &DynamicRecordEmitter::vgpr(size_t field_offset, uint16_t value_vgpr) {
-  if (!sequence_)
+  if (!sequence_.require(value_vgpr != scratch_vgpr_ &&
+                         value_vgpr != static_cast<uint16_t>(scratch_vgpr_ + 1u)))
     return *this;
-  if (value_vgpr == scratch_vgpr_ || value_vgpr == static_cast<uint16_t>(scratch_vgpr_ + 1u)) {
-    require(false);
-    return *this;
-  }
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
-  require(store && append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
-                                                 slot_vgpr_, scratch_vgpr_, arch_));
-  if (sequence_)
-    words_.insert(words_.end(), store->begin(), store->end());
+  sequence_
+      .require(append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
+                                             slot_vgpr_, scratch_vgpr_, arch_))
+      .append(store);
   return *this;
 }
 
@@ -209,16 +207,12 @@ DynamicRecordEmitter &DynamicRecordEmitter::scalar(size_t field_offset, uint16_t
   if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
-  require(value_vgpr != slot_vgpr_ &&
-          append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
-                                        scratch_vgpr_, arch_));
-  if (!sequence_)
-    return *this;
-  words_.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch_));
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
-  require(store.has_value());
-  if (sequence_)
-    words_.insert(words_.end(), store->begin(), store->end());
+  sequence_
+      .require(value_vgpr != slot_vgpr_ &&
+               append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
+                                             slot_vgpr_, scratch_vgpr_, arch_))
+      .append(build_v_mov_b32_e32(value_vgpr, scalar_src, arch_), store);
   return *this;
 }
 
@@ -226,20 +220,13 @@ DynamicRecordEmitter &DynamicRecordEmitter::literal(size_t field_offset, uint32_
   if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
-  require(value_vgpr != slot_vgpr_ &&
-          append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
-                                        scratch_vgpr_, arch_));
-  if (!sequence_)
-    return *this;
   const auto mov_value = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch_);
-  require(mov_value.has_value());
-  if (!sequence_)
-    return *this;
-  words_.insert(words_.end(), mov_value->begin(), mov_value->end());
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
-  require(store.has_value());
-  if (sequence_)
-    words_.insert(words_.end(), store->begin(), store->end());
+  sequence_
+      .require(value_vgpr != slot_vgpr_ &&
+               append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
+                                             slot_vgpr_, scratch_vgpr_, arch_))
+      .append(mov_value, store);
   return *this;
 }
 
@@ -250,23 +237,17 @@ DynamicRecordEmitter &DynamicRecordEmitter::private_value(size_t field_offset,
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
   const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch_);
   const auto wait = instrumentation::build_s_wait_private_load0(arch_);
-  require(load.has_value() && wait.has_value());
+  sequence_.append(load, wait);
   if (!sequence_)
     return *this;
-  words_.insert(words_.end(), load->begin(), load->end());
-  words_.push_back(*wait);
   return vgpr(field_offset, value_vgpr);
 }
 
 DynamicRecordEmitter &
 DynamicRecordEmitter::dispatch_id(size_t field_offset,
                                   const ConSanMoiReportDispatchIdSource &source) {
-  if (!sequence_)
+  if (!sequence_.require(source.is_well_formed()))
     return *this;
-  if (!source.is_well_formed()) {
-    require(false);
-    return *this;
-  }
   for (const bool high_word : {false, true}) {
     const size_t word_offset = field_offset + (high_word ? sizeof(uint32_t) : 0u);
     const uint16_t register_word = high_word ? 1u : 0u;
@@ -285,16 +266,13 @@ DynamicRecordEmitter::dispatch_id(size_t field_offset,
 
 DynamicRecordEmitter &DynamicRecordEmitter::workgroup(size_t field_offset,
                                                       const ConSanMoiWorkgroupSource &source) {
-  if (!sequence_)
+  if (!sequence_.require(source.is_well_formed()))
     return *this;
-  if (!source.is_well_formed()) {
-    require(false);
-    return *this;
-  }
   if (!source.has_value())
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
-  require(consan_detail::append_workgroup_source_value(words_, source, value_vgpr, arch_));
+  sequence_.require(
+      consan_detail::append_workgroup_source_value(words_, source, value_vgpr, arch_));
   if (sequence_)
     vgpr(field_offset, value_vgpr);
   return *this;
@@ -305,7 +283,7 @@ DynamicRecordEmitter &DynamicRecordEmitter::event_index(size_t field_offset,
   if (!sequence_)
     return *this;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
-  require(
+  sequence_.require(
       append_atomic_fetch_add_one_u32(words_, counter_address, value_vgpr, scratch_vgpr_, arch_));
   if (sequence_)
     vgpr(field_offset, value_vgpr);
