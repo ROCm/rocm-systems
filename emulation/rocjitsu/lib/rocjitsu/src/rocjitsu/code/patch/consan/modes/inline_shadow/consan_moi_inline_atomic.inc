@@ -368,29 +368,17 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
     return;
   }
-  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (!neutralize_atomic_scalar_clause(neutralized_text, planned.candidate, arch,
-                                         scalar_clause_patches, result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate, arch, scalar_clause_patches,
+                                           result.errors))
       return;
   }
 
   std::vector<ConSanTextFragment> fragments;
   fragments.reserve(planned_candidates.size() + scalar_clause_patches.size());
-  for (ConSanPatchInfo &patch : scalar_clause_patches) {
-    fragments.push_back({
-        .id = 0u,
-        .kind = ConSanTextFragmentKind::Replacement,
-        .intent_ids = {},
-        .runtime_mapping = {},
-        .before_words = {},
-        .replacement_words = {build_s_nop(0u, arch)},
-        .after_words = {},
-        .branch_fixups = {},
-        .patch = std::move(patch),
-    });
-  }
+  for (ConSanPatchInfo &patch : scalar_clause_patches)
+    fragments.push_back(ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
 
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;

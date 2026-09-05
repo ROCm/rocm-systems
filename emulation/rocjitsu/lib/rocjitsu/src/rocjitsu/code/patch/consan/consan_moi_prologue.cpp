@@ -1690,15 +1690,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       note_dispatch_id_patch_info(info, *item.emission.dispatch_plan,
                                   item.emission.dispatch_capture);
     info.owner_descriptor_file_offsets.push_back(item.kernel->descriptor_file_offset);
-    fragments.push_back({.id = 0u,
-                         .kind = ConSanTextFragmentKind::EntryPrefix,
-                         .intent_ids = {},
-                         .runtime_mapping = {},
-                         .before_words = std::move(*words),
-                         .replacement_words = {},
-                         .after_words = {},
-                         .branch_fixups = {},
-                         .patch = std::move(info)});
+    fragments.push_back(ConSanTextFragment::entry_prefix(std::move(*words), std::move(info)));
   }
   result.replacement = std::move(patcher).emit();
   (void)stage_consan_text_fragments(std::move(fragments), result);
@@ -2225,15 +2217,7 @@ void try_apply_owner_epoch_prologue_patch(
       note_dispatch_id_patch_info(info, *prologue_plan.dispatch_plan,
                                   prologue_plan.dispatch_capture);
     info.owner_descriptor_file_offsets.push_back(canonical_kernel->descriptor_file_offset);
-    fragments.push_back({.id = 0u,
-                         .kind = ConSanTextFragmentKind::EntryPrefix,
-                         .intent_ids = {},
-                         .runtime_mapping = {},
-                         .before_words = std::move(*words),
-                         .replacement_words = {},
-                         .after_words = {},
-                         .branch_fixups = {},
-                         .patch = std::move(info)});
+    fragments.push_back(ConSanTextFragment::entry_prefix(std::move(*words), std::move(info)));
   }
 
   if (fragments.empty()) {

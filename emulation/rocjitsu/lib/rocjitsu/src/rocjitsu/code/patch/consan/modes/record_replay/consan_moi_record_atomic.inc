@@ -153,28 +153,16 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, planned.emission, arch);
   }
-  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    if (!neutralize_atomic_scalar_clause(neutralized_text, planned.candidate, arch,
-                                         scalar_clause_patches, result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate, arch, scalar_clause_patches,
+                                           result.errors))
       return;
   }
   std::vector<ConSanTextFragment> fragments;
   fragments.reserve(selected_candidates.size() + scalar_clause_patches.size());
-  for (ConSanPatchInfo &patch : scalar_clause_patches) {
-    fragments.push_back({
-        .id = 0u,
-        .kind = ConSanTextFragmentKind::Replacement,
-        .intent_ids = {},
-        .runtime_mapping = {},
-        .before_words = {},
-        .replacement_words = {build_s_nop(0u, arch)},
-        .after_words = {},
-        .branch_fixups = {},
-        .patch = std::move(patch),
-    });
-  }
+  for (ConSanPatchInfo &patch : scalar_clause_patches)
+    fragments.push_back(ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;

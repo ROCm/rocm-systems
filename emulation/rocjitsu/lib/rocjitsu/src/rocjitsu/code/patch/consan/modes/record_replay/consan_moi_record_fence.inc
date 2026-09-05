@@ -169,31 +169,19 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
     return;
   }
-  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedFenceRecord &planned : selected) {
     MoiAtomicEvidenceSitePlan scalar_clause_candidate;
     scalar_clause_candidate.site = planned.candidate.communication_site;
     scalar_clause_candidate.scalar_clause_text_offset = planned.candidate.scalar_clause_text_offset;
-    if (!neutralize_atomic_scalar_clause(neutralized_text, scalar_clause_candidate, arch,
-                                         scalar_clause_patches, result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, scalar_clause_candidate, arch,
+                                           scalar_clause_patches, result.errors))
       return;
   }
   std::vector<ConSanTextFragment> fragments;
   fragments.reserve(selected.size() + scalar_clause_patches.size());
-  for (ConSanPatchInfo &patch : scalar_clause_patches) {
-    fragments.push_back({
-        .id = 0u,
-        .kind = ConSanTextFragmentKind::Replacement,
-        .intent_ids = {},
-        .runtime_mapping = {},
-        .before_words = {},
-        .replacement_words = {build_s_nop(0u, arch)},
-        .after_words = {},
-        .branch_fixups = {},
-        .patch = std::move(patch),
-    });
-  }
+  for (ConSanPatchInfo &patch : scalar_clause_patches)
+    fragments.push_back(ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
   uint32_t record_index = 0;
   for (const PlannedFenceRecord &planned : selected) {
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;

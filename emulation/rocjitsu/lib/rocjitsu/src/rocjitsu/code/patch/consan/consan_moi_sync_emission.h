@@ -61,8 +61,8 @@ sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 [[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicLoweringForm &form);
 
-[[nodiscard]] bool neutralize_atomic_scalar_clause(
-    std::vector<uint8_t> &text, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
+[[nodiscard]] bool append_atomic_scalar_clause_patch(
+    std::span<const uint8_t> text, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors);
 
 } // namespace rocjitsu::consan_moi_impl

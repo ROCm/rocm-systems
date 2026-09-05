@@ -604,19 +604,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   std::vector<ConSanTextFragment> fragments;
   fragments.reserve(planned_patches.size());
-  for (PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    fragments.push_back({
-        .id = 0,
-        .kind = ConSanTextFragmentKind::Replacement,
-        .intent_ids = std::move(planned.intent_ids),
-        .runtime_mapping = {},
-        .before_words = {},
-        .replacement_words = std::move(planned.words),
-        .after_words = {},
-        .branch_fixups = {},
-        .patch = std::move(planned.info),
-    });
-  }
+  for (PlannedFlatCheckTrapPatch &planned : planned_patches)
+    fragments.push_back(ConSanTextFragment::replacement(
+        std::move(planned.words), std::move(planned.info), std::move(planned.intent_ids)));
   (void)stage_consan_text_rewrites(code_object, arch,
                                    {no_vgpr_requirements, descriptor_sgpr_growths,
                                     descriptor_private_requirements, no_group_segment_requirements},

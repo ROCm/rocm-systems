@@ -249,6 +249,26 @@ struct ConSanTextFragmentBranchFixup {
 /// Staging order defines nesting: earlier Around fragments are outermost, so access followed by
 /// atomic staging produces access-before, atomic-before, guest, atomic-after, access-after.
 struct ConSanTextFragment {
+  [[nodiscard]] static ConSanTextFragment
+  replacement(std::vector<uint32_t> words, ConSanPatchInfo patch,
+              std::vector<ConSanProbeIntentId> intents = {}) {
+    ConSanTextFragment result;
+    result.kind = ConSanTextFragmentKind::Replacement;
+    result.intent_ids = std::move(intents);
+    result.replacement_words = std::move(words);
+    result.patch = std::move(patch);
+    return result;
+  }
+
+  [[nodiscard]] static ConSanTextFragment entry_prefix(std::vector<uint32_t> words,
+                                                       ConSanPatchInfo patch) {
+    ConSanTextFragment result;
+    result.kind = ConSanTextFragmentKind::EntryPrefix;
+    result.before_words = std::move(words);
+    result.patch = std::move(patch);
+    return result;
+  }
+
   /// Transaction-local stable identity assigned when the fragment is staged.
   uint64_t id = 0;
   ConSanTextFragmentKind kind = ConSanTextFragmentKind::Replacement;

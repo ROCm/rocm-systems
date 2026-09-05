@@ -486,11 +486,11 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
   return plans;
 }
 
-[[nodiscard]] bool neutralize_atomic_scalar_clause(std::vector<uint8_t> &text,
-                                                   const MoiAtomicEvidenceSitePlan &candidate,
-                                                   rj_code_arch_t arch,
-                                                   std::vector<ConSanPatchInfo> &patches,
-                                                   std::vector<std::string> &errors) {
+[[nodiscard]] bool append_atomic_scalar_clause_patch(std::span<const uint8_t> text,
+                                                     const MoiAtomicEvidenceSitePlan &candidate,
+                                                     rj_code_arch_t arch,
+                                                     std::vector<ConSanPatchInfo> &patches,
+                                                     std::vector<std::string> &errors) {
   if (!candidate.scalar_clause_text_offset)
     return true;
   const uint64_t offset = *candidate.scalar_clause_text_offset;
@@ -502,7 +502,10 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
   uint32_t word = 0;
   std::memcpy(&word, text.data() + offset, sizeof(word));
   const uint32_t nop = build_s_nop(0, arch);
-  if (word == nop)
+  if (word == nop || std::ranges::any_of(patches, [&](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::InlineScalarClauseNopRewrite &&
+               patch.anchor_offset == offset;
+      }))
     return true;
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
@@ -519,7 +522,6 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     errors.emplace_back("ConSan MOI atomic scalar-clause prefix is no longer an s_clause");
     return false;
   }
-  std::memcpy(text.data() + offset, &nop, sizeof(nop));
   ConSanPatchInfo info;
   info.kind = ConSanPatchKind::InlineScalarClauseNopRewrite;
   info.anchor_offset = offset;

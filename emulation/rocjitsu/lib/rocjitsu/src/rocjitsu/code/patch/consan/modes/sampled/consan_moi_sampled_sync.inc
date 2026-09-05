@@ -1350,12 +1350,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
   MoiDescriptorSgprRequirements scalar_requirements;
   std::vector<ConSanTextFragment> staged_fragments;
-  std::vector<uint8_t> neutralized_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   staged_fragments.reserve(selected.size() * 2u);
   for (const Planned &planned : selected) {
-    if (!neutralize_atomic_scalar_clause(neutralized_text, planned.candidate.atomic, arch,
-                                         scalar_clause_patches, result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate.atomic, arch,
+                                           scalar_clause_patches, result.errors))
       return;
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);
@@ -1405,19 +1404,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       fragment->replacement_words.clear();
     staged_fragments.push_back(std::move(*fragment));
   }
-  for (ConSanPatchInfo &patch : scalar_clause_patches) {
-    staged_fragments.push_back({
-        .id = 0u,
-        .kind = ConSanTextFragmentKind::Replacement,
-        .intent_ids = {},
-        .runtime_mapping = {},
-        .before_words = {},
-        .replacement_words = {build_s_nop(0u, arch)},
-        .after_words = {},
-        .branch_fixups = {},
-        .patch = std::move(patch),
-    });
-  }
+  for (ConSanPatchInfo &patch : scalar_clause_patches)
+    staged_fragments.push_back(
+        ConSanTextFragment::replacement({build_s_nop(0u, arch)}, std::move(patch)));
   const MoiDescriptorLdsRequirements no_lds;
   (void)stage_consan_text_rewrites(
       code_object, arch,
