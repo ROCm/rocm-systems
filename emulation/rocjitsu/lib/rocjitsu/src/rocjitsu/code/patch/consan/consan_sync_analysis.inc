@@ -67,102 +67,78 @@ namespace {
           site.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange);
 }
 
-template <typename Container>
-void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::string_view fingerprint,
-                                      const Container &container, bool in_kernel,
-                                      rj_code_arch_t arch,
-                                      std::span<const ConSanDecodedProgramSite> decoded_sites,
-                                      std::vector<ConSanFaultSite> &sites) {
-  const std::string container_kind = in_kernel ? "kernel" : "function";
-  const ConSanProgramContainerRef container_ref = consan_program_container_ref(container);
-  uint32_t barrier_occurrence = 0;
+void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
+                                rj_code_arch_t arch,
+                                std::span<const ConSanDecodedProgramSite> decoded_sites,
+                                std::vector<ConSanFaultSite> &sites) {
+  std::map<std::pair<ConSanProgramContainerId, ConSanFaultSiteKind>, uint32_t> occurrences;
   for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
-    const ConSanBarrierSite *barrier_ptr = decoded.get_if<ConSanBarrierSite>();
-    if (decoded.container != container_ref || barrier_ptr == nullptr)
+    if (decoded.container.is_kernel() && is_rocclr_runtime_kernel_name(decoded.container.name))
       continue;
-    const ConSanBarrierSite &barrier = *barrier_ptr;
-    if (barrier.size != sizeof(uint32_t))
-      continue;
+
     ConSanFaultSite site;
-    site.kind = ConSanFaultSiteKind::Barrier;
-    site.code_object_fingerprint = fingerprint;
-    site.container_name = container.name;
-    site.in_kernel = in_kernel;
-    site.occurrence = barrier_occurrence++;
-    site.text_offset = barrier.text_offset;
-    site.file_offset = barrier.file_offset;
-    site.size = barrier.size;
-    site.mnemonic = barrier.mnemonic;
-    site.semantic_role = barrier.mnemonic.find("signal") != std::string::npos ? "barrier-signal"
-                         : barrier.mnemonic.find("wait") != std::string::npos ? "barrier-wait"
-                                                                              : "workgroup-barrier";
-    uint32_t encoding = 0;
-    if (barrier.file_offset <= bytes.size() &&
-        sizeof(encoding) <= bytes.size() - barrier.file_offset) {
-      std::memcpy(&encoding, bytes.data() + barrier.file_offset, sizeof(encoding));
-      site.decoded_operands = consan_barrier_decoded_operands(barrier, encoding);
+    std::string_view site_kind;
+    if (const ConSanBarrierSite *barrier = decoded.get_if<ConSanBarrierSite>()) {
+      if (barrier->size != sizeof(uint32_t))
+        continue;
+      site.kind = ConSanFaultSiteKind::Barrier;
+      site.text_offset = barrier->text_offset;
+      site.file_offset = barrier->file_offset;
+      site.size = barrier->size;
+      site.mnemonic = barrier->mnemonic;
+      site.semantic_role = barrier->mnemonic.find("signal") != std::string::npos ? "barrier-signal"
+                           : barrier->mnemonic.find("wait") != std::string::npos
+                               ? "barrier-wait"
+                               : "workgroup-barrier";
+      uint32_t encoding = 0;
+      if (barrier->file_offset <= bytes.size() &&
+          sizeof(encoding) <= bytes.size() - barrier->file_offset) {
+        std::memcpy(&encoding, bytes.data() + barrier->file_offset, sizeof(encoding));
+        site.decoded_operands = consan_barrier_decoded_operands(*barrier, encoding);
+      } else {
+        site.decoded_operands = "-";
+      }
+      site_kind = "barrier";
+    } else if (const ConSanAtomicSite *atomic = decoded.get_if<ConSanAtomicSite>()) {
+      if (classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch) ==
+          AtomicFaultEncoding::Unsupported)
+        continue;
+      site.kind = ConSanFaultSiteKind::Atomic;
+      site.text_offset = atomic->text_offset;
+      site.file_offset = atomic->file_offset;
+      site.size = atomic->size;
+      site.width_bits = atomic->width_bits;
+      site.mnemonic = atomic->mnemonic;
+      site.semantic_role = consan_atomic_semantic_role(*atomic);
+      site.decoded_operands = consan_atomic_decoded_operands(*atomic);
+      site_kind = "atomic";
+    } else if (const ConSanOrdinaryMemorySite *memory =
+                   decoded.get_if<ConSanOrdinaryMemorySite>()) {
+      site.kind = ConSanFaultSiteKind::OrdinaryMemory;
+      site.text_offset = memory->text_offset;
+      site.file_offset = memory->file_offset;
+      site.size = memory->size;
+      site.width_bits = memory->width_bits;
+      site.mnemonic = memory->mnemonic;
+      site.semantic_role = memory->operation == ConSanOrdinaryMemoryOperation::Load
+                               ? "ordinary-load"
+                               : "ordinary-store";
+      site.decoded_operands = consan_ordinary_memory_decoded_operands(*memory);
+      site.ordinary_memory_support_reason = memory->support_reason;
+      site_kind = "ordinary-memory";
     } else {
-      site.decoded_operands = "-";
-    }
-    site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=barrier|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
-                    "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
-    sites.push_back(std::move(site));
-  }
-
-  uint32_t atomic_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
-    const ConSanAtomicSite *atomic_ptr = decoded.get_if<ConSanAtomicSite>();
-    if (decoded.container != container_ref || atomic_ptr == nullptr)
-      continue;
-    const ConSanAtomicSite &atomic = *atomic_ptr;
-    if (classify_consan_atomic_fault_encoding(atomic.mnemonic, atomic.size, arch) ==
-        AtomicFaultEncoding::Unsupported) {
       continue;
     }
-    ConSanFaultSite site;
-    site.kind = ConSanFaultSiteKind::Atomic;
-    site.code_object_fingerprint = fingerprint;
-    site.container_name = container.name;
-    site.in_kernel = in_kernel;
-    site.occurrence = atomic_occurrence++;
-    site.text_offset = atomic.text_offset;
-    site.file_offset = atomic.file_offset;
-    site.size = atomic.size;
-    site.width_bits = atomic.width_bits;
-    site.mnemonic = atomic.mnemonic;
-    site.semantic_role = consan_atomic_semantic_role(atomic);
-    site.decoded_operands = consan_atomic_decoded_operands(atomic);
-    site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=atomic|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
-                    "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
-    sites.push_back(std::move(site));
-  }
 
-  uint32_t ordinary_memory_occurrence = 0;
-  for (const ConSanDecodedProgramSite &decoded : decoded_sites) {
-    const ConSanOrdinaryMemorySite *memory_ptr = decoded.get_if<ConSanOrdinaryMemorySite>();
-    if (decoded.container != container_ref || memory_ptr == nullptr)
-      continue;
-    const ConSanOrdinaryMemorySite &memory = *memory_ptr;
-    ConSanFaultSite site;
-    site.kind = ConSanFaultSiteKind::OrdinaryMemory;
     site.code_object_fingerprint = fingerprint;
-    site.container_name = container.name;
-    site.in_kernel = in_kernel;
-    site.occurrence = ordinary_memory_occurrence++;
-    site.text_offset = memory.text_offset;
-    site.file_offset = memory.file_offset;
-    site.size = memory.size;
-    site.width_bits = memory.width_bits;
-    site.mnemonic = memory.mnemonic;
-    site.semantic_role = memory.operation == ConSanOrdinaryMemoryOperation::Load ? "ordinary-load"
-                                                                                 : "ordinary-store";
-    site.decoded_operands = consan_ordinary_memory_decoded_operands(memory);
-    site.ordinary_memory_support_reason = memory.support_reason;
-    site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=ordinary-memory|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
-                    "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
+    site.container_id = decoded.container.id;
+    site.container_name = decoded.container.name;
+    site.in_kernel = decoded.container.is_kernel();
+    site.occurrence = occurrences[{decoded.container.id, site.kind}]++;
+    site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +
+                    site.container_name + "|kind=" + std::string(site_kind) + "|pc=0x" +
+                    consan_fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
+                    "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
 }
@@ -183,6 +159,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     }
     ConSanFaultSite site;
     site.kind = ConSanFaultSiteKind::LdsAccess;
+    site.container_id = access.container.id;
     site.code_object_fingerprint = fingerprint;
     site.container_name = access.container.name;
     site.in_kernel = access.container.is_kernel();
@@ -212,15 +189,18 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                                 ConSanProgramAnalysisResult &result) {
   const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
-  for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
-    if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_fault_sites_for_container(bytes, fingerprint, kernel, true, arch,
-                                       result.program_inventory.decoded_sites(),
-                                       result.fault_sites);
-  }
-  for (const ConSanProgramContainer &function : result.program_inventory.functions())
-    append_fault_sites_for_container(bytes, fingerprint, function, false, arch,
-                                     result.program_inventory.decoded_sites(), result.fault_sites);
+  append_decoded_fault_sites(bytes, fingerprint, arch, result.program_inventory.decoded_sites(),
+                             result.fault_sites);
+  std::ranges::stable_sort(
+      result.fault_sites, [&](const ConSanFaultSite &lhs, const ConSanFaultSite &rhs) {
+        const auto kind_order = [](ConSanFaultSiteKind kind) {
+          return kind == ConSanFaultSiteKind::Barrier  ? 0u
+                 : kind == ConSanFaultSiteKind::Atomic ? 1u
+                                                       : 2u;
+        };
+        return std::tuple{lhs.container_id, kind_order(lhs.kind), lhs.text_offset} <
+               std::tuple{rhs.container_id, kind_order(rhs.kind), rhs.text_offset};
+      });
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory.access_sites(),
                                  result.fault_sites);
 }
@@ -302,7 +282,7 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     events.push_back(std::move(event));
   };
 
-  std::map<std::tuple<ConSanProgramContainerKind, std::string_view, size_t>, uint32_t> occurrences;
+  std::map<std::pair<ConSanProgramContainerId, size_t>, uint32_t> occurrences;
   for (size_t decoded_index = 0; decoded_index < decoded_sites.size(); ++decoded_index) {
     const ConSanDecodedProgramSite &decoded = decoded_sites[decoded_index];
     if (decoded.container.kind == ConSanProgramContainerKind::Kernel &&
@@ -439,8 +419,7 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     } else {
       continue;
     }
-    auto &occurrence =
-        occurrences[{decoded.container.kind, decoded.container.name, occurrence_kind}];
+    auto &occurrence = occurrences[{decoded.container.id, occurrence_kind}];
     finish_event(event, event_kind, occurrence++, {static_cast<uint32_t>(decoded_index)});
   }
 }
@@ -452,15 +431,15 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   inventory.sync_events.clear();
   build_sync_events(code_object_id, arch, program_inventory.decoded_sites(), inventory.sync_events);
 
-  std::map<std::pair<bool, std::string_view>, size_t> container_order;
-  for (const ConSanProgramContainer &container : program_inventory.containers())
-    container_order.emplace(std::pair{container.is_kernel(), std::string_view{container.name}},
-                            container_order.size());
-  std::ranges::stable_sort(inventory.sync_events, [&](const ConSanSyncEvent &lhs,
-                                                      const ConSanSyncEvent &rhs) {
-    return std::pair{container_order.at({lhs.in_kernel, lhs.container_name}), lhs.text_offset()} <
-           std::pair{container_order.at({rhs.in_kernel, rhs.container_name}), rhs.text_offset()};
-  });
+  std::ranges::stable_sort(
+      inventory.sync_events, [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
+        const ConSanProgramContainerId lhs_container =
+            program_inventory.decoded_sites()[lhs.source_site.ordinal].container.id;
+        const ConSanProgramContainerId rhs_container =
+            program_inventory.decoded_sites()[rhs.source_site.ordinal].container.id;
+        return std::pair{lhs_container, lhs.text_offset()} <
+               std::pair{rhs_container, rhs.text_offset()};
+      });
 }
 
 [[nodiscard]] const ConSanDecodedProgramSite *

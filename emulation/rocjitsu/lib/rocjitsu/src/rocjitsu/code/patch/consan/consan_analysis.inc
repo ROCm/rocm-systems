@@ -1845,6 +1845,7 @@ void relay_flat_pointer_provenance_across_calls(
     }
     for (ConSanProgramContainer &function : functions) {
       ConSanProgramContainer decoded;
+      decoded.id = function.id;
       decoded.kind = ConSanProgramContainerKind::Function;
       decoded.name = function.name;
       decoded.entry_text_offset = function.entry_text_offset;

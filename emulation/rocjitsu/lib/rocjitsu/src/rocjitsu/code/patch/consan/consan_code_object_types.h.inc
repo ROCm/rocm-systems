@@ -317,6 +317,17 @@ enum class ConSanProgramContainerKind : uint8_t {
   Count,
 };
 
+/// Stable handle into one immutable `ProgramInventory`'s executable-container
+/// arena. Containers are finalized before their decoded sites are published.
+struct ConSanProgramContainerId {
+  static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
+  uint32_t ordinal = kInvalidOrdinal;
+
+  [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
+
+  auto operator<=>(const ConSanProgramContainerId &) const = default;
+};
+
 /// Attribution reference from a semantic site to the symbol range through
 /// which it was decoded.
 ///
@@ -324,6 +335,7 @@ enum class ConSanProgramContainerKind : uint8_t {
 /// a descriptor. Execution owners are kept separately: a shared function can
 /// be decoded through one symbol yet execute for several kernel descriptors.
 struct ConSanProgramContainerRef {
+  ConSanProgramContainerId id;
   /// Whether the symbol is a dispatchable kernel or a helper function.
   ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
   /// Symbol name retained for diagnostics and symbol-attributed inventory lookup.
@@ -419,6 +431,7 @@ struct ConSanProgramContainer {
   explicit ConSanProgramContainer(ConSanProgramContainerKind container_kind)
       : kind(container_kind) {}
 
+  ConSanProgramContainerId id;
   ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
   std::string name;
   /// Kernel-only descriptor identity. Zero for a function.
@@ -453,6 +466,7 @@ struct ConSanProgramContainer {
 [[nodiscard]] inline ConSanProgramContainerRef
 consan_program_container_ref(const ConSanProgramContainer &container) {
   return {
+      .id = container.id,
       .kind = container.kind,
       .name = container.name,
       .entry_text_offset = container.entry_text_offset,

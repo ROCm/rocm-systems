@@ -99,6 +99,7 @@ struct ConSanFaultSitePresentation {
 /// A currently injectable instruction with its application-private proof
 /// identity and target operand state.
 struct ConSanFaultSite : ConSanFaultSitePresentation {
+  ConSanProgramContainerId container_id;
   std::string code_object_fingerprint;
   std::optional<uint16_t> address_vgpr;
   /// Target-defined selectable-bank state at this instruction.

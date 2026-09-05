@@ -438,6 +438,10 @@ public:
     return storage_ ? std::span<const ConSanProgramContainer>(storage_->containers)
                     : std::span<const ConSanProgramContainer>{};
   }
+  [[nodiscard]] const ConSanProgramContainer *container(ConSanProgramContainerId id) const {
+    const std::span<const ConSanProgramContainer> records = containers();
+    return id.valid() && id.ordinal < records.size() ? &records[id.ordinal] : nullptr;
+  }
   [[nodiscard]] std::span<const ConSanProgramContainer> kernels() const {
     return containers().first(storage_ ? storage_->kernel_count : 0);
   }
@@ -561,14 +565,16 @@ public:
   }
   ConSanProgramContainer &add_kernel(ConSanProgramContainer container = {}) {
     container.kind = ConSanProgramContainerKind::Kernel;
-    const auto inserted = storage_->containers.insert(
-        storage_->containers.begin() + static_cast<std::ptrdiff_t>(storage_->kernel_count),
-        std::move(container));
+    if (storage_->kernel_count != storage_->containers.size())
+      throw std::logic_error("ConSan kernels must be staged before functions");
+    container.id = {static_cast<uint32_t>(storage_->containers.size())};
+    storage_->containers.push_back(std::move(container));
     ++storage_->kernel_count;
-    return *inserted;
+    return storage_->containers.back();
   }
   ConSanProgramContainer &add_function(ConSanProgramContainer container = {}) {
     container.kind = ConSanProgramContainerKind::Function;
+    container.id = {static_cast<uint32_t>(storage_->containers.size())};
     storage_->containers.push_back(std::move(container));
     return storage_->containers.back();
   }
@@ -615,10 +621,24 @@ public:
   /// Repeated publication is idempotent because a completed record has a valid
   /// code-object identity and no longer qualifies as pending decode output.
   void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
+    const auto bind_container = [&](ConSanProgramContainerRef &reference) {
+      if (reference.id.valid())
+        return;
+      const auto match = std::ranges::find_if(storage_->containers, [&](const auto &container) {
+        ConSanProgramContainerRef candidate = consan_program_container_ref(container);
+        candidate.id = {};
+        return candidate == reference;
+      });
+      if (match != storage_->containers.end())
+        reference = consan_program_container_ref(*match);
+    };
     for (ConSanAccessInventorySite &access : storage_->access_sites) {
+      bind_container(access.container);
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
     }
+    for (ConSanDecodedProgramSite &site : storage_->decoded_sites)
+      bind_container(site.container);
   }
 
   /// Transfer normalized accesses in a staged executable range to their

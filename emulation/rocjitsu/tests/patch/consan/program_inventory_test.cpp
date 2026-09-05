@@ -255,6 +255,8 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_EQ(moved.program_inventory.kernels().front().name, "inventory_kernel");
   EXPECT_EQ(moved.program_inventory.kernels().front().declared_group_segment_bytes, 4096u);
   EXPECT_EQ(moved.program_inventory.access_sites().front().container.name, "inventory_kernel");
+  EXPECT_EQ(moved.program_inventory.access_sites().front().container.id,
+            moved.program_inventory.kernels().front().id);
 }
 
 TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
@@ -263,15 +265,19 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(empty.find_kernel_by_name("kernel"), nullptr);
   EXPECT_EQ(empty.find_function_by_name("helper"), nullptr);
 
+  ProgramInventoryBuilder invalid_order;
+  invalid_order.add_function();
+  EXPECT_THROW(invalid_order.add_kernel(), std::logic_error);
+
   ProgramInventoryBuilder builder;
   ConSanProgramContainer first = make_inventory_kernel("kernel");
   builder.add_kernel(first);
-  ConSanProgramContainer helper{ConSanProgramContainerKind::Function};
-  helper.name = "helper";
-  builder.add_function(helper);
   ConSanProgramContainer duplicate = first;
   duplicate.descriptor_file_offset = 768;
   builder.add_kernel(duplicate);
+  ConSanProgramContainer helper{ConSanProgramContainerKind::Function};
+  helper.name = "helper";
+  builder.add_function(helper);
   builder.add_function(helper);
 
   const ProgramInventory inventory = builder.view();
@@ -282,6 +288,12 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.functions().data(), inventory.containers().data() + 2);
   EXPECT_TRUE(std::ranges::all_of(inventory.kernels(), &ConSanProgramContainer::is_kernel));
   EXPECT_TRUE(std::ranges::none_of(inventory.functions(), &ConSanProgramContainer::is_kernel));
+  for (size_t index = 0; index < inventory.containers().size(); ++index) {
+    const ConSanProgramContainer &container = inventory.containers()[index];
+    EXPECT_EQ(container.id.ordinal, index);
+    EXPECT_EQ(inventory.container(container.id), &container);
+  }
+  EXPECT_EQ(inventory.container({}), nullptr);
   EXPECT_EQ(inventory.find_kernel_by_descriptor(512), &inventory.kernels()[0]);
   EXPECT_EQ(inventory.find_kernel_by_descriptor(768), &inventory.kernels()[1]);
   EXPECT_EQ(inventory.find_kernel_by_descriptor(1024), nullptr);
