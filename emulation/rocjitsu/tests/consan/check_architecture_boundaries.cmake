@@ -419,6 +419,14 @@ if(_program_site_contracts MATCHES "find_unique_event")
         "ConSan consumers must resolve synchronization events through typed identities, not physical reverse joins"
     )
 endif()
+if(NOT _program_site_contracts MATCHES
+       "void[ 	]+invalidate_site_derivatives[(][)]" OR
+   NOT _program_site_contracts MATCHES
+       "void[ 	]+add_access_site[(][^)]*[)][ 	\r\n]*[{][ 	\r\n]*invalidate_site_derivatives[(][)]")
+    message(FATAL_ERROR
+        "ConSan program-site structural mutation must invalidate revision-local synchronization products"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_program_inventory.h.inc"
     "bind_container|reference[.](name|kind)"

@@ -590,10 +590,11 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   ConSanProgramSite added_access = make_inventory_lds_site("ds_load_b32", 24);
   added_access.container = revision.functions().back().id;
   revision.add_access_site(std::move(added_access));
+  EXPECT_TRUE(revision.view().sync().empty());
   SynchronizationInventoryBuildView revised = revision.synchronization();
-  revised.sync_events.front().identity = "revision-event";
-  revised.sync_sequences.clear();
-  revised.barrier_lifecycle_groups.clear();
+  event.identity = "revision-event";
+  revised.sync_events.push_back(event);
+  revised.moi_fence_candidates.push_back(fence);
   revised.moi_fence_candidates.front().association = ConSanFenceAssociation::Qualified;
   revision.publish_decoded_accesses(bytes);
   revision.publish_decoded_accesses(bytes);

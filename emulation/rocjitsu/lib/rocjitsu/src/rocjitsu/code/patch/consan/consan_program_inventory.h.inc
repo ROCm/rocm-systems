@@ -102,7 +102,7 @@ struct ConSanProgramSite {
   using Payload = std::variant<ConSanAccessSite, ConSanOrdinaryMemorySite, ConSanBarrierSite,
                                ConSanFenceSite, ConSanAtomicSite>;
 
-  /// Stable identity assigned by the owning program-site arena.
+  /// Stable identity within one immutable published inventory revision.
   ConSanProgramSiteId id;
   PhysicalSiteId physical_id;
   ConSanProgramContainerId container;
@@ -1004,13 +1004,19 @@ public:
     return storage_->program_sites.sites();
   }
   void add_access_site(ConSanProgramSite site) {
+    invalidate_site_derivatives();
     storage_->program_sites.add_access(std::move(site));
   }
   void add_semantic_site(ConSanProgramSite site) {
+    invalidate_site_derivatives();
     storage_->program_sites.add_semantic(std::move(site));
   }
-  void add_sites(ConSanProgramSiteArena sites) { storage_->program_sites.append(std::move(sites)); }
+  void add_sites(ConSanProgramSiteArena sites) {
+    invalidate_site_derivatives();
+    storage_->program_sites.append(std::move(sites));
+  }
   template <typename Predicate> void erase_sites_if(Predicate predicate) {
+    invalidate_site_derivatives();
     storage_->program_sites.erase_if(predicate);
   }
   /// Transfer semantic facets in an installed code range to their final
@@ -1019,6 +1025,7 @@ public:
   /// retain every independently normalized access record.
   void reattribute_semantic_range(uint64_t begin, uint32_t size,
                                   const ConSanProgramContainer &owner) {
+    invalidate_site_derivatives();
     storage_->program_sites.reattribute_semantic_range(begin, size, owner.id);
   }
   /// Return the analysis-only capability for synchronization-derived facts.
@@ -1077,6 +1084,7 @@ public:
   void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanProgramContainer &owner,
                                 std::span<const ConSanProgramSite> decoded_accesses,
                                 std::span<const uint8_t> code_object_bytes) {
+    invalidate_site_derivatives();
     const uint64_t end = begin + size;
     const ConSanProgramContainerId reference = owner.id;
     for (ConSanProgramSite &access : access_sites()) {
@@ -1097,6 +1105,17 @@ public:
   }
 
 private:
+  /// Structural site mutation starts a new arena revision. Ordinal handles
+  /// remain stable only while that revision is immutable, so no graph product
+  /// derived from the preceding ordering may survive the transition.
+  void invalidate_site_derivatives() {
+    storage_->sync_events.clear();
+    storage_->sync_sequences.clear();
+    storage_->sequence_membership_by_event.clear();
+    storage_->barrier_lifecycle_groups.clear();
+    storage_->moi_fence_candidates.clear();
+  }
+
   [[nodiscard]] static std::optional<uint32_t>
   read_little_endian_u32(std::span<const uint8_t> bytes, uint64_t offset) {
     if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
