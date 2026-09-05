@@ -101,9 +101,7 @@ bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
       sequence,
       [&](SemanticSiteId identity) { return find_sequence_member_event(events, identity); },
       [&](const ConSanSyncEvent &event) -> const ConSanProgramSite * {
-        return event.source_site.valid() && event.source_site.ordinal < events.program_sites.size()
-                   ? &events.program_sites[event.source_site.ordinal]
-                   : nullptr;
+        return consan_program_site(events.program_sites, event);
       });
 }
 

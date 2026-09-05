@@ -457,18 +457,11 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
       });
 }
 
-[[nodiscard]] const ConSanProgramSite *source_site(std::span<const ConSanProgramSite> sites,
-                                                   const ConSanSyncEvent &event) {
-  return event.source_site.valid() && event.source_site.ordinal < sites.size()
-             ? &sites[event.source_site.ordinal]
-             : nullptr;
-}
-
 [[nodiscard]] bool sync_event_semantics_equal(std::span<const ConSanProgramSite> sites,
                                               const ConSanSyncEvent &lhs,
                                               const ConSanSyncEvent &rhs) {
-  const ConSanProgramSite *lhs_source = source_site(sites, lhs);
-  const ConSanProgramSite *rhs_source = source_site(sites, rhs);
+  const ConSanProgramSite *lhs_source = consan_program_site(sites, lhs);
+  const ConSanProgramSite *rhs_source = consan_program_site(sites, rhs);
   if (lhs_source == nullptr || rhs_source == nullptr ||
       lhs_source->container.kind != rhs_source->container.kind ||
       !lhs_source->same_payload(*rhs_source))
@@ -481,7 +474,7 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
                                           ConSanProgramAnalysisResult &result) {
   const std::span<const ConSanProgramSite> program_sites = inventory.program_sites;
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
-    const ConSanProgramSite *source = source_site(program_sites, event);
+    const ConSanProgramSite *source = consan_program_site(program_sites, event);
     const ConSanProgramContainer *container =
         source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
     return container == nullptr ? std::nullopt
@@ -491,11 +484,11 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
   return consan_detail::canonicalize_physical_site_aliases(
       inventory.sync_events, result.errors, "ConSan synchronization site",
       [&](const ConSanSyncEvent &event) {
-        const ConSanProgramSite *source = source_site(program_sites, event);
+        const ConSanProgramSite *source = consan_program_site(program_sites, event);
         return source == nullptr ? uint64_t{0} : source->decoded_file_offset();
       },
       [&](const ConSanSyncEvent &event) -> std::string_view {
-        const ConSanProgramSite *source = source_site(program_sites, event);
+        const ConSanProgramSite *source = consan_program_site(program_sites, event);
         return source == nullptr ? std::string_view{} : std::string_view(source->container.name);
       },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
@@ -1000,7 +993,8 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     // supplies the leave association for this lifecycle.
     const ConSanSyncEvent *leave_event = first_sequence_event(events, leave);
     const ConSanProgramSite *leave_decoded =
-        leave_event == nullptr ? nullptr : source_site(inventory.program_sites, *leave_event);
+        leave_event == nullptr ? nullptr
+                               : consan_program_site(inventory.program_sites, *leave_event);
     const ConSanBarrierSite *leave_source =
         leave_decoded == nullptr ? nullptr : leave_decoded->get_if<ConSanBarrierSite>();
     if (leave_source == nullptr || leave_source->size != sizeof(uint32_t) ||
@@ -1310,9 +1304,9 @@ is_exact_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSeq
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
   const ConSanProgramSite *first_decoded =
-      first_event == nullptr ? nullptr : source_site(events.program_sites, *first_event);
+      first_event == nullptr ? nullptr : consan_program_site(events.program_sites, *first_event);
   const ConSanProgramSite *second_decoded =
-      second_event == nullptr ? nullptr : source_site(events.program_sites, *second_event);
+      second_event == nullptr ? nullptr : consan_program_site(events.program_sites, *second_event);
   const ConSanFenceSite *first_source =
       first_decoded == nullptr ? nullptr : first_decoded->get_if<ConSanFenceSite>();
   const ConSanFenceSite *second_source =
@@ -1654,7 +1648,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
   std::vector<ConSanMoiFenceCandidate> &candidates = inventory.moi_fence_candidates;
   candidates.clear();
   const auto fence_source = [&](const ConSanSyncEvent &event) -> const ConSanFenceSite * {
-    const ConSanProgramSite *source = source_site(inventory.program_sites, event);
+    const ConSanProgramSite *source = consan_program_site(inventory.program_sites, event);
     return source == nullptr ? nullptr : source->get_if<ConSanFenceSite>();
   };
 
@@ -1983,7 +1977,7 @@ void associate_ordinary_release_sync_sequences(
     }
     const ConSanSyncEvent *store = first_sequence_event(events, sequence);
     const ConSanProgramSite *store_decoded =
-        store == nullptr ? nullptr : source_site(inventory.program_sites, *store);
+        store == nullptr ? nullptr : consan_program_site(inventory.program_sites, *store);
     const ConSanOrdinaryMemorySite *store_source =
         store_decoded == nullptr ? nullptr : store_decoded->get_if<ConSanOrdinaryMemorySite>();
     if (store_source == nullptr || store_source->width_bits != 32u || !store->scope ||

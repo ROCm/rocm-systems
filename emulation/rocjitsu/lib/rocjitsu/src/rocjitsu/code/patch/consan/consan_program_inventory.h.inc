@@ -268,6 +268,30 @@ private:
   size_t access_site_count_ = 0;
 };
 
+/// Resolve one stable site handle in any immutable arena view.
+[[nodiscard]] inline const ConSanProgramSite *
+consan_program_site(std::span<const ConSanProgramSite> sites, ConSanProgramSiteId id) {
+  return id.valid() && id.ordinal < sites.size() ? &sites[id.ordinal] : nullptr;
+}
+
+template <typename Site>
+[[nodiscard]] inline const Site *consan_program_site(std::span<const ConSanProgramSite> sites,
+                                                     ConSanProgramSiteId id) {
+  const ConSanProgramSite *site = consan_program_site(sites, id);
+  return site == nullptr ? nullptr : site->get_if<Site>();
+}
+
+[[nodiscard]] inline const ConSanProgramSite *
+consan_program_site(std::span<const ConSanProgramSite> sites, const ConSanSyncEvent &event) {
+  return consan_program_site(sites, event.source_site);
+}
+
+template <typename Site>
+[[nodiscard]] inline const Site *consan_program_site(std::span<const ConSanProgramSite> sites,
+                                                     const ConSanSyncEvent &event) {
+  return consan_program_site<Site>(sites, event.source_site);
+}
+
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
 ///
@@ -285,9 +309,7 @@ struct SynchronizationInventoryView {
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
 
   [[nodiscard]] const ConSanProgramSite *source(const ConSanSyncEvent &event) const {
-    return event.source_site.valid() && event.source_site.ordinal < program_sites.size()
-               ? &program_sites[event.source_site.ordinal]
-               : nullptr;
+    return consan_program_site(program_sites, event);
   }
 
   template <typename Site> [[nodiscard]] const Site *source_as(const ConSanSyncEvent &event) const {
@@ -625,8 +647,7 @@ public:
 
   /// Resolve one exact source-site handle in this inventory revision.
   [[nodiscard]] const ConSanProgramSite *program_site(ConSanProgramSiteId id) const {
-    const std::span<const ConSanProgramSite> sites = program_sites();
-    return id.valid() && id.ordinal < sites.size() ? &sites[id.ordinal] : nullptr;
+    return consan_program_site(program_sites(), id);
   }
 
   /// Resolve one exact source-site handle and require its typed payload.
