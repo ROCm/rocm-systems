@@ -159,8 +159,7 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
         const auto event =
             std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
-              const ConSanProgramSite *source =
-                  pristine_inventory.program_site(item.source_site);
+              const ConSanProgramSite *source = pristine_inventory.program_site(item.source_site);
               return item.container_name == candidate->container_name &&
                      item.in_kernel == candidate->in_kernel &&
                      item.text_offset() == patch.anchor_offset && source != nullptr &&
@@ -223,10 +222,6 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
   return result;
 }
 
-} // namespace
-
-namespace {
-
 /// Remove every destructive fault kind while retaining independently planned
 /// perturbation policy. A composed instrumentation pass uses this boundary to
 /// ensure it cannot accidentally reapply the already committed fault.
@@ -244,18 +239,273 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
   request.fault_ordinary_weaken_scope = false;
 }
 
-} // namespace
+[[nodiscard]] ConSanTransformArtifacts
+lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                   const ConSanMoiOperatingPoint &initial_operating_point,
+                   std::span<const CarriedPerturbationPlan> carried_plans,
+                   ConSanPerturbationPlanningState *inspected_perturbation,
+                   const ConSanPreappliedMutationLayout &preapplied_mutation, bool apply_fault_plan,
+                   bool require_exactly_one_applied_fault, ConSanLoweringExtent extent,
+                   const ConSanLoweringObservation *observation);
 
 [[nodiscard]] ConSanTransformArtifacts
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       const ConSanMoiOperatingPoint &initial_operating_point,
-                      std::span<const CarriedPerturbationPlan> carried_plans = {},
-                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-                      const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-                      bool require_applicable_fault_plan = false,
-                      bool require_exactly_one_applied_fault = false,
-                      ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
-                      const ConSanLoweringObservation *observation = nullptr) {
+                      ConSanPerturbationPlanningState *inspected_perturbation,
+                      const ConSanPreappliedMutationLayout &preapplied_mutation,
+                      ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
+  const bool has_fault = options.has_fault_mutation();
+  const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
+  const bool has_atomic_fault = options.fault_atomic_wrong_address ||
+                                options.fault_atomic_weaken_order ||
+                                options.fault_atomic_weaken_scope;
+  const bool has_ordinary_fault = options.fault_ordinary_wrong_address ||
+                                  options.fault_ordinary_weaken_order ||
+                                  options.fault_ordinary_weaken_scope;
+  const auto unsupported_composition = [&](std::string warning) {
+    ConSanTransformArtifacts result;
+    result.mutation.fault.requested = options.fault_mutation_count();
+    ProgramInventoryBuilder inventory_builder(code_object_bytes, preapplied_mutation);
+    result.program_inventory = inventory_builder.view();
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.push_back(std::move(warning));
+    return result;
+  };
+  if (has_ordinary_fault && has_perturbation)
+    return unsupported_composition(
+        "ConSan ordinary fault/perturbation composition is not yet qualified");
+  if (has_atomic_fault && has_perturbation &&
+      (options.sc_perturb_kind != ConSanPerturbationKind::Atomic || options.fault_drop_barrier ||
+       options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
+       options.fault_mutate_barrier_participants)) {
+    return unsupported_composition(
+        "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
+  }
+  if (!has_fault || options.fault_dry_run) {
+    return lower_consan_stage(code_object_bytes, options, initial_operating_point, {},
+                              inspected_perturbation, preapplied_mutation, false, false, extent,
+                              observation);
+  }
+
+  const major_image_ownership::ScopedPhase incremental_phase(
+      major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
+  ConSanPerturbationPlanningState local_perturbation;
+  ConSanPerturbationPlanningState &perturbation =
+      inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
+  ConSanOptions planning_options = options;
+  planning_options.fault_dry_run = true;
+  if (!has_perturbation)
+    planning_options.fault_require_exactly_one = false;
+  ConSanPerturbationPlanningState pristine_perturbation;
+  ConSanTransformArtifacts pristine_mutation_plan = lower_consan_stage(
+      code_object_bytes, planning_options, initial_operating_point, {}, &pristine_perturbation, {},
+      true, options.fault_require_exactly_one, ConSanLoweringExtent::Complete, nullptr);
+  const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
+  const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
+      pristine_mutation_plan.fault_plans;
+  if (has_perturbation &&
+      (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
+       pristine_perturbation.plans.empty())) {
+    pristine_mutation_plan.outcome = ConSanTransformOutcome::Unsupported;
+    pristine_mutation_plan.warnings.emplace_back(
+        has_perturbation
+            ? "ConSan composite planning did not select exact fault and perturbation plans"
+            : "ConSan mutation planning did not select an exact fault plan");
+    return pristine_mutation_plan;
+  }
+  // The pristine mutation stage both resolved and applied the fault.
+  // Its replacement must be instrumented so probes model the instruction
+  // that the GPU will actually execute.
+  ConSanTransformArtifacts fault_result =
+      has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
+  fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
+                                        options.moi_report_dispatch_id);
+  if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
+    return fault_result;
+  ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
+  const major_image_ownership::ScopedOwner mutation_image_owner(
+      major_image_ownership::OwnerKind::CompositeImage, mutation_stage.image);
+  const major_image_ownership::ScopedPhase composite_phase(
+      major_image_ownership::Phase::CompositeIncrementalPatch);
+
+  ConSanOptions instrument_options = options;
+  ConSanPreappliedMutationLayout instrument_preapplied;
+  clear_fault_mutation_kinds(instrument_options);
+  // Cardinality was enforced on the mutation stage. The subsequent
+  // instrumentation-only pass has no mutation of its own to count.
+  instrument_options.fault_require_exactly_one = false;
+  instrument_options.abort_unmatched_barrier_wait = false;
+  for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
+    if (patch.original_size != 0) {
+      instrument_preapplied.reserved_ranges.push_back(
+          {.text_offset = patch.anchor_offset, .size = patch.original_size});
+    }
+    if (patch.trampoline_size != 0) {
+      instrument_preapplied.reserved_ranges.push_back(
+          {.text_offset = patch.trampoline_offset, .size = patch.trampoline_size});
+    }
+    if (patch.kind != ConSanPatchKind::InlineBarrierMoveTargetRewrite || patch.trampoline_size == 0)
+      continue;
+    const auto owner =
+        std::ranges::find_if(fault_result.program_inventory.kernels(), [&](const auto &kernel) {
+          return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
+                 patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
+        });
+    if (owner == fault_result.program_inventory.kernels().end()) {
+      fault_result.errors.emplace_back(
+          "ConSan markerless barrier move could not retain fault-cave kernel ownership");
+      return fault_result;
+    }
+    instrument_preapplied.code_ranges.push_back(
+        {.text_offset = patch.trampoline_offset,
+         .size = patch.trampoline_size,
+         .kernel_name = owner->name,
+         .continuation_text_offset = patch.anchor_offset + patch.original_size});
+  }
+  std::vector<CarriedPerturbationPlan> staged_carried;
+  if (has_perturbation) {
+    std::string carry_error;
+    auto carried = carry_perturbation_plans_across_mutation(
+        pristine_mutation_plan.program_inventory, pristine_perturbation, mutation_stage,
+        &carry_error);
+    if (!carried)
+      return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
+    instrument_options.sc_perturb_identity.clear();
+    instrument_options.sc_perturb_index = 0;
+    staged_carried = std::move(*carried);
+  }
+  const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
+  ConSanTransformArtifacts instrument_result = finalize_consan_result(
+      lower_consan_stage(mutation_stage.image, instrument_options, initial_operating_point,
+                         instrument_carried, &perturbation, instrument_preapplied, false, false,
+                         ConSanLoweringExtent::Complete, nullptr),
+      mutation_stage.image, instrument_options.moi_report_dispatch_id,
+      /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
+  const major_image_ownership::ScopedOwner instrument_result_owner(
+      major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
+  // Resource ownership is a logical kernel identity, but instrumentation of
+  // a staged mutation records descriptor offsets in the mutation image.
+  // Normalize those offsets before merging stages: an intermediate offset
+  // can otherwise collide with a different pristine kernel descriptor.
+  ConSanDescriptorNameIndex pristine_descriptor_offsets;
+  const major_image_ownership::ScopedOwner pristine_index_owner(
+      major_image_ownership::OwnerKind::CompactIndex, &pristine_descriptor_offsets,
+      measure_descriptor_name_index);
+  {
+    AmdGpuCodeObject pristine_code_object(code_object_bytes.data(), code_object_bytes.size());
+    pristine_descriptor_offsets.reserve(pristine_code_object.kernels().size());
+    for (const AmdGpuKernelInfo &kernel : pristine_code_object.kernels())
+      pristine_descriptor_offsets.emplace(kernel.name, kernel.descriptor_file_offset);
+    pristine_index_owner.checkpoint();
+  }
+  ConSanDescriptorOwnerIndex pristine_owner_offsets;
+  const major_image_ownership::ScopedOwner owner_index_owner(
+      major_image_ownership::OwnerKind::CompactIndex, &pristine_owner_offsets,
+      measure_descriptor_owner_index);
+  {
+    AmdGpuCodeObject staged_code_object(mutation_stage.image.data(), mutation_stage.image.size());
+    for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
+      const auto pristine = pristine_descriptor_offsets.find(staged_kernel.name);
+      if (pristine != pristine_descriptor_offsets.end()) {
+        pristine_owner_offsets.emplace(staged_kernel.descriptor_file_offset, pristine->second);
+      }
+    }
+    owner_index_owner.checkpoint();
+  }
+  const auto normalize_owner_offsets = [&](std::vector<uint64_t> &offsets) {
+    for (uint64_t &offset : offsets) {
+      const auto pristine = pristine_owner_offsets.find(offset);
+      if (pristine != pristine_owner_offsets.end())
+        offset = pristine->second;
+    }
+  };
+  for (ConSanCandidateResourcePlan &plan : instrument_result.resource_plans)
+    normalize_owner_offsets(plan.owner_descriptor_file_offsets);
+  for (ConSanPatchAbiEffects &patch : instrument_result.patches)
+    normalize_owner_offsets(patch.owner_descriptor_file_offsets);
+  prepend_stage_diagnostics(instrument_result, mutation_stage);
+  switch (instrument_result.outcome) {
+  case ConSanTransformOutcome::ModifiedValid:
+    if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid) {
+      instrument_result.errors.emplace_back(
+          "ConSan staged composition is missing an independently validated stage");
+      instrument_result.outcome = ConSanTransformOutcome::Invalid;
+      instrument_result.discard_candidate_modification();
+      instrument_result.mutation.fault.applied = 0;
+      instrument_result.mutation.applied_fault_logical_identity.reset();
+      return instrument_result;
+    }
+    // Retain the exact applied mutation plan. The instrumentation pass
+    // inventories the mutated image, so without this provenance a live
+    // staged result loses which dry-run plan authorized the mutation.
+    if (!retained_fault_plans.empty()) {
+      instrument_result.mutation.fault.planned = retained_planned_faults;
+      instrument_result.fault_plans = retained_fault_plans;
+    }
+    if (has_perturbation) {
+      instrument_result.mutation.perturbation.requested =
+          pristine_mutation_plan.mutation.perturbation.requested;
+      instrument_result.mutation.perturbation.planned =
+          pristine_mutation_plan.mutation.perturbation.planned;
+    }
+    instrument_result.patches.insert(instrument_result.patches.begin(),
+                                     std::make_move_iterator(mutation_stage.patches.begin()),
+                                     std::make_move_iterator(mutation_stage.patches.end()));
+    return instrument_result;
+  case ConSanTransformOutcome::Unchanged:
+    // A no-target instrumentation stage must not discard an otherwise valid
+    // mutation. Its inventory describes the staged image being committed.
+    if (!retained_fault_plans.empty()) {
+      instrument_result.mutation.fault.planned = retained_planned_faults;
+      instrument_result.fault_plans = retained_fault_plans;
+    }
+    instrument_result.replacement = std::move(mutation_stage.image);
+    instrument_result.patches = std::move(mutation_stage.patches);
+    instrument_result.mark_modified();
+    return instrument_result;
+  case ConSanTransformOutcome::Unsupported:
+    if (instrument_options.flavor == ConSanFlavor::SuperCollider && !instrument_options.probe_nop &&
+        !instrument_options.probe_trampoline_nop && !instrument_options.probe_endpgm &&
+        !instrument_options.probe_lds_endpgm && !instrument_options.probe_lds_check_trap &&
+        !instrument_options.probe_flat_check_trap && !instrument_options.probe_flat_trap &&
+        instrument_options.sc_perturb_kind == ConSanPerturbationKind::None) {
+      // The second pass may classify the intentionally weakened image as a
+      // preflight skip. With no instrumentation request, that is not a
+      // reason to discard an independently validated mutation stage.
+      instrument_result.outcome = ConSanTransformOutcome::Unchanged;
+      if (!retained_fault_plans.empty()) {
+        instrument_result.mutation.fault.planned = retained_planned_faults;
+        instrument_result.fault_plans = retained_fault_plans;
+      }
+      instrument_result.replacement = std::move(mutation_stage.image);
+      instrument_result.patches = std::move(mutation_stage.patches);
+      instrument_result.mark_modified();
+      return instrument_result;
+    }
+    instrument_result.warnings.emplace_back(
+        "ConSan rolled back staged fault mutation because instrumentation is unsupported");
+    instrument_result.mutation.fault.applied = 0;
+    instrument_result.mutation.applied_fault_logical_identity.reset();
+    break;
+  case ConSanTransformOutcome::Invalid:
+    instrument_result.warnings.emplace_back(
+        "ConSan rolled back staged fault mutation because instrumentation is invalid");
+    instrument_result.mutation.fault.applied = 0;
+    instrument_result.mutation.applied_fault_logical_identity.reset();
+    break;
+  }
+  instrument_result.discard_candidate_modification();
+  return instrument_result;
+}
+
+[[nodiscard]] ConSanTransformArtifacts
+lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                   const ConSanMoiOperatingPoint &initial_operating_point,
+                   std::span<const CarriedPerturbationPlan> carried_plans,
+                   ConSanPerturbationPlanningState *inspected_perturbation,
+                   const ConSanPreappliedMutationLayout &preapplied_mutation, bool apply_fault_plan,
+                   bool require_exactly_one_applied_fault, ConSanLoweringExtent extent,
+                   const ConSanLoweringObservation *observation) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -266,238 +516,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   result.mutation.fault.requested = options.fault_mutation_count();
   ProgramInventoryBuilder inventory_builder(code_object_bytes, preapplied_mutation);
   result.program_inventory = inventory_builder.view();
-  const bool has_fault = options.has_fault_mutation();
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
-  const bool has_atomic_fault = options.fault_atomic_wrong_address ||
-                                options.fault_atomic_weaken_order ||
-                                options.fault_atomic_weaken_scope;
-  const bool has_ordinary_fault = options.fault_ordinary_wrong_address ||
-                                  options.fault_ordinary_weaken_order ||
-                                  options.fault_ordinary_weaken_scope;
-  if (has_ordinary_fault && has_perturbation) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.emplace_back(
-        "ConSan ordinary fault/perturbation composition is not yet qualified");
-    return result;
-  }
-  if (has_atomic_fault && has_perturbation &&
-      (options.sc_perturb_kind != ConSanPerturbationKind::Atomic || options.fault_drop_barrier ||
-       options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
-       options.fault_mutate_barrier_participants)) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.emplace_back(
-        "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
-    return result;
-  }
-  if (has_fault && !options.fault_dry_run) {
-    ConSanOptions planning_options = options;
-    planning_options.fault_dry_run = true;
-    if (!has_perturbation)
-      planning_options.fault_require_exactly_one = false;
-    ConSanPerturbationPlanningState pristine_perturbation;
-    ConSanTransformArtifacts pristine_mutation_plan =
-        try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
-                              &pristine_perturbation, {}, true, options.fault_require_exactly_one);
-    const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
-    const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
-        pristine_mutation_plan.fault_plans;
-    if (has_perturbation &&
-        (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
-         pristine_perturbation.plans.empty())) {
-      pristine_mutation_plan.outcome = ConSanTransformOutcome::Unsupported;
-      pristine_mutation_plan.warnings.emplace_back(
-          has_perturbation
-              ? "ConSan composite planning did not select exact fault and perturbation plans"
-              : "ConSan mutation planning did not select an exact fault plan");
-      return pristine_mutation_plan;
-    }
-    // The recursive pristine transaction both resolved and applied the fault.
-    // Its replacement must be instrumented so probes model the instruction
-    // that the GPU will actually execute.
-    ConSanTransformArtifacts fault_result =
-        has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
-    fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
-                                          options.moi_report_dispatch_id);
-    if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
-      return fault_result;
-    ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
-    const major_image_ownership::ScopedOwner mutation_image_owner(
-        major_image_ownership::OwnerKind::CompositeImage, mutation_stage.image);
-    const major_image_ownership::ScopedPhase composite_phase(
-        major_image_ownership::Phase::CompositeIncrementalPatch);
-
-    ConSanOptions instrument_options = options;
-    ConSanPreappliedMutationLayout instrument_preapplied;
-    clear_fault_mutation_kinds(instrument_options);
-    // Cardinality was enforced on the mutation stage. The subsequent
-    // instrumentation-only pass has no mutation of its own to count.
-    instrument_options.fault_require_exactly_one = false;
-    instrument_options.abort_unmatched_barrier_wait = false;
-    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
-      if (patch.original_size != 0) {
-        instrument_preapplied.reserved_ranges.push_back(
-            {.text_offset = patch.anchor_offset, .size = patch.original_size});
-      }
-      if (patch.trampoline_size != 0) {
-        instrument_preapplied.reserved_ranges.push_back(
-            {.text_offset = patch.trampoline_offset, .size = patch.trampoline_size});
-      }
-      if (patch.kind != ConSanPatchKind::InlineBarrierMoveTargetRewrite ||
-          patch.trampoline_size == 0)
-        continue;
-      const auto owner =
-          std::ranges::find_if(fault_result.program_inventory.kernels(), [&](const auto &kernel) {
-            return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
-                   patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
-          });
-      if (owner == fault_result.program_inventory.kernels().end()) {
-        fault_result.errors.emplace_back(
-            "ConSan markerless barrier move could not retain fault-cave kernel ownership");
-        return fault_result;
-      }
-      instrument_preapplied.code_ranges.push_back(
-          {.text_offset = patch.trampoline_offset,
-           .size = patch.trampoline_size,
-           .kernel_name = owner->name,
-           .continuation_text_offset = patch.anchor_offset + patch.original_size});
-    }
-    std::vector<CarriedPerturbationPlan> staged_carried;
-    if (has_perturbation) {
-      std::string carry_error;
-      auto carried = carry_perturbation_plans_across_mutation(
-          pristine_mutation_plan.program_inventory, pristine_perturbation, mutation_stage,
-          &carry_error);
-      if (!carried)
-        return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
-      instrument_options.sc_perturb_identity.clear();
-      instrument_options.sc_perturb_index = 0;
-      staged_carried = std::move(*carried);
-    }
-    const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
-    ConSanTransformArtifacts instrument_result = finalize_consan_result(
-        try_patch_consan_impl(mutation_stage.image, instrument_options, initial_operating_point,
-                              instrument_carried, &perturbation, instrument_preapplied, false,
-                              false),
-        mutation_stage.image, instrument_options.moi_report_dispatch_id,
-        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
-    const major_image_ownership::ScopedOwner instrument_result_owner(
-        major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
-    // Resource ownership is a logical kernel identity, but instrumentation of
-    // a staged mutation records descriptor offsets in the mutation image.
-    // Normalize those offsets before merging stages: an intermediate offset
-    // can otherwise collide with a different pristine kernel descriptor.
-    ConSanDescriptorNameIndex pristine_descriptor_offsets;
-    const major_image_ownership::ScopedOwner pristine_index_owner(
-        major_image_ownership::OwnerKind::CompactIndex, &pristine_descriptor_offsets,
-        measure_descriptor_name_index);
-    {
-      AmdGpuCodeObject pristine_code_object(code_object_bytes.data(), code_object_bytes.size());
-      pristine_descriptor_offsets.reserve(pristine_code_object.kernels().size());
-      for (const AmdGpuKernelInfo &kernel : pristine_code_object.kernels())
-        pristine_descriptor_offsets.emplace(kernel.name, kernel.descriptor_file_offset);
-      pristine_index_owner.checkpoint();
-    }
-    ConSanDescriptorOwnerIndex pristine_owner_offsets;
-    const major_image_ownership::ScopedOwner owner_index_owner(
-        major_image_ownership::OwnerKind::CompactIndex, &pristine_owner_offsets,
-        measure_descriptor_owner_index);
-    {
-      AmdGpuCodeObject staged_code_object(mutation_stage.image.data(), mutation_stage.image.size());
-      for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
-        const auto pristine = pristine_descriptor_offsets.find(staged_kernel.name);
-        if (pristine != pristine_descriptor_offsets.end()) {
-          pristine_owner_offsets.emplace(staged_kernel.descriptor_file_offset, pristine->second);
-        }
-      }
-      owner_index_owner.checkpoint();
-    }
-    const auto normalize_owner_offsets = [&](std::vector<uint64_t> &offsets) {
-      for (uint64_t &offset : offsets) {
-        const auto pristine = pristine_owner_offsets.find(offset);
-        if (pristine != pristine_owner_offsets.end())
-          offset = pristine->second;
-      }
-    };
-    for (ConSanCandidateResourcePlan &plan : instrument_result.resource_plans)
-      normalize_owner_offsets(plan.owner_descriptor_file_offsets);
-    for (ConSanPatchAbiEffects &patch : instrument_result.patches)
-      normalize_owner_offsets(patch.owner_descriptor_file_offsets);
-    prepend_stage_diagnostics(instrument_result, mutation_stage);
-    switch (instrument_result.outcome) {
-    case ConSanTransformOutcome::ModifiedValid:
-      if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid) {
-        instrument_result.errors.emplace_back(
-            "ConSan staged composition is missing an independently validated stage");
-        instrument_result.outcome = ConSanTransformOutcome::Invalid;
-        instrument_result.discard_candidate_modification();
-        instrument_result.mutation.fault.applied = 0;
-        instrument_result.mutation.applied_fault_logical_identity.reset();
-        return instrument_result;
-      }
-      // Retain the exact applied mutation plan. The instrumentation pass
-      // inventories the mutated image, so without this provenance a live
-      // staged result loses which dry-run plan authorized the mutation.
-      if (!retained_fault_plans.empty()) {
-        instrument_result.mutation.fault.planned = retained_planned_faults;
-        instrument_result.fault_plans = retained_fault_plans;
-      }
-      if (has_perturbation) {
-        instrument_result.mutation.perturbation.requested =
-            pristine_mutation_plan.mutation.perturbation.requested;
-        instrument_result.mutation.perturbation.planned =
-            pristine_mutation_plan.mutation.perturbation.planned;
-      }
-      instrument_result.patches.insert(instrument_result.patches.begin(),
-                                       std::make_move_iterator(mutation_stage.patches.begin()),
-                                       std::make_move_iterator(mutation_stage.patches.end()));
-      return instrument_result;
-    case ConSanTransformOutcome::Unchanged:
-      // A no-target instrumentation stage must not discard an otherwise valid
-      // mutation. Its inventory describes the staged image being committed.
-      if (!retained_fault_plans.empty()) {
-        instrument_result.mutation.fault.planned = retained_planned_faults;
-        instrument_result.fault_plans = retained_fault_plans;
-      }
-      instrument_result.replacement = std::move(mutation_stage.image);
-      instrument_result.patches = std::move(mutation_stage.patches);
-      instrument_result.mark_modified();
-      return instrument_result;
-    case ConSanTransformOutcome::Unsupported:
-      if (instrument_options.flavor == ConSanFlavor::SuperCollider &&
-          !instrument_options.probe_nop && !instrument_options.probe_trampoline_nop &&
-          !instrument_options.probe_endpgm && !instrument_options.probe_lds_endpgm &&
-          !instrument_options.probe_lds_check_trap && !instrument_options.probe_flat_check_trap &&
-          !instrument_options.probe_flat_trap &&
-          instrument_options.sc_perturb_kind == ConSanPerturbationKind::None) {
-        // The second pass may classify the intentionally weakened image as a
-        // preflight skip. With no instrumentation request, that is not a
-        // reason to discard an independently validated mutation stage.
-        instrument_result.outcome = ConSanTransformOutcome::Unchanged;
-        if (!retained_fault_plans.empty()) {
-          instrument_result.mutation.fault.planned = retained_planned_faults;
-          instrument_result.fault_plans = retained_fault_plans;
-        }
-        instrument_result.replacement = std::move(mutation_stage.image);
-        instrument_result.patches = std::move(mutation_stage.patches);
-        instrument_result.mark_modified();
-        return instrument_result;
-      }
-      instrument_result.warnings.emplace_back(
-          "ConSan rolled back staged fault mutation because instrumentation is unsupported");
-      instrument_result.mutation.fault.applied = 0;
-      instrument_result.mutation.applied_fault_logical_identity.reset();
-      break;
-    case ConSanTransformOutcome::Invalid:
-      instrument_result.warnings.emplace_back(
-          "ConSan rolled back staged fault mutation because instrumentation is invalid");
-      instrument_result.mutation.fault.applied = 0;
-      instrument_result.mutation.applied_fault_logical_identity.reset();
-      break;
-    }
-    instrument_result.discard_candidate_modification();
-    return instrument_result;
-  }
-
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
 
@@ -524,9 +543,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (extent == ConSanLoweringExtent::ThroughProgramInventory)
     return result;
   if (options.fault_dry_run) {
-    resolve_consan_fault_mutations(*code_object, arch, options, require_applicable_fault_plan,
-                                   require_applicable_fault_plan, require_exactly_one_applied_fault,
-                                   result);
+    resolve_consan_fault_mutations(*code_object, arch, options, apply_fault_plan, apply_fault_plan,
+                                   require_exactly_one_applied_fault, result);
     build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
                             carried_plans);
     return result;
@@ -646,3 +664,5 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 
   return result;
 }
+
+} // namespace

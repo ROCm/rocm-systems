@@ -88,9 +88,8 @@ compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSan
                         ConSanPerturbationPlanningState *inspected_perturbation,
                         const ConSanPreappliedMutationLayout &preapplied_mutation,
                         ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
-  return try_patch_consan_impl(code_object_bytes, options, initial_operating_point, {},
-                               inspected_perturbation, preapplied_mutation, false, false, extent,
-                               observation);
+  return try_patch_consan_impl(code_object_bytes, options, initial_operating_point,
+                               inspected_perturbation, preapplied_mutation, extent, observation);
 }
 
 bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
