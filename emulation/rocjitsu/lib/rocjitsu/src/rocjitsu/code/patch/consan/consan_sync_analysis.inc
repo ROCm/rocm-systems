@@ -466,7 +466,9 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                               const ConSanSyncEvent &rhs) {
   const ConSanProgramSite *lhs_source = source_site(sites, lhs);
   const ConSanProgramSite *rhs_source = source_site(sites, rhs);
-  if (lhs_source == nullptr || rhs_source == nullptr || !lhs_source->same_payload(*rhs_source))
+  if (lhs_source == nullptr || rhs_source == nullptr ||
+      lhs_source->container.kind != rhs_source->container.kind ||
+      !lhs_source->same_payload(*rhs_source))
     return false;
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.scope) ==
