@@ -5756,7 +5756,9 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
     builder.kernels().emplace_back();
     builder.kernels().back().name = "auto_report_atomic";
-    builder.kernels().back().atomic_sites.emplace_back();
+    builder.decoded_sites().push_back(
+        {.container = rocjitsu::consan_program_container_ref(builder.kernels().back()),
+         .payload = rocjitsu::ConSanAtomicSite{}});
   });
   const rocjitsu::PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),

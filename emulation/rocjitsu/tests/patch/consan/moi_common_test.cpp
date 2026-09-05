@@ -2306,7 +2306,10 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  ASSERT_EQ(result.program_inventory.functions().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.functions().front())
+                .size(),
+            1u);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   const auto plan_it = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;

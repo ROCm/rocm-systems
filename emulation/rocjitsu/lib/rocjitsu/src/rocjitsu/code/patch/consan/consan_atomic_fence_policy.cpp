@@ -125,58 +125,16 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
   };
 }
 
-template <typename Container>
-[[nodiscard]] const ConSanAtomicSite *atomic_site_in_container(const Container &container,
-                                                               uint64_t text_offset) {
-  const auto site =
-      std::ranges::find(container.atomic_sites, text_offset, &ConSanAtomicSite::text_offset);
-  if (site == container.atomic_sites.end() ||
-      std::ranges::count(container.atomic_sites, text_offset, &ConSanAtomicSite::text_offset) !=
-          1) {
-    return nullptr;
-  }
-  return &*site;
-}
-
 [[nodiscard]] const ConSanAtomicSite *find_atomic_site(const ProgramInventory &inventory,
                                                        const ConSanSyncEvent &event) {
-  if (event.in_kernel) {
-    const ConSanKernelInfo *container = inventory.find_kernel_by_name(event.container_name);
-    if (container != nullptr)
-      return atomic_site_in_container(*container, event.text_offset);
-  } else {
-    const ConSanFunctionInfo *container = inventory.find_function_by_name(event.container_name);
-    if (container != nullptr)
-      return atomic_site_in_container(*container, event.text_offset);
-  }
-  return nullptr;
-}
-
-template <typename Container>
-[[nodiscard]] const ConSanOrdinaryMemorySite *ordinary_site_in_container(const Container &container,
-                                                                         uint64_t text_offset) {
-  const auto site = std::ranges::find(container.ordinary_memory_sites, text_offset,
-                                      &ConSanOrdinaryMemorySite::text_offset);
-  if (site == container.ordinary_memory_sites.end() ||
-      std::ranges::count(container.ordinary_memory_sites, text_offset,
-                         &ConSanOrdinaryMemorySite::text_offset) != 1) {
-    return nullptr;
-  }
-  return &*site;
+  return inventory.find_unique_decoded_site<ConSanAtomicSite>(event.in_kernel, event.container_name,
+                                                              event.text_offset);
 }
 
 [[nodiscard]] const ConSanOrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
                                                                  const ConSanSyncEvent &event) {
-  if (event.in_kernel) {
-    const ConSanKernelInfo *container = inventory.find_kernel_by_name(event.container_name);
-    if (container != nullptr)
-      return ordinary_site_in_container(*container, event.text_offset);
-  } else {
-    const ConSanFunctionInfo *container = inventory.find_function_by_name(event.container_name);
-    if (container != nullptr)
-      return ordinary_site_in_container(*container, event.text_offset);
-  }
-  return nullptr;
+  return inventory.find_unique_decoded_site<ConSanOrdinaryMemorySite>(
+      event.in_kernel, event.container_name, event.text_offset);
 }
 
 [[nodiscard]] ConSanAtomicSite normalize_ordinary_site(const ConSanOrdinaryMemorySite &site) {

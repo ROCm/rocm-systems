@@ -429,10 +429,6 @@ struct ConSanKernelInfo {
   bool decoded = false;
   bool uses_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
-  std::vector<ConSanBarrierSite> barrier_sites;
-  std::vector<ConSanFenceSite> fence_sites;
-  std::vector<ConSanAtomicSite> atomic_sites;
   ConSanPreflightAction preflight_action = ConSanPreflightAction::NotRun;
   std::vector<std::string> preflight_reasons;
 };
@@ -446,10 +442,6 @@ struct ConSanFunctionInfo {
   bool decoded = false;
   bool uses_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
-  std::vector<ConSanBarrierSite> barrier_sites;
-  std::vector<ConSanFenceSite> fence_sites;
-  std::vector<ConSanAtomicSite> atomic_sites;
 };
 
 /// Build the stable symbol attribution shared by every access decoded through

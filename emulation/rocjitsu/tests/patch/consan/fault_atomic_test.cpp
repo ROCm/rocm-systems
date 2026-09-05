@@ -221,11 +221,24 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().anchor_offset, inventory.fault_sites[1].text_offset);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.program_inventory.kernels().front().atomic_sites[0].raw_ioffset);
-  ASSERT_TRUE(result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset);
-  EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[0].raw_ioffset, 0);
-  EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset, 8);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            2u);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels().front())[0]
+                  .raw_ioffset);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels().front())[1]
+                  .raw_ioffset);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels().front())[0]
+                 .raw_ioffset,
+            0);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels().front())[1]
+                 .raw_ioffset,
+            8);
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
 }
@@ -510,9 +523,17 @@ TEST(ConSan, FaultAtomicWrongAddressIsVisibleToSubsequentInventory) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineAtomicAddressRewrite);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].raw_ioffset);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[1].raw_ioffset, 4);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            2u);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[1]
+                  .raw_ioffset);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[1]
+                 .raw_ioffset,
+            4);
 }
 
 TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
@@ -535,11 +556,23 @@ TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].raw_th);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].returns_old_value);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[1].raw_th, 1u);
-  EXPECT_TRUE(*result.program_inventory.kernels()[0].atomic_sites[1].returns_old_value);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            2u);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[1]
+                  .raw_th);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[1]
+                  .returns_old_value);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[1]
+                 .raw_th,
+            1u);
+  EXPECT_TRUE(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                    result.program_inventory.kernels()[0])[1]
+                   .returns_old_value);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_inv") != std::string::npos;
   }));
@@ -566,8 +599,14 @@ TEST(ConSan, FaultAtomicWeakenOrderPreservesReturningCasDataOperation) {
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels()[0])
+          .front();
   EXPECT_EQ(atomic.mnemonic, "flat_atomic_cmpswap_b32");
   ASSERT_TRUE(atomic.returns_old_value);
   ASSERT_TRUE(atomic.raw_th);
@@ -602,8 +641,12 @@ TEST(ConSan, FaultAtomicWeakenScopeLeavesThReturnAndAddressUntouched) {
            patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
   }));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites[1];
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            2u);
+  const ConSanAtomicSite atomic = test_decoded_sites<ConSanAtomicSite>(
+      result.program_inventory, result.program_inventory.kernels()[0])[1];
   ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
@@ -626,15 +669,37 @@ TEST(ConSan, FaultGlobalAtomicWrongAddressIsVisibleToSubsequentInventory) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineAtomicAddressRewrite);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].scope);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_th);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset, 4);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].scope, ConSanMemoryScope::Agent);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_th, 1u);
-  EXPECT_TRUE(*result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            1u);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[0]
+                  .raw_ioffset);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[0]
+                  .scope);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[0]
+                  .raw_th);
+  ASSERT_TRUE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels()[0])[0]
+                  .returns_old_value);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[0]
+                 .raw_ioffset,
+            4);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[0]
+                 .scope,
+            ConSanMemoryScope::Agent);
+  EXPECT_EQ(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[0]
+                 .raw_th,
+            1u);
+  EXPECT_TRUE(*test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                    result.program_inventory.kernels()[0])[0]
+                   .returns_old_value);
 }
 
 TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
@@ -649,8 +714,14 @@ TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels()[0])
+          .front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.scope);
@@ -674,8 +745,14 @@ TEST(ConSan, FaultGlobalAtomicWeakenOrderPreservesReturnedValue) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels()[0])
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels()[0])
+          .front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
@@ -812,8 +889,14 @@ TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.scope);
@@ -838,8 +921,14 @@ TEST(ConSan, FaultBufferAtomicWeakenScopePreservesAddressAndReturnedValue) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
@@ -866,8 +955,14 @@ TEST(ConSan, FaultBufferAtomicWeakenOrderPreservesDataOperationAndReturnedValue)
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite atomic =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
   ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);

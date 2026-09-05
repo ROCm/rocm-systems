@@ -16,9 +16,9 @@
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
-#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -45,30 +45,17 @@ namespace rocjitsu {
 
 #include "rocjitsu/code/patch/consan/consan_analysis.inc"
 
-template <typename Site>
-void move_sites_in_range(std::vector<Site> &source, std::vector<Site> &destination, uint64_t begin,
-                         uint32_t size) {
+void reattribute_decoded_sites_in_range(std::vector<ConSanDecodedProgramSite> &sites,
+                                        uint64_t begin, uint32_t size,
+                                        const ConSanProgramContainerRef &owner) {
   const uint64_t end = begin + size;
-  for (auto it = source.begin(); it != source.end();) {
-    if (it->text_offset < begin || it->text_offset >= end) {
-      ++it;
-      continue;
-    }
-    destination.push_back(std::move(*it));
-    it = source.erase(it);
-  }
-}
-
-template <typename Site>
-void append_unique_sites(std::vector<Site> &source, std::vector<Site> &destination) {
-  for (Site &site : source) {
-    if (std::ranges::none_of(destination, [&](const Site &existing) {
-          return existing.text_offset == site.text_offset;
-        })) {
-      destination.push_back(std::move(site));
-    }
-  }
-  std::ranges::sort(destination, {}, &Site::text_offset);
+  std::set<std::pair<size_t, uint64_t>> seen;
+  std::erase_if(sites, [&](ConSanDecodedProgramSite &site) {
+    if (site.text_offset() < begin || site.text_offset() >= end)
+      return false;
+    site.container = owner;
+    return !seen.emplace(site.payload.index(), site.text_offset()).second;
+  });
 }
 
 void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_bytes,
@@ -85,25 +72,9 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
       result.errors.emplace_back("ConSan could not recover the owner of a preapplied fault cave");
       continue;
     }
-    for (ConSanKernelInfo &other : kernels) {
-      if (&other == &*kernel)
-        continue;
-      move_sites_in_range(other.ordinary_memory_sites, kernel->ordinary_memory_sites,
-                          range.text_offset, range.size);
-      move_sites_in_range(other.barrier_sites, kernel->barrier_sites, range.text_offset,
-                          range.size);
-      move_sites_in_range(other.fence_sites, kernel->fence_sites, range.text_offset, range.size);
-      move_sites_in_range(other.atomic_sites, kernel->atomic_sites, range.text_offset, range.size);
-    }
-    for (ConSanFunctionInfo &function : functions) {
-      move_sites_in_range(function.ordinary_memory_sites, kernel->ordinary_memory_sites,
-                          range.text_offset, range.size);
-      move_sites_in_range(function.barrier_sites, kernel->barrier_sites, range.text_offset,
-                          range.size);
-      move_sites_in_range(function.fence_sites, kernel->fence_sites, range.text_offset, range.size);
-      move_sites_in_range(function.atomic_sites, kernel->atomic_sites, range.text_offset,
-                          range.size);
-    }
+    const ConSanProgramContainerRef owner = consan_program_container_ref(*kernel);
+    reattribute_decoded_sites_in_range(inventory.decoded_sites(), range.text_offset, range.size,
+                                       owner);
 
     ConSanKernelInfo decoded_range;
     decoded_range.name = kernel->name;
@@ -112,14 +83,23 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
     std::vector<ConSanAccessInventorySite> decoded_accesses;
+    std::vector<ConSanDecodedProgramSite> decoded_sites;
     decode_consan_kernel_inventory(code_object_bytes, decoder, arch, decoded_range,
-                                   decoded_accesses, result.warnings);
+                                   decoded_accesses, decoded_sites, result.warnings);
     inventory.reattribute_access_range(range.text_offset, range.size, *kernel, decoded_accesses,
                                        code_object_bytes);
-    append_unique_sites(decoded_range.ordinary_memory_sites, kernel->ordinary_memory_sites);
-    append_unique_sites(decoded_range.barrier_sites, kernel->barrier_sites);
-    append_unique_sites(decoded_range.fence_sites, kernel->fence_sites);
-    append_unique_sites(decoded_range.atomic_sites, kernel->atomic_sites);
+    for (ConSanDecodedProgramSite &site : decoded_sites) {
+      site.container = owner;
+      const bool duplicate = std::ranges::any_of(
+          inventory.decoded_sites(), [&](const ConSanDecodedProgramSite &existing) {
+            return existing.container == owner &&
+                   existing.payload.index() == site.payload.index() &&
+                   existing.text_offset() == site.text_offset();
+          });
+      if (!duplicate)
+        inventory.decoded_sites().push_back(std::move(site));
+    }
+    std::ranges::sort(inventory.decoded_sites(), {}, &ConSanDecodedProgramSite::text_offset);
   }
 }
 
@@ -128,15 +108,18 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 void decode_consan_kernel_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
                                     rj_code_arch_t arch, ConSanKernelInfo &kernel,
                                     std::vector<ConSanAccessInventorySite> &accesses,
+                                    std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                     std::vector<std::string> &warnings) {
-  decode_kernel_stats(code_object_bytes, decoder, arch, kernel, accesses, warnings);
+  decode_kernel_stats(code_object_bytes, decoder, arch, kernel, accesses, decoded_sites, warnings);
 }
 
 void decode_consan_function_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
                                       rj_code_arch_t arch, ConSanFunctionInfo &function,
                                       std::vector<ConSanAccessInventorySite> &accesses,
+                                      std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                       std::vector<std::string> &warnings) {
-  decode_function_stats(code_object_bytes, decoder, arch, function, accesses, warnings);
+  decode_function_stats(code_object_bytes, decoder, arch, function, accesses, decoded_sites,
+                        warnings);
 }
 
 void refine_consan_flat_pointer_provenance(std::span<const uint8_t> code_object_bytes,
@@ -144,18 +127,20 @@ void refine_consan_flat_pointer_provenance(std::span<const uint8_t> code_object_
                                            std::vector<ConSanKernelInfo> &kernels,
                                            std::vector<ConSanFunctionInfo> &functions,
                                            std::vector<ConSanAccessInventorySite> &accesses,
+                                           std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                            std::vector<std::string> &warnings) {
   relay_flat_pointer_provenance_across_calls(code_object_bytes, code_object, arch, kernels,
-                                             functions, accesses, warnings);
+                                             functions, accesses, decoded_sites, warnings);
 }
 
 void prune_consan_unreachable_inferred_ranges(
     const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
     std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
     std::span<ConSanKernelInfo> kernels, std::span<ConSanFunctionInfo> functions,
-    std::vector<ConSanAccessInventorySite> &accesses) {
+    std::vector<ConSanAccessInventorySite> &accesses,
+    std::vector<ConSanDecodedProgramSite> &decoded_sites) {
   prune_unreachable_inferred_ranges(code_object, decoder, arch, preapplied_ranges, kernels,
-                                    functions, accesses);
+                                    functions, accesses, decoded_sites);
 }
 
 void preflight_consan_kernel(ConSanKernelInfo &kernel, std::vector<std::string> &warnings) {
@@ -274,17 +259,24 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
 
   for (ConSanKernelInfo &kernel : inventory_builder.kernels()) {
     decode_consan_kernel_inventory(code_object_bytes, *decoder, arch, kernel,
-                                   inventory_builder.access_sites(), result.warnings);
+                                   inventory_builder.access_sites(),
+                                   inventory_builder.decoded_sites(), result.warnings);
   }
   std::vector<ConSanAccessInventorySite> function_accesses;
+  std::vector<ConSanDecodedProgramSite> function_decoded_sites;
   for (ConSanFunctionInfo &function : inventory_builder.functions())
     decode_consan_function_inventory(code_object_bytes, *decoder, arch, function, function_accesses,
-                                     result.warnings);
+                                     function_decoded_sites, result.warnings);
   const auto append_function_accesses = [&] {
     inventory_builder.access_sites().insert(inventory_builder.access_sites().end(),
                                             std::make_move_iterator(function_accesses.begin()),
                                             std::make_move_iterator(function_accesses.end()));
     function_accesses.clear();
+    inventory_builder.decoded_sites().insert(
+        inventory_builder.decoded_sites().end(),
+        std::make_move_iterator(function_decoded_sites.begin()),
+        std::make_move_iterator(function_decoded_sites.end()));
+    function_decoded_sites.clear();
   };
   const bool has_decode_error =
       std::ranges::any_of(
@@ -304,7 +296,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
   }
   refine_consan_flat_pointer_provenance(code_object_bytes, *code_object, arch,
                                         inventory_builder.kernels(), inventory_builder.functions(),
-                                        function_accesses, result.warnings);
+                                        function_accesses, function_decoded_sites, result.warnings);
   append_function_accesses();
   publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
@@ -317,7 +309,8 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     return false;
   prune_consan_unreachable_inferred_ranges(
       *code_object, *decoder, arch, result.program_inventory.preapplied_mutation().code_ranges,
-      inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites());
+      inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites(),
+      inventory_builder.decoded_sites());
   return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, options,
                                            inventory_builder, perturbation, result);
 }

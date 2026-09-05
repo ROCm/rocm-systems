@@ -226,9 +226,11 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
   kernel.name = "atomic_kernel";
   kernel.descriptor_file_offset = 384;
   kernel.entry_text_offset = 0;
-  kernel.atomic_sites = std::move(atomic_sites);
-  kernel.ordinary_memory_sites = std::move(ordinary_sites);
   builder.kernels().push_back(std::move(kernel));
+  for (ConSanAtomicSite &site : atomic_sites)
+    stage_decoded_site(builder, builder.kernels().back(), std::move(site));
+  for (ConSanOrdinaryMemorySite &site : ordinary_sites)
+    stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
   synchronization.sync_sequences = std::move(sequences);

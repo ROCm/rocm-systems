@@ -14,7 +14,6 @@
 #include <optional>
 #include <ranges>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -26,37 +25,32 @@ struct UnmatchedBarrierWait {
   std::optional<uint64_t> owner_descriptor_file_offset;
 };
 
-template <typename Container>
-void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
-                                    const ConSanOptions &options, const ProgramInventory &inventory,
-                                    std::vector<UnmatchedBarrierWait> &waits) {
-  if (!consan_container_selected(options, container.name))
+void append_unmatched_barrier_wait(const ConSanDecodedProgramSite &decoded,
+                                   const ConSanOptions &options, const ProgramInventory &inventory,
+                                   std::vector<UnmatchedBarrierWait> &waits) {
+  const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
+  if (site == nullptr || !consan_container_selected(options, decoded.container.name))
     return;
   const SynchronizationInventoryView synchronization = inventory.sync();
-  for (const ConSanBarrierSite &site : container.barrier_sites) {
-    if (site.operation != ConSanBarrierSite::Operation::Wait || site.size != sizeof(uint32_t) ||
-        !site.barrier_id || site.operand_source != ConSanBarrierSite::OperandSource::Immediate)
-      continue;
-    const ConSanSyncEvent *event = synchronization.find_unique_event(
-        ConSanSyncEventKind::Barrier, container.name, in_kernel, site.text_offset);
-    if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
-        event->container_name != container.name || event->in_kernel != in_kernel ||
-        event->size != site.size)
-      continue;
-    const bool belongs_to_sequence = std::ranges::any_of(
-        synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
-          return sequence.kind == ConSanSyncSequenceKind::Barrier &&
-                 sequence.member_event_identities.size() > 1u &&
-                 std::ranges::find(sequence.member_event_identities, event->identity) !=
-                     sequence.member_event_identities.end();
-        });
-    if (belongs_to_sequence)
-      continue;
-    std::optional<uint64_t> owner;
-    if constexpr (std::is_same_v<Container, ConSanKernelInfo>)
-      owner = container.descriptor_file_offset;
-    waits.push_back({&site, owner});
-  }
+  if (site->operation != ConSanBarrierSite::Operation::Wait || site->size != sizeof(uint32_t) ||
+      !site->barrier_id || site->operand_source != ConSanBarrierSite::OperandSource::Immediate)
+    return;
+  const ConSanSyncEvent *event =
+      synchronization.find_unique_event(ConSanSyncEventKind::Barrier, decoded.container.name,
+                                        decoded.container.is_kernel(), site->text_offset);
+  if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
+      event->container_name != decoded.container.name ||
+      event->in_kernel != decoded.container.is_kernel() || event->size != site->size)
+    return;
+  const bool belongs_to_sequence =
+      std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
+        return sequence.kind == ConSanSyncSequenceKind::Barrier &&
+               sequence.member_event_identities.size() > 1u &&
+               std::ranges::find(sequence.member_event_identities, event->identity) !=
+                   sequence.member_event_identities.end();
+      });
+  if (!belongs_to_sequence)
+    waits.push_back({site, decoded.container.kernel_descriptor_file_offset});
 }
 
 } // namespace
@@ -67,10 +61,8 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_unmatched_barrier_waits(kernel, true, options, result.program_inventory, waits);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_unmatched_barrier_waits(function, false, options, result.program_inventory, waits);
+  for (const ConSanDecodedProgramSite &site : result.program_inventory.decoded_sites())
+    append_unmatched_barrier_wait(site, options, result.program_inventory, waits);
   if (waits.empty())
     return;
 

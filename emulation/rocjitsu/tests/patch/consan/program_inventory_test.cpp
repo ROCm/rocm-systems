@@ -591,8 +591,14 @@ TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  EXPECT_FALSE(result.program_inventory.kernels().front().atomic_sites.front().scope);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  EXPECT_FALSE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                    result.program_inventory.kernels().front())
+                   .front()
+                   .scope);
 
   const SynchronizationInventoryView graph = result.program_inventory.sync();
   const auto event =

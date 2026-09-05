@@ -551,9 +551,10 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.fence_like_count, 2u);
-  EXPECT_EQ(kernel.fence_sites.size(), 2u);
+  EXPECT_EQ(fence_sites.size(), 2u);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
 }
 
@@ -1597,20 +1598,24 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(result.program_inventory.access_sites()[2].operands.data_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[2].operands.address_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[2].operands.data_vgpr, 0u);
-  ASSERT_EQ(kernel.barrier_sites.size(), 1u);
-  EXPECT_EQ(kernel.barrier_sites[0].mnemonic, "s_barrier_wait");
-  EXPECT_EQ(kernel.barrier_sites[0].text_offset, 24u);
-  ASSERT_TRUE(kernel.barrier_sites[0].barrier_id);
-  EXPECT_EQ(*kernel.barrier_sites[0].barrier_id, 0);
-  EXPECT_EQ(kernel.barrier_sites[0].operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(kernel.barrier_sites[0].scope, ConSanBarrierSite::Scope::Unknown);
-  ASSERT_EQ(kernel.fence_sites.size(), 1u);
-  EXPECT_EQ(kernel.fence_sites[0].mnemonic, "s_dcache_inv");
-  EXPECT_EQ(kernel.fence_sites[0].text_offset, 32u);
-  EXPECT_EQ(kernel.fence_sites[0].file_offset, 0x120u);
-  EXPECT_EQ(kernel.fence_sites[0].size, 8u);
-  ASSERT_EQ(kernel.atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = kernel.atomic_sites.front();
+  const auto barrier_sites =
+      test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
+  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
+  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
+  ASSERT_EQ(barrier_sites.size(), 1u);
+  EXPECT_EQ(barrier_sites[0].mnemonic, "s_barrier_wait");
+  EXPECT_EQ(barrier_sites[0].text_offset, 24u);
+  ASSERT_TRUE(barrier_sites[0].barrier_id);
+  EXPECT_EQ(*barrier_sites[0].barrier_id, 0);
+  EXPECT_EQ(barrier_sites[0].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier_sites[0].scope, ConSanBarrierSite::Scope::Unknown);
+  ASSERT_EQ(fence_sites.size(), 1u);
+  EXPECT_EQ(fence_sites[0].mnemonic, "s_dcache_inv");
+  EXPECT_EQ(fence_sites[0].text_offset, 32u);
+  EXPECT_EQ(fence_sites[0].file_offset, 0x120u);
+  EXPECT_EQ(fence_sites[0].size, 8u);
+  ASSERT_EQ(atomic_sites.size(), 1u);
+  const ConSanAtomicSite &atomic = atomic_sites.front();
   EXPECT_EQ(atomic.address_space_hint, ConSanAtomicAddressSpaceHint::Lds);
   EXPECT_EQ(atomic.mnemonic, "ds_add_u32");
   EXPECT_EQ(atomic.text_offset, 16u);
@@ -3065,11 +3070,12 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.instruction_count, 2u);
   EXPECT_EQ(kernel.stats.flat_atomic_count, 1u);
-  ASSERT_EQ(kernel.atomic_sites.size(), 1u);
-  const ConSanAtomicSite &site = kernel.atomic_sites.front();
+  ASSERT_EQ(atomic_sites.size(), 1u);
+  const ConSanAtomicSite &site = atomic_sites.front();
   EXPECT_EQ(site.mnemonic, "flat_atomic_add");
   EXPECT_EQ(site.size, 8u);
   EXPECT_EQ(site.width_bits, 32u);
@@ -3149,16 +3155,18 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
+  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 16u);
   EXPECT_EQ(kernel.stats.instruction_count, 2u);
   EXPECT_EQ(kernel.stats.global_memory_count, 1u);
   EXPECT_EQ(kernel.stats.lds_atomic_count, 0u);
   EXPECT_TRUE(result.program_inventory.access_sites().empty());
-  EXPECT_TRUE(kernel.fence_sites.empty());
-  ASSERT_EQ(kernel.atomic_sites.size(), 1u);
+  EXPECT_TRUE(fence_sites.empty());
+  ASSERT_EQ(atomic_sites.size(), 1u);
 
-  const ConSanAtomicSite &atomic = kernel.atomic_sites.front();
+  const ConSanAtomicSite &atomic = atomic_sites.front();
   EXPECT_EQ(atomic.address_space_hint, ConSanAtomicAddressSpaceHint::Global);
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   EXPECT_EQ(atomic.text_offset, 0u);
@@ -3214,8 +3222,14 @@ TEST(ConSan, SyncInventoryRetainsUnsupportedFlatAtomicWithoutProvenance) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  EXPECT_EQ(result.program_inventory.kernels().front().atomic_sites.front().address_space_hint,
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  EXPECT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .front()
+                .address_space_hint,
             ConSanAtomicAddressSpaceHint::FlatUnknown);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const ConSanSyncEvent &event = result.program_inventory.sync().sync_events.front();
@@ -3739,9 +3753,14 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                         result.program_inventory.kernels().front())
+                .size(),
+            1u);
   const ConSanOrdinaryMemorySite store_site =
-      result.program_inventory.kernels().front().ordinary_memory_sites.front();
+      test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                   result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(store_site.support_reason,
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
   ASSERT_TRUE(store_site.raw_scale_offset);
@@ -4029,8 +4048,14 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  EXPECT_EQ(result.program_inventory.kernels().front().atomic_sites.front().address_space_hint,
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  EXPECT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .front()
+                .address_space_hint,
             ConSanAtomicAddressSpaceHint::FlatMaybeGroup);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const ConSanSyncEvent &event = result.program_inventory.sync().sync_events.front();
@@ -4059,8 +4084,14 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(site.mnemonic, "flat_atomic_add_u32");
   EXPECT_EQ(site.size, 3u * sizeof(uint32_t));
   EXPECT_EQ(site.width_bits, 32u);
@@ -4486,23 +4517,24 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
-  ASSERT_EQ(kernel.barrier_sites.size(), 7u);
-  EXPECT_EQ(kernel.barrier_sites[0].operation, ConSanBarrierSite::Operation::Init);
-  EXPECT_EQ(kernel.barrier_sites[1].operation, ConSanBarrierSite::Operation::Join);
-  EXPECT_EQ(kernel.barrier_sites[2].operation, ConSanBarrierSite::Operation::Signal);
-  EXPECT_EQ(kernel.barrier_sites[3].operation, ConSanBarrierSite::Operation::Wait);
-  EXPECT_EQ(kernel.barrier_sites[4].operation, ConSanBarrierSite::Operation::Leave);
-  EXPECT_EQ(kernel.barrier_sites[5].operation, ConSanBarrierSite::Operation::Wakeup);
-  EXPECT_EQ(kernel.barrier_sites[6].operation, ConSanBarrierSite::Operation::StateQuery);
+  const auto barrier_sites =
+      test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
+  ASSERT_EQ(barrier_sites.size(), 7u);
+  EXPECT_EQ(barrier_sites[0].operation, ConSanBarrierSite::Operation::Init);
+  EXPECT_EQ(barrier_sites[1].operation, ConSanBarrierSite::Operation::Join);
+  EXPECT_EQ(barrier_sites[2].operation, ConSanBarrierSite::Operation::Signal);
+  EXPECT_EQ(barrier_sites[3].operation, ConSanBarrierSite::Operation::Wait);
+  EXPECT_EQ(barrier_sites[4].operation, ConSanBarrierSite::Operation::Leave);
+  EXPECT_EQ(barrier_sites[5].operation, ConSanBarrierSite::Operation::Wakeup);
+  EXPECT_EQ(barrier_sites[6].operation, ConSanBarrierSite::Operation::StateQuery);
   for (const size_t index : {0u, 1u, 5u, 6u}) {
-    EXPECT_EQ(kernel.barrier_sites[index].operand_source,
-              ConSanBarrierSite::OperandSource::DynamicM0);
-    EXPECT_FALSE(kernel.barrier_sites[index].barrier_id);
+    EXPECT_EQ(barrier_sites[index].operand_source, ConSanBarrierSite::OperandSource::DynamicM0);
+    EXPECT_FALSE(barrier_sites[index].barrier_id);
   }
-  EXPECT_EQ(kernel.barrier_sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  ASSERT_TRUE(kernel.barrier_sites[2].barrier_id);
-  EXPECT_EQ(*kernel.barrier_sites[2].barrier_id, -1);
-  EXPECT_EQ(kernel.barrier_sites[4].operand_source, ConSanBarrierSite::OperandSource::Unknown);
+  EXPECT_EQ(barrier_sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  ASSERT_TRUE(barrier_sites[2].barrier_id);
+  EXPECT_EQ(*barrier_sites[2].barrier_id, -1);
+  EXPECT_EQ(barrier_sites[4].operand_source, ConSanBarrierSite::OperandSource::Unknown);
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 7u);
   const std::array<ConSanSyncOperation, 7> expected_operations = {
@@ -4559,7 +4591,8 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const auto sites = result.program_inventory.kernels().front().barrier_sites;
+  const auto sites = test_decoded_sites<ConSanBarrierSite>(
+      result.program_inventory, result.program_inventory.kernels().front());
   ASSERT_EQ(sites.size(), 4u);
 
   EXPECT_EQ(sites[0].size, 4u);
@@ -4594,6 +4627,27 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
     EXPECT_FALSE(event.participant_count);
     EXPECT_FALSE(event.participant_mask);
   }
+}
+
+TEST(ConSan, DecodedSitesUseFinalContainerFactsDiscoveredLaterInTheRange) {
+  const std::array<uint32_t, 3> text_words = {
+      0xBE805181u, // s_barrier_init 1
+      build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(/*ttmp=*/6u), ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  MoiOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanTransformArtifacts result =
+      test_semantic_inventory(make_gfx1250_code_object(text_words, "late_container_fact"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  ASSERT_TRUE(kernel.uses_cluster_workgroup_id);
+  const auto sites = test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
+  ASSERT_EQ(sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_events.front().text_offset, 0u);
 }
 
 TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {

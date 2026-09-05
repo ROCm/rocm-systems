@@ -6988,7 +6988,10 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   ASSERT_NE(barrier_coverage, nullptr);
   EXPECT_EQ(barrier_coverage->lowering, ConSanLoweringOutcomeKind::Instrumented);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().barrier_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanBarrierSite>(result.program_inventory,
+                                                  result.program_inventory.kernels().front())
+                .size(),
+            1u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,
             ConSanPatchKind::TrampolineMoiBarrierRecord);
@@ -7102,15 +7105,23 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
   }
   ASSERT_EQ(barriers.size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels()[0].barrier_sites.size(), 2u);
+  ASSERT_EQ(test_decoded_sites<ConSanBarrierSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])
+                .size(),
+            2u);
   EXPECT_EQ(barriers[0]->anchor_offset,
-            result.program_inventory.kernels()[0].barrier_sites[0].text_offset);
+            test_decoded_sites<ConSanBarrierSite>(result.program_inventory,
+                                                  result.program_inventory.kernels()[0])[0]
+                .text_offset);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> second_barrier = text_words_at_offset(
-      patched, result.program_inventory.kernels()[0].barrier_sites[1].text_offset,
-      sizeof(uint32_t));
+  const std::vector<uint32_t> second_barrier =
+      text_words_at_offset(patched,
+                           test_decoded_sites<ConSanBarrierSite>(
+                               result.program_inventory, result.program_inventory.kernels()[0])[1]
+                               .text_offset,
+                           sizeof(uint32_t));
   ASSERT_EQ(second_barrier.size(), 1u);
   EXPECT_EQ(second_barrier.front(), *barrier);
   ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 2u);
@@ -10061,7 +10072,10 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end())
@@ -10204,8 +10218,14 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(site.raw_saddr, kGfx1250FlatNoSaddrEncoding);
   EXPECT_EQ(site.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(site.raw_ioffset, 0);
@@ -10311,8 +10331,14 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(site.mnemonic, "ds_add_u32");
   EXPECT_EQ(site.raw_ioffset, 12);
   EXPECT_FALSE(site.scope);
@@ -11954,9 +11980,15 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
   SCOPED_TRACE(testing::PrintToString(result.warnings));
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                         result.program_inventory.kernels().front())
+                .size(),
+            1u);
   EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-  EXPECT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason,
+  EXPECT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                         result.program_inventory.kernels().front())
+                .front()
+                .support_reason,
             ConSanOrdinaryMemorySupportReason::Supported);
   ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 1u);
   EXPECT_EQ(result.observation_plan().fence_site_decisions.front().kind,

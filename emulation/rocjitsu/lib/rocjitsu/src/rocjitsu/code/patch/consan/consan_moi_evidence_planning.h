@@ -16,27 +16,22 @@ namespace rocjitsu::consan_moi_impl {
 /// being rediscovered by each evidence kind.
 struct MoiEvidenceContainerView {
   std::string qualified_name;
-  std::span<const ConSanOrdinaryMemorySite> ordinary_memory_sites;
-  std::span<const ConSanBarrierSite> barrier_sites;
-  std::span<const ConSanAtomicSite> atomic_sites;
+  const ProgramInventory *inventory = nullptr;
+  ConSanProgramContainerRef container;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   uint64_t entry_text_offset = 0, text_file_offset = 0, code_size = 0;
   bool uses_cluster_workgroup_id = false;
+
+  template <typename Site> [[nodiscard]] const Site *find_site(uint64_t text_offset) const {
+    return inventory == nullptr ? nullptr
+                                : inventory->find_unique_decoded_site<Site>(container, text_offset);
+  }
 };
 
 [[nodiscard]] std::optional<MoiEvidenceContainerView>
 resolve_moi_evidence_container(const ProgramInventory &inventory, bool in_kernel,
                                std::string_view container_name,
                                std::span<const ConSanExecutionOwner> execution_owners);
-
-template <typename Site>
-[[nodiscard]] const Site *find_unique_moi_evidence_site(std::span<const Site> sites,
-                                                        uint64_t text_offset) {
-  const auto site = std::ranges::find(sites, text_offset, &Site::text_offset);
-  if (site == sites.end() || std::ranges::count(sites, text_offset, &Site::text_offset) != 1u)
-    return nullptr;
-  return &*site;
-}
 
 [[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
 build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,

@@ -310,15 +310,15 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     }
     if (communication->kind == ConSanSyncEventKind::Atomic) {
       const ConSanAtomicSite *site =
-          find_unique_moi_evidence_site(container->atomic_sites, communication->text_offset);
+          container->find_site<ConSanAtomicSite>(communication->text_offset);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
         return {};
       }
       plan.communication_site = *site;
     } else {
-      const ConSanOrdinaryMemorySite *site = find_unique_moi_evidence_site(
-          container->ordinary_memory_sites, communication->text_offset);
+      const ConSanOrdinaryMemorySite *site =
+          container->find_site<ConSanOrdinaryMemorySite>(communication->text_offset);
       if (site == nullptr ||
           (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
            site->support_reason !=
@@ -481,8 +481,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       return {};
     }
     if (event->kind == ConSanSyncEventKind::Atomic) {
-      const ConSanAtomicSite *site =
-          find_unique_moi_evidence_site(container->atomic_sites, event->text_offset);
+      const ConSanAtomicSite *site = container->find_site<ConSanAtomicSite>(event->text_offset);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
         return {};
@@ -490,7 +489,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       plan.site = *site;
     } else {
       const ConSanOrdinaryMemorySite *site =
-          find_unique_moi_evidence_site(container->ordinary_memory_sites, event->text_offset);
+          container->find_site<ConSanOrdinaryMemorySite>(event->text_offset);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
         return {};

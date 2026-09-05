@@ -45,7 +45,10 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
   ASSERT_EQ(first_sites.size(), 4u);
   ASSERT_EQ(second_sites.size(), first_sites.size());
   ASSERT_EQ(first.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(first.program_inventory.kernels().front().ordinary_memory_sites.size(), 4u);
+  ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(first.program_inventory,
+                                                         first.program_inventory.kernels().front())
+                .size(),
+            4u);
 
   for (size_t i = 0; i < first_sites.size(); ++i) {
     EXPECT_EQ(first_sites[i]->identity, second_sites[i]->identity);

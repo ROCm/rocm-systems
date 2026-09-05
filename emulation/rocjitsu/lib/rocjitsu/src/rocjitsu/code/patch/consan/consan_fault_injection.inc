@@ -186,19 +186,8 @@ find_static_participant_init(const ProgramInventory &program_inventory,
   });
   if (init_event == sync.sync_events.end())
     return nullptr;
-  const auto find_in = [&](const auto &containers) -> const ConSanBarrierSite * {
-    for (const auto &container : containers) {
-      if (container.name != group.container_name)
-        continue;
-      const auto site = std::ranges::find(container.barrier_sites, init_event->text_offset,
-                                          &ConSanBarrierSite::text_offset);
-      if (site != container.barrier_sites.end())
-        return &*site;
-    }
-    return nullptr;
-  };
-  return group.in_kernel ? find_in(program_inventory.kernels())
-                         : find_in(program_inventory.functions());
+  return program_inventory.find_unique_decoded_site<ConSanBarrierSite>(
+      group.in_kernel, group.container_name, init_event->text_offset);
 }
 
 template <typename State>

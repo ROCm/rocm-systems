@@ -73,6 +73,31 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   }
 };
 
+/// Return copies of one decoded source-site payload for focused assertions.
+/// Production consumers resolve individual stable sites through
+/// `ProgramInventory`; tests occasionally need to inspect the complete
+/// container-local decode sequence.
+template <typename Site, typename Container>
+[[nodiscard]] std::vector<Site> test_decoded_sites(const ProgramInventory &inventory,
+                                                   const Container &container) {
+  const ConSanProgramContainerRef reference = consan_program_container_ref(container);
+  std::vector<Site> result;
+  for (const ConSanDecodedProgramSite &decoded : inventory.decoded_sites()) {
+    if (decoded.container == reference) {
+      if (const Site *site = decoded.get_if<Site>())
+        result.push_back(*site);
+    }
+  }
+  return result;
+}
+
+/// Seed one decoded source site in a builder-owned test inventory.
+template <typename Container, typename Site>
+void stage_decoded_site(ProgramInventoryBuilder &builder, const Container &container, Site site) {
+  builder.decoded_sites().push_back(
+      {.container = consan_program_container_ref(container), .payload = std::move(site)});
+}
+
 /// Focused classifier/planner tests start from decoded sites so they can
 /// exercise rejection mapping as well as normalized address planning.
 /// Production lowering carries ConSanAtomicLoweringForm across that boundary.

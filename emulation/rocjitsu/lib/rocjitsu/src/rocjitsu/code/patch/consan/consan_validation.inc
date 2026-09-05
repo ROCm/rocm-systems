@@ -40,7 +40,6 @@ struct ValidationByteRange {
   return consan_arch_is_cdna3_or_cdna4(target.arch);
 }
 
-
 [[nodiscard]] bool has_blocked_kernel(const ProgramInventory &inventory) {
   return std::ranges::any_of(inventory.kernels(), [](const ConSanKernelInfo &kernel) {
     return kernel.preflight_action == ConSanPreflightAction::Blocked;
@@ -2354,17 +2353,11 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
   const std::span<const uint8_t> text = environment.replacement_text.bytes;
 
   const auto atomic_site_for = [&](uint64_t text_offset) -> const ConSanAtomicSite * {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      const auto site =
-          std::ranges::find(kernel.atomic_sites, text_offset, &ConSanAtomicSite::text_offset);
-      if (site != kernel.atomic_sites.end())
-        return &*site;
-    }
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-      const auto site =
-          std::ranges::find(function.atomic_sites, text_offset, &ConSanAtomicSite::text_offset);
-      if (site != function.atomic_sites.end())
-        return &*site;
+    for (const ConSanDecodedProgramSite &decoded : result.program_inventory.decoded_sites()) {
+      if (decoded.text_offset() == text_offset) {
+        if (const ConSanAtomicSite *site = decoded.get_if<ConSanAtomicSite>())
+          return site;
+      }
     }
     return nullptr;
   };

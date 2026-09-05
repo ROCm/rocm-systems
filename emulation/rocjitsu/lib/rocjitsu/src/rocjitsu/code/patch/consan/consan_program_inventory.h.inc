@@ -141,6 +141,39 @@ struct ConSanAccessInventorySite {
   bool operator==(const ConSanAccessInventorySite &) const = default;
 };
 
+/// One decoded instruction fact used by synchronization and fault analysis.
+///
+/// These sites formerly lived in four vectors on every kernel and function.
+/// Keeping the container attribution beside a tagged payload gives the
+/// original program one authoritative source-site arena. Synchronization
+/// events may derive semantic facts from this record, but do not own another
+/// decoder representation of it.
+struct ConSanDecodedProgramSite {
+  using Payload =
+      std::variant<ConSanOrdinaryMemorySite, ConSanBarrierSite, ConSanFenceSite, ConSanAtomicSite>;
+
+  ConSanProgramContainerRef container;
+  Payload payload;
+
+  template <typename Site> [[nodiscard]] const Site *get_if() const {
+    return std::get_if<Site>(&payload);
+  }
+  template <typename Site> [[nodiscard]] Site *get_if() { return std::get_if<Site>(&payload); }
+
+  [[nodiscard]] uint64_t text_offset() const {
+    return std::visit([](const auto &site) { return site.text_offset; }, payload);
+  }
+  [[nodiscard]] uint64_t file_offset() const {
+    return std::visit([](const auto &site) { return site.file_offset; }, payload);
+  }
+  [[nodiscard]] uint32_t size() const {
+    return std::visit([](const auto &site) { return site.size; }, payload);
+  }
+  [[nodiscard]] std::string_view mnemonic() const {
+    return std::visit([](const auto &site) -> std::string_view { return site.mnemonic; }, payload);
+  }
+};
+
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
 ///
@@ -324,6 +357,7 @@ struct ConSanProgramInventoryStorage {
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanAccessInventorySite> access_sites;
+  std::vector<ConSanDecodedProgramSite> decoded_sites;
   std::vector<ConSanSyncEvent> sync_events;
   std::vector<ConSanSyncSequence> sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
@@ -411,9 +445,54 @@ public:
     const auto function = std::ranges::find(records, name, &ConSanFunctionInfo::name);
     return function == records.end() ? nullptr : &*function;
   }
+  /// Resolve the immutable attribution record for a symbol container.
+  [[nodiscard]] std::optional<ConSanProgramContainerRef>
+  find_container(bool in_kernel, std::string_view name) const {
+    if (in_kernel) {
+      const ConSanKernelInfo *kernel = find_kernel_by_name(name);
+      return kernel == nullptr ? std::nullopt
+                               : std::optional{consan_program_container_ref(*kernel)};
+    }
+    const ConSanFunctionInfo *function = find_function_by_name(name);
+    return function == nullptr ? std::nullopt
+                               : std::optional{consan_program_container_ref(*function)};
+  }
   [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
                     : std::span<const ConSanAccessInventorySite>{};
+  }
+  /// Return the authoritative decoded source sites used by synchronization
+  /// and fault analysis. Payloads remain decoder facts; policy and lowering
+  /// products live in later phase-owned records.
+  [[nodiscard]] std::span<const ConSanDecodedProgramSite> decoded_sites() const {
+    return storage_ ? std::span<const ConSanDecodedProgramSite>(storage_->decoded_sites)
+                    : std::span<const ConSanDecodedProgramSite>{};
+  }
+
+  /// Resolve one uniquely decoded payload in a symbol container. This is the
+  /// sole compatibility join needed while synchronization events acquire a
+  /// direct stable source-site identity.
+  template <typename Site>
+  [[nodiscard]] const Site *find_unique_decoded_site(const ConSanProgramContainerRef &container,
+                                                     uint64_t text_offset) const {
+    const Site *match = nullptr;
+    for (const ConSanDecodedProgramSite &decoded : decoded_sites()) {
+      if (decoded.container != container || decoded.text_offset() != text_offset)
+        continue;
+      const Site *site = decoded.get_if<Site>();
+      if (site == nullptr)
+        continue;
+      if (match != nullptr)
+        return nullptr;
+      match = site;
+    }
+    return match;
+  }
+  template <typename Site>
+  [[nodiscard]] const Site *find_unique_decoded_site(bool in_kernel, std::string_view container,
+                                                     uint64_t text_offset) const {
+    const std::optional<ConSanProgramContainerRef> reference = find_container(in_kernel, container);
+    return reference ? find_unique_decoded_site<Site>(*reference, text_offset) : nullptr;
   }
   /// Return the complete immutable synchronization projection as one value.
   [[nodiscard]] SynchronizationInventoryView sync() const {
@@ -487,6 +566,9 @@ public:
   /// `ProgramInventory` views remain read-only.
   [[nodiscard]] std::vector<ConSanAccessInventorySite> &access_sites() {
     return storage_->access_sites;
+  }
+  [[nodiscard]] std::vector<ConSanDecodedProgramSite> &decoded_sites() {
+    return storage_->decoded_sites;
   }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {

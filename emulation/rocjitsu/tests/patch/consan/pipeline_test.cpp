@@ -45,9 +45,8 @@ concept HasCommittedPatchGeometry = requires(const T &patch) {
 };
 
 template <typename T>
-concept HasPatchRoutingProof = requires(const T &patch) {
-  patch.dispatch_id_primary_prologue_offset;
-};
+concept HasPatchRoutingProof =
+    requires(const T &patch) { patch.dispatch_id_primary_prologue_offset; };
 
 template <typename T>
 concept HasPatchMutationProof = requires(const T &patch) {

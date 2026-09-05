@@ -256,8 +256,14 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteRdna3CacheSequence) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front();
   EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::Acquire,
                                                 ROCJITSU_CODE_ARCH_RDNA3),
             ConSanAtomicClassifierReason::None)
@@ -638,11 +644,12 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-    const auto site = std::ranges::find_if(result.program_inventory.kernels().front().atomic_sites,
-                                           [](const ConSanAtomicSite &candidate) {
-                                             return candidate.mnemonic == "global_atomic_add_u32";
-                                           });
-    ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
+    const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(
+        result.program_inventory, result.program_inventory.kernels().front());
+    const auto site = std::ranges::find_if(atomic_sites, [](const ConSanAtomicSite &candidate) {
+      return candidate.mnemonic == "global_atomic_add_u32";
+    });
+    ASSERT_NE(site, atomic_sites.end());
     EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
                                                   ROCJITSU_CODE_ARCH_RDNA3),
               ConSanAtomicClassifierReason::None);
@@ -690,11 +697,12 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const auto site = std::ranges::find_if(result.program_inventory.kernels().front().atomic_sites,
-                                         [](const ConSanAtomicSite &candidate) {
-                                           return candidate.mnemonic == "global_atomic_add_u32";
-                                         });
-  ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
+  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(
+      result.program_inventory, result.program_inventory.kernels().front());
+  const auto site = std::ranges::find_if(atomic_sites, [](const ConSanAtomicSite &candidate) {
+    return candidate.mnemonic == "global_atomic_add_u32";
+  });
+  ASSERT_NE(site, atomic_sites.end());
   EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
                                                 ROCJITSU_CODE_ARCH_RDNA3),
             ConSanAtomicClassifierReason::UnsupportedEncoding);
@@ -1315,12 +1323,12 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-      const auto site =
-          std::ranges::find_if(result.program_inventory.kernels().front().atomic_sites,
-                               [](const ConSanAtomicSite &candidate) {
-                                 return candidate.mnemonic.starts_with("global_atomic_");
-                               });
-      ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
+      const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(
+          result.program_inventory, result.program_inventory.kernels().front());
+      const auto site = std::ranges::find_if(atomic_sites, [](const ConSanAtomicSite &candidate) {
+        return candidate.mnemonic.starts_with("global_atomic_");
+      });
+      ASSERT_NE(site, atomic_sites.end());
       EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, test_case.event_kind, target.arch),
                 test_case.expected_reason);
       EXPECT_EQ(site->raw_th, test_case.semantics);
@@ -2911,9 +2919,15 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
   ASSERT_TRUE(global_inventory.errors.empty()) << testing::PrintToString(global_inventory.errors);
   ASSERT_EQ(global_inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(global_inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(
+      test_decoded_sites<ConSanAtomicSite>(global_inventory.program_inventory,
+                                           global_inventory.program_inventory.kernels().front())
+          .size(),
+      1u);
   const ConSanAtomicSite global_site =
-      global_inventory.program_inventory.kernels().front().atomic_sites.front();
+      test_decoded_sites<ConSanAtomicSite>(global_inventory.program_inventory,
+                                           global_inventory.program_inventory.kernels().front())
+          .front();
 
   const ConSanMoiAtomicAddressPlan global_plan = plan_consan_moi_atomic_address(
       global_site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/5,
@@ -2947,9 +2961,15 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
       test_lower_consan(make_rdna4_flat_atomic_code_object(), inventory_options);
   ASSERT_TRUE(flat_inventory.errors.empty()) << testing::PrintToString(flat_inventory.errors);
   ASSERT_EQ(flat_inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(flat_inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(flat_inventory.program_inventory,
+                                                 flat_inventory.program_inventory.kernels().front())
+                .size(),
+            1u);
   const ConSanMoiAtomicAddressPlan flat_plan = plan_consan_moi_atomic_address(
-      flat_inventory.program_inventory.kernels().front().atomic_sites.front(), /*scratch_vgpr=*/8,
+      test_decoded_sites<ConSanAtomicSite>(flat_inventory.program_inventory,
+                                           flat_inventory.program_inventory.kernels().front())
+          .front(),
+      /*scratch_vgpr=*/8,
       /*scratch_vgpr_count=*/3, ConSanRegisterAllocationSource::LivenessDead,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(flat_plan.supported()) << consan_moi_atomic_address_support_name(flat_plan.support);
@@ -2977,8 +2997,14 @@ TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
 
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = inventory.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                                 inventory.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                           inventory.program_inventory.kernels().front())
+          .front();
   ASSERT_TRUE(site.raw_scale_offset);
   EXPECT_TRUE(*site.raw_scale_offset);
   EXPECT_EQ(site.raw_ioffset, 4);
@@ -3147,8 +3173,14 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  ConSanAtomicSite site = inventory.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                                 inventory.program_inventory.kernels().front())
+                .size(),
+            1u);
+  ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                           inventory.program_inventory.kernels().front())
+          .front();
   site.raw_ioffset = -4;
   site.raw_scale_offset = false;
 
@@ -3210,8 +3242,12 @@ TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) 
       make_rdna4_displaced_vglobal_atomic_release_acquire_code_object(), inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(inventory.program_inventory.kernels().front().atomic_sites.size(), 2u);
-  const ConSanAtomicSite site = inventory.program_inventory.kernels().front().atomic_sites[1];
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                                 inventory.program_inventory.kernels().front())
+                .size(),
+            2u);
+  const ConSanAtomicSite site = test_decoded_sites<ConSanAtomicSite>(
+      inventory.program_inventory, inventory.program_inventory.kernels().front())[1];
   ASSERT_EQ(site.raw_saddr, rdna4::OPR_SREG_NULL);
   ASSERT_EQ(site.raw_ioffset, 20);
 
@@ -3271,8 +3307,14 @@ TEST(ConSanMoi, VglobalAddressPlanAcceptsSpillResourcesAndPinsPrivatePair) {
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite site = inventory.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                                 inventory.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite site =
+      test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                           inventory.program_inventory.kernels().front())
+          .front();
 
   RegisterSet live;
   expand_all_vgprs(live);
@@ -3295,8 +3337,14 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(inventory.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite base = inventory.program_inventory.kernels().front().atomic_sites.front();
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                                 inventory.program_inventory.kernels().front())
+                .size(),
+            1u);
+  const ConSanAtomicSite base =
+      test_decoded_sites<ConSanAtomicSite>(inventory.program_inventory,
+                                           inventory.program_inventory.kernels().front())
+          .front();
   const auto classify = [&](const ConSanAtomicSite &site, uint16_t scratch = 8u,
                             uint16_t count = 5u,
                             ConSanRegisterAllocationSource source =
@@ -3612,12 +3660,19 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset);
     EXPECT_GE(candidate_sequence->end_text_offset, fence_event->text_offset + fence_event->size);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-    ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
+    ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(
+                  result.program_inventory, result.program_inventory.kernels().front())
+                  .size(),
+              1u);
     EXPECT_TRUE(
-        result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason ==
-            ConSanOrdinaryMemorySupportReason::Supported ||
-        result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason ==
-            ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
+        test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                     result.program_inventory.kernels().front())
+                .front()
+                .support_reason == ConSanOrdinaryMemorySupportReason::Supported ||
+        test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
+                                                     result.program_inventory.kernels().front())
+                .front()
+                .support_reason == ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
     ASSERT_TRUE(result.modified())
         << "warnings=" << testing::PrintToString(result.warnings)
         << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
@@ -3740,7 +3795,10 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            2u);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
                           [](const ConSanPatchInfo &patch) {
                             return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
@@ -4418,9 +4476,14 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
       patched, acquire_patch->trampoline_offset, acquire_patch->trampoline_size);
 
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            2u);
   const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-      result.program_inventory.kernels().front().atomic_sites[1], /*scratch_vgpr=*/12,
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())[1],
+      /*scratch_vgpr=*/12,
       /*scratch_vgpr_count=*/26, ConSanRegisterAllocationSource::Explicit,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(address_plan.supported());
@@ -4519,9 +4582,15 @@ TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->scratch_vgpr_count, 26u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
   const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-      result.program_inventory.kernels().front().atomic_sites.front(), /*scratch_vgpr=*/8,
+      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
+          .front(),
+      /*scratch_vgpr=*/8,
       /*scratch_vgpr_count=*/26, ConSanRegisterAllocationSource::Explicit,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(address_plan.supported());
@@ -4653,8 +4722,14 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
     EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
               ConSanSyncMemoryRole::AcquireRelease);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-    ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-    const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
+    ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                   result.program_inventory.kernels().front())
+                  .size(),
+              1u);
+    const ConSanAtomicSite site =
+        test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                             result.program_inventory.kernels().front())
+            .front();
     EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::AcquireRelease,
                                                   ROCJITSU_CODE_ARCH_RDNA4),
               ConSanAtomicClassifierReason::None);
@@ -4984,12 +5059,17 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(
-      result.program_inventory.kernels().front().atomic_sites, [](const ConSanAtomicSite &site) {
-        return site.raw_saddr == static_cast<uint32_t>(cdna5::OPR_SREG_NULL) &&
-               site.scope == ConSanMemoryScope::Agent && site.raw_ioffset == 0;
-      }));
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            2u);
+  EXPECT_TRUE(
+      std::ranges::all_of(test_decoded_sites<ConSanAtomicSite>(
+                              result.program_inventory, result.program_inventory.kernels().front()),
+                          [](const ConSanAtomicSite &site) {
+                            return site.raw_saddr == static_cast<uint32_t>(cdna5::OPR_SREG_NULL) &&
+                                   site.scope == ConSanMemoryScope::Agent && site.raw_ioffset == 0;
+                          }));
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Atomic && plan.scratch_vgpr_count == 26u;
   }));

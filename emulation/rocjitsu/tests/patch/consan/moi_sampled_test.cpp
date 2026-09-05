@@ -1058,7 +1058,10 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_EQ(result.observation_plan().engine, ConSanCapabilityEngine::Sampled);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
+                                                 result.program_inventory.kernels().front())
+                .size(),
+            1u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -2070,11 +2073,12 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-      const auto site = std::ranges::find_if(
-          result.program_inventory.kernels().front().atomic_sites,
-          [](const ConSanAtomicSite &item) { return item.mnemonic.starts_with("global_atomic_"); });
-      ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end())
-          << testing::PrintToString(result.program_inventory.kernels().front().atomic_sites);
+      const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(
+          result.program_inventory, result.program_inventory.kernels().front());
+      const auto site = std::ranges::find_if(atomic_sites, [](const ConSanAtomicSite &item) {
+        return item.mnemonic.starts_with("global_atomic_");
+      });
+      ASSERT_NE(site, atomic_sites.end()) << testing::PrintToString(atomic_sites);
       ASSERT_TRUE(site->scope) << testing::PrintToString(*site);
       EXPECT_EQ(site->width_bits, 32u);
       EXPECT_EQ(site->saddr_sgpr, test_case.scalar_base_sgpr);
@@ -7025,7 +7029,6 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   const auto guard = instrumentation::build_s_cbranch_execz(guard_distance, kArch);
   ASSERT_TRUE(guard);
   EXPECT_EQ(body.front(), *guard);
-
 }
 
 TEST(ConSanMoi, Cdna4SampledSpillSafeRuntimeSelectionUsesBodyGate) {
