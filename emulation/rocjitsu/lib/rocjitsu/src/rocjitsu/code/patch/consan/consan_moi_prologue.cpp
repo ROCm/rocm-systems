@@ -1412,7 +1412,8 @@ void note_dispatch_id_patch_info(ConSanPatchAbiEffects &effects,
   };
 }
 
-void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
+void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
+                                            const BoundRuntimeResources &resources,
                                             const ConSanMoiOperatingPoint &operating_point,
                                             const MoiObjectModeSemantics &mode_semantics,
                                             rj_code_arch_t arch, ConSanTransformArtifacts &result) {
@@ -1477,7 +1478,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     ConSanMoiOperatingPoint kernel_point = operating_point;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(options, kernel_point, result.moi_operating_point,
+        !apply_moi_transient_sgpr_assignment(request, kernel_point, result.moi_operating_point,
                                              kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue has no transient scalar assignment for kernel '" +
@@ -1586,7 +1587,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
           static_cast<uint32_t>(scalar_base) +
               moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(options, options, kernel_point, mode_semantics),
+                  resolve_moi_exec_save_requirement(request, resources, kernel_point, mode_semantics),
                   arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
@@ -1629,9 +1630,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_point.moi_exec_save_sgpr,
-        .runtime_sample_stride = options.moi_runtime_sample_stride,
-        .runtime_sample_offset = options.moi_runtime_sample_offset,
-        .runtime_report_dispatch_id = options.moi_report_dispatch_id,
+        .runtime_sample_stride = request.moi_runtime_sample_stride,
+        .runtime_sample_offset = request.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = resources.moi_report_dispatch_id,
     };
     planned.push_back({
         .kernel = &kernel,
@@ -1748,7 +1749,8 @@ moi_owner_epoch_prologue_uses_vgpr(const MoiOwnerEpochPrologueEmissionPlan &emis
 }
 
 void try_apply_owner_epoch_prologue_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    std::span<const uint8_t> bytes, const ConSanRequest &request,
+    const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     const MoiObjectModeSemantics &mode_semantics, const MoiPrologueModePolicy &mode_policy,
@@ -1766,7 +1768,8 @@ void try_apply_owner_epoch_prologue_patch(
     return;
   }
   if (operating_point.automatic_moi_private_epoch) {
-    try_apply_private_epoch_prologue_patch(options, operating_point, mode_semantics, arch, result);
+    try_apply_private_epoch_prologue_patch(request, resources, operating_point, mode_semantics, arch,
+                                           result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
@@ -1784,7 +1787,7 @@ void try_apply_owner_epoch_prologue_patch(
     result.errors.emplace_back("ConSan MOI owner and epoch VGPRs must be distinct");
     return;
   }
-  if (options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+  if (request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
       !operating_point.moi_owner_sgpr.base()) {
     result.errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
     return;
@@ -1802,7 +1805,7 @@ void try_apply_owner_epoch_prologue_patch(
     return;
   }
   const uint32_t owner_required_sgpr_count =
-      options.moi_owner_source == ConSanMoiOwnerSource::HwId
+      request.moi_owner_source == ConSanMoiOwnerSource::HwId
           ? static_cast<uint32_t>(*operating_point.moi_owner_sgpr.base()) + 1u
           : 0u;
   /// Per-kernel transaction fixed before any descriptor or text mutation.
@@ -1874,7 +1877,7 @@ void try_apply_owner_epoch_prologue_patch(
     if (kernel_point.automatic_moi_private_epoch)
       continue;
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(options, kernel_point, result.moi_operating_point,
+        !apply_moi_transient_sgpr_assignment(request, kernel_point, result.moi_operating_point,
                                              kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no transient scalar assignment for kernel '" +
@@ -2002,7 +2005,7 @@ void try_apply_owner_epoch_prologue_patch(
                     !result.moi_operating_point.owner_persistent_vgprs.empty()),
             },
         .owner_shift_bits = owner_shift_bits,
-        .owner_source = options.moi_owner_source,
+        .owner_source = request.moi_owner_source,
         .owner_sgpr = kernel_point.moi_owner_sgpr.base(),
         .one_based_owner_ids = mode_policy.one_based_owner_ids,
         .persistent_sgprs = kernel_point.moi_persistent_sgprs,
@@ -2010,9 +2013,9 @@ void try_apply_owner_epoch_prologue_patch(
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_point.moi_exec_save_sgpr,
-        .runtime_sample_stride = options.moi_runtime_sample_stride,
-        .runtime_sample_offset = options.moi_runtime_sample_offset,
-        .runtime_report_dispatch_id = options.moi_report_dispatch_id,
+        .runtime_sample_stride = request.moi_runtime_sample_stride,
+        .runtime_sample_offset = request.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = resources.moi_report_dispatch_id,
         .entry_scalar_backup = std::nullopt,
         .workgroup_shadow = std::move(prologue_workgroup_shadow),
         .has_quad_zero_tuple = kernel_point.automatic_moi_persistent_vgprs &&
@@ -2030,13 +2033,13 @@ void try_apply_owner_epoch_prologue_patch(
     // before any site-local spill exists.
     const bool needs_mode_runtime_scalar_backup =
         mode_policy.backup_compact_spill_for_runtime_sampling &&
-        kernel_point.has_compact_moi_scalar_spill() && options.moi_runtime_sample_stride > 1u;
+        kernel_point.has_compact_moi_scalar_spill() && request.moi_runtime_sample_stride > 1u;
     const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
                                                 needs_dynamic_stack_scalar_backup ||
                                                 needs_mode_runtime_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
         kernel_point.moi_owner_sgpr.automatic() &&
-        options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+        request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
         kernel_point.moi_owner_sgpr.base().has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
       const bool entry_backup_arch_supported = consan_is_capability_arch(arch);
@@ -2055,7 +2058,7 @@ void try_apply_owner_epoch_prologue_patch(
       const uint16_t borrowed_sgpr_count =
           needs_full_entry_scalar_backup
               ? moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                             options, options, kernel_point, mode_semantics),
+                                             request, resources, kernel_point, mode_semantics),
                                          arch)
               : 1u;
       const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);

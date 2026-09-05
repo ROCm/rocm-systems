@@ -377,6 +377,10 @@ foreach(_source IN ITEMS
     consan_perturbation.cpp
     consan_unmatched_barrier_abort.h
     consan_unmatched_barrier_abort.cpp
+    consan_moi_placement_contracts.h
+    consan_moi_placement.inc
+    consan_moi_prologue.h
+    consan_moi_prologue.cpp
     consan_placement.h
     consan_placement.inc
     consan_text_relocation.h

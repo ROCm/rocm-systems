@@ -20,7 +20,8 @@ namespace rocjitsu::consan_moi_impl {
                                                         ConSanTransformArtifacts &result);
 
 void try_apply_owner_epoch_prologue_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    std::span<const uint8_t> bytes, const ConSanRequest &request,
+    const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     const MoiObjectModeSemantics &mode_semantics, const MoiPrologueModePolicy &mode_policy,

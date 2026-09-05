@@ -258,7 +258,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     std::span<const ConSanCandidateResourcePlan> site_plans, const MoiResourcePlanningState &state);
 
 [[nodiscard]] ConSanMoiOperatingPointAttempt
-plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperatingPoint &base,
+plan_moi_dispatch_id_fallback(const ConSanRequest &request,
+                              const BoundRuntimeResources &resources,
+                              const ConSanMoiOperatingPoint &base,
                               const MoiResourceProblem &problem,
                               std::span<const ConSanCandidateResourcePlan> site_plans);
 

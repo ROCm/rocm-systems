@@ -2982,7 +2982,9 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
 }
 
 [[nodiscard]] ConSanMoiOperatingPointAttempt
-plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperatingPoint &base,
+plan_moi_dispatch_id_fallback(const ConSanRequest &request,
+                              const BoundRuntimeResources &resources,
+                              const ConSanMoiOperatingPoint &base,
                               const MoiResourceProblem &problem,
                               std::span<const ConSanCandidateResourcePlan> site_plans) {
   ConSanMoiOperatingPoint point = base;
@@ -3042,7 +3044,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
               !moi_scalar_contexts_admit_reserved_window(
                   owner_contexts->summaries, *point.moi_exec_save_sgpr,
                   moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                               input, input, point, problem.mode_semantics()),
+                                               request, resources, point, problem.mode_semantics()),
                                            arch),
                   arch)) {
             continue;

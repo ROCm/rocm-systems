@@ -224,7 +224,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   // established without exposing mutable search options.
   result.moi_operating_point = effective_point;
   ConSanMoiOperatingPointAttempt dispatch_fallback = plan_moi_dispatch_id_fallback(
-      effective_options, effective_point, resource_problem, result.resource_plans);
+      effective_options, effective_options, effective_point, resource_problem,
+      result.resource_plans);
   if (dispatch_fallback.accepted()) {
     effective_point = std::move(dispatch_fallback.attempted_operating_point);
     result.warnings.insert(result.warnings.end(),
@@ -311,9 +312,9 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
                            resource_planning_state, moi_candidates, object_facts,
                            mode_plan.semantics, result);
   if (result.errors.empty() && (!mode_plan.prologue_requires_consumer || result.modified()))
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, mode_plan.semantics,
-                                         mode_plan.prologue, arch, result);
+    try_apply_owner_epoch_prologue_patch(
+        code_object_bytes, effective_options, effective_options, effective_point,
+        prologue_scratch_assignments, mode_plan.semantics, mode_plan.prologue, arch, result);
   if (result.errors.empty())
     result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
