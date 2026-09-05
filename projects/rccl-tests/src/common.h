@@ -19,6 +19,13 @@
 #if (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)) \
     || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
+#if defined(RCCL_DEVCOMM_EXPECT_FABRIC_FIELDS)
+#include <cstddef>
+// Fails if common.cu compiled against /opt/rocm headers that lack the fabric
+// DDA tail (240-byte ncclDevComm vs librccl 288-byte memset).
+static_assert(offsetof(struct ncclDevComm, ginFabricPeerScratch) < sizeof(struct ncclDevComm),
+              "ncclDevComm is missing ginFabricPeerScratch; rccl_common include path is picking the wrong headers");
+#endif
 #endif
 #include <stdio.h>
 #include <cstdint>
