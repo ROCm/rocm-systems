@@ -3340,6 +3340,16 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   expect_bounded_static_record_replay_probe_size(result.patches.front().trampoline_size);
 }
 
+[[nodiscard]] const ConSanSyncEvent *test_sync_event(const ConSanTransformArtifacts &result,
+                                                     const ConSanFaultSite &site) {
+  return result.program_inventory.sync().find_event(site.source_site);
+}
+
+[[nodiscard]] const ConSanSyncSequence *test_sync_sequence(const ConSanTransformArtifacts &result,
+                                                           const ConSanFaultSite &site) {
+  return result.program_inventory.sync().find_unique_sequence_containing(site.source_site);
+}
+
 std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {
   std::vector<uint32_t> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base

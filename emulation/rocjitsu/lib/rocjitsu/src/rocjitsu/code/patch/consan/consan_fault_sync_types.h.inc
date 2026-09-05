@@ -94,8 +94,6 @@ struct ConSanFaultSitePresentation : ConSanDecodedSite {
   std::string decoded_operands;
   ConSanOrdinaryMemorySupportReason ordinary_memory_support_reason =
       ConSanOrdinaryMemorySupportReason::NotApplicable;
-  std::optional<std::string> sync_event_identity;
-  std::optional<std::string> sync_sequence_identity;
   ConSanSemanticConfidence sync_confidence = ConSanSemanticConfidence::Unsupported;
   ConSanSyncMemoryRole sync_memory_role = ConSanSyncMemoryRole::Unknown;
   std::vector<ConSanExecutionOwner> execution_owners;

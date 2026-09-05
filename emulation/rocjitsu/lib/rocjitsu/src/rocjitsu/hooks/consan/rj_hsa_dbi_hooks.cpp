@@ -4274,8 +4274,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const rocjitsu::ConSanProgramSite *presentation_source = nullptr;
       size_t source_count = 0;
       size_t addressed_source_count = 0;
-      for (const rocjitsu::SemanticSiteId &member_id : sequence.member_semantic_ids) {
-        const rocjitsu::ConSanSyncEvent *event = sync.find_sequence_member(member_id);
+      for (const rocjitsu::ConSanSyncEventId member_id : sequence.member_event_ids) {
+        const rocjitsu::ConSanSyncEvent *event = sync.find_event(member_id);
         if (event == nullptr)
           continue;
         if (!members.empty())

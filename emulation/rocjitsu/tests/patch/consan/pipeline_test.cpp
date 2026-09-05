@@ -367,6 +367,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   };
   barrier.kind = ConSanSyncKind::Barrier;
   barrier.operation = ConSanSyncOperation::BarrierFull;
+  barrier.identity = "event:24";
   ConSanProgramSite barrier_source;
   barrier_source.physical_id = barrier.semantic_id.physical;
   barrier_source.container = consan_program_container_ref(inventory_builder.kernels().back());
@@ -374,6 +375,10 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   barrier.source_site = {static_cast<uint32_t>(inventory_builder.program_sites().size())};
   inventory_builder.add_semantic_site(std::move(barrier_source));
   inventory_builder.synchronization().sync_events.push_back(barrier);
+  ConSanSyncSequence barrier_sequence;
+  barrier_sequence.identity = "sequence:24";
+  barrier_sequence.member_event_ids = {{0}};
+  inventory_builder.synchronization().sync_sequences.push_back(std::move(barrier_sequence));
   const ProgramInventory inventory = inventory_builder.view();
   ASSERT_EQ(inventory.access_sites().size(), 1u);
   ASSERT_EQ(inventory.access_sites().front().ranges.size(), 1u);
@@ -444,12 +449,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   published_fault_site.decoded_operands = "v[0:1], v[2:3]";
   published_fault_site.ordinary_memory_support_reason =
       ConSanOrdinaryMemorySupportReason::Supported;
-  published_fault_site.sync_event_identity = "event:24";
-  published_fault_site.sync_sequence_identity = "sequence:24";
   published_fault_site.sync_confidence = ConSanSemanticConfidence::Exact;
   published_fault_site.sync_memory_role = ConSanSyncMemoryRole::Release;
   published_fault_site.execution_owners = {
       {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::DirectCall}};
+  published_fault_site.source_site = barrier.source_site;
   published_fault_site.address_vgpr = 2u;
   published_fault_site.selectable_vgpr_bank_mode = 1u;
   const ConSanFaultSitePresentation expected_fault_site = published_fault_site;
@@ -512,6 +516,8 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       TransformResultTestAccess::diagnostic_report(published);
   ASSERT_EQ(published_diagnostics.fault_sites.size(), 1u);
   EXPECT_EQ(published_diagnostics.fault_sites.front(), expected_fault_site);
+  EXPECT_EQ(published_diagnostics.fault_sites.front().sync_event_identity, "event:24");
+  EXPECT_EQ(published_diagnostics.fault_sites.front().sync_sequence_identity, "sequence:24");
   ASSERT_EQ(published_diagnostics.barrier_move_destinations.size(), 1u);
   EXPECT_EQ(published_diagnostics.barrier_move_destinations.front(), expected_destination);
   ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);

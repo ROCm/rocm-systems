@@ -2181,14 +2181,12 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
     const ConSanSyncEvent *event = source == nullptr ? nullptr : sync.find_event(site.source_site);
     if (event == nullptr)
       continue;
-    site.sync_event_identity = event->identity;
     const SyncSequenceMembership *sequence_entry =
         find_sync_sequence_membership(sequence_by_event, sync.event_id(*event));
     const ConSanSyncSequence *sequence =
         sequence_entry == nullptr ? nullptr : sequence_entry->sequence;
     if (sequence == nullptr)
       continue;
-    site.sync_sequence_identity = sequence->identity;
     site.sync_confidence = sequence->confidence;
     site.sync_memory_role = sequence->memory_role;
     switch (sequence->operation) {

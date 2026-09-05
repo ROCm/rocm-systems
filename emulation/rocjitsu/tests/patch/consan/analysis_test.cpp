@@ -4184,10 +4184,8 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
     EXPECT_EQ(barrier.member_event_ids[index], ConSanSyncEventId{static_cast<uint32_t>(index)});
   }
   ASSERT_EQ(paired.fault_sites.size(), 2u);
-  ASSERT_TRUE(paired.fault_sites[0].sync_sequence_identity);
-  ASSERT_TRUE(paired.fault_sites[1].sync_sequence_identity);
-  EXPECT_EQ(*paired.fault_sites[0].sync_sequence_identity, barrier.identity);
-  EXPECT_EQ(*paired.fault_sites[1].sync_sequence_identity, barrier.identity);
+  EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[0]), &barrier);
+  EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[1]), &barrier);
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("barrier_id=-1"), std::string::npos);
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("operand_source=immediate"),
             std::string::npos);

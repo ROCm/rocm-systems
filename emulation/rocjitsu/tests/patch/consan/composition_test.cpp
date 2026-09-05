@@ -572,7 +572,7 @@ TEST(ConSanMoi, LateIncompleteBarrierDropRetryMatchesFreshSafety) {
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   ASSERT_NE(sequence, selection.program_inventory.sync().sync_sequences.end());
   const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
-    return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
+    return test_sync_sequence(selection, site) == &*sequence && site.mnemonic == "s_barrier_signal";
   });
   ASSERT_NE(primary, selection.fault_sites.end());
   live.fault_site_identity = primary->identity;
@@ -616,7 +616,7 @@ TEST(ConSanMoi, LateExactBarrierDropRetryMatchesFreshTransform) {
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   ASSERT_NE(sequence, selection.program_inventory.sync().sync_sequences.end());
   const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
-    return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
+    return test_sync_sequence(selection, site) == &*sequence && site.mnemonic == "s_barrier_signal";
   });
   ASSERT_NE(primary, selection.fault_sites.end());
 
@@ -836,7 +836,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
   ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
-        return site.sync_sequence_identity == sequence->identity &&
+        return test_sync_sequence(inventory, site) == &*sequence &&
                site.mnemonic == "s_barrier_signal";
       });
   ASSERT_NE(primary, inventory.fault_sites.end());
@@ -918,7 +918,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
-        return site.sync_sequence_identity == sequence->identity &&
+        return test_sync_sequence(inventory, site) == &*sequence &&
                site.mnemonic == "s_barrier_signal";
       });
   ASSERT_NE(primary, inventory.fault_sites.end());

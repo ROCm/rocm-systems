@@ -19,7 +19,10 @@ namespace rocjitsu {
 /// Presentation-only snapshots copied from the immutable facets of completed
 /// analysis products. These aliases cannot expose the private source binding,
 /// target operands, or application proof carried by the derived products.
-using ConSanFaultSiteDiagnostic = ConSanFaultSitePresentation;
+struct ConSanFaultSiteDiagnostic : ConSanFaultSitePresentation {
+  std::optional<std::string> sync_event_identity;
+  std::optional<std::string> sync_sequence_identity;
+};
 using ConSanBarrierMoveDestinationDiagnostic = ConSanBarrierMoveDestinationPresentation;
 using ConSanFaultMutationDiagnostic = ConSanFaultMutationPresentation;
 

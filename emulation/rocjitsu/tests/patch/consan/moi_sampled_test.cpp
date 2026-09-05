@@ -8159,7 +8159,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   ASSERT_NE(cluster_sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
-        return site.sync_sequence_identity == cluster_sequence->identity &&
+        return test_sync_sequence(inventory, site) == &*cluster_sequence &&
                site.mnemonic == "s_barrier_signal";
       });
   ASSERT_NE(primary, inventory.fault_sites.end());

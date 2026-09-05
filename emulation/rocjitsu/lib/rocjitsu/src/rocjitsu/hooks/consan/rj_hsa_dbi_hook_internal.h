@@ -161,12 +161,11 @@ barrier_move_cfg_contract_name(rocjitsu::ConSanBarrierMoveCfgContract contract) 
 }
 
 inline constexpr auto kSyncSequenceKinds = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncSequenceKind::Barrier, "barrier"),
-    consan_enum(ConSanSyncSequenceKind::Fence, "fence"),
-    consan_enum(ConSanSyncSequenceKind::Atomic, "atomic"),
-    consan_enum(ConSanSyncSequenceKind::OrdinaryMemory, "ordinary-memory"));
+    "unknown", consan_enum(ConSanSyncKind::Barrier, "barrier"),
+    consan_enum(ConSanSyncKind::Fence, "fence"), consan_enum(ConSanSyncKind::Atomic, "atomic"),
+    consan_enum(ConSanSyncKind::OrdinaryMemory, "ordinary-memory"));
 
-[[nodiscard]] inline const char *sync_sequence_kind_name(rocjitsu::ConSanSyncSequenceKind kind) {
+[[nodiscard]] inline const char *sync_sequence_kind_name(rocjitsu::ConSanSyncKind kind) {
   return kSyncSequenceKinds.name(kind).data();
 }
 

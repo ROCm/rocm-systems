@@ -86,7 +86,8 @@ TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
     return item.kind == ConSanFaultSiteKind::Barrier && item.container_name == "shared_lds_helper";
   });
   ASSERT_NE(source, inventory.fault_sites.end());
-  ASSERT_TRUE(source->sync_sequence_identity);
+  const ConSanSyncSequence *source_sequence = test_sync_sequence(inventory, *source);
+  ASSERT_NE(source_sequence, nullptr);
   const auto destination =
       std::ranges::find_if(inventory.barrier_move_destinations, [](const auto &item) {
         return item.container_name == "shared_lds_helper" && item.suitable() &&
@@ -97,7 +98,7 @@ TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
   ConSanOptions selected_options = inventory_options;
   selected_options.fault_move_barrier = true;
   selected_options.fault_site_identity = source->identity;
-  selected_options.fault_barrier_sequence_identity = *source->sync_sequence_identity;
+  selected_options.fault_barrier_sequence_identity = source_sequence->identity;
   selected_options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
   selected_options.fault_barrier_destination_identity = destination->identity;
   selected_options.test_kernel_name_filter = "shared_owner_0";
@@ -867,7 +868,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   EXPECT_NE(sequence->confidence_reason.find("no intervening barrier"), std::string::npos);
 
   const auto primary = std::ranges::find_if(inventory.fault_sites, [&](const auto &site) {
-    return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
+    return test_sync_sequence(inventory, site) == &*sequence && site.mnemonic == "s_barrier_signal";
   });
   ASSERT_NE(primary, inventory.fault_sites.end());
   ConSanOptions execution_options = inventory_options;
@@ -952,7 +953,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   ASSERT_EQ(sequences.size(), 2u);
   const auto site_for = [&](const ConSanSyncSequence &sequence) {
     return std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
-      return site.sync_sequence_identity == sequence.identity;
+      return test_sync_sequence(inventory, site) == &sequence;
     });
   };
   const auto first_site = site_for(*sequences[0]);
@@ -1020,7 +1021,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   ASSERT_EQ(sequences.size(), 2u);
   const auto site_for = [&](const ConSanSyncSequence &sequence) {
     return std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
-      return site.sync_sequence_identity == sequence.identity;
+      return test_sync_sequence(inventory, site) == &sequence;
     });
   };
   const auto first_site = site_for(*sequences[0]);
@@ -1419,11 +1420,16 @@ TEST(ConSan, FaultBarrierMoveDryRunPlansStableRealEarlierAndLaterDestinations) {
     ASSERT_EQ(result.fault_plans.size(), 1u);
     const ConSanFaultMutationPlan &mutation = result.fault_plans.front();
     ASSERT_TRUE(mutation.logical_sequence_identity);
-    EXPECT_EQ(*mutation.logical_sequence_identity,
-              *inventory.fault_sites[0].sync_sequence_identity);
+    const ConSanSyncSequence *sequence = test_sync_sequence(inventory, inventory.fault_sites[0]);
+    ASSERT_NE(sequence, nullptr);
+    EXPECT_EQ(*mutation.logical_sequence_identity, sequence->identity);
     ASSERT_EQ(mutation.ordered_member_identities.size(), 2u);
-    EXPECT_EQ(mutation.ordered_member_identities[0], *inventory.fault_sites[0].sync_event_identity);
-    EXPECT_EQ(mutation.ordered_member_identities[1], *inventory.fault_sites[1].sync_event_identity);
+    const ConSanSyncEvent *first_event = test_sync_event(inventory, inventory.fault_sites[0]);
+    const ConSanSyncEvent *second_event = test_sync_event(inventory, inventory.fault_sites[1]);
+    ASSERT_NE(first_event, nullptr);
+    ASSERT_NE(second_event, nullptr);
+    EXPECT_EQ(mutation.ordered_member_identities[0], first_event->identity);
+    EXPECT_EQ(mutation.ordered_member_identities[1], second_event->identity);
     ASSERT_TRUE(mutation.destination_identity);
     EXPECT_EQ(*mutation.destination_identity, destination.identity);
     EXPECT_EQ(mutation.barrier_move_direction, direction);

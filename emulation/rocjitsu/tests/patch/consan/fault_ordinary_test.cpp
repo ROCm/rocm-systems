@@ -65,13 +65,11 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
     EXPECT_NE(first_sites[i]->identity.find("|kernel=ordinary_memory_kernel|"
                                             "kind=ordinary-memory|"),
               std::string::npos);
-    ASSERT_TRUE(first_sites[i]->sync_event_identity);
-    ASSERT_TRUE(second_sites[i]->sync_event_identity);
-    EXPECT_EQ(first_sites[i]->sync_event_identity, second_sites[i]->sync_event_identity);
-    const auto event =
-        std::ranges::find(first.program_inventory.sync().sync_events,
-                          *first_sites[i]->sync_event_identity, &ConSanSyncEvent::identity);
-    ASSERT_NE(event, first.program_inventory.sync().sync_events.end());
+    const ConSanSyncEvent *event = test_sync_event(first, *first_sites[i]);
+    const ConSanSyncEvent *second_event = test_sync_event(second, *second_sites[i]);
+    ASSERT_NE(event, nullptr);
+    ASSERT_NE(second_event, nullptr);
+    EXPECT_EQ(event->identity, second_event->identity);
     EXPECT_EQ(event->kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(event->operation, i % 2u == 0u ? ConSanSyncOperation::OrdinaryLoad
                                              : ConSanSyncOperation::OrdinaryStore);
@@ -127,8 +125,8 @@ TEST(ConSan, FaultInventoryRetainsMalformedOrdinaryMemoryAsTypedUnsupported) {
   EXPECT_EQ(site->mnemonic, "global_load_b32");
   EXPECT_EQ(site->ordinary_memory_support_reason,
             ConSanOrdinaryMemorySupportReason::MalformedEncoding);
-  EXPECT_TRUE(site->sync_event_identity == std::nullopt);
-  EXPECT_TRUE(site->sync_sequence_identity == std::nullopt);
+  EXPECT_EQ(test_sync_event(result, *site), nullptr);
+  EXPECT_EQ(test_sync_sequence(result, *site), nullptr);
 }
 
 TEST(ConSan, FaultInventoryDecodesGfx1250VglobalMemoryForSynchronization) {
@@ -233,14 +231,12 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
     return site.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(load, result.fault_sites.end());
-  ASSERT_TRUE(load->sync_event_identity);
-  ASSERT_TRUE(load->sync_sequence_identity);
+  ASSERT_NE(test_sync_event(result, *load), nullptr);
   EXPECT_EQ(load->semantic_role, "ordinary-acquire-load");
   EXPECT_EQ(load->sync_memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(load->sync_confidence, ConSanSemanticConfidence::Conservative);
 
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryLoad);
@@ -262,9 +258,7 @@ TEST(ConSan, AssociatesRetainedOrdinaryLoadSelfLoopExitAcquireSequence) {
            site.semantic_role == "ordinary-acquire-load";
   });
   ASSERT_NE(load, result.fault_sites.end());
-  ASSERT_TRUE(load->sync_event_identity);
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->memory_role_confidence, ConSanSemanticConfidence::Conservative);
@@ -294,9 +288,7 @@ TEST(ConSan, AssociatesGfx1250BufferPollLoopWithBoundedAddressSetup) {
     return site.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(load, result.fault_sites.end());
-  ASSERT_TRUE(load->sync_event_identity);
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
@@ -323,9 +315,7 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
     return site.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(load, result.fault_sites.end());
-  ASSERT_TRUE(load->sync_event_identity);
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *load);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
@@ -467,14 +457,12 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
     return site.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(store, result.fault_sites.end());
-  ASSERT_TRUE(store->sync_event_identity);
-  ASSERT_TRUE(store->sync_sequence_identity);
+  ASSERT_NE(test_sync_event(result, *store), nullptr);
   EXPECT_EQ(store->semantic_role, "ordinary-release-store");
   EXPECT_EQ(store->sync_memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(store->sync_confidence, ConSanSemanticConfidence::Conservative);
 
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*store->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *store);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryStore);
@@ -558,12 +546,10 @@ TEST(ConSan, AssociatesExactScopedOrdinaryReleaseWaitTail) {
     return site.kind == ConSanFaultSiteKind::OrdinaryMemory;
   });
   ASSERT_NE(store, result.fault_sites.end());
-  ASSERT_TRUE(store->sync_event_identity);
-  ASSERT_TRUE(store->sync_sequence_identity);
+  ASSERT_NE(test_sync_event(result, *store), nullptr);
   EXPECT_EQ(store->semantic_role, "ordinary-release-store");
   EXPECT_EQ(store->sync_memory_role, ConSanSyncMemoryRole::Release);
-  const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*store->sync_event_identity);
+  const ConSanSyncSequence *sequence = test_sync_sequence(result, *store);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->release_wait_text_offset, 0u);
@@ -676,7 +662,8 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
     return site.semantic_role == "ordinary-acquire-load";
   });
   ASSERT_NE(load, inventory.fault_sites.end());
-  ASSERT_TRUE(load->sync_sequence_identity);
+  const ConSanSyncSequence *load_sequence = test_sync_sequence(inventory, *load);
+  ASSERT_NE(load_sequence, nullptr);
 
   ConSanOptions options = inventory_options;
   options.fault_dry_run = true;
@@ -692,7 +679,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   EXPECT_EQ(result.fault_plans[2].kind, ConSanFaultMutationKind::OrdinaryWeakenScope);
   for (const ConSanFaultMutationPlan &plan : result.fault_plans) {
     EXPECT_EQ(plan.primary_identity, load->identity);
-    EXPECT_EQ(plan.logical_sequence_identity, load->sync_sequence_identity);
+    EXPECT_EQ(plan.logical_sequence_identity, load_sequence->identity);
     EXPECT_EQ(plan.ordered_member_identities.size(), 2u);
   }
   EXPECT_FALSE(result.fault_plans[0].companion_identity);
@@ -890,10 +877,8 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), kLoadCount);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), kLoadCount);
   ASSERT_EQ(result.fault_sites.size(), kLoadCount);
-  for (const ConSanFaultSite &site : result.fault_sites) {
-    EXPECT_TRUE(site.sync_event_identity.has_value());
-    EXPECT_TRUE(site.sync_sequence_identity.has_value());
-  }
+  for (const ConSanFaultSite &site : result.fault_sites)
+    EXPECT_NE(test_sync_event(result, site), nullptr);
   for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     ASSERT_EQ(sequence.member_event_ids.size(), 1u);
     ASSERT_EQ(sequence.execution_owners.size(), 1u);

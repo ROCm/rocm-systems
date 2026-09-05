@@ -200,8 +200,8 @@ TEST(ConSan, FaultInventoryIncludesAtomicOperandsAndRoles) {
   EXPECT_EQ(result.fault_sites[1].occurrence, 1u);
   EXPECT_EQ(result.fault_sites[0].semantic_role, "atomic-order-unknown");
   EXPECT_EQ(result.fault_sites[1].semantic_role, "atomic-order-unknown");
-  ASSERT_TRUE(result.fault_sites[0].sync_event_identity);
-  ASSERT_TRUE(result.fault_sites[0].sync_sequence_identity);
+  ASSERT_NE(test_sync_event(result, result.fault_sites[0]), nullptr);
+  ASSERT_NE(test_sync_sequence(result, result.fault_sites[0]), nullptr);
   EXPECT_EQ(result.fault_sites[0].sync_confidence, ConSanSemanticConfidence::Unsupported);
   EXPECT_EQ(result.fault_sites[0].sync_memory_role, ConSanSyncMemoryRole::Unknown);
   EXPECT_NE(result.fault_sites[1].decoded_operands.find("raw_ioffset=0"), std::string::npos);

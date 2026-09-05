@@ -270,8 +270,17 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
   report.resource_summary = resource_summary;
 
   report.fault_sites.reserve(result.private_lowering_.fault_sites.size());
-  for (const ConSanFaultSite &site : result.private_lowering_.fault_sites)
-    report.fault_sites.emplace_back(static_cast<const ConSanFaultSitePresentation &>(site));
+  const SynchronizationInventoryView synchronization = result.program_inventory.sync();
+  for (const ConSanFaultSite &site : result.private_lowering_.fault_sites) {
+    ConSanFaultSiteDiagnostic diagnostic;
+    static_cast<ConSanFaultSitePresentation &>(diagnostic) = site;
+    if (const ConSanSyncEvent *event = synchronization.find_event(site.source_site))
+      diagnostic.sync_event_identity = event->identity;
+    if (const ConSanSyncSequence *sequence =
+            synchronization.find_unique_sequence_containing(site.source_site))
+      diagnostic.sync_sequence_identity = sequence->identity;
+    report.fault_sites.push_back(std::move(diagnostic));
+  }
 
   report.barrier_move_destinations.reserve(
       result.private_lowering_.barrier_move_destinations.size());
