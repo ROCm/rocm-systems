@@ -58,7 +58,7 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
   }
   struct PlannedAtomicRecord : MoiPlannedRecordEvent {
     MoiAtomicEvidenceSitePlan candidate;
-    ConSanAtomicSite site;
+    MoiAtomicEvidenceSourceView source;
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
@@ -74,14 +74,13 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
     if (selected_candidates.size() == max_candidates)
       break;
-    const std::optional<ConSanAtomicSite> materialized_site =
-        materialize_moi_communication_site(result.program_inventory, candidate.source_site,
-                                           candidate.sequence);
-    if (!materialized_site) {
+    std::optional<MoiAtomicEvidenceSourceView> source =
+        resolve_moi_atomic_evidence_source(result.program_inventory, candidate);
+    if (!source) {
       result.errors.emplace_back("ConSan MOI atomic record patch lost its decoded source site");
       return;
     }
-    const ConSanAtomicSite &site = *materialized_site;
+    const ConSanAtomicSite &site = source->site;
     if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset) {
       result.errors.emplace_back("ConSan MOI atomic record patch site is outside .text");
       return;
@@ -135,7 +134,8 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
                               spill_managers, arch, "ConSan MOI atomic record patch");
     if (!record_event)
       continue;
-    selected_candidates.push_back({std::move(*record_event), candidate, site, address_plan});
+    selected_candidates.push_back(
+        {std::move(*record_event), candidate, std::move(*source), address_plan});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -151,8 +151,8 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.site,
-                                           planned.candidate.scalar_clause_text_offset, arch,
+    if (!append_atomic_scalar_clause_patch(old_text, planned.source.site,
+                                           planned.source.sequence->scalar_clause_text_offset, arch,
                                            scalar_clause_patches, result.errors))
       return;
   }
@@ -163,10 +163,11 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
-    const ConSanAtomicSite &site = planned.site;
+    const ConSanAtomicSite &site = planned.source.site;
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
-        active_bytes, candidate, site, planned.address_plan, planned.emission,
+        active_bytes, planned.source, candidate.lowering_form, planned.address_plan,
+        planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, guest_instruction_offset,

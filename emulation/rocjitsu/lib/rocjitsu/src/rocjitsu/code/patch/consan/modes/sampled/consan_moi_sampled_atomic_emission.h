@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access_emission.h"
@@ -59,8 +60,8 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
                                              const ConSanAtomicLoweringForm &form);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, uint64_t owner_descriptor_file_offset,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
     const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
@@ -70,8 +71,8 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
     std::span<const uint32_t> trailing_guest_words = {}, uint32_t *emitted_guest_size = nullptr);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, uint64_t owner_descriptor_file_offset,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
     const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,

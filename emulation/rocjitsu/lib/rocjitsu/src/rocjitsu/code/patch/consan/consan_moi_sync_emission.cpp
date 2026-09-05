@@ -71,23 +71,21 @@ namespace consan_moi_impl {
 }
 
 [[nodiscard]] SampledAtomicSemanticsResult
-sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
-                                  const MoiAtomicEvidenceSitePlan &plan,
-                                  const ConSanAtomicSite &site) {
+sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source) {
   using Reason = SampledAtomicSemanticsReason;
   const auto reject = [](Reason reason) {
     return SampledAtomicSemanticsResult{.semantics = std::nullopt, .reason = reason};
   };
-  const ConSanSyncSequence *sequence = graph.find_sequence(plan.sequence);
-  if (sequence == nullptr ||
-      !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
-      !consan_sync_confidence_meets(sequence->memory_role_confidence,
+  const ConSanSyncSequence &sequence = *source.sequence;
+  const ConSanAtomicSite &site = source.site;
+  if (!consan_sync_confidence_meets(sequence.confidence, ConSanSemanticConfidence::Conservative) ||
+      !consan_sync_confidence_meets(sequence.memory_role_confidence,
                                     ConSanSemanticConfidence::Conservative)) {
     return reject(Reason::UnqualifiedSharedSyncSequence);
   }
 
   consan_detail::SampledAtomicSemantics semantics;
-  switch (sequence->memory_role) {
+  switch (sequence.memory_role) {
   case ConSanSyncMemoryRole::Release:
     semantics.role = ConSanMoiSampledSyncRole::RmwRelease;
     break;
@@ -102,7 +100,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   case ConSanSyncMemoryRole::SequentiallyConsistent:
     return reject(Reason::UnsupportedQualifiedMemoryRole);
   }
-  const std::optional<ConSanMemoryScope> semantic_scope = sequence->scope;
+  const std::optional<ConSanMemoryScope> semantic_scope = sequence.scope;
   if (!semantic_scope) {
     return reject(Reason::MissingQualifiedScope);
   }
@@ -115,7 +113,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     return reject(Reason::UnsupportedQualifiedByteRange);
   }
   semantics.byte_count = site.width_bits / 8u;
-  switch (sequence->rmw_outcome) {
+  switch (sequence.rmw_outcome) {
   case ConSanSyncRmwOutcome::NoReturn:
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwNoReturn;
     break;
@@ -145,7 +143,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     return reject(Reason::SampledSyncAbiRejectedQualifiedSequence);
   }
   semantics.descriptor = encoded.packed.descriptor;
-  if (sequence->rmw_outcome == ConSanSyncRmwOutcome::CompareExchange) {
+  if (sequence.rmw_outcome == ConSanSyncRmwOutcome::CompareExchange) {
     ConSanMoiSampledSyncMetadata failure_metadata{
         .address = 1,
         .byte_count = semantics.byte_count,
@@ -364,23 +362,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
   return std::max<uint16_t>(inline_atomic_scratch_count(form), record_minimum);
 }
 
-[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-moi_atomic_event_kind(ConSanSyncMemoryRole role) {
-  switch (role) {
-  case ConSanSyncMemoryRole::Release:
-    return ConSanMoiAtomicEventKind::Release;
-  case ConSanSyncMemoryRole::Acquire:
-    return ConSanMoiAtomicEventKind::Acquire;
-  case ConSanSyncMemoryRole::AcquireRelease:
-    return ConSanMoiAtomicEventKind::AcquireRelease;
-  case ConSanSyncMemoryRole::Unknown:
-  case ConSanSyncMemoryRole::None:
-  case ConSanSyncMemoryRole::SequentiallyConsistent:
-    return std::nullopt;
-  }
-  return std::nullopt;
-}
-
 /// Project admitted atomic evidence directly into the common MOI lowering
 /// contract.
 ///
@@ -426,33 +407,18 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its synchronization graph");
       return {};
     }
-    const auto event_kind = moi_atomic_event_kind(sequence->memory_role);
-    if (!event_kind) {
-      errors.emplace_back("ConSan MOI admitted atomic evidence has no supported ordering role");
-      return {};
-    }
-
     MoiAtomicEvidenceSitePlan plan;
     plan.event = graph.event_id(*event);
     plan.sequence = graph.sequence_id(*sequence);
     plan.source_site = event->source_site;
     plan.address_capture_intent = address_capture;
     plan.evidence_intent = evidence;
-    plan.event_kind = *event_kind;
-    plan.is_rmw = event->kind == ConSanSyncKind::Atomic;
-    plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
-    plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-    const ConSanProgramContainer *container =
-        resolve_moi_evidence_container(inventory, event->source_site);
-    if (!container || !decision.lowering_form) {
+    if (!decision.lowering_form) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }
-    const std::optional<ConSanAtomicSite> site =
-        materialize_moi_communication_site(inventory, event->source_site, plan.sequence);
     plan.lowering_form = *decision.lowering_form;
-    if (!site || plan.ordered_sequence_end_text_offset < site->text_offset + site->size ||
-        !plan.is_well_formed()) {
+    if (!resolve_moi_atomic_evidence_source(inventory, plan) || !plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }

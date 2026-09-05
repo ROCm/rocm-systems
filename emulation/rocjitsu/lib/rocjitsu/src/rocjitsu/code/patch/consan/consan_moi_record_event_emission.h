@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
@@ -44,8 +45,9 @@ struct MoiRecordEventEmissionPlan {
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &lowering_form,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,

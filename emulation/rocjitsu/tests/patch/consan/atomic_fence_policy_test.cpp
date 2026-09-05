@@ -525,6 +525,26 @@ TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSe
   EXPECT_EQ(communication->text_offset, event.text_offset());
   EXPECT_EQ(communication->width_bits, 32u);
   EXPECT_EQ(communication->scope, ConSanMemoryScope::Workgroup);
+
+  consan_detail::MoiAtomicEvidenceSitePlan plan;
+  plan.event = {0u};
+  plan.sequence = {0u};
+  plan.source_site = published_event.source_site;
+  plan.address_capture_intent = {.value = 1u};
+  plan.evidence_intent = {.value = 2u};
+  plan.lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
+  const std::optional<consan_moi_impl::MoiAtomicEvidenceSourceView> source =
+      consan_moi_impl::resolve_moi_atomic_evidence_source(inventory, plan);
+  ASSERT_TRUE(source.has_value());
+  EXPECT_EQ(source->event, &published_event);
+  EXPECT_EQ(source->sequence, &inventory.sync().sync_sequences.front());
+  EXPECT_FALSE(source->is_rmw());
+  EXPECT_EQ(source->site, *communication);
+
+  consan_detail::MoiAtomicEvidenceSitePlan mismatched = plan;
+  mismatched.event = {1u};
+  EXPECT_FALSE(
+      consan_moi_impl::resolve_moi_atomic_evidence_source(inventory, mismatched).has_value());
   EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
                    inventory, {}, ConSanSyncSequenceId{0u})
                    .has_value());

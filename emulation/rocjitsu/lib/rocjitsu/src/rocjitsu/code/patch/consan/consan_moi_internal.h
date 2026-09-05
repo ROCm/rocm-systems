@@ -655,8 +655,7 @@ struct MoiWorkitemOwnerDerivationRequest {
 /// resolves operands from `source_site` at its boundary, but it must not
 /// rediscover release/acquire meaning from instruction bits or choose a
 /// different evidence intent. Language-level atomic load/store sequences use
-/// the same contract with `is_rmw == false`; their complete ordered suffix is
-/// retained in `ordered_sequence_end_text_offset`.
+/// the same handle contract; their ordered suffix remains owned by `sequence`.
 struct MoiAtomicEvidenceSitePlan {
   /// Authoritative synchronization event selected by evidence policy.
   ConSanSyncEventId event;
@@ -677,20 +676,7 @@ struct MoiAtomicEvidenceSitePlan {
   /// Stable decoded source whose operands and execution owners scope lowering.
   ConSanProgramSiteId source_site;
 
-  /// Normalized release/acquire role selected from the shared sequence.
-  ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
-
-  /// True for a native RMW/CAS and false for an ordered ordinary load/store.
-  bool is_rmw = true;
-
-  /// End of the complete ordered guest sequence in original text coordinates.
-  uint64_t ordered_sequence_end_text_offset = 0;
-
-  /// Scalar scheduling hint that must be neutralized before inserting control
-  /// flow around the guest operation.
-  std::optional<uint64_t> scalar_clause_text_offset;
-
-  /// Verify the cross-stage identities and basic guest-range invariants.
+  /// Verify the cross-stage identities and intent invariants.
   [[nodiscard]] std::array<ConSanProbeIntentId, 2> intent_ids() const {
     return {address_capture_intent, evidence_intent};
   }

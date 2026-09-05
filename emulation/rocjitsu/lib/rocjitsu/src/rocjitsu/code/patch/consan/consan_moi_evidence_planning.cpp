@@ -59,4 +59,40 @@ materialize_moi_communication_site(const ProgramInventory &inventory,
   return result;
 }
 
+std::optional<ConSanMoiAtomicEventKind> moi_atomic_event_kind(ConSanSyncMemoryRole role) {
+  switch (role) {
+  case ConSanSyncMemoryRole::Release:
+    return ConSanMoiAtomicEventKind::Release;
+  case ConSanSyncMemoryRole::Acquire:
+    return ConSanMoiAtomicEventKind::Acquire;
+  case ConSanSyncMemoryRole::AcquireRelease:
+    return ConSanMoiAtomicEventKind::AcquireRelease;
+  case ConSanSyncMemoryRole::Unknown:
+  case ConSanSyncMemoryRole::None:
+  case ConSanSyncMemoryRole::SequentiallyConsistent:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+std::optional<MoiAtomicEvidenceSourceView>
+resolve_moi_atomic_evidence_source(const ProgramInventory &inventory,
+                                   const consan_detail::MoiAtomicEvidenceSitePlan &plan) {
+  const SynchronizationInventoryView graph = inventory.sync();
+  const ConSanSyncEvent *event = graph.find_event(plan.event);
+  const ConSanSyncSequence *sequence = graph.find_sequence(plan.sequence);
+  const std::optional<ConSanAtomicSite> site =
+      materialize_moi_communication_site(inventory, plan.source_site, plan.sequence);
+  if (event == nullptr || sequence == nullptr || !site ||
+      resolve_moi_evidence_container(inventory, plan.source_site) == nullptr ||
+      event->source_site != plan.source_site ||
+      (event->kind != ConSanSyncKind::Atomic && event->kind != ConSanSyncKind::OrdinaryMemory) ||
+      graph.find_unique_sequence_containing(event->semantic_id) != sequence ||
+      !moi_atomic_event_kind(sequence->memory_role) ||
+      sequence->end_text_offset < site->text_offset + site->size) {
+    return std::nullopt;
+  }
+  return MoiAtomicEvidenceSourceView{event, sequence, *site};
+}
+
 } // namespace rocjitsu::consan_moi_impl

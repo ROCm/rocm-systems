@@ -443,7 +443,6 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   plan.address_capture_intent = {.value = 3u};
   plan.evidence_intent = {.value = 4u};
   plan.lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
-  plan.ordered_sequence_end_text_offset = 20u;
   EXPECT_TRUE(plan.is_well_formed());
 
   consan_detail::MoiAtomicEvidenceSitePlan missing_source_site = plan;

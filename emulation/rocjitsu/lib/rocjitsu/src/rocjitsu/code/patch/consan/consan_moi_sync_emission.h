@@ -52,9 +52,7 @@ struct SampledAtomicSemanticsResult {
 };
 
 [[nodiscard]] SampledAtomicSemanticsResult
-sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
-                                  const consan_detail::MoiAtomicEvidenceSitePlan &plan,
-                                  const ConSanAtomicSite &site);
+sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source);
 
 [[nodiscard]] std::string_view
 sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);

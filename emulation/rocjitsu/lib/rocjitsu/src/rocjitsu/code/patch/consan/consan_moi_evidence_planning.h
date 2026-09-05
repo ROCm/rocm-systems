@@ -29,6 +29,26 @@ materialize_moi_communication_site(const ProgramInventory &inventory,
                                    ConSanProgramSiteId source_site,
                                    ConSanSyncSequenceId sequence);
 
+/// Short-lived lowering view resolved from an atomic evidence plan. Pointers
+/// refer into the immutable inventory that owns the plan's handles; decoded
+/// operands are materialized only in this view.
+struct MoiAtomicEvidenceSourceView {
+  const ConSanSyncEvent *event = nullptr;
+  const ConSanSyncSequence *sequence = nullptr;
+  ConSanAtomicSite site;
+
+  [[nodiscard]] bool is_rmw() const {
+    return event != nullptr && event->kind == ConSanSyncKind::Atomic;
+  }
+};
+
+[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
+moi_atomic_event_kind(ConSanSyncMemoryRole role);
+
+[[nodiscard]] std::optional<MoiAtomicEvidenceSourceView>
+resolve_moi_atomic_evidence_source(const ProgramInventory &inventory,
+                                   const consan_detail::MoiAtomicEvidenceSitePlan &plan);
+
 [[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
 build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,
                                       const ConSanObservationPlan &observation,

@@ -41,9 +41,6 @@
 
 namespace rocjitsu {
 
-using consan_detail::MoiAtomicEvidenceSitePlan;
-using consan_detail::MoiBarrierEvidenceSitePlan;
-using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::range_overlaps;
@@ -1303,7 +1300,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
 [[nodiscard]] bool append_inline_versioned_release_transaction(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    const MoiAtomicEvidenceSitePlan &candidate, const ConSanAtomicSite &site,
+    ConSanMoiAtomicEventKind event_kind, const ConSanAtomicSite &site,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
     rj_code_arch_t arch, bool emit_guest_instruction,
     bool import_claimed_predecessor, bool predicate_on_compare_exchange_success,
@@ -1547,7 +1544,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                          token_table_base, token_capacity,
                          /*source_slot_claimed=*/true,
                          /*release_sequence_only=*/
-                         candidate.event_kind == ConSanMoiAtomicEventKind::Release,
+                         event_kind == ConSanMoiAtomicEventKind::Release,
                          inline_access_present, arch, errors));
     // Acquire import reuses the release slot-address and scratch+20 source
     // version for its token transaction. That transaction journals the source
@@ -1610,7 +1607,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
   }
 
-  if (candidate.event_kind == ConSanMoiAtomicEventKind::Acquire) {
+  if (event_kind == ConSanMoiAtomicEventKind::Acquire) {
     // A read-only acquire must bind its guest observation to exactly one
     // immutable release transaction. Holding the direct-mapped slot odd
     // across the guest load excludes a producer from linearizing its RMW
@@ -1763,12 +1760,18 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
-    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
     std::span<const uint32_t> trailing_guest_words) {
+  const ConSanAtomicSite &site = source.site;
+  const std::optional<ConSanMoiAtomicEventKind> event_kind =
+      moi_atomic_event_kind(source.sequence->memory_role);
+  if (!event_kind)
+    return std::nullopt;
+  const bool is_rmw = source.is_rmw();
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
   const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const bool scalar_persistent = plan.persistent_sgprs.complete();
@@ -1896,14 +1899,14 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       sequence.append(load_workgroup, wait_private);
     }
   }
-  if (candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
+  if (*event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
     // An ISA release RMW extends the claimed predecessor's release sequence.
     // A language-level ordinary release store starts a new publication: it
     // must reserve and stage metadata before the guest store, but must not
     // inherit an unrelated predecessor's causal frontier.
-    const bool import_claimed_predecessor = claims_release_predecessor && candidate.is_rmw;
+    const bool import_claimed_predecessor = claims_release_predecessor && is_rmw;
     require_emission(append_inline_versioned_release_transaction(
-                         words, bytes, candidate, site, address_plan, plan, arch,
+                         words, bytes, *event_kind, site, address_plan, plan, arch,
                          /*emit_guest_instruction=*/true, import_claimed_predecessor,
                          /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset,
                          errors),
@@ -1917,11 +1920,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // causal snapshot, and successor commit.
   const bool claimed_acquire_release =
       claims_release_predecessor &&
-      candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
+      *event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, site, address_plan, plan, arch,
+            words, bytes, *event_kind, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors),
@@ -1936,11 +1939,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // and restore the prior slot unchanged for dynamically failed comparisons.
   const bool claimed_compare_exchange_release =
       claims_release_predecessor && is_compare_exchange &&
-      candidate.event_kind != ConSanMoiAtomicEventKind::Acquire;
+      *event_kind != ConSanMoiAtomicEventKind::Acquire;
   if (claimed_compare_exchange_release) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, site, address_plan, plan, arch,
+            words, bytes, *event_kind, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors),
@@ -1953,12 +1956,12 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // publisher through the old pre/post-version fail-closed window. RMW
   // acquires cannot use this path: an acquire-only RMW also extends a language
   // release sequence and needs a separate successor-publication contract.
-  const bool claimed_read_only_acquire = claims_release_predecessor && !candidate.is_rmw &&
-                                         candidate.event_kind == ConSanMoiAtomicEventKind::Acquire;
+  const bool claimed_read_only_acquire =
+      claims_release_predecessor && !is_rmw && *event_kind == ConSanMoiAtomicEventKind::Acquire;
   if (claimed_read_only_acquire) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, site, address_plan, plan, arch,
+            words, bytes, *event_kind, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors,
@@ -1972,8 +1975,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // importer rechecks it only after loading the complete release payload and
   // causal snapshot. The 24-VGPR spill-backed plan keeps this value disjoint
   // from the final address pair reserved by address materialization.
-  if (candidate.event_kind == ConSanMoiAtomicEventKind::Acquire ||
-      candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease) {
+  if (*event_kind == ConSanMoiAtomicEventKind::Acquire ||
+      *event_kind == ConSanMoiAtomicEventKind::AcquireRelease) {
     const uint16_t version_before = static_cast<uint16_t>(scratch_vgpr + 20u);
     const uint16_t version_retry_count = static_cast<uint16_t>(plan.exec_save_sgpr + 20u);
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
@@ -2029,7 +2032,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  if (candidate.is_rmw) {
+  if (is_rmw) {
     sequence.require(append_moi_flat_load_wait(words, arch));
   } else {
     if (trailing_guest_words.empty()) {
@@ -2050,8 +2053,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                            address_vgpr, scratch_vgpr, arch),
                    "ConSan MOI inline atomic patch could not derive an address-indexed slot");
 
-  if (candidate.event_kind == ConSanMoiAtomicEventKind::Acquire ||
-      candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease)
+  if (*event_kind == ConSanMoiAtomicEventKind::Acquire ||
+      *event_kind == ConSanMoiAtomicEventKind::AcquireRelease)
     sequence.require(append_inline_atomic_acquire_import(
         words, plan, scratch_vgpr, address_vgpr, workgroup_key_vgpr, producer_owner_vgpr,
         token_value_vgpr, temporary_vgpr, snapshot_table_base,
@@ -2060,7 +2063,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         /*source_slot_claimed=*/false,
         /*release_sequence_only=*/false, plan.inline_access_present, arch, errors));
 
-  if (candidate.event_kind != ConSanMoiAtomicEventKind::Acquire) {
+  if (*event_kind != ConSanMoiAtomicEventKind::Acquire) {
     // AcquireRelease must first import the release observed by the guest RMW;
     // all release-capable events then publish that complete ancestry through
     // the same ABI-v6 transaction. CAS publication is narrowed to lanes whose
@@ -2068,7 +2071,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // EXEC mask has been preserved.
     require_emission(append_restore_moi_special_state(words, plan.special_state, arch) &&
                          append_inline_versioned_release_transaction(
-                             words, bytes, candidate, site, address_plan, plan, arch,
+                             words, bytes, *event_kind, site, address_plan, plan, arch,
                              /*emit_guest_instruction=*/false,
                              /*import_claimed_predecessor=*/false,
                              /*predicate_on_compare_exchange_success=*/is_compare_exchange,

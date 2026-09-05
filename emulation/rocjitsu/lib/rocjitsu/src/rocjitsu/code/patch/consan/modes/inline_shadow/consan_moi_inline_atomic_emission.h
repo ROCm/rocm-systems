@@ -16,8 +16,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                                                  uint16_t scalar_base, uint16_t scalar_count);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors,

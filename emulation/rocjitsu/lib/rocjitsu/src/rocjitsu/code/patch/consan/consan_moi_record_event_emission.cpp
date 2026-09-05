@@ -23,7 +23,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
@@ -186,12 +185,20 @@ using consan_moi_detail::kFenceRecordLayout;
   return words;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
-    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
+    const ConSanAtomicLoweringForm &lowering_form,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
+  const ConSanAtomicSite &site = source.site;
+  const std::optional<ConSanMoiAtomicEventKind> event_kind =
+      moi_atomic_event_kind(source.sequence->memory_role);
+  if (!event_kind) {
+    errors.emplace_back("ConSan MOI atomic record patch lost its ordering role");
+    return std::nullopt;
+  }
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -210,7 +217,7 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI atomic record patch has an invalid scratch VGPR window");
     return std::nullopt;
   }
-  if (reject_atomic_candidate_scratch_overlap(candidate.lowering_form, *options.scratch_vgpr,
+  if (reject_atomic_candidate_scratch_overlap(lowering_form, *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
       reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.owner(),
                                             *options.scratch_vgpr, address_plan.scratch_vgpr_count,
@@ -285,8 +292,8 @@ using consan_moi_detail::kFenceRecordLayout;
       vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
 
   const bool reserve_event_before_guest =
-      is_compare_exchange && (candidate.event_kind == ConSanMoiAtomicEventKind::Release ||
-                              candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease);
+      is_compare_exchange && (*event_kind == ConSanMoiAtomicEventKind::Release ||
+                              *event_kind == ConSanMoiAtomicEventKind::AcquireRelease);
   const uint16_t reserved_event_index_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 7u);
   if (reserve_event_before_guest) {
     if (!append_save_moi_special_state(words, options.special_state, arch)) {
@@ -319,7 +326,7 @@ using consan_moi_detail::kFenceRecordLayout;
   }
 
   const bool record_before_guest_release =
-      candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange;
+      *event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange;
   if (!record_before_guest_release) {
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     words.insert(words.end(), guest_atomic_words.begin(), guest_atomic_words.end());
@@ -439,7 +446,7 @@ using consan_moi_detail::kFenceRecordLayout;
             static_cast<uint16_t>(recorded_address_vgpr + 1u))
       .literal(offsetof(ConSanMoiAtomicRecord, instruction_offset),
                static_cast<uint32_t>(site.text_offset))
-      .literal(offsetof(ConSanMoiAtomicRecord, kind), static_cast<uint32_t>(candidate.event_kind))
+      .literal(offsetof(ConSanMoiAtomicRecord, kind), static_cast<uint32_t>(*event_kind))
       .literal(offsetof(ConSanMoiAtomicRecord, scope), *report_scope)
       .literal(offsetof(ConSanMoiAtomicRecord, semantics), site.raw_th.value_or(0u))
       .literal(offsetof(ConSanMoiAtomicRecord, operation), static_cast<uint32_t>(atomic_operation))

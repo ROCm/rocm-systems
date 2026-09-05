@@ -174,7 +174,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   struct PlannedInlineAtomic : MoiPlannedProbeResources {
     MoiAtomicEvidenceSitePlan candidate;
-    ConSanAtomicSite site;
+    MoiAtomicEvidenceSourceView source;
     ConSanMoiAtomicAddressPlan address_plan;
     MoiInlineAtomicEmissionPlan emission;
     uint32_t relocated_guest_size = 0;
@@ -192,19 +192,17 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (planned_candidates.size() == options.max_patches)
       break;
     const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
-    const std::optional<ConSanAtomicSite> materialized_site =
-        materialize_moi_communication_site(result.program_inventory, candidate.source_site,
-                                           candidate.sequence);
-    if (!materialized_site) {
+    std::optional<MoiAtomicEvidenceSourceView> source =
+        resolve_moi_atomic_evidence_source(result.program_inventory, candidate);
+    if (!source) {
       result.errors.emplace_back("ConSan MOI inline atomic patch lost its decoded source site");
       return;
     }
-    const ConSanAtomicSite &site = *materialized_site;
+    const ConSanAtomicSite &site = source->site;
     uint32_t relocated_guest_size = site.size;
     std::vector<uint32_t> trailing_guest_words;
-    if (!candidate.is_rmw &&
-        candidate.ordered_sequence_end_text_offset > site.text_offset + site.size) {
-      const uint64_t sequence_end = candidate.ordered_sequence_end_text_offset;
+    if (!source->is_rmw() && source->sequence->end_text_offset > site.text_offset + site.size) {
+      const uint64_t sequence_end = source->sequence->end_text_offset;
       const uint64_t sequence_size = sequence_end - site.text_offset;
       if (!moi_resource_offsets_share_block(*resource_state, site.text_offset,
                                             sequence_end - sizeof(uint32_t)) ||
@@ -356,7 +354,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, probe->resources);
     note_moi_sgpr_requirements(scalar_requirements, probe->resources, options, options,
                                candidate_point, semantics, arch);
-    planned_candidates.push_back({std::move(*probe), candidate, site, address_plan,
+    planned_candidates.push_back({std::move(*probe), candidate, std::move(*source), address_plan,
                                   std::move(*emission), relocated_guest_size,
                                   std::move(trailing_guest_words)});
   }
@@ -370,8 +368,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.site,
-                                           planned.candidate.scalar_clause_text_offset, arch,
+    if (!append_atomic_scalar_clause_patch(old_text, planned.source.site,
+                                           planned.source.sequence->scalar_clause_text_offset, arch,
                                            scalar_clause_patches, result.errors))
       return;
   }
@@ -383,10 +381,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
-    const ConSanAtomicSite &site = planned.site;
+    const ConSanAtomicSite &site = planned.source.site;
     uint32_t guest_instruction_offset = 0u;
     auto words = build_inline_atomic_ordering_cave_words(
-        active_bytes, candidate, site, planned.address_plan, planned.emission,
+        active_bytes, planned.source, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, guest_instruction_offset,
         result.errors, planned.trailing_guest_words);
