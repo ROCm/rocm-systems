@@ -726,17 +726,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention,
     std::vector<std::string> &errors) {
   InstructionSequence sequence(words);
-  struct FailureStage {
-    std::vector<std::string> &errors;
-    std::string_view stage = "preflight";
-    std::string_view failed_stage;
-    bool succeeded = false;
-    ~FailureStage() {
-      if (!succeeded)
-        errors.emplace_back("ConSan MOI versioned exact-shadow transaction failed during " +
-                            std::string(failed_stage.empty() ? stage : failed_stage));
-    }
-  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
+  MoiStagedEmission require_emission(sequence, errors,
+                                     "ConSan MOI versioned exact-shadow transaction");
   const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
   if (!plan.scalar_state.exec_save_sgpr ||
       (!has_hardware_dispatch_id && !plan.dispatch_id.literal) ||
@@ -764,16 +755,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
   MoiPublicationExec exec_masks(words, temporary_exec_sgpr, arch);
-  const auto require_emission = [&](bool success) {
-    if (sequence && !success)
-      failure.failed_stage = failure.stage;
-    sequence.require(success);
-  };
-  const auto set_stage = [&](std::string_view stage) {
-    if (!sequence && failure.failed_stage.empty())
-      failure.failed_stage = failure.stage;
-    failure.stage = stage;
-  };
+  const auto set_stage = [&](std::string_view stage) { require_emission.stage(stage); };
   const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) {
     return exec_masks.require_literal(value_vgpr, literal, true);
   };
@@ -1018,8 +1000,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
   sequence.append(instrumentation::build_s_and_b64(kAmdGpuExecLo, committed_exec_sgpr,
                                                    low_dispatch_exec_sgpr, arch));
-  failure.succeeded = sequence.finish(arch);
-  return failure.succeeded;
+  return require_emission.finish(arch);
 }
 
 // Build the target-neutral exact-byte provenance for one external shadow
@@ -1184,33 +1165,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
     std::vector<std::string> &errors) {
   InstructionSequence sequence(words);
-  struct FailureStage {
-    std::vector<std::string> &errors;
-    std::string_view stage = "preflight";
-    std::string_view failed_stage;
-    bool succeeded = false;
-    ~FailureStage() {
-      if (!succeeded)
-        errors.emplace_back("ConSan MOI wave-coalesced exact-shadow swap failed during " +
-                            std::string(failed_stage.empty() ? stage : failed_stage));
-    }
-  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
+  MoiStagedEmission require_emission(sequence, errors,
+                                     "ConSan MOI wave-coalesced exact-shadow swap");
   if (!plan.scalar_state.exec_save_sgpr)
     return false;
 
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success) {
-      failure.failed_stage = failure.stage;
-      if (!message.empty())
-        errors.emplace_back(message);
-    }
-    sequence.require(success);
-  };
-  const auto set_stage = [&](std::string_view stage) {
-    if (!sequence && failure.failed_stage.empty())
-      failure.failed_stage = failure.stage;
-    failure.stage = stage;
-  };
+  const auto set_stage = [&](std::string_view stage) { require_emission.stage(stage); };
 
   const uint16_t base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(base + 2u);
@@ -1368,8 +1328,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   words.push_back(restore_current_high);
   sequence.require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
 
-  failure.succeeded = sequence.finish(arch);
-  return failure.succeeded;
+  return require_emission.finish(arch);
 }
 
 // Make one packed-validity local slot ready without eagerly clearing the full

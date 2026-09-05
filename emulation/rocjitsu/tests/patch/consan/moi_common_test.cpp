@@ -22,6 +22,40 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSanMoi, StagedEmissionKeepsOnlyFirstFailureStageAndRollsBackTransaction) {
+  std::vector<uint32_t> words{0xfeedfaceu};
+  std::vector<std::string> errors;
+  {
+    InstructionSequence sequence(words);
+    consan_moi_impl::MoiStagedEmission emission(sequence, errors, "test transaction");
+    emission.stage("claim");
+    sequence.append(0x12345678u);
+    emission(false, "leaf failure");
+    emission.stage("publication");
+    emission(false, "later failure");
+    EXPECT_FALSE(emission.finish(ROCJITSU_CODE_ARCH_RDNA4));
+  }
+
+  EXPECT_EQ(words, std::vector<uint32_t>{0xfeedfaceu});
+  EXPECT_EQ(errors,
+            (std::vector<std::string>{"leaf failure", "test transaction failed during claim"}));
+}
+
+TEST(ConSanMoi, StagedEmissionCommitsWithoutDiagnostic) {
+  std::vector<uint32_t> words;
+  std::vector<std::string> errors;
+  {
+    InstructionSequence sequence(words);
+    consan_moi_impl::MoiStagedEmission emission(sequence, errors, "test transaction");
+    emission.stage("publication");
+    sequence.append(0x12345678u);
+    EXPECT_TRUE(emission.finish(ROCJITSU_CODE_ARCH_RDNA4));
+  }
+
+  EXPECT_EQ(words, std::vector<uint32_t>{0x12345678u});
+  EXPECT_TRUE(errors.empty());
+}
+
 TEST(ConSanMoi, DynamicRecordEmitterRollsBackCompleteRecordAfterFieldFailure) {
   constexpr uint16_t kScratchVgpr = 40u;
   std::vector<uint32_t> words = {0xfeedfaceu};

@@ -1302,21 +1302,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     ConSanMoiAtomicEventKind event_kind, const ConSanAtomicSite &site,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
-    rj_code_arch_t arch, bool emit_guest_instruction,
-    bool import_claimed_predecessor, bool predicate_on_compare_exchange_success,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
-    std::span<const uint32_t> trailing_guest_words = {}) {
-  struct FailureStage {
-    std::vector<std::string> &errors;
-    std::string_view stage = "preflight";
-    std::string_view failed_stage;
-    bool succeeded = false;
-    ~FailureStage() {
-      if (!succeeded)
-        errors.emplace_back("ConSan MOI inline versioned release transaction failed during " +
-                            std::string(failed_stage.empty() ? stage : failed_stage));
-    }
-  } failure{.errors = errors, .stage = "preflight", .failed_stage = {}, .succeeded = false};
+    rj_code_arch_t arch, bool emit_guest_instruction, bool import_claimed_predecessor,
+    bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
+    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
   const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
   const uint64_t release_table_base =
@@ -1361,19 +1349,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   MoiPublicationExec exec_masks(words, narrow_save, arch);
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success) {
-      failure.failed_stage = failure.stage;
-      if (!message.empty())
-        errors.emplace_back(message);
-    }
-    sequence.require(success);
-  };
-  const auto set_stage = [&](std::string_view stage) {
-    if (!sequence && failure.failed_stage.empty())
-      failure.failed_stage = failure.stage;
-    failure.stage = stage;
-  };
+  MoiStagedEmission require_emission(sequence, errors,
+                                     "ConSan MOI inline versioned release transaction");
+  const auto set_stage = [&](std::string_view stage) { require_emission.stage(stage); };
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
   const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
@@ -1428,8 +1406,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     }
     const uint16_t compare_vgpr = static_cast<uint16_t>(*site.data_vgpr + 1u);
-    if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(compare_vgpr), *site.destination_vgpr, arch))) {
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(compare_vgpr),
+                                                                   *site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI inline release CAS could not compare its dynamic outcome");
       return false;
     }
@@ -1537,15 +1515,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
               save_exec(claimed_exec),
           "ConSan MOI inline release CAS could not predicate its claimed predecessor import");
     }
-    require_emission(restore_exec(claimed_exec) &&
-                     append_inline_atomic_acquire_import(
-                         words, plan, scratch_vgpr, stable_guest_address, workgroup_key, cas_new,
-                         cas_expected, temporary, snapshot_table_base, snapshot_capacity,
-                         token_table_base, token_capacity,
-                         /*source_slot_claimed=*/true,
-                         /*release_sequence_only=*/
-                         event_kind == ConSanMoiAtomicEventKind::Release,
-                         inline_access_present, arch, errors));
+    require_emission(
+        restore_exec(claimed_exec) &&
+        append_inline_atomic_acquire_import(
+            words, plan, scratch_vgpr, stable_guest_address, workgroup_key, cas_new, cas_expected,
+            temporary, snapshot_table_base, snapshot_capacity, token_table_base, token_capacity,
+            /*source_slot_claimed=*/true,
+            /*release_sequence_only=*/
+            event_kind == ConSanMoiAtomicEventKind::Release, inline_access_present, arch, errors));
     // Acquire import reuses the release slot-address and scratch+20 source
     // version for its token transaction. That transaction journals the source
     // version in scratch+8; recover the claim's prior even version from there
@@ -1644,8 +1621,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         restore_exec(original_exec));
     words.push_back(publisher_handoff);
     require_emission(append_restore_moi_special_state(words, plan.special_state, arch));
-    failure.succeeded = sequence.finish(arch);
-    return failure.succeeded;
+    return require_emission.finish(arch);
   }
 
   set_stage("causal snapshot capture");
@@ -1746,8 +1722,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                       temporary, cas_new, arch) &&
       restore_exec(original_exec) &&
       append_restore_moi_special_state(words, plan.special_state, arch));
-  failure.succeeded = sequence.finish(arch);
-  return failure.succeeded;
+  return require_emission.finish(arch);
 }
 
 [[nodiscard]] bool
@@ -1761,8 +1736,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
-    const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiInlineAtomicEmissionPlan &plan,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
     std::span<const uint32_t> trailing_guest_words) {
@@ -1918,9 +1892,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // AcquireRelease RMWs with the release reservation itself: the claimed odd
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
-  const bool claimed_acquire_release =
-      claims_release_predecessor &&
-      *event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
+  const bool claimed_acquire_release = claims_release_predecessor &&
+                                       *event_kind == ConSanMoiAtomicEventKind::AcquireRelease &&
+                                       !is_compare_exchange;
   if (claimed_acquire_release) {
     require_emission(
         append_inline_versioned_release_transaction(
@@ -1937,9 +1911,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // an acquire could observe the new value while the release slot was still
   // empty. Claim the slot first, execute the CAS once inside that transaction,
   // and restore the prior slot unchanged for dynamically failed comparisons.
-  const bool claimed_compare_exchange_release =
-      claims_release_predecessor && is_compare_exchange &&
-      *event_kind != ConSanMoiAtomicEventKind::Acquire;
+  const bool claimed_compare_exchange_release = claims_release_predecessor && is_compare_exchange &&
+                                                *event_kind != ConSanMoiAtomicEventKind::Acquire;
   if (claimed_compare_exchange_release) {
     require_emission(
         append_inline_versioned_release_transaction(

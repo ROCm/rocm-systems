@@ -56,6 +56,60 @@ private:
   std::vector<std::string> &errors_;
 };
 
+/// Stage-aware first-failure diagnostics for one transactional MOI program.
+///
+/// Large publication transactions advance through named semantic stages while
+/// appending to one InstructionSequence. This owner records the stage at which
+/// the sequence first failed, preserves an optional leaf diagnostic, and emits
+/// the common transaction diagnostic unless finish() succeeds. Keeping that
+/// lifecycle here prevents mode emitters from independently implementing
+/// subtly different first-failure rules.
+class MoiStagedEmission {
+public:
+  MoiStagedEmission(InstructionSequence &sequence, std::vector<std::string> &errors,
+                    std::string_view diagnostic_prefix)
+      : sequence_(sequence), errors_(errors), diagnostic_prefix_(diagnostic_prefix) {}
+
+  ~MoiStagedEmission() {
+    if (!succeeded_)
+      errors_.emplace_back(std::string(diagnostic_prefix_) + " failed during " +
+                           std::string(failed_stage_.empty() ? stage_ : failed_stage_));
+  }
+
+  MoiStagedEmission(const MoiStagedEmission &) = delete;
+  MoiStagedEmission &operator=(const MoiStagedEmission &) = delete;
+
+  void require(bool success, std::string_view message = {}) {
+    if (sequence_ && !success) {
+      failed_stage_ = stage_;
+      if (!message.empty())
+        errors_.emplace_back(message);
+    }
+    sequence_.require(success);
+  }
+
+  void operator()(bool success, std::string_view message = {}) { require(success, message); }
+
+  void stage(std::string_view stage) {
+    if (!sequence_ && failed_stage_.empty())
+      failed_stage_ = stage_;
+    stage_ = stage;
+  }
+
+  [[nodiscard]] bool finish(rj_code_arch_t arch) {
+    succeeded_ = sequence_.finish(arch);
+    return succeeded_;
+  }
+
+private:
+  InstructionSequence &sequence_;
+  std::vector<std::string> &errors_;
+  std::string_view diagnostic_prefix_;
+  std::string_view stage_ = "preflight";
+  std::string_view failed_stage_;
+  bool succeeded_ = false;
+};
+
 /// Immutable mode semantics and ABI facts that affect common resource solving
 /// and emission. These decisions are selected once by the mode owner from
 /// normalized object and runtime-binding facts. They are not solver choices
