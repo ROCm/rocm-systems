@@ -473,6 +473,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     std::span<const uint8_t> original_bytes, const ConSanProgramSite &site,
     const ConSanTargetProfile &target, const ConSanOptions &options, uint16_t scratch_vgpr,
     uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
+    std::span<const uint32_t> delay_words,
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   const rj_code_arch_t arch = target.arch;
   guest_instruction_word_offset.reset();
@@ -638,8 +639,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     words.push_back(*wait_dscnt);
     words.push_back(*d16_seed_scratch);
   }
-  if (!consan_sc_append_delay_words(words, arch, options, errors, "ConSan LDS check/trap proof"))
-    return std::nullopt;
+  words.insert(words.end(), delay_words.begin(), delay_words.end());
   if (split_two_address) {
     const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *form.address_vgpr;
     const auto split = consan_sc_build_split_single_address_lds_pair(

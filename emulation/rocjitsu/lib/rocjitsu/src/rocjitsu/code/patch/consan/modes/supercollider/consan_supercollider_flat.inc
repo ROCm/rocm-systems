@@ -29,8 +29,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  if (!consan_sc_delay_instruction_word_count(options, result.errors,
-                                              "ConSan flat check/trap proof"))
+  const auto delay_words = consan_sc_build_delay_words(
+      arch, options, result.errors, "ConSan flat check/trap proof");
+  if (!delay_words)
     return;
 
   const auto original_bytes = std::span<const uint8_t>(
@@ -357,9 +358,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
     }
     (void)sequence.emit(std::span(original_access).first(access_words));
-    if (!consan_sc_append_delay_words(planned.words, arch, options, result.errors,
-                                      "ConSan flat check/trap proof"))
-      return;
+    planned.words.insert(planned.words.end(), delay_words->begin(), delay_words->end());
     const bool needs_runtime_group_gate =
         target.requires_sc_runtime_flat_group_gate &&
         site.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;

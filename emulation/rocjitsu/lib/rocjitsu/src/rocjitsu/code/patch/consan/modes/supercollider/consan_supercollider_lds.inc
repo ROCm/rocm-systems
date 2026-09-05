@@ -4,8 +4,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
 
-  if (!consan_sc_delay_instruction_word_count(options, result.errors,
-                                              "ConSan LDS check/trap proof"))
+  const auto delay_words = consan_sc_build_delay_words(
+      arch, options, result.errors, "ConSan LDS check/trap proof");
+  if (!delay_words)
     return;
 
   const std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
@@ -494,7 +495,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     auto words = build_lds_check_trap_words(original_bytes, site, target, options,
                                             candidate.scratch_vgpr, candidate.vcc_save_sgpr,
                                             candidate.selectable_vgpr_bank_mode.value_or(0u),
-                                            guest_instruction_word_offset, result.errors);
+                                            *delay_words, guest_instruction_word_offset,
+                                            result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);

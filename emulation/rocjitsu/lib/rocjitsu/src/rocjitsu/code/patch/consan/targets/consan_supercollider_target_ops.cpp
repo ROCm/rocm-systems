@@ -16,68 +16,39 @@ std::optional<uint32_t> consan_sc_build_guest_flat_completion_wait(rj_code_arch_
                                              : instrumentation::build_s_wait_lds0(arch);
 }
 
-std::optional<uint32_t> consan_sc_delay_instruction_word_count(const ConSanRequest &request,
-                                                               std::vector<std::string> &errors,
-                                                               std::string_view context) {
+std::optional<std::vector<uint32_t>>
+consan_sc_build_delay_words(rj_code_arch_t arch, const ConSanRequest &request,
+                            std::vector<std::string> &errors, std::string_view context) {
+  std::vector<uint32_t> words;
   if (request.delay_nops == 0)
-    return 0u;
-
-  switch (request.delay_mode) {
-  case ConSanDelayMode::Nop:
-    return request.delay_nops;
-  case ConSanDelayMode::Sleep:
-    if (request.delay_nops > UINT16_MAX) {
-      errors.emplace_back(std::string(context) +
-                          " sleep delay immediate exceeds the 16-bit s_sleep field");
-      return std::nullopt;
-    }
-    return 1u;
-  case ConSanDelayMode::SleepVar:
-    if (request.delay_var_ssrc > 255) {
-      errors.emplace_back(std::string(context) +
-                          " sleep_var source exceeds the 8-bit scalar source field");
-      return std::nullopt;
-    }
-    return 1u;
-  }
-
-  errors.emplace_back(std::string(context) + " has unknown delay mode '" +
-                      consan_delay_mode_name(request.delay_mode) + "'");
-  return std::nullopt;
-}
-
-bool consan_sc_append_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                                  const ConSanRequest &request, std::vector<std::string> &errors,
-                                  std::string_view context) {
-  if (request.delay_nops == 0)
-    return true;
+    return words;
 
   switch (request.delay_mode) {
   case ConSanDelayMode::Nop:
     for (uint32_t i = 0; i < request.delay_nops; ++i)
       words.push_back(build_s_nop(0, arch));
-    return true;
+    return words;
   case ConSanDelayMode::Sleep:
     if (request.delay_nops > UINT16_MAX) {
       errors.emplace_back(std::string(context) +
                           " sleep delay immediate exceeds the 16-bit s_sleep field");
-      return false;
+      return std::nullopt;
     }
     words.push_back(build_s_sleep(static_cast<uint16_t>(request.delay_nops), arch));
-    return true;
+    return words;
   case ConSanDelayMode::SleepVar:
     if (request.delay_var_ssrc > 255) {
       errors.emplace_back(std::string(context) +
                           " sleep_var source exceeds the 8-bit scalar source field");
-      return false;
+      return std::nullopt;
     }
     words.push_back(build_s_sleep_var(request.delay_var_ssrc, arch));
-    return true;
+    return words;
   }
 
   errors.emplace_back(std::string(context) + " has unknown delay mode '" +
                       consan_delay_mode_name(request.delay_mode) + "'");
-  return false;
+  return std::nullopt;
 }
 
 std::optional<uint32_t> consan_sc_build_v_cmp_ne_u32(uint16_t src0, uint16_t vsrc1,
