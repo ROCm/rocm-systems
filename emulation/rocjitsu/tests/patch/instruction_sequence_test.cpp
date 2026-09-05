@@ -35,6 +35,27 @@ TEST(InstructionSequenceTest, FailedBatchRollsBackEveryWordInThatBatch) {
   EXPECT_EQ(words, (std::vector<uint32_t>{1u}));
 }
 
+TEST(InstructionSequenceTest, StickyTransactionRollsBackAndIgnoresLaterAppends) {
+  std::vector<uint32_t> words{1u};
+  const std::optional<uint32_t> missing;
+  InstructionSequence sequence(words);
+
+  sequence.append(2u).append(missing).append(3u);
+
+  EXPECT_FALSE(sequence.finish());
+  EXPECT_EQ(words, (std::vector<uint32_t>{1u}));
+}
+
+TEST(InstructionSequenceTest, StickyBranchResolutionRollsBackWholeTransaction) {
+  std::vector<uint32_t> words{1u};
+  InstructionSequence sequence(words);
+  const auto missing = sequence.make_label();
+  sequence.append(2u).branch(missing, InstructionSequence::BranchKind::VccZero);
+
+  EXPECT_FALSE(sequence.finish(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(words, (std::vector<uint32_t>{1u}));
+}
+
 TEST(InstructionSequenceTest, ResolvesForwardAndBackwardBranches) {
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);

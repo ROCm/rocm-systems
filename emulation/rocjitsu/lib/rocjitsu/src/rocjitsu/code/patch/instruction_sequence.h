@@ -35,7 +35,16 @@ public:
     ExecNonzero,
   };
 
-  explicit InstructionSequence(std::vector<uint32_t> &words) : words_(words) {}
+  explicit InstructionSequence(std::vector<uint32_t> &words)
+      : words_(words), initial_size_(words.size()) {}
+
+  ~InstructionSequence() {
+    if (failed_)
+      words_.resize(initial_size_);
+  }
+
+  InstructionSequence(const InstructionSequence &) = delete;
+  InstructionSequence &operator=(const InstructionSequence &) = delete;
 
   [[nodiscard]] bool emit(uint32_t word) {
     words_.push_back(word);
@@ -61,6 +70,43 @@ public:
     return false;
   }
 
+  /// Append one transactional batch and remember failure on the sequence.
+  ///
+  /// Sticky construction lets a caller describe the complete instruction
+  /// program without repeating local boolean propagation. The first failure
+  /// rolls the destination back to its construction size; later operations
+  /// are ignored and finish() remains false.
+  template <typename... Values> InstructionSequence &append(const Values &...values) {
+    if (!failed_ && !emit_all(values...))
+      fail();
+    return *this;
+  }
+
+  /// Incorporate a helper that emitted directly into the same destination.
+  InstructionSequence &require(bool success) {
+    if (!failed_ && !success)
+      fail();
+    return *this;
+  }
+
+  InstructionSequence &branch(Label label, BranchKind kind) {
+    return require(failed_ || emit_branch(label, kind));
+  }
+
+  InstructionSequence &bind_label(Label label) { return require(failed_ || bind(label)); }
+
+  [[nodiscard]] explicit operator bool() const { return !failed_; }
+
+  /// Complete a branch-free transaction.
+  [[nodiscard]] bool finish() const { return !failed_; }
+
+  /// Resolve local branches and complete the transaction atomically.
+  [[nodiscard]] bool finish(rj_code_arch_t arch) {
+    if (!failed_ && !resolve_branches(arch))
+      fail();
+    return !failed_;
+  }
+
   /// Creates a forward label. Bind it exactly once before resolving branches.
   [[nodiscard]] Label make_label();
 
@@ -82,7 +128,14 @@ private:
     BranchKind kind;
   };
 
+  void fail() {
+    words_.resize(initial_size_);
+    failed_ = true;
+  }
+
   std::vector<uint32_t> &words_;
+  size_t initial_size_ = 0;
+  bool failed_ = false;
   std::vector<std::optional<size_t>> labels_;
   std::vector<BranchFixup> branch_fixups_;
 };

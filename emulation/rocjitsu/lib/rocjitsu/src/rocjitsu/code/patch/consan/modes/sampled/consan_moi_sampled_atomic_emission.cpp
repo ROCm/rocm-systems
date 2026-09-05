@@ -404,9 +404,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_first =
       instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!sequence.emit_all(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch),
-                         active_mask, mbcnt_lo, mbcnt_hi, first, narrow_first))
-    return std::nullopt;
+  sequence.append(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch), active_mask,
+                  mbcnt_lo, mbcnt_hi, first, narrow_first);
 
   // BANK still names the causal-window slot stored in the pending payload.
   // Address the pending table through a separate (window, owner) index so all
@@ -431,150 +430,127 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
          .index_vgpr = value},
         *target);
   };
-  if (!append_pending_address() ||
-      !sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(value, 1u, arch),
-          instrumentation::build_v_mov_b32_literal(expected, 0u, arch),
-          instrumentation::build_flat_atomic_cmpswap_b32(
-              base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)) ||
-      !append_moi_global_atomic_wait(words, arch)) {
-    return std::nullopt;
-  }
-  if (!sequence.emit_all(
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-    return std::nullopt;
-  if (!sequence.emit_branch(contention_label, InstructionSequence::BranchKind::SccZero))
-    return std::nullopt;
+  sequence.require(append_pending_address())
+      .append(instrumentation::build_v_mov_b32_literal(value, 1u, arch),
+              instrumentation::build_v_mov_b32_literal(expected, 0u, arch),
+              instrumentation::build_flat_atomic_cmpswap_b32(
+                  base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch))
+      .require(append_moi_global_atomic_wait(words, arch))
+      .append(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+      .branch(contention_label, InstructionSequence::BranchKind::SccZero);
 
   if (release_selected_slot) {
     // RESERVED carries release_slot + 1 (zero means no release attachment).
     // BANK is the absolute acquire slot, so the wrapped unsigned delta also
     // handles a release window whose static base precedes the acquire window.
     const uint32_t release_delta = *release_selected_slot - selected_slot + 1u;
-    if (!sequence.emit(
-            instrumentation::build_v_add_u32_literal(expected, value, release_delta, bank, arch)))
-      return std::nullopt;
+    sequence.append(
+        instrumentation::build_v_add_u32_literal(expected, value, release_delta, bank, arch));
   }
 
-  if (!record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, selected_slot), bank) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation),
-                            static_cast<uint32_t>(plan.report_generation)) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
-                            static_cast<uint32_t>(plan.report_generation >> 32u)) ||
-      !append_store_moi_report_dispatch_id_pair(
-          record, plan.dispatch_id, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id)) ||
-      !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
-                              plan.workgroup_sources.x) ||
-      !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
-                              plan.workgroup_sources.y) ||
-      !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_z),
-                              plan.workgroup_sources.z) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, owner_id),
-                         *plan.owner_epoch_vgprs.owner) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, source_epoch),
-                         *plan.owner_epoch_vgprs.epoch) ||
-      !(release_selected_slot
-            ? record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), expected)
-            : record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), 0u)) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                             offsetof(ConSanMoiSampledSyncMetadataPacked, address),
-                         saved_address) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                             offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
-                         static_cast<uint16_t>(saved_address + 1u)) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                                offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
-                            4u) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                             offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                         *plan.owner_epoch_vgprs.epoch) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                             offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-                         *plan.owner_epoch_vgprs.epoch))
-    return std::nullopt;
+  sequence
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, selected_slot), bank))
+      .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation),
+                                    static_cast<uint32_t>(plan.report_generation)))
+      .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
+                                    static_cast<uint32_t>(plan.report_generation >> 32u)))
+      .require(append_store_moi_report_dispatch_id_pair(
+          record, plan.dispatch_id, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id)))
+      .require(record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
+                                      plan.workgroup_sources.x))
+      .require(record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
+                                      plan.workgroup_sources.y))
+      .require(record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_z),
+                                      plan.workgroup_sources.z))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, owner_id),
+                                 *plan.owner_epoch_vgprs.owner))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, source_epoch),
+                                 *plan.owner_epoch_vgprs.epoch))
+      .require(
+          release_selected_slot
+              ? record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), expected)
+              : record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), 0u))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                     offsetof(ConSanMoiSampledSyncMetadataPacked, address),
+                                 saved_address))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                     offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
+                                 static_cast<uint16_t>(saved_address + 1u)))
+      .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                        offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
+                                    4u))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                     offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                                 *plan.owner_epoch_vgprs.epoch))
+      .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                     offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
+                                 *plan.owner_epoch_vgprs.epoch));
 
   if (is_cas) {
     assert(prelude.cas_compare_vgpr && prelude.cas_result_vgpr);
     const auto cas_failure_label = sequence.make_label();
     const auto descriptor_done_label = sequence.make_label();
-    if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch)))
-      return std::nullopt;
-    if (!sequence.emit_branch(cas_failure_label, InstructionSequence::BranchKind::VccZero))
-      return std::nullopt;
-    if (!record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                                  offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-                              *success_descriptor))
-      return std::nullopt;
-    if (!sequence.emit_branch(descriptor_done_label,
-                              InstructionSequence::BranchKind::Unconditional) ||
-        !sequence.bind(cas_failure_label))
-      return std::nullopt;
-    if (!record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                                  offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-                              *failure_descriptor))
-      return std::nullopt;
-    if (!sequence.bind(descriptor_done_label))
-      return std::nullopt;
-  } else if (!record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
-                                       offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-                                   *success_descriptor)) {
-    return std::nullopt;
+    sequence
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch))
+        .branch(cas_failure_label, InstructionSequence::BranchKind::VccZero)
+        .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                          offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+                                      *success_descriptor))
+        .branch(descriptor_done_label, InstructionSequence::BranchKind::Unconditional)
+        .bind_label(cas_failure_label)
+        .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                          offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+                                      *failure_descriptor))
+        .bind_label(descriptor_done_label);
+  } else {
+    sequence.require(
+        record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
+                                 offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+                             *success_descriptor));
   }
 
-  if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)) ||
-      !append_pending_address() ||
-      !sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(value, 2u, arch),
-          instrumentation::build_v_mov_b32_literal(expected, 1u, arch),
-          instrumentation::build_flat_atomic_cmpswap_b32(
-              base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)) ||
-      !append_moi_global_atomic_wait(words, arch)) {
-    return std::nullopt;
-  }
-  if (!sequence.emit_all(
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-    return std::nullopt;
-  if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
-    return std::nullopt;
-  if (!append_atomic_fetch_add_one_u32(
+  sequence.append(instrumentation::build_s_wait_global_store0(arch))
+      .require(append_pending_address())
+      .append(instrumentation::build_v_mov_b32_literal(value, 2u, arch),
+              instrumentation::build_v_mov_b32_literal(expected, 1u, arch),
+              instrumentation::build_flat_atomic_cmpswap_b32(
+                  base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch))
+      .require(append_moi_global_atomic_wait(words, arch))
+      .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+      .branch(collision_label, InstructionSequence::BranchKind::SccZero)
+      .require(append_atomic_fetch_add_one_u32(
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_pending_acquire_count),
           value, base, arch))
-    return std::nullopt;
-  if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional))
-    return std::nullopt;
+      .branch(restore_label, InstructionSequence::BranchKind::Unconditional);
 
-  const auto append_counter_path = [&](size_t counter_offset) -> bool {
-    if (!sequence.emit_all(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
-                           active_mask, mbcnt_lo, mbcnt_hi, first, narrow_first))
-      return false;
-    if (!append_atomic_fetch_add_one_u32(words, report_base + counter_offset, value, base, arch))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional);
+  const auto append_counter_path = [&](size_t counter_offset) {
+    sequence
+        .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), active_mask,
+                mbcnt_lo, mbcnt_hi, first, narrow_first)
+        .require(
+            append_atomic_fetch_add_one_u32(words, report_base + counter_offset, value, base, arch))
+        .branch(restore_label, InstructionSequence::BranchKind::Unconditional);
   };
   // The sole successful claim chooses one sampled wave. Losing claims are
   // ordinary bounded contention and never write the pending record. The later
   // read requires the exact winner, so winner-without-read remains fail closed.
-  if (!sequence.bind(contention_label) ||
-      !append_counter_path(
-          offsetof(ConSanMoiReportHeader, sampled_pending_acquire_contention_count)) ||
-      !sequence.bind(collision_label) ||
-      !append_counter_path(
-          offsetof(ConSanMoiReportHeader, sampled_pending_acquire_collision_count)))
-    return std::nullopt;
+  sequence.bind_label(contention_label);
+  append_counter_path(offsetof(ConSanMoiReportHeader, sampled_pending_acquire_contention_count));
+  sequence.bind_label(collision_label);
+  append_counter_path(offsetof(ConSanMoiReportHeader, sampled_pending_acquire_collision_count));
 
-  if (!sequence.bind(restore_label) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)) ||
-      !append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return std::nullopt;
+  sequence.bind_label(restore_label)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))
+      .require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (!sequence.resolve_branches(arch))
+  if (!sequence.finish(arch))
     return std::nullopt;
   return words;
 }
@@ -681,257 +657,215 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, plan, spill,
-                                     scalar_spill, private_layout, arch, saved_address, defer_guest,
-                                     prelude, errors, guest_instruction_offset,
-                                     trailing_guest_words, emitted_guest_size))
-    return std::nullopt;
-  if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
+  sequence.require(append_sampled_atomic_prelude(
+      words, bytes, candidate, address_plan, plan, spill, scalar_spill, private_layout, arch,
+      saved_address, defer_guest, prelude, errors, guest_instruction_offset, trailing_guest_words,
+      emitted_guest_size));
+  if (sequence &&
+      !append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
     errors.emplace_back("ConSan MOI sampled atomic metadata failed at bank selection");
-    return std::nullopt;
+    sequence.require(false);
   }
-  if (selected_slot != 0u) {
-    if (!sequence.emit(
-            instrumentation::build_v_add_u32_literal(bank, expected, selected_slot, bank, arch)))
-      return std::nullopt;
-  }
+  if (selected_slot != 0u)
+    sequence.append(
+        instrumentation::build_v_add_u32_literal(bank, expected, selected_slot, bank, arch));
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return std::nullopt;
-  if (!sequence.emit(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch)))
-    return std::nullopt;
-
-  if (!consan_detail::append_moi_indexed_address(
+  sequence.require(append_save_moi_special_state(words, plan.scalar_abi.special_state, arch))
+      .append(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch))
+      .require(consan_detail::append_moi_indexed_address(
           words,
           {.table_address = first_window_address,
            .stride_bytes = sizeof(ConSanMoiSampledCausalWindow),
            .address_vgpr = base,
            .index_vgpr = bank},
           *target))
-    return std::nullopt;
-
-  if (!append_sampled_causal_window_validation(words, sequence,
-                                               {.generation = plan.report_generation,
-                                                .dispatch_id = plan.dispatch_id,
-                                                .workgroup_sources = plan.workgroup_sources,
-                                                .address_vgpr = base,
-                                                .value_vgpr = value,
-                                                .expected_vgpr = expected,
-                                                .epoch_vgpr = *plan.owner_epoch_vgprs.epoch,
-                                                .first_entry_vgpr = bank,
-                                                .temporary_exec_sgpr = temporary_exec,
-                                                .mismatch_label = restore_label,
-                                                .arch = arch}))
-    return std::nullopt;
-
-  if (!consan_detail::append_moi_indexed_address(words,
-                                                 {.table_address = first_watchpoint_address,
-                                                  .stride_bytes = sizeof(uint64_t),
-                                                  .address_vgpr = base,
-                                                  .index_vgpr = bank},
-                                                 *target))
-    return std::nullopt;
-  const auto narrow_current_vcc = [&]() -> bool {
-    if (!sequence.emit(
-            instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
+      .require(append_sampled_causal_window_validation(words, sequence,
+                                                       {.generation = plan.report_generation,
+                                                        .dispatch_id = plan.dispatch_id,
+                                                        .workgroup_sources = plan.workgroup_sources,
+                                                        .address_vgpr = base,
+                                                        .value_vgpr = value,
+                                                        .expected_vgpr = expected,
+                                                        .epoch_vgpr = *plan.owner_epoch_vgprs.epoch,
+                                                        .first_entry_vgpr = bank,
+                                                        .temporary_exec_sgpr = temporary_exec,
+                                                        .mismatch_label = restore_label,
+                                                        .arch = arch}))
+      .require(consan_detail::append_moi_indexed_address(words,
+                                                         {.table_address = first_watchpoint_address,
+                                                          .stride_bytes = sizeof(uint64_t),
+                                                          .address_vgpr = base,
+                                                          .index_vgpr = bank},
+                                                         *target));
+  const auto narrow_current_vcc = [&]() {
+    sequence.append(instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+        .branch(restore_label, InstructionSequence::BranchKind::SccZero);
   };
-  const auto narrow_masked_low = [&](uint32_t mask, uint32_t wanted) -> bool {
-    if (!append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
-      return false;
-    if (!sequence.emit_all(
-            instrumentation::build_v_and_b32_literal(value, mask, value, arch),
-            instrumentation::build_v_mov_b32_literal(expected, wanted, arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch)))
-      return false;
-    return narrow_current_vcc();
+  const auto narrow_masked_low = [&](uint32_t mask, uint32_t wanted) {
+    sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
+        .append(instrumentation::build_v_and_b32_literal(value, mask, value, arch),
+                instrumentation::build_v_mov_b32_literal(expected, wanted, arch),
+                instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch));
+    narrow_current_vcc();
   };
-  if (!narrow_masked_low(static_cast<uint32_t>(consan_moi_sampled_watchpoint::valid_mask),
-                         static_cast<uint32_t>(consan_moi_sampled_watchpoint::valid_mask)) ||
-      !narrow_masked_low(static_cast<uint32_t>(consan_moi_sampled_watchpoint::consumed_mask), 0u) ||
-      !append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(
-              value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::access_kind_shift),
-              value, arch),
-          instrumentation::build_v_and_b32_literal(
-              value, (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, value, arch),
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), value, arch)))
-    return std::nullopt;
-  if (!narrow_current_vcc())
-    return std::nullopt;
-  if (!sequence.emit(
-          instrumentation::build_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(3u), value, arch)))
-    return std::nullopt;
-  if (!narrow_current_vcc() || !append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(
-              value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::owner_shift), value,
-              arch),
-          instrumentation::build_v_and_b32_literal(value, consan_moi_sampled_watchpoint::max_owner,
-                                                   value, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(*plan.owner_epoch_vgprs.owner),
-                                                  value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-    return std::nullopt;
-  if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero))
-    return std::nullopt;
+  narrow_masked_low(static_cast<uint32_t>(consan_moi_sampled_watchpoint::valid_mask),
+                    static_cast<uint32_t>(consan_moi_sampled_watchpoint::valid_mask));
+  narrow_masked_low(static_cast<uint32_t>(consan_moi_sampled_watchpoint::consumed_mask), 0u);
+  sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
+      .append(instrumentation::build_v_lshrrev_b32(
+                  value,
+                  scalar_positive_inline_u32(consan_moi_sampled_watchpoint::access_kind_shift),
+                  value, arch),
+              instrumentation::build_v_and_b32_literal(
+                  value, (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, value, arch),
+              instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), value, arch));
+  narrow_current_vcc();
+  sequence.append(
+      instrumentation::build_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(3u), value, arch));
+  narrow_current_vcc();
+  sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
+      .append(instrumentation::build_v_lshrrev_b32(
+                  value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::owner_shift),
+                  value, arch),
+              instrumentation::build_v_and_b32_literal(
+                  value, consan_moi_sampled_watchpoint::max_owner, value, arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(
+                  vector_source_vgpr(*plan.owner_epoch_vgprs.owner), value, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+      .branch(restore_label, InstructionSequence::BranchKind::SccZero);
 
-  if (!append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(
-              value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::epoch_shift), value,
-              arch),
-          instrumentation::build_v_and_b32_literal(value, consan_moi_sampled_watchpoint::max_epoch,
-                                                   value, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(*plan.owner_epoch_vgprs.epoch),
-                                                  value, arch)))
-    return std::nullopt;
-  if (!narrow_current_vcc() || !append_load_u32_vgpr_at_offset(words, base, 0u, value, arch) ||
-      !append_load_u32_vgpr_at_offset(words, base, sizeof(uint32_t), expected, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(
-              value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::generation_shift),
-              value, arch),
-          instrumentation::build_v_lshlrev_b32(
-              expected,
-              scalar_positive_inline_u32(32u - consan_moi_sampled_watchpoint::generation_shift),
-              expected, arch),
-          instrumentation::build_v_add_u32(value, vector_source_vgpr(expected), value, arch),
-          instrumentation::build_v_and_b32_literal(
-              value, consan_moi_sampled_watchpoint::max_generation, value, arch),
-          instrumentation::build_v_mov_b32_literal(
-              expected,
-              static_cast<uint32_t>(plan.report_generation) &
-                  consan_moi_sampled_watchpoint::max_generation,
-              arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch)))
-    return std::nullopt;
-  if (!narrow_current_vcc())
-    return std::nullopt;
+  sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
+      .append(instrumentation::build_v_lshrrev_b32(
+                  value, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::epoch_shift),
+                  value, arch),
+              instrumentation::build_v_and_b32_literal(
+                  value, consan_moi_sampled_watchpoint::max_epoch, value, arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(
+                  vector_source_vgpr(*plan.owner_epoch_vgprs.epoch), value, arch));
+  narrow_current_vcc();
+  sequence.require(append_load_u32_vgpr_at_offset(words, base, 0u, value, arch))
+      .require(append_load_u32_vgpr_at_offset(words, base, sizeof(uint32_t), expected, arch))
+      .append(instrumentation::build_v_lshrrev_b32(
+                  value,
+                  scalar_positive_inline_u32(consan_moi_sampled_watchpoint::generation_shift),
+                  value, arch),
+              instrumentation::build_v_lshlrev_b32(
+                  expected,
+                  scalar_positive_inline_u32(32u - consan_moi_sampled_watchpoint::generation_shift),
+                  expected, arch),
+              instrumentation::build_v_add_u32(value, vector_source_vgpr(expected), value, arch),
+              instrumentation::build_v_and_b32_literal(
+                  value, consan_moi_sampled_watchpoint::max_generation, value, arch),
+              instrumentation::build_v_mov_b32_literal(
+                  expected,
+                  static_cast<uint32_t>(plan.report_generation) &
+                      consan_moi_sampled_watchpoint::max_generation,
+                  arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch));
+  narrow_current_vcc();
 
-  if (!sequence.emit_all(
-          instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(
-              value, static_cast<uint16_t>(temporary_exec + 1u), vector_source_vgpr(value), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-    return std::nullopt;
+  sequence.append(
+      instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
+      instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
+                                                scalar_positive_inline_u32(0), arch),
+      instrumentation::build_v_mbcnt_hi_u32_b32(value, static_cast<uint16_t>(temporary_exec + 1u),
+                                                vector_source_vgpr(value), arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
 
-  const auto append_publication = [&](uint32_t descriptor) -> bool {
-    if (!consan_detail::append_moi_indexed_address(
+  const auto append_publication = [&](uint32_t descriptor) {
+    sequence
+        .require(consan_detail::append_moi_indexed_address(
             words,
             {.table_address =
                  first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
              .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
              .address_vgpr = base,
              .index_vgpr = bank},
-            *target) ||
-        !sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                               value, kConSanMoiSampledSyncPublishingDescriptor, arch),
-                           instrumentation::build_v_mov_b32_literal(expected, 0, arch),
-                           instrumentation::build_flat_atomic_cmpswap_b32(
-                               base, value, value, true, kAmdGpuScopeDevice, arch)) ||
-        !append_moi_global_atomic_wait(words, arch)) {
-      return false;
-    }
-    if (!sequence.emit_all(
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-            instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-      return false;
-    if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
-      return false;
-    if (!consan_detail::append_moi_indexed_address(
+            *target))
+        .append(instrumentation::build_v_mov_b32_literal(
+                    value, kConSanMoiSampledSyncPublishingDescriptor, arch),
+                instrumentation::build_v_mov_b32_literal(expected, 0, arch),
+                instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
+                                                               kAmdGpuScopeDevice, arch))
+        .require(append_moi_global_atomic_wait(words, arch))
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+                instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+        .branch(collision_label, InstructionSequence::BranchKind::SccZero)
+        .require(consan_detail::append_moi_indexed_address(
             words,
             {.table_address = first_metadata_address,
              .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
              .address_vgpr = base,
              .index_vgpr = bank},
-            *target) ||
-        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address), saved_address) ||
-        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
-                           static_cast<uint16_t>(saved_address + 1u)) ||
-        !record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u) ||
-        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                           *plan.owner_epoch_vgprs.epoch) ||
-        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-                           *plan.owner_epoch_vgprs.epoch))
-      return false;
-    if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)) ||
-        !consan_detail::append_moi_indexed_address(
+            *target))
+        .require(
+            record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address), saved_address))
+        .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
+                                   static_cast<uint16_t>(saved_address + 1u)))
+        .require(record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u))
+        .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                                   *plan.owner_epoch_vgprs.epoch))
+        .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
+                                   *plan.owner_epoch_vgprs.epoch))
+        .append(instrumentation::build_s_wait_global_store0(arch))
+        .require(consan_detail::append_moi_indexed_address(
             words,
             {.table_address =
                  first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
              .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
              .address_vgpr = base,
              .index_vgpr = bank},
-            *target) ||
-        !sequence.emit_all(instrumentation::build_v_mov_b32_literal(value, descriptor, arch),
-                           instrumentation::build_v_mov_b32_literal(
-                               expected, kConSanMoiSampledSyncPublishingDescriptor, arch),
-                           instrumentation::build_flat_atomic_cmpswap_b32(
-                               base, value, value, true, kAmdGpuScopeDevice, arch)) ||
-        !append_moi_global_atomic_wait(words, arch)) {
-      return false;
-    }
-    if (!sequence.emit_all(
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
-            instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-      return false;
-    if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
-      return false;
-    if (!append_atomic_fetch_add_one_u32(
+            *target))
+        .append(instrumentation::build_v_mov_b32_literal(value, descriptor, arch),
+                instrumentation::build_v_mov_b32_literal(
+                    expected, kConSanMoiSampledSyncPublishingDescriptor, arch),
+                instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
+                                                               kAmdGpuScopeDevice, arch))
+        .require(append_moi_global_atomic_wait(words, arch))
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
+                instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+        .branch(collision_label, InstructionSequence::BranchKind::SccZero)
+        .require(append_atomic_fetch_add_one_u32(
             words, report_base + offsetof(ConSanMoiReportHeader, sampled_sync_metadata_count),
             value, base, arch))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional);
+        .branch(restore_label, InstructionSequence::BranchKind::Unconditional);
   };
 
   if (is_cas) {
     assert(prelude.cas_compare_vgpr && prelude.cas_result_vgpr);
     const auto cas_failure_label = sequence.make_label();
-    if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch)))
-      return std::nullopt;
-    if (!sequence.emit_branch(cas_failure_label, InstructionSequence::BranchKind::VccZero) ||
-        !append_publication(*success_descriptor) || !sequence.bind(cas_failure_label))
-      return std::nullopt;
+    sequence
+        .append(instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch))
+        .branch(cas_failure_label, InstructionSequence::BranchKind::VccZero);
+    append_publication(*success_descriptor);
+    sequence.bind_label(cas_failure_label);
   }
-  if (!append_publication(is_cas ? *failure_descriptor : *success_descriptor))
-    return std::nullopt;
+  append_publication(is_cas ? *failure_descriptor : *success_descriptor);
 
   // A failed claim/commit reaches here after its cumulative EXEC intersection
   // became empty. Reconstitute the guest mask and select exactly one active
   // lane so the collision counter is neither lost nor multiplied by wave size.
-  if (!sequence.bind(collision_label) ||
-      !sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
-          instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(
-              value, static_cast<uint16_t>(temporary_exec + 1u), vector_source_vgpr(value), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-    return std::nullopt;
-  if (!append_atomic_fetch_add_one_u32(
+  sequence.bind_label(collision_label)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
+              instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
+              instrumentation::build_v_mbcnt_lo_u32_b32(value, temporary_exec,
+                                                        scalar_positive_inline_u32(0), arch),
+              instrumentation::build_v_mbcnt_hi_u32_b32(value,
+                                                        static_cast<uint16_t>(temporary_exec + 1u),
+                                                        vector_source_vgpr(value), arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+      .require(append_atomic_fetch_add_one_u32(
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_dropped_window_count), value,
           base, arch))
-    return std::nullopt;
-  if (!sequence.bind(restore_label) ||
-      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)) ||
-      !append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
-    return std::nullopt;
+      .bind_label(restore_label)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))
+      .require(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
@@ -939,20 +873,23 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (defer_guest) {
     std::vector<uint32_t> deferred_guest_words;
-    if (!append_sampled_atomic_guest(deferred_guest_words, bytes, candidate, arch,
-                                     /*guest_instruction_offset=*/nullptr, emitted_guest_size)) {
-      return std::nullopt;
+    const bool guest_ok =
+        append_sampled_atomic_guest(deferred_guest_words, bytes, candidate, arch,
+                                    /*guest_instruction_offset=*/nullptr, emitted_guest_size);
+    sequence.require(guest_ok);
+    if (guest_ok) {
+      deferred_guest_words.insert(deferred_guest_words.end(), trailing_guest_words.begin(),
+                                  trailing_guest_words.end());
+      if (emitted_guest_size)
+        *emitted_guest_size +=
+            static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
+      if (guest_instruction_offset)
+        *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+      words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
     }
-    deferred_guest_words.insert(deferred_guest_words.end(), trailing_guest_words.begin(),
-                                trailing_guest_words.end());
-    if (emitted_guest_size)
-      *emitted_guest_size += static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
-    if (guest_instruction_offset)
-      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-    words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
   }
 
-  if (!sequence.resolve_branches(arch))
+  if (!sequence.finish(arch))
     return std::nullopt;
   return words;
 }
