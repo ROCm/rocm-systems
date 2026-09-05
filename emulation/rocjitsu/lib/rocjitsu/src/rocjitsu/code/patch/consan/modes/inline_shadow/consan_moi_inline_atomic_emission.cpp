@@ -1303,8 +1303,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
 [[nodiscard]] bool append_inline_versioned_release_transaction(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiInlineAtomicEmissionPlan &plan, rj_code_arch_t arch, bool emit_guest_instruction,
+    const MoiAtomicEvidenceSitePlan &candidate, const ConSanAtomicSite &site,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
+    rj_code_arch_t arch, bool emit_guest_instruction,
     bool import_claimed_predecessor, bool predicate_on_compare_exchange_success,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
     std::span<const uint32_t> trailing_guest_words = {}) {
@@ -1425,13 +1426,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                                    /*original_exec_save_offset=*/12u, arch),
                    "ConSan MOI inline release could not initialize its EXEC transaction");
   const auto narrow_compare_exchange_success = [&]() -> bool {
-    if (!candidate.site.data_vgpr || !candidate.site.destination_vgpr) {
+    if (!site.data_vgpr || !site.destination_vgpr) {
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
       return false;
     }
-    const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
+    const uint16_t compare_vgpr = static_cast<uint16_t>(*site.data_vgpr + 1u);
     if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(compare_vgpr), *candidate.site.destination_vgpr, arch))) {
+            vector_source_vgpr(compare_vgpr), *site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI inline release CAS could not compare its dynamic outcome");
       return false;
     }
@@ -1518,9 +1519,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     require_emission(restore_exec(original_exec) &&
                      append_restore_moi_special_state(words, plan.special_state, arch));
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-    for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
+    for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
-      std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
+      std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
       words.push_back(word);
     }
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
@@ -1721,9 +1722,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   set_stage("guest completion");
   if (emit_guest_instruction && !import_claimed_predecessor) {
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-    for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
+    for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
-      std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
+      std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
       words.push_back(word);
     }
   }
@@ -1763,7 +1764,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
+    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiInlineAtomicEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
     std::span<const uint32_t> trailing_guest_words) {
@@ -1783,14 +1785,14 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const uint16_t token_value_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
   const uint16_t temporary_vgpr = static_cast<uint16_t>(scratch_vgpr + 6u);
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
-  const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   const bool claims_release_predecessor = consan_is_capability_arch(arch);
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   MoiEmissionRequirement require_emission(sequence, errors);
   words.reserve(
-      candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
+      site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
       (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
   if (spill)
@@ -1901,7 +1903,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // inherit an unrelated predecessor's causal frontier.
     const bool import_claimed_predecessor = claims_release_predecessor && candidate.is_rmw;
     require_emission(append_inline_versioned_release_transaction(
-                         words, bytes, candidate, address_plan, plan, arch,
+                         words, bytes, candidate, site, address_plan, plan, arch,
                          /*emit_guest_instruction=*/true, import_claimed_predecessor,
                          /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset,
                          errors),
@@ -1919,7 +1921,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   if (claimed_acquire_release) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, address_plan, plan, arch,
+            words, bytes, candidate, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors),
@@ -1938,7 +1940,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   if (claimed_compare_exchange_release) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, address_plan, plan, arch,
+            words, bytes, candidate, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors),
@@ -1956,7 +1958,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   if (claimed_read_only_acquire) {
     require_emission(
         append_inline_versioned_release_transaction(
-            words, bytes, candidate, address_plan, plan, arch,
+            words, bytes, candidate, site, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors,
@@ -2022,9 +2024,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                      "ConSan MOI inline acquire could not restore pre-guest state");
   }
   guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
+  for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
+    std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
   if (candidate.is_rmw) {
@@ -2066,7 +2068,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // EXEC mask has been preserved.
     require_emission(append_restore_moi_special_state(words, plan.special_state, arch) &&
                          append_inline_versioned_release_transaction(
-                             words, bytes, candidate, address_plan, plan, arch,
+                             words, bytes, candidate, site, address_plan, plan, arch,
                              /*emit_guest_instruction=*/false,
                              /*import_claimed_predecessor=*/false,
                              /*predicate_on_compare_exchange_success=*/is_compare_exchange,

@@ -60,7 +60,8 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    uint64_t owner_descriptor_file_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const ConSanAtomicSite &site, uint64_t owner_descriptor_file_offset,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
     rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
@@ -70,7 +71,8 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    uint64_t owner_descriptor_file_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const ConSanAtomicSite &site, uint64_t owner_descriptor_file_offset,
+    const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
     rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,

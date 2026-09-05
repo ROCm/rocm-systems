@@ -45,7 +45,8 @@ struct MoiRecordEventEmissionPlan {
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
+    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors);

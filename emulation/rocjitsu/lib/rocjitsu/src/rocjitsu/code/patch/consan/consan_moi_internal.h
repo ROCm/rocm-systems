@@ -651,12 +651,12 @@ struct MoiWorkitemOwnerDerivationRequest {
 ///
 /// The observation plan owns why this operation must be observed. This value
 /// joins that decision to the sole normalized synchronization sequence and to
-/// the operand-rich guest instruction needed by native lowering. A target
-/// emitter may consume the copied `site` operands, but it must not rediscover
-/// release/acquire meaning from instruction bits or choose a different
-/// evidence intent. Language-level atomic load/store sequences use the same
-/// contract with `is_rmw == false`; their complete ordered suffix is retained
-/// in `ordered_sequence_end_text_offset`.
+/// the stable decoded source needed by native lowering. A target emitter
+/// resolves operands from `source_site` at its boundary, but it must not
+/// rediscover release/acquire meaning from instruction bits or choose a
+/// different evidence intent. Language-level atomic load/store sequences use
+/// the same contract with `is_rmw == false`; their complete ordered suffix is
+/// retained in `ordered_sequence_end_text_offset`.
 struct MoiAtomicEvidenceSitePlan {
   /// Authoritative synchronization event selected by evidence policy.
   ConSanSyncEventId event;
@@ -670,12 +670,8 @@ struct MoiAtomicEvidenceSitePlan {
   /// Engine-specific after-guest evidence intent implemented by this plan.
   ConSanProbeIntentId evidence_intent;
 
-  /// Decoded operands and encoding fields required to relocate the guest and
-  /// materialize its address. Semantic ordering does not come from this copy.
-  ConSanAtomicSite site;
-
   /// Classifier-owned target form shared by address planning and the selected
-  /// ordering mechanism. Native lowerers consume it and never re-admit `site`.
+  /// ordering mechanism. Native lowerers consume it without re-admission.
   ConSanAtomicLoweringForm lowering_form;
 
   /// Stable decoded source whose operands and execution owners scope lowering.
@@ -701,9 +697,8 @@ struct MoiAtomicEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() &&
            address_capture_intent.valid() && evidence_intent.valid() &&
-           address_capture_intent != evidence_intent && site.size != 0u && site.width_bits != 0u &&
-           lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
-           ordered_sequence_end_text_offset >= site.text_offset + site.size;
+           address_capture_intent != evidence_intent &&
+           lowering_form.kind != ConSanAtomicLoweringFormKind::Count;
   }
 };
 

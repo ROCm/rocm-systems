@@ -841,6 +841,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   struct Candidate {
     MoiAtomicEvidenceSitePlan atomic;
+    ConSanAtomicSite site;
     consan_detail::SampledAtomicSemantics semantics;
     uint64_t ordered_sequence_end_text_offset = 0;
     uint32_t selected_slot = 0;
@@ -865,9 +866,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   if (!result.errors.empty())
     return;
   for (MoiAtomicEvidenceSitePlan &atomic : admitted) {
+    const std::optional<ConSanAtomicSite> site = materialize_moi_communication_site(
+        result.program_inventory, atomic.source_site, atomic.sequence);
+    if (!site) {
+      result.errors.emplace_back("ConSan MOI sampled atomic sync lost its decoded source site");
+      return;
+    }
     if (atomic.is_rmw) {
       const SampledAtomicSemanticsResult semantics =
-          sampled_atomic_semantics_for_plan(graph, atomic);
+          sampled_atomic_semantics_for_plan(graph, atomic, *site);
       if (!semantics.semantics) {
         result.errors.emplace_back(
             "ConSan MOI admitted sampled atomic evidence is invalid: " +
@@ -875,14 +882,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         return;
       }
       const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
-      candidates.push_back(
-          {std::move(atomic), *semantics.semantics, sequence_end, 0, 1, false, std::nullopt});
+      candidates.push_back({std::move(atomic), *site, *semantics.semantics, sequence_end, 0, 1,
+                            false, std::nullopt});
       continue;
     }
     const auto role = sampled_atomic_role(atomic.event_kind, /*is_rmw=*/false);
-    const auto scope =
-        atomic.site.scope ? consan_moi_sampled_sync_scope(*atomic.site.scope) : std::nullopt;
-    if (!role || !scope || atomic.site.width_bits == 0u || atomic.site.width_bits % 8u != 0u) {
+    const auto scope = site->scope ? consan_moi_sampled_sync_scope(*site->scope) : std::nullopt;
+    if (!role || !scope || site->width_bits == 0u || site->width_bits % 8u != 0u) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync skipped an unqualified ordinary atomic sequence in " +
           moi_evidence_container_name(result.program_inventory, atomic.source_site));
@@ -892,7 +898,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         .role = *role,
         .scope = *scope,
         .outcome = ConSanMoiSampledSyncOutcome::NotApplicable,
-        .byte_count = atomic.site.width_bits / 8u,
+        .byte_count = site->width_bits / 8u,
         .descriptor = 0u,
         .cas_failure_descriptor = std::nullopt,
     };
@@ -912,7 +918,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     semantics.descriptor = encoded.packed.descriptor;
     const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
-    candidates.push_back({std::move(atomic), semantics, sequence_end, 0, 1, false, std::nullopt});
+    candidates.push_back(
+        {std::move(atomic), *site, semantics, sequence_end, 0, 1, false, std::nullopt});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -1046,11 +1053,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         distance =
             sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
                                          window.mapping->access.original_site.original_text_offset,
-                                         candidate.atomic.site.text_offset);
+                                         candidate.site.text_offset);
       } else if (acquire_side) {
         side = Association::Side::Acquire;
         distance = sampled_cfg_forward_distance(
-            resource_state, window.owner_descriptor_file_offset, candidate.atomic.site.text_offset,
+            resource_state, window.owner_descriptor_file_offset, candidate.site.text_offset,
             window.mapping->access.original_site.original_text_offset);
       }
       if (!distance)
@@ -1104,11 +1111,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           continue;
         const uint64_t text_distance =
             window.mapping->access.original_site.original_text_offset <
-                    candidate.atomic.site.text_offset
-                ? candidate.atomic.site.text_offset -
+                    candidate.site.text_offset
+                ? candidate.site.text_offset -
                       window.mapping->access.original_site.original_text_offset
                 : window.mapping->access.original_site.original_text_offset -
-                      candidate.atomic.site.text_offset;
+                      candidate.site.text_offset;
         Association current{candidate_index,
                             window_index,
                             {std::numeric_limits<uint32_t>::max(), text_distance},
@@ -1231,7 +1238,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const uint16_t scratch_count = sampled_atomic_scratch_count();
   for (size_t index = 0; index < candidates.size() && selected.size() < remaining; ++index) {
     Candidate candidate = candidates[index];
-    const ConSanAtomicSite &site = candidate.atomic.site;
+    const ConSanAtomicSite &site = candidate.site;
     const auto composed_access_fragment =
         std::ranges::find_if(result.staged_text_fragments, [&](const ConSanTextFragment &fragment) {
           return (fragment.patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -1357,7 +1364,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   staged_fragments.reserve(selected.size() * 2u);
   for (const Planned &planned : selected) {
     if (!append_atomic_scalar_clause_patch(
-            old_text, planned.candidate.atomic.site,
+            old_text, planned.candidate.site,
             planned.candidate.atomic.scalar_clause_text_offset, arch, scalar_clause_patches,
             result.errors))
       return;
@@ -1377,7 +1384,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     auto words =
         planned.candidate.deferred_acquire
             ? build_sampled_pending_acquire_cave_words(
-                  bytes, planned.candidate.atomic, planned.owner_descriptor_file_offset,
+                  bytes, planned.candidate.atomic, planned.candidate.site,
+                  planned.owner_descriptor_file_offset,
                   planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
@@ -1385,7 +1393,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                   planned.candidate.release_selected_slot, layout, result.errors,
                   &guest_instruction_offset, planned.trailing_guest_words, &emitted_guest_size)
             : build_sampled_atomic_sync_cave_words(
-                  bytes, planned.candidate.atomic, planned.owner_descriptor_file_offset,
+                  bytes, planned.candidate.atomic, planned.candidate.site,
+                  planned.owner_descriptor_file_offset,
                   planned.address_plan, *emission_plan, planned.spill ? &*planned.spill : nullptr,
                   planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
@@ -1396,7 +1405,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       return;
     ConSanPatchInfo patch;
     patch.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
-    patch.anchor_offset = planned.candidate.atomic.site.text_offset;
+    patch.anchor_offset = planned.candidate.site.text_offset;
     patch.original_size = planned.relocated_guest_size;
     note_moi_probe_patch_info(patch, planned);
     auto fragment = make_consan_around_text_fragment(

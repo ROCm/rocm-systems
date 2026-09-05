@@ -54,11 +54,16 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
+      const ConSanProgramSite *source = problem.inventory().program_site(candidate.source_site);
+      if (source == nullptr) {
+        errors.emplace_back("ConSan MOI atomic resource planning lost its source site");
+        return;
+      }
       const uint16_t scratch_count =
           mode.atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
       ConSanCandidateResourcePlan plan =
           plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Atomic,
-                                 index, candidate.site.text_offset, candidate.source_site,
+                                 index, source->text_offset(), candidate.source_site,
                                  scratch_count, nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));

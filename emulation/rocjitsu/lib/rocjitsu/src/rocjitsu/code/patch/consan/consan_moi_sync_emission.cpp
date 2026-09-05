@@ -72,7 +72,8 @@ namespace consan_moi_impl {
 
 [[nodiscard]] SampledAtomicSemanticsResult
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
-                                  const MoiAtomicEvidenceSitePlan &plan) {
+                                  const MoiAtomicEvidenceSitePlan &plan,
+                                  const ConSanAtomicSite &site) {
   using Reason = SampledAtomicSemanticsReason;
   const auto reject = [](Reason reason) {
     return SampledAtomicSemanticsResult{.semantics = std::nullopt, .reason = reason};
@@ -109,11 +110,11 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   if (!sampled_scope)
     return reject(Reason::UnsupportedQualifiedScope);
   semantics.scope = *sampled_scope;
-  if (plan.site.width_bits == 0 || plan.site.width_bits % 8u != 0 ||
-      plan.site.width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
+  if (site.width_bits == 0 || site.width_bits % 8u != 0 ||
+      site.width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
     return reject(Reason::UnsupportedQualifiedByteRange);
   }
-  semantics.byte_count = plan.site.width_bits / 8u;
+  semantics.byte_count = site.width_bits / 8u;
   switch (sequence->rmw_outcome) {
   case ConSanSyncRmwOutcome::NoReturn:
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwNoReturn;
@@ -122,8 +123,8 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwReturnsOld;
     break;
   case ConSanSyncRmwOutcome::CompareExchange:
-    if (!plan.site.returns_old_value.value_or(false) || !plan.site.data_vgpr ||
-        !plan.site.destination_vgpr) {
+    if (!site.returns_old_value.value_or(false) || !site.data_vgpr ||
+        !site.destination_vgpr) {
       return reject(Reason::CompareExchangeDynamicOutcomeUnavailable);
     }
     semantics.outcome = ConSanMoiSampledSyncOutcome::CasSuccess;
@@ -447,34 +448,20 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }
-    if (event->kind == ConSanSyncKind::Atomic) {
-      const ConSanAtomicSite *site = inventory.program_site<ConSanAtomicSite>(event->source_site);
-      if (site == nullptr) {
-        errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
-        return {};
-      }
-      plan.site = *site;
-    } else {
-      const ConSanOrdinaryMemorySite *site =
-          inventory.program_site<ConSanOrdinaryMemorySite>(event->source_site);
-      if (site == nullptr) {
-        errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
-        return {};
-      }
-      plan.site = consan_atomic_communication_site(*site);
-    }
-    if (sequence->scope)
-      plan.site.scope = sequence->scope;
+    const std::optional<ConSanAtomicSite> site =
+        materialize_moi_communication_site(inventory, event->source_site, plan.sequence);
     plan.lowering_form = *decision.lowering_form;
-    if (!plan.is_well_formed()) {
+    if (!site || plan.ordered_sequence_end_text_offset < site->text_offset + site->size ||
+        !plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }
     plans.push_back(std::move(plan));
   }
 
-  std::ranges::sort(plans, {},
-                    [](const MoiAtomicEvidenceSitePlan &plan) { return plan.site.text_offset; });
+  std::ranges::sort(plans, {}, [&](const MoiAtomicEvidenceSitePlan &plan) {
+    return inventory.program_site(plan.source_site)->text_offset();
+  });
   return plans;
 }
 

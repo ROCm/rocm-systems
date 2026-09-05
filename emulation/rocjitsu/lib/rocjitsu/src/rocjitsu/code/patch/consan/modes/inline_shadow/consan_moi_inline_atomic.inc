@@ -159,9 +159,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       ConSanProbeIntentKind::ExactAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
-  std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.site.text_offset < rhs.site.text_offset;
-  });
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no supported flat atomics");
     return;
@@ -177,6 +174,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   struct PlannedInlineAtomic : MoiPlannedProbeResources {
     MoiAtomicEvidenceSitePlan candidate;
+    ConSanAtomicSite site;
     ConSanMoiAtomicAddressPlan address_plan;
     MoiInlineAtomicEmissionPlan emission;
     uint32_t relocated_guest_size = 0;
@@ -194,7 +192,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (planned_candidates.size() == options.max_patches)
       break;
     const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
-    const ConSanAtomicSite &site = candidate.site;
+    const std::optional<ConSanAtomicSite> materialized_site =
+        materialize_moi_communication_site(result.program_inventory, candidate.source_site,
+                                           candidate.sequence);
+    if (!materialized_site) {
+      result.errors.emplace_back("ConSan MOI inline atomic patch lost its decoded source site");
+      return;
+    }
+    const ConSanAtomicSite &site = *materialized_site;
     uint32_t relocated_guest_size = site.size;
     std::vector<uint32_t> trailing_guest_words;
     if (!candidate.is_rmw &&
@@ -351,8 +356,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, probe->resources);
     note_moi_sgpr_requirements(scalar_requirements, probe->resources, options, options,
                                candidate_point, semantics, arch);
-    planned_candidates.push_back({std::move(*probe), candidate, address_plan, std::move(*emission),
-                                  relocated_guest_size, std::move(trailing_guest_words)});
+    planned_candidates.push_back({std::move(*probe), candidate, site, address_plan,
+                                  std::move(*emission), relocated_guest_size,
+                                  std::move(trailing_guest_words)});
   }
   // Retain every admitted release even when this code object contains no
   // acquire. Its consumer can live in another large code object, and pruning
@@ -364,7 +370,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate.site,
+    if (!append_atomic_scalar_clause_patch(old_text, planned.site,
                                            planned.candidate.scalar_clause_text_offset, arch,
                                            scalar_clause_patches, result.errors))
       return;
@@ -377,10 +383,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
-    const ConSanAtomicSite &site = candidate.site;
+    const ConSanAtomicSite &site = planned.site;
     uint32_t guest_instruction_offset = 0u;
     auto words = build_inline_atomic_ordering_cave_words(
-        active_bytes, candidate, planned.address_plan, planned.emission,
+        active_bytes, candidate, site, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, guest_instruction_offset,
         result.errors, planned.trailing_guest_words);

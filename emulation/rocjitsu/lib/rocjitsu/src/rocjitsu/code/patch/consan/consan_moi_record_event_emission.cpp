@@ -187,7 +187,8 @@ using consan_moi_detail::kFenceRecordLayout;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
+    const ConSanAtomicSite &site, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
@@ -196,7 +197,7 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
   const auto report_scope =
-      candidate.site.scope ? consan_moi_record_replay_scope(*candidate.site.scope) : std::nullopt;
+      site.scope ? consan_moi_record_replay_scope(*site.scope) : std::nullopt;
   if (!report_scope) {
     errors.emplace_back("ConSan MOI atomic record patch requires a recordable causal scope");
     return std::nullopt;
@@ -243,15 +244,14 @@ using consan_moi_detail::kFenceRecordLayout;
 
   const ConSanMoiWorkgroupSources &workgroup_sources = options.workgroup_sources;
 
-  if (candidate.site.file_offset > bytes.size() ||
-      candidate.site.size > bytes.size() - candidate.site.file_offset) {
+  if (site.file_offset > bytes.size() || site.size > bytes.size() - site.file_offset) {
     errors.emplace_back("ConSan MOI atomic record patch site exceeds ELF bytes");
     return std::nullopt;
   }
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
-  words.reserve(words.size() + candidate.site.size / sizeof(uint32_t) + 96u +
+  words.reserve(words.size() + site.size / sizeof(uint32_t) + 96u +
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
@@ -267,12 +267,12 @@ using consan_moi_detail::kFenceRecordLayout;
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   std::vector<uint32_t> guest_atomic_words;
-  guest_atomic_words.reserve(candidate.site.size / sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
+  guest_atomic_words.reserve(site.size / sizeof(uint32_t));
+  for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
+    std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
     guest_atomic_words.push_back(word);
   }
 
@@ -336,15 +336,15 @@ using consan_moi_detail::kFenceRecordLayout;
   const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
   if (is_compare_exchange) {
-    if (!candidate.site.data_vgpr || !candidate.site.destination_vgpr) {
+    if (!site.data_vgpr || !site.destination_vgpr) {
       errors.emplace_back("ConSan MOI atomic record CAS lacks compare/result operands");
       return std::nullopt;
     }
-    const uint16_t value_word_count = static_cast<uint16_t>(candidate.site.width_bits / 32u);
+    const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
     const uint16_t compare_vgpr =
-        static_cast<uint16_t>(*candidate.site.data_vgpr + value_word_count);
+        static_cast<uint16_t>(*site.data_vgpr + value_word_count);
     if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(compare_vgpr), *candidate.site.destination_vgpr, arch))) {
+            vector_source_vgpr(compare_vgpr), *site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI atomic record CAS could not capture its outcome mask");
       return std::nullopt;
     }
@@ -352,11 +352,11 @@ using consan_moi_detail::kFenceRecordLayout;
     const uint16_t success_hi = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
     words.push_back(build_v_mov_b32_e32(success_lo, kAmdGpuVccLo, arch));
     words.push_back(build_v_mov_b32_e32(success_hi, kAmdGpuVccHi, arch));
-    if (candidate.site.width_bits == 64u) {
+    if (site.width_bits == 64u) {
       if (!sequence.emit_all(
               instrumentation::build_v_cmp_eq_u32_vcc(
                   vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
-                  static_cast<uint16_t>(*candidate.site.destination_vgpr + 1u), arch),
+                  static_cast<uint16_t>(*site.destination_vgpr + 1u), arch),
               instrumentation::build_v_and_b32(success_lo, kAmdGpuVccLo, success_lo, arch),
               instrumentation::build_v_and_b32(success_hi, kAmdGpuVccHi, success_hi, arch))) {
         errors.emplace_back(
@@ -438,10 +438,10 @@ using consan_moi_detail::kFenceRecordLayout;
       .vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t),
             static_cast<uint16_t>(recorded_address_vgpr + 1u))
       .literal(offsetof(ConSanMoiAtomicRecord, instruction_offset),
-               static_cast<uint32_t>(candidate.site.text_offset))
+               static_cast<uint32_t>(site.text_offset))
       .literal(offsetof(ConSanMoiAtomicRecord, kind), static_cast<uint32_t>(candidate.event_kind))
       .literal(offsetof(ConSanMoiAtomicRecord, scope), *report_scope)
-      .literal(offsetof(ConSanMoiAtomicRecord, semantics), candidate.site.raw_th.value_or(0u))
+      .literal(offsetof(ConSanMoiAtomicRecord, semantics), site.raw_th.value_or(0u))
       .literal(offsetof(ConSanMoiAtomicRecord, operation), static_cast<uint32_t>(atomic_operation))
       .literal(offsetof(ConSanMoiAtomicRecord, outcome), static_cast<uint32_t>(atomic_outcome));
   if (is_compare_exchange) {

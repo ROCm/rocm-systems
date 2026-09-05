@@ -442,9 +442,6 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   plan.source_site = {0u};
   plan.address_capture_intent = {.value = 3u};
   plan.evidence_intent = {.value = 4u};
-  plan.site.text_offset = 16u;
-  plan.site.size = 4u;
-  plan.site.width_bits = 32u;
   plan.lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
   plan.ordered_sequence_end_text_offset = 20u;
   EXPECT_TRUE(plan.is_well_formed());
@@ -461,12 +458,6 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   consan_detail::MoiAtomicEvidenceSitePlan aliased_intents = plan;
   aliased_intents.evidence_intent = aliased_intents.address_capture_intent;
   EXPECT_FALSE(aliased_intents.is_well_formed());
-  consan_detail::MoiAtomicEvidenceSitePlan truncated_sequence = plan;
-  truncated_sequence.ordered_sequence_end_text_offset = 19u;
-  EXPECT_FALSE(truncated_sequence.is_well_formed());
-  consan_detail::MoiAtomicEvidenceSitePlan missing_guest = plan;
-  missing_guest.site.size = 0u;
-  EXPECT_FALSE(missing_guest.is_well_formed());
   consan_detail::MoiAtomicEvidenceSitePlan missing_lowering_form = plan;
   missing_lowering_form.lowering_form.kind = ConSanAtomicLoweringFormKind::Count;
   EXPECT_FALSE(missing_lowering_form.is_well_formed());

@@ -234,6 +234,8 @@ foreach(_plan IN ITEMS
         _site_plan_contract MATCHES "ConSanBarrierSite site") OR
        (_plan STREQUAL "MoiFenceEvidenceSitePlan" AND
         _site_plan_contract MATCHES "ConSanAtomicSite communication_site") OR
+       (_plan STREQUAL "MoiAtomicEvidenceSitePlan" AND
+        _site_plan_contract MATCHES "ConSanAtomicSite site") OR
        _site_plan_contract MATCHES "kernel_descriptor_file_offset")
         message(FATAL_ERROR
             "ConSan ${_plan} must retain stable graph/source handles, not copied identities or descriptors"
