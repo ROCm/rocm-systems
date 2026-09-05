@@ -303,12 +303,13 @@ bool consan_detail::append_moi_global_atomic_completion(std::vector<uint32_t> &w
                                                         const ConSanTargetProfile &target) {
   const auto load = instrumentation::build_s_wait_global_load0(target.arch);
   const auto store = instrumentation::build_s_wait_global_store0(target.arch);
-  if (!load || !store)
-    return false;
-  words.push_back(*load);
-  if (*store != *load)
-    words.push_back(*store);
-  return true;
+  InstructionSequence sequence(words);
+  sequence.append(load);
+  if (load && store && *store != *load)
+    sequence.append(store);
+  else
+    sequence.require(store.has_value());
+  return sequence.finish();
 }
 
 bool consan_detail::append_moi_atomic_counter_increment(
@@ -328,18 +329,10 @@ bool consan_detail::append_moi_atomic_counter_increment(
   const auto atomic = instrumentation::build_flat_atomic_add_u32(
       request.address_vgpr, request.result_vgpr, request.result_vgpr,
       /*return_old_value=*/true, /*scope=*/2u, target.arch);
-  if (!address_lo || !address_hi || !one || !atomic)
-    return false;
-
-  std::vector<uint32_t> emitted;
-  emitted.insert(emitted.end(), address_lo->begin(), address_lo->end());
-  emitted.insert(emitted.end(), address_hi->begin(), address_hi->end());
-  emitted.insert(emitted.end(), one->begin(), one->end());
-  emitted.insert(emitted.end(), atomic->begin(), atomic->end());
-  if (!append_moi_global_atomic_completion(emitted, target))
-    return false;
-  words.insert(words.end(), emitted.begin(), emitted.end());
-  return true;
+  InstructionSequence sequence(words);
+  sequence.append(address_lo, address_hi, one, atomic)
+      .require(append_moi_global_atomic_completion(words, target));
+  return sequence.finish();
 }
 
 bool consan_detail::append_moi_workitem_owner_derivation(
@@ -348,16 +341,13 @@ bool consan_detail::append_moi_workitem_owner_derivation(
   if (!request.is_well_formed())
     return false;
 
-  std::vector<uint32_t> emitted;
+  InstructionSequence sequence(words);
   uint16_t owner_source_vgpr = 0u;
   if (request.plan.entry_workitem_x_private_offset) {
     const auto owner_load = instrumentation::build_private_load_b32(
         request.result_vgpr, *request.plan.entry_workitem_x_private_offset, target.arch);
     const auto owner_wait = instrumentation::build_s_wait_private_load0(target.arch);
-    if (!owner_load || !owner_wait)
-      return false;
-    emitted.insert(emitted.end(), owner_load->begin(), owner_load->end());
-    emitted.push_back(*owner_wait);
+    sequence.append(owner_load, owner_wait);
     owner_source_vgpr = request.result_vgpr;
   }
 
@@ -366,11 +356,8 @@ bool consan_detail::append_moi_workitem_owner_derivation(
   const auto owner_init = instrumentation::build_v_lshrrev_b32(
       request.result_vgpr, scalar_positive_inline_u32(request.plan.wave_size_shift),
       owner_source_vgpr, target.arch);
-  if (!owner_init)
-    return false;
-  emitted.push_back(*owner_init);
-  words.insert(words.end(), emitted.begin(), emitted.end());
-  return true;
+  sequence.append(owner_init);
+  return sequence.finish();
 }
 
 bool consan_detail::append_moi_indexed_address(std::vector<uint32_t> &words,
@@ -382,18 +369,12 @@ bool consan_detail::append_moi_indexed_address(std::vector<uint32_t> &words,
     return false;
   }
 
-  const size_t original_size = words.size();
-  const auto reject = [&]() {
-    words.resize(original_size);
-    return false;
-  };
+  InstructionSequence sequence(words);
   const uint32_t highest_bit = std::bit_width(request.stride_bytes) - 1u;
   const auto scale_highest = instrumentation::build_v_lshlrev_b32(
       request.address_vgpr, scalar_positive_inline_u32(highest_bit), request.index_vgpr,
       target.arch);
-  if (!scale_highest)
-    return reject();
-  words.push_back(*scale_highest);
+  sequence.append(scale_highest);
 
   uint32_t remaining_bits = request.stride_bytes & ~(uint32_t{1} << highest_bit);
   while (remaining_bits != 0u) {
@@ -404,21 +385,16 @@ bool consan_detail::append_moi_indexed_address(std::vector<uint32_t> &words,
     const auto add_term = instrumentation::build_v_add_u32(
         request.address_vgpr, vector_source_vgpr(request.address_vgpr),
         static_cast<uint16_t>(request.address_vgpr + 1u), target.arch);
-    if (!scale_term || !add_term)
-      return reject();
-    words.push_back(*scale_term);
-    words.insert(words.end(), add_term->begin(), add_term->end());
+    sequence.append(scale_term, add_term);
     remaining_bits &= ~(uint32_t{1} << bit);
   }
 
-  words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(request.address_vgpr + 1u),
+  sequence.append(build_v_mov_b32_e32(static_cast<uint16_t>(request.address_vgpr + 1u),
                                       scalar_positive_inline_u32(0), target.arch));
   const auto add_base = instrumentation::build_v_add_u64_literal(
       request.address_vgpr, request.table_address, target.arch);
-  if (!add_base)
-    return reject();
-  words.insert(words.end(), add_base->begin(), add_base->end());
-  return true;
+  sequence.append(add_base);
+  return sequence.finish();
 }
 
 std::optional<consan_detail::ScalarOwnerContextResolution>
@@ -587,16 +563,14 @@ consan_detail::append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words,
   const uint32_t slot_offset = spill.slot_offsets[source - spill.vgpr_base];
   const auto wait = instrumentation::build_s_wait_private_load0(arch);
   InstructionSequence sequence(words);
-  bool encoded = false;
   if (spill.uses_dynamic_stack_frame) {
-    encoded = sequence.emit_all(build_dynamic_stack_vgpr_load(
-                                    destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
-                                wait);
+    sequence.append(build_dynamic_stack_vgpr_load(destination, spill.dynamic_frame_base_sgpr,
+                                                  slot_offset, arch),
+                    wait);
   } else {
-    encoded = sequence.emit_all(
-        instrumentation::build_private_load_b32(destination, slot_offset, arch), wait);
+    sequence.append(instrumentation::build_private_load_b32(destination, slot_offset, arch), wait);
   }
-  if (!encoded)
+  if (!sequence.finish())
     return MoiSpilledVgprReloadResult::UnsupportedEncoding;
 
   return MoiSpilledVgprReloadResult::Appended;
@@ -607,36 +581,31 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
                                                   uint16_t value_vgpr, rj_code_arch_t arch) {
   if (!source.is_well_formed() || !source.has_value())
     return false;
+  InstructionSequence sequence(words);
   if (source.private_offset) {
     const auto load =
         instrumentation::build_private_load_b32(value_vgpr, *source.private_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit_all(load, wait))
-      return false;
+    sequence.append(load, wait);
   } else {
     const auto operand = source.operand();
     if (!operand)
       return false;
-    words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
+    sequence.append(build_v_mov_b32_e32(value_vgpr, *operand, arch));
   }
   if (source.mask_low_16) {
     const auto shift_left = instrumentation::build_v_lshlrev_b32(
         value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
     const auto shift_right = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit_all(shift_left, shift_right))
-      return false;
+    sequence.append(shift_left, shift_right);
   }
   if (source.shift_right_16) {
     const auto shift = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit(shift))
-      return false;
+    sequence.append(shift);
   }
-  return true;
+  return sequence.finish();
 }
 
 } // namespace rocjitsu
