@@ -654,18 +654,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (const char *identity = std::getenv("RJ_CONSAN_SC_PERTURB_IDENTITY"))
     config.sc_perturb_identity = identity;
-  if (config.sc_perturb_kind != rocjitsu::ConSanPerturbationKind::None &&
-      config.flavor != rocjitsu::ConSanFlavor::SuperCollider) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_SC_PERTURB_KIND requires "
-                         "RJ_CONSAN_MODE=supercollider\n");
-    return std::nullopt;
-  }
-  if (config.sc_perturb_max == 0 || config.sc_perturb_max > 2 || config.sc_perturb_sleep == 0 ||
-      config.sc_perturb_sleep > 15 || config.sc_perturb_required_count > config.sc_perturb_max) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] SC perturb controls require max=1..2, "
-                         "sleep=1..15, and required-count<=max\n");
-    return std::nullopt;
-  }
   if (config.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
       !has_explicit_primary_probe(config) &&
       config.sc_perturb_kind == rocjitsu::ConSanPerturbationKind::None) {
@@ -674,34 +662,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     config.probe_flat_check_trap = config.check_trap_mode == CheckTrapMode::All ||
                                    config.check_trap_mode == CheckTrapMode::Flat;
   }
-  if (config.fault_allow_destructive_incomplete_barrier_drop && !config.fault_drop_barrier) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] "
-                         "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP requires "
-                         "RJ_CONSAN_FAULT_DROP_BARRIER=1\n");
-    return std::nullopt;
-  }
   if (!parse_barrier_move_direction_env(&config.fault_barrier_move_direction))
     return std::nullopt;
-  if (config.fault_allow_completing_conditional_barrier_move &&
-      (!config.fault_move_barrier ||
-       config.fault_barrier_move_direction != rocjitsu::ConSanBarrierMoveDirection::Earlier)) {
-    std::fprintf(
-        stderr,
-        "[rocjitsu-dbi-hooks] "
-        "RJ_CONSAN_FAULT_ALLOW_COMPLETING_CONDITIONAL_BARRIER_MOVE requires "
-        "RJ_CONSAN_FAULT_MOVE_BARRIER=1 and RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION=earlier\n");
-    return std::nullopt;
-  }
-  if (config.fault_allow_destructive_divergent_barrier_move &&
-      (!config.fault_move_barrier ||
-       config.fault_barrier_move_direction != rocjitsu::ConSanBarrierMoveDirection::Earlier)) {
-    std::fprintf(
-        stderr,
-        "[rocjitsu-dbi-hooks] "
-        "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE requires "
-        "RJ_CONSAN_FAULT_MOVE_BARRIER=1 and RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION=earlier\n");
-    return std::nullopt;
-  }
   if (const char *identity = std::getenv("RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY"))
     config.fault_barrier_destination_identity = identity;
   if (const char *identity = std::getenv("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"))
@@ -748,12 +710,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
     if (!parse_u32_env("RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA", 0,
-                       &config.fault_atomic_address_delta) ||
-        config.fault_atomic_address_delta == 0 || config.fault_atomic_address_delta % 4u != 0 ||
-        config.fault_atomic_address_delta > 0x7fffffu) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA must be a "
-                   "positive aligned signed-24-bit byte offset\n");
+                       &config.fault_atomic_address_delta)) {
       return std::nullopt;
     }
   }
@@ -776,24 +733,13 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
     if (!parse_u32_env("RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA", 0,
-                       &config.fault_ordinary_address_delta) ||
-        config.fault_ordinary_address_delta == 0 || config.fault_ordinary_address_delta % 4u != 0 ||
-        config.fault_ordinary_address_delta > 0x7fffffu) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] "
-                   "RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA must be a positive aligned "
-                   "signed-24-bit byte offset\n");
+                       &config.fault_ordinary_address_delta)) {
       return std::nullopt;
     }
   }
   if (!parse_u32_env("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS",
                      kConSanDefaultFaultReservationTimeoutMs, &config.fault_reservation_timeout_ms))
     return std::nullopt;
-  if (config.fault_reservation_timeout_ms == 0) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS='0'; "
-                         "expected >=1\n");
-    return std::nullopt;
-  }
   if (config.test_seed_inline_exact_odd &&
       (config.flavor != rocjitsu::ConSanFlavor::Moi ||
        config.moi_engine != rocjitsu::ConSanMoiEngine::InlineShadow)) {
@@ -831,13 +777,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
     config.fault_load_occurrence = occurrence;
-  }
-  if (config.fault_load_occurrence && (config.fault_site_identity.empty() ||
-                                       !config.fault_require_exactly_one || config.fault_dry_run)) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] RJ_CONSAN_FAULT_LOAD_OCCURRENCE requires an exact "
-                 "site identity, RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE=1, and a live fault row\n");
-    return std::nullopt;
   }
   if (!parse_delay_mode_env(&config.delay_mode))
     return std::nullopt;
@@ -887,26 +826,10 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   config.max_patches_explicit = env_has_value("RJ_CONSAN_MAX_PATCHES");
   if (!parse_u32_env("RJ_CONSAN_MAX_PATCHES", kConSanAllSupportedPatchBudget, &config.max_patches))
     return std::nullopt;
-  if (config.max_patches == 0) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MAX_PATCHES='0'; expected >=1\n");
-    return std::nullopt;
-  }
   if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLE_STRIDE", 1, &config.moi_sample_stride))
     return std::nullopt;
-  if (config.moi_sample_stride == 0) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_SAMPLE_STRIDE='0'; expected >=1\n");
-    return std::nullopt;
-  }
   if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLE_OFFSET", 0, &config.moi_sample_offset))
     return std::nullopt;
-  if (config.moi_sample_offset >= config.moi_sample_stride) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_SAMPLE_OFFSET='%s'; expected < "
-                 "RJ_CONSAN_MOI_SAMPLE_STRIDE (%u)\n",
-                 std::getenv("RJ_CONSAN_MOI_SAMPLE_OFFSET"), config.moi_sample_stride);
-    return std::nullopt;
-  }
   config.moi_runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE");
   const uint32_t runtime_sample_stride_default = config.flavor == rocjitsu::ConSanFlavor::Moi
                                                      ? moi_mode_policy.default_runtime_sample_stride
@@ -914,24 +837,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
                      &config.moi_runtime_sample_stride))
     return std::nullopt;
-  if (config.moi_runtime_sample_stride == 0 || config.moi_runtime_sample_stride > (1u << 24u) ||
-      (config.moi_runtime_sample_stride & (config.moi_runtime_sample_stride - 1u)) != 0) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE='%s'; "
-                 "expected a power of two in 1..16777216\n",
-                 std::getenv("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"));
-    return std::nullopt;
-  }
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
     return std::nullopt;
-  if (config.moi_runtime_sample_offset >= config.moi_runtime_sample_stride) {
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET='%s'; "
-                 "expected < RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE (%u)\n",
-                 std::getenv("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET"),
-                 config.moi_runtime_sample_stride);
-    return std::nullopt;
-  }
   if (!refresh_report_config_from_env(&config))
     return std::nullopt;
   uint32_t delay_var_ssrc = 106;
@@ -979,13 +886,10 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
         warn_env(name, "this guard only checks HSA-tool-owned auto report buffers");
     }
   }
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_diagnostics &&
-      config.moi_forbid_diagnostics) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS and "
-                         "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS cannot both be enabled\n");
-    return std::nullopt;
-  }
   config.max_patches_is_expert_limit = config.max_patches_explicit;
+  // Keep this parser responsible for environment syntax and hook-only
+  // provenance constraints. Cross-field semantics belong to the typed
+  // contracts so every configuration source observes the same rules.
   const auto reject_contract = [](rocjitsu::ConSanContractIssue issue) {
     if (issue == rocjitsu::ConSanContractIssue::None)
       return false;
