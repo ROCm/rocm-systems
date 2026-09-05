@@ -138,6 +138,18 @@ TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), expectedAddrMode + sizeof(uint32_t));
 }
 
+// Every detector test derives its write extent from the constant it is pinning, so a mutated
+// boundary moves the input with it and the split stays self-consistent. Assert the values here so
+// narrowing a window, or moving a boundary, is caught by something.
+TEST(AmdSmiFabricRuntimeLayout, WindowBoundariesHaveTheirShippedValues)
+{
+    EXPECT_EQ(kAmdSmiFabricV1PayloadBegin, 12u);
+    EXPECT_EQ(kAmdSmiFabricV1PayloadEnd, 256u);
+    EXPECT_EQ(kAmdSmiFabricInfo8GpuSize, 288u);
+    EXPECT_EQ(kAmdSmiFabricInfo16GpuSize, 320u);
+    EXPECT_GE(kAmdSmiFabricInfoBufferSize, kAmdSmiFabricInfo16GpuSize);
+}
+
 TEST(AmdSmiFabricRuntimeLayout, DetectsEightGpuWriter)
 {
     amdSmiFabricInfoBuffer buffer;

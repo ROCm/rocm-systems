@@ -503,7 +503,7 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
   sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
-  offsetof(amdsmi_fabric_info_t, reserved) == 256;
+  offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
 
 // amd_smi 27.x added amdsmi_fabric_info_v2_t to the payload union. That member is larger than v1,
 // so the outer struct grows and reserved moves, but the v1 window we read keeps its 16-GPU
