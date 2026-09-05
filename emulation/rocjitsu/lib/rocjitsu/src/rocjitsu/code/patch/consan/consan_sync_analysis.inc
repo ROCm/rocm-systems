@@ -1032,31 +1032,14 @@ void build_barrier_move_destination_inventory(
     if (event == nullptr)
       continue;
 
-    uint64_t container_begin = 0;
-    uint64_t container_end = 0;
-    uint64_t text_file_offset = 0;
-    bool found_container = false;
-    if (sequence.in_kernel) {
-      const ConSanProgramContainer *container =
-          result.program_inventory.find_kernel_by_name(sequence.container_name);
-      if (container != nullptr && container->has_text_range) {
-        container_begin = container->entry_text_offset;
-        container_end = container_begin + container->code_size;
-        text_file_offset = container->text_file_offset;
-        found_container = true;
-      }
-    } else {
-      const ConSanProgramContainer *container =
-          result.program_inventory.find_function_by_name(sequence.container_name);
-      if (container != nullptr) {
-        container_begin = container->entry_text_offset;
-        container_end = container_begin + container->code_size;
-        text_file_offset = container->text_file_offset;
-        found_container = true;
-      }
-    }
-    if (!found_container)
+    const ConSanProgramSite *source = result.program_inventory.program_site(event->source_site);
+    const ConSanProgramContainer *container =
+        source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
+    if (container == nullptr || (container->is_kernel() && !container->has_text_range))
       continue;
+    const uint64_t container_begin = container->entry_text_offset;
+    const uint64_t container_end = container_begin + container->code_size;
+    const uint64_t text_file_offset = container->text_file_offset;
 
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
       BasicBlock *block = blocks[block_index].get();
