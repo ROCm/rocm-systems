@@ -144,7 +144,6 @@ void append_decoded_fault_sites(std::span<const uint8_t> bytes, std::string_view
     }
 
     site.source_site = {static_cast<uint32_t>(decoded_index)};
-    site.container_id = decoded.container.id;
     site.container_name = decoded.container.name;
     site.in_kernel = decoded.container.is_kernel();
     site.occurrence = occurrences[{decoded.container.id, site.kind}]++;
@@ -174,7 +173,6 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     ConSanFaultSite site;
     site.kind = ConSanFaultSiteKind::LdsAccess;
     site.source_site = {static_cast<uint32_t>(source_index)};
-    site.container_id = access.container.id;
     site.container_name = access.container.name;
     site.in_kernel = access.container.is_kernel();
     site.occurrence = occurrence++;
@@ -207,16 +205,18 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
   result.fault_sites.clear();
   append_decoded_fault_sites(bytes, fingerprint, arch, result.program_inventory.program_sites(),
                              result.fault_sites);
-  std::ranges::stable_sort(
-      result.fault_sites, [&](const ConSanFaultSite &lhs, const ConSanFaultSite &rhs) {
-        const auto kind_order = [](ConSanFaultSiteKind kind) {
-          return kind == ConSanFaultSiteKind::Barrier  ? 0u
-                 : kind == ConSanFaultSiteKind::Atomic ? 1u
-                                                       : 2u;
-        };
-        return std::tuple{lhs.container_id, kind_order(lhs.kind), lhs.text_offset} <
-               std::tuple{rhs.container_id, kind_order(rhs.kind), rhs.text_offset};
-      });
+  std::ranges::stable_sort(result.fault_sites, [&](const ConSanFaultSite &lhs,
+                                                   const ConSanFaultSite &rhs) {
+    const auto kind_order = [](ConSanFaultSiteKind kind) {
+      return kind == ConSanFaultSiteKind::Barrier  ? 0u
+             : kind == ConSanFaultSiteKind::Atomic ? 1u
+                                                   : 2u;
+    };
+    const ConSanProgramSite *lhs_source = result.program_inventory.program_site(lhs.source_site);
+    const ConSanProgramSite *rhs_source = result.program_inventory.program_site(rhs.source_site);
+    return std::tuple{lhs_source->container.id, kind_order(lhs.kind), lhs.text_offset} <
+           std::tuple{rhs_source->container.id, kind_order(rhs.kind), rhs.text_offset};
+  });
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory,
                                  result.program_inventory.program_sites(), result.fault_sites);
 }

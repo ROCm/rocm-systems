@@ -99,7 +99,6 @@ struct ConSanFaultSite : ConSanFaultSitePresentation {
   /// derived. Synchronization annotation follows this handle instead of
   /// reconstructing source identity from copied names and offsets.
   ConSanProgramSiteId source_site;
-  ConSanProgramContainerId container_id;
   std::optional<uint16_t> address_vgpr;
   /// Target-defined selectable-bank state at this instruction.
   std::optional<uint16_t> selectable_vgpr_bank_mode;
