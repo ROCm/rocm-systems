@@ -31,6 +31,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_atomic_candidate_scratch_overlap;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
+using consan_moi_detail::append_guarded_dynamic_record;
 using consan_moi_detail::append_select_first_active_lane;
 using consan_moi_detail::DynamicRecordEmitter;
 using consan_moi_detail::kAtomicRecordLayout;
@@ -167,19 +168,9 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
 
-  if (record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-    errors.emplace_back("ConSan MOI barrier record overflow branch is out of range");
-    return std::nullopt;
-  }
-  if (!sequence.emit(
-          instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch))) {
-    errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC restore");
-    return std::nullopt;
-  }
-  words.insert(words.end(), record_words.begin(), record_words.end());
-  if (!sequence.emit(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch))) {
-    errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC restore");
+  if (!append_guarded_dynamic_record(words, record_words, *options.moi_exec_save_sgpr,
+                                     /*wait_for_global_stores=*/false, arch)) {
+    errors.emplace_back("ConSan MOI barrier record patch could not append its guarded record");
     return std::nullopt;
   }
   if (!append_restore_moi_special_state(words, options.special_state, arch)) {
@@ -478,24 +469,9 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
 
-  InstructionSequence record_sequence(record_words);
-  if (!record_sequence.emit(instrumentation::build_s_wait_global_store0(arch))) {
-    errors.emplace_back("ConSan MOI atomic record patch could not complete dynamic publication");
-    return std::nullopt;
-  }
-  if (record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-    errors.emplace_back("ConSan MOI atomic record overflow branch is out of range");
-    return std::nullopt;
-  }
-  if (!sequence.emit(
-          instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch))) {
-    errors.emplace_back("ConSan MOI atomic record patch could not encode its capacity branch");
-    return std::nullopt;
-  }
-  words.insert(words.end(), record_words.begin(), record_words.end());
-  if (!sequence.emit(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch))) {
-    errors.emplace_back("ConSan MOI atomic record patch could not restore EXEC");
+  if (!append_guarded_dynamic_record(words, record_words, *options.moi_exec_save_sgpr,
+                                     /*wait_for_global_stores=*/true, arch)) {
+    errors.emplace_back("ConSan MOI atomic record patch could not append its guarded record");
     return std::nullopt;
   }
 
@@ -716,16 +692,8 @@ using consan_moi_detail::kFenceRecordLayout;
       errors.emplace_back("ConSan MOI dynamic fence record could not encode record stores");
       return std::nullopt;
     }
-    InstructionSequence record_sequence(record_words);
-    if (!record_sequence.emit(instrumentation::build_s_wait_global_store0(arch)) ||
-        record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
-      return std::nullopt;
-    if (!sequence.emit(
-            instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch)))
-      return std::nullopt;
-    words.insert(words.end(), record_words.begin(), record_words.end());
-    if (!sequence.emit(
-            instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch)))
+    if (!append_guarded_dynamic_record(words, record_words, *options.moi_exec_save_sgpr,
+                                       /*wait_for_global_stores=*/true, arch))
       return std::nullopt;
   }
   if (!append_restore_moi_special_state(words, options.special_state, arch)) {

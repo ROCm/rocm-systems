@@ -102,6 +102,13 @@ append_publish_first_active_lane_visible_evidence_if_zero(
                                                  const DynamicRecordLayout &layout,
                                                  uint64_t field_address, uint16_t slot_vgpr,
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch);
+/// Append one VCC-guarded dynamic record and restore the EXEC mask saved by
+/// the publisher election. The optional store wait is part of the skipped
+/// record body, so its branch displacement is computed from the final body.
+[[nodiscard]] bool append_guarded_dynamic_record(std::vector<uint32_t> &words,
+                                                 std::vector<uint32_t> &record_words,
+                                                 uint16_t saved_exec_sgpr,
+                                                 bool wait_for_global_stores, rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,
                                                             uint64_t address, uint16_t slot,
                                                             uint16_t address_vgpr,

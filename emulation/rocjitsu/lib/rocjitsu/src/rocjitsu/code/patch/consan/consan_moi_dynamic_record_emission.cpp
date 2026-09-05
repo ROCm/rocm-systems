@@ -9,6 +9,8 @@
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include <limits>
+
 namespace rocjitsu::consan_moi_detail {
 namespace {
 
@@ -85,6 +87,22 @@ bool append_select_first_active_lane(std::vector<uint32_t> &words, uint16_t lane
               instrumentation::build_salu_to_valu_dependency_wait(arch))
       .require(append_select_first_lane_in_exec_mask(words, lane_rank_vgpr, active_exec_sgpr,
                                                      saved_exec_sgpr, arch));
+  return sequence.finish();
+}
+
+bool append_guarded_dynamic_record(std::vector<uint32_t> &words,
+                                   std::vector<uint32_t> &record_words, uint16_t saved_exec_sgpr,
+                                   bool wait_for_global_stores, rj_code_arch_t arch) {
+  InstructionSequence record_sequence(record_words);
+  if (wait_for_global_stores)
+    record_sequence.append(instrumentation::build_s_wait_global_store0(arch));
+  if (!record_sequence.finish() ||
+      record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+    return false;
+  InstructionSequence sequence(words);
+  sequence.append(
+      instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch),
+      record_words, instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec_sgpr, arch));
   return sequence.finish();
 }
 
