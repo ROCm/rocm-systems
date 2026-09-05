@@ -152,7 +152,42 @@ enum class ConSanOrdinaryMemorySupportReason : uint8_t {
   MissingValueVgpr,
 };
 
-struct ConSanOrdinaryMemorySite {
+/// Location and operand vocabulary shared by ordinary-memory and atomic
+/// decoding. Both kinds feed the same addressed-communication classifiers;
+/// keeping one representation avoids translating ordinary operations into a
+/// second atomic-shaped field bag before policy and lowering.
+struct ConSanDecodedMemorySite {
+  uint64_t text_offset = 0;
+  uint64_t file_offset = 0;
+  uint32_t size = 0;
+  uint32_t width_bits = 0;
+  std::optional<uint16_t> destination_vgpr;
+  std::optional<uint16_t> address_vgpr;
+  std::optional<uint16_t> data_vgpr;
+  std::optional<uint16_t> scalar_address_sgpr;
+  std::optional<uint32_t> raw_saddr;
+  std::optional<bool> raw_scale_offset;
+  std::optional<uint32_t> raw_rsrc;
+  std::optional<uint32_t> raw_soffset;
+  std::optional<bool> raw_offen;
+  std::optional<bool> raw_idxen;
+  std::optional<uint32_t> raw_vaddr;
+  std::optional<uint32_t> raw_vsrc;
+  std::optional<uint32_t> raw_vdst;
+  std::optional<uint32_t> raw_vdata;
+  std::optional<int32_t> raw_ioffset;
+  /// Target-facing diagnostic scope code. This is the encoded operand when
+  /// one exists and retains the legacy numeric spelling for implicit forms.
+  /// Semantic consumers must use `scope`.
+  std::optional<uint32_t> raw_scope;
+  std::optional<ConSanMemoryScope> scope;
+  std::optional<uint32_t> raw_th;
+  std::string mnemonic;
+
+  bool operator==(const ConSanDecodedMemorySite &) const = default;
+};
+
+struct ConSanOrdinaryMemorySite : ConSanDecodedMemorySite {
   ConSanOrdinaryMemoryOperation operation = ConSanOrdinaryMemoryOperation::Load;
   ConSanOrdinaryMemorySupportReason support_reason =
       ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
@@ -161,38 +196,13 @@ struct ConSanOrdinaryMemorySite {
   // synchronization analysis can distinguish a bounded group-FLAT sequence
   // from an otherwise identical global/private instruction.
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  std::optional<uint16_t> destination_vgpr;
-  std::optional<uint16_t> address_vgpr;
-  std::optional<uint16_t> address_sgpr;
-  std::optional<uint16_t> value_vgpr;
-  std::optional<uint32_t> raw_saddr;
   std::optional<uint32_t> raw_nv;
-  std::optional<bool> raw_scale_offset;
   std::optional<uint32_t> raw_sve;
-  std::optional<uint32_t> raw_rsrc;
-  std::optional<uint32_t> raw_soffset;
-  std::optional<bool> raw_offen;
-  std::optional<bool> raw_idxen;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<int32_t> raw_ioffset;
-  /// Target-facing diagnostic scope code. This is the encoded operand when
-  /// one exists and retains the legacy numeric spelling for implicit forms.
-  /// Semantic consumers must use `scope`.
-  std::optional<uint32_t> raw_scope;
-  std::optional<ConSanMemoryScope> scope;
-  std::optional<uint32_t> raw_th;
   /// Target-normalized exact ordering qualifier for a compiler-generated
   /// workgroup group-FLAT acquire. The raw fields remain available for
   /// diagnostics and mutation proof, but common synchronization analysis does
   /// not reinterpret them by target family.
   bool workgroup_acquire_ordering = false;
-  std::string mnemonic;
 
   bool operator==(const ConSanOrdinaryMemorySite &) const = default;
 };
@@ -255,45 +265,33 @@ struct ConSanFenceSite {
   bool operator==(const ConSanFenceSite &) const = default;
 };
 
-struct ConSanAtomicSite {
+struct ConSanAtomicSite : ConSanDecodedMemorySite {
   ConSanAtomicAddressSpaceHint address_space_hint = ConSanAtomicAddressSpaceHint::Unknown;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  std::optional<uint16_t> dst_vgpr;
-  std::optional<uint16_t> addr_vgpr;
-  std::optional<uint16_t> data_vgpr;
-  std::optional<uint16_t> saddr_sgpr;
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_addr;
   std::optional<uint32_t> raw_data0;
   std::optional<uint32_t> raw_data1;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<uint32_t> raw_saddr;
-  std::optional<bool> raw_scale_offset;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdata;
-  std::optional<uint32_t> raw_rsrc;
-  std::optional<uint32_t> raw_soffset;
-  std::optional<bool> raw_offen;
-  std::optional<bool> raw_idxen;
-  std::optional<int32_t> raw_ioffset;
-  /// Target-facing diagnostic scope code. This is the encoded operand when
-  /// one exists and retains the legacy numeric spelling for implicit forms.
-  /// Semantic consumers must use `scope`; diagnostics and mutation proof may
-  /// retain this target-owned presentation value.
-  std::optional<uint32_t> raw_scope;
-  /// Target-normalized scope. Target forms with an implicit scope publish the
-  /// same semantic value as forms carrying an encoded scope field.
-  std::optional<ConSanMemoryScope> scope;
-  std::optional<uint32_t> raw_th;
   std::optional<bool> returns_old_value;
-  std::string mnemonic;
 
   bool operator==(const ConSanAtomicSite &) const = default;
 };
+
+/// Present an ordinary load/store through the shared communication shape used
+/// by atomic policy and native lowering. Only genuinely atomic facets need
+/// normalization; the location and operand base transfers as one value.
+[[nodiscard]] inline ConSanAtomicSite
+consan_atomic_communication_site(const ConSanOrdinaryMemorySite &site) {
+  ConSanAtomicSite result;
+  static_cast<ConSanDecodedMemorySite &>(result) = site;
+  if (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group)
+    result.address_space_hint = ConSanAtomicAddressSpaceHint::FlatGroup;
+  if (!result.data_vgpr && site.operation == ConSanOrdinaryMemoryOperation::Load)
+    result.data_vgpr = result.destination_vgpr;
+  if (!result.raw_vdata && site.operation == ConSanOrdinaryMemoryOperation::Load)
+    result.raw_vdata = result.raw_vdst;
+  result.returns_old_value = false;
+  return result;
+}
 
 [[nodiscard]] constexpr bool consan_atomic_is_compare_exchange(const ConSanAtomicSite &site) {
   return site.mnemonic.find("cmpswap") != std::string::npos ||

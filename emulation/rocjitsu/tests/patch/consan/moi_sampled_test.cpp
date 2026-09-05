@@ -2081,7 +2081,7 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
       ASSERT_NE(site, atomic_sites.end()) << testing::PrintToString(atomic_sites);
       ASSERT_TRUE(site->scope) << testing::PrintToString(*site);
       EXPECT_EQ(site->width_bits, 32u);
-      EXPECT_EQ(site->saddr_sgpr, test_case.scalar_base_sgpr);
+      EXPECT_EQ(site->scalar_address_sgpr, test_case.scalar_base_sgpr);
       const auto patch =
           std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                             &ConSanPatchInfo::kind);

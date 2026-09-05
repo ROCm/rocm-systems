@@ -2540,12 +2540,12 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     valid &= wait_store_count >= 2u;
 
     if (compare_exchange) {
-      if (!site->data_vgpr || !site->dst_vgpr) {
+      if (!site->data_vgpr || !site->destination_vgpr) {
         valid = false;
       } else {
         const auto success = instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)), *site->dst_vgpr,
-            arch);
+            vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)),
+            *site->destination_vgpr, arch);
         const auto narrow = instrumentation::build_s_and_saveexec_b64(
             *result.moi_operating_point.moi_exec_save_sgpr, kVccLo, arch);
         if (!success || !narrow) {

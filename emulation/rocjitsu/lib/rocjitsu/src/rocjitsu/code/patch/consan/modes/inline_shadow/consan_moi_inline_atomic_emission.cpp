@@ -1429,13 +1429,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                                    /*original_exec_save_offset=*/12u, arch),
                    "ConSan MOI inline release could not initialize its EXEC transaction");
   const auto narrow_compare_exchange_success = [&]() -> bool {
-    if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
+    if (!candidate.site.data_vgpr || !candidate.site.destination_vgpr) {
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
       return false;
     }
     const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
     if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(compare_vgpr), *candidate.site.dst_vgpr, arch))) {
+            vector_source_vgpr(compare_vgpr), *candidate.site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI inline release CAS could not compare its dynamic outcome");
       return false;
     }

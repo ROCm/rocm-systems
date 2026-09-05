@@ -59,10 +59,10 @@ std::string consan_barrier_decoded_operands(const ConSanBarrierSite &site, uint3
 
 std::string consan_atomic_decoded_operands(const ConSanAtomicSite &site) {
   std::string result;
-  append_decoded_operand(result, "dst_vgpr", site.dst_vgpr);
-  append_decoded_operand(result, "addr_vgpr", site.addr_vgpr);
+  append_decoded_operand(result, "dst_vgpr", site.destination_vgpr);
+  append_decoded_operand(result, "addr_vgpr", site.address_vgpr);
   append_decoded_operand(result, "data_vgpr", site.data_vgpr);
-  append_decoded_operand(result, "saddr_sgpr", site.saddr_sgpr);
+  append_decoded_operand(result, "saddr_sgpr", site.scalar_address_sgpr);
   if (site.raw_scale_offset)
     append_decoded_operand(result, "raw_scale_offset", *site.raw_scale_offset ? 1 : 0);
   append_decoded_operand(result, "raw_ioffset", site.raw_ioffset);
@@ -93,8 +93,11 @@ std::string consan_ordinary_memory_decoded_operands(const ConSanOrdinaryMemorySi
   std::string result;
   append_decoded_operand(result, "dst_vgpr", site.destination_vgpr);
   append_decoded_operand(result, "addr_vgpr", site.address_vgpr);
-  append_decoded_operand(result, "addr_sgpr", site.address_sgpr);
-  append_decoded_operand(result, "value_vgpr", site.value_vgpr);
+  append_decoded_operand(result, "addr_sgpr", site.scalar_address_sgpr);
+  append_decoded_operand(result, "value_vgpr",
+                         site.operation == ConSanOrdinaryMemoryOperation::Store
+                             ? site.data_vgpr
+                             : std::optional<uint16_t>{});
   append_decoded_operand(result, "raw_saddr", site.raw_saddr);
   append_decoded_operand(result, "raw_nv", site.raw_nv);
   if (site.raw_scale_offset)

@@ -2773,7 +2773,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.mnemonic = "flat_atomic_add_u32";
   site.size = 3u * sizeof(uint32_t);
   site.width_bits = 32;
-  site.addr_vgpr = 2;
+  site.address_vgpr = 2;
   site.data_vgpr = 4;
   site.raw_saddr = rdna4::OPR_SREG_NULL;
   site.raw_vaddr = 2;
@@ -2794,7 +2794,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
 
   ConSanAtomicSite changed = site;
   changed.mnemonic = "flat_atomic_cmpswap_u32";
-  changed.dst_vgpr = 6;
+  changed.destination_vgpr = 6;
   changed.returns_old_value = true;
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_RDNA4),
@@ -2806,7 +2806,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   changed = site;
   changed.mnemonic = "global_atomic_add_u32";
   changed.raw_saddr = 4;
-  changed.saddr_sgpr = 4;
+  changed.scalar_address_sgpr = 4;
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_RDNA4),
             ConSanAtomicClassifierReason::None);
@@ -2815,15 +2815,15 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                                                 ROCJITSU_CODE_ARCH_RDNA4),
             ConSanAtomicClassifierReason::UnsupportedEncoding);
   changed.raw_saddr = kCdnaGlobalNoSaddrEncoding;
-  changed.saddr_sgpr.reset();
+  changed.scalar_address_sgpr.reset();
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_CDNA4),
             ConSanAtomicClassifierReason::None);
   changed.size = 3u * sizeof(uint32_t);
   changed.raw_saddr = 4;
-  changed.saddr_sgpr = 4;
+  changed.scalar_address_sgpr = 4;
   changed.mnemonic = "global_atomic_cmpswap_b32";
-  changed.dst_vgpr = 6;
+  changed.destination_vgpr = 6;
   changed.returns_old_value = true;
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_RDNA4),
@@ -2856,7 +2856,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
     representative.mnemonic = "global_atomic_add_u32";
     representative.size = contract_case.size;
     representative.raw_saddr = contract_case.raw_saddr;
-    representative.saddr_sgpr =
+    representative.scalar_address_sgpr =
         contract_case.raw_saddr == 4u ? std::optional<uint16_t>(4u) : std::nullopt;
     representative.raw_scale_offset =
         contract_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? std::optional<bool>(false) : std::nullopt;
@@ -2901,7 +2901,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                                                 ROCJITSU_CODE_ARCH_RDNA4),
             ConSanAtomicClassifierReason::UnsupportedInputWidth);
   changed = site;
-  changed.addr_vgpr.reset();
+  changed.address_vgpr.reset();
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_RDNA4),
             ConSanAtomicClassifierReason::MissingOperands);
@@ -2944,8 +2944,8 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
 
   ConSanAtomicSite vector_only_global = global_site;
   vector_only_global.raw_saddr = rdna4::OPR_SREG_NULL;
-  vector_only_global.saddr_sgpr = rdna4::OPR_SREG_NULL;
-  vector_only_global.addr_vgpr = 2u;
+  vector_only_global.scalar_address_sgpr = rdna4::OPR_SREG_NULL;
+  vector_only_global.address_vgpr = 2u;
   vector_only_global.raw_vaddr = 2u;
   const ConSanMoiAtomicAddressPlan vector_only_plan = plan_consan_moi_atomic_address(
       vector_only_global, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/3,
@@ -3008,8 +3008,8 @@ TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
   ASSERT_TRUE(site.raw_scale_offset);
   EXPECT_TRUE(*site.raw_scale_offset);
   EXPECT_EQ(site.raw_ioffset, 4);
-  ASSERT_TRUE(site.saddr_sgpr);
-  EXPECT_EQ(*site.saddr_sgpr, 0u);
+  ASSERT_TRUE(site.scalar_address_sgpr);
+  EXPECT_EQ(*site.scalar_address_sgpr, 0u);
 
   constexpr uint16_t kScratch = 8u;
   constexpr uint16_t kVccSave = 80u;
@@ -3083,9 +3083,9 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
   site.file_offset = 0;
   site.size = 3u * sizeof(uint32_t);
   site.width_bits = 128u;
-  site.addr_vgpr = 4u;
+  site.address_vgpr = 4u;
   site.data_vgpr = 24u;
-  site.saddr_sgpr = 72u;
+  site.scalar_address_sgpr = 72u;
   site.raw_vaddr = 4u;
   site.raw_rsrc = 72u;
   site.raw_soffset = 10u;
@@ -3130,7 +3130,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250LdsTokenWithByteOffset) {
   ConSanAtomicSite site;
   site.size = 2u * sizeof(uint32_t);
   site.width_bits = 32u;
-  site.addr_vgpr = 4u;
+  site.address_vgpr = 4u;
   site.data_vgpr = 6u;
   site.raw_addr = 4u;
   site.raw_data0 = 6u;
@@ -3367,17 +3367,17 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   changed = base;
   changed.raw_saddr = rdna4::OPR_SREG_NULL;
-  changed.saddr_sgpr.reset();
+  changed.scalar_address_sgpr.reset();
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
   changed = base;
-  changed.addr_vgpr = 255u;
+  changed.address_vgpr = 255u;
   changed.raw_vaddr = 255u;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::Supported);
   changed = base;
   changed.raw_ioffset = 1 << 23;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedOffset);
   changed = base;
-  changed.addr_vgpr = 11u;
+  changed.address_vgpr = 11u;
   changed.raw_vaddr = 11u;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::ResultAddressAlias);
   EXPECT_EQ(classify(base, /*scratch=*/8, /*count=*/4),

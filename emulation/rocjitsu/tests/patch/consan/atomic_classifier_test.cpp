@@ -24,8 +24,8 @@ ConSanAtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
   ConSanAtomicSite site;
   site.size = target.instruction_size;
   site.width_bits = 32u;
-  site.dst_vgpr = 9u;
-  site.addr_vgpr = 3u;
+  site.destination_vgpr = 9u;
+  site.address_vgpr = 3u;
   site.data_vgpr = 7u;
   site.raw_saddr = target.vector_only_saddr;
   if (target.arch == ROCJITSU_CODE_ARCH_CDNA5)
@@ -63,7 +63,7 @@ TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
   ConSanAtomicSite load = exact_flat_atomic(target);
   load.mnemonic = "flat_load_dword";
-  load.data_vgpr = load.dst_vgpr;
+  load.data_vgpr = load.destination_vgpr;
   load.returns_old_value = false;
   const ConSanAtomicLoweringClassification load_classification =
       classify_consan_atomic_lowering(load, target.arch, /*is_rmw=*/false);
@@ -75,7 +75,7 @@ TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
 
   ConSanAtomicSite store = load;
   store.mnemonic = "flat_store_dword";
-  store.dst_vgpr.reset();
+  store.destination_vgpr.reset();
   store.data_vgpr = 7u;
   const ConSanAtomicLoweringClassification store_classification =
       classify_consan_atomic_lowering(store, target.arch, /*is_rmw=*/false);
@@ -89,8 +89,8 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     AtomicTargetCase target{arch, 12u, 8u};
     ConSanAtomicSite site = exact_flat_atomic(target);
-    site.saddr_sgpr = 8u;
-    site.dst_vgpr.reset();
+    site.scalar_address_sgpr = 8u;
+    site.destination_vgpr.reset();
     site.returns_old_value = false;
     const ConSanAtomicLoweringClassification classification =
         classify_consan_atomic_lowering(site, arch);
@@ -107,7 +107,7 @@ TEST(ConSanAtomicClassifier, ExactOperationRejectionsRemainTypedAfterNormalizati
   ConSanAtomicSite site = exact_flat_atomic(target);
   site.mnemonic = "flat_atomic_cmpswap";
   site.returns_old_value = false;
-  site.dst_vgpr.reset();
+  site.destination_vgpr.reset();
   const ConSanAtomicLoweringClassification no_outcome =
       classify_consan_atomic_lowering(site, target.arch);
   ASSERT_TRUE(no_outcome.normalized());
@@ -143,8 +143,8 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   ConSanAtomicSite lds;
   lds.size = 8u;
   lds.width_bits = 32u;
-  lds.dst_vgpr = 9u;
-  lds.addr_vgpr = 3u;
+  lds.destination_vgpr = 9u;
+  lds.address_vgpr = 3u;
   lds.data_vgpr = 7u;
   lds.raw_addr = 3u;
   lds.raw_data0 = 7u;
@@ -164,10 +164,10 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   ConSanAtomicSite buffer;
   buffer.size = 12u;
   buffer.width_bits = 32u;
-  buffer.dst_vgpr = 11u;
-  buffer.addr_vgpr = 5u;
+  buffer.destination_vgpr = 11u;
+  buffer.address_vgpr = 5u;
   buffer.data_vgpr = 8u;
-  buffer.saddr_sgpr = 24u;
+  buffer.scalar_address_sgpr = 24u;
   buffer.raw_rsrc = 24u;
   buffer.raw_soffset = 10u;
   buffer.raw_vaddr = 5u;
@@ -190,7 +190,7 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   AtomicTargetCase cdna4{ROCJITSU_CODE_ARCH_CDNA4, 8u, 8u};
   ConSanAtomicSite global = exact_flat_atomic(cdna4);
   global.mnemonic = "global_atomic_add_u32";
-  global.saddr_sgpr = 8u;
+  global.scalar_address_sgpr = 8u;
   const ConSanAtomicLoweringClassification global_form =
       classify_consan_atomic_lowering(global, cdna4.arch);
   ASSERT_TRUE(global_form.address_available());

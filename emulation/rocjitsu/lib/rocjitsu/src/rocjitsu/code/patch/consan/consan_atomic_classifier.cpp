@@ -54,7 +54,7 @@ using Reason = ConSanAtomicClassifierReason;
   if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset &&
       *site.scope != ConSanMemoryScope::Workgroup)
     return Reason::UnsupportedScope;
-  if (form.compare_exchange && (!site.returns_old_value.value_or(false) || !site.dst_vgpr))
+  if (form.compare_exchange && (!site.returns_old_value.value_or(false) || !site.destination_vgpr))
     return Reason::CompareExchangeOutcomeUnavailable;
   return Reason::None;
 }
@@ -74,7 +74,7 @@ using Reason = ConSanAtomicClassifierReason;
     return Reason::NonzeroImmediateOffset;
   if (form.compare_exchange && site.returns_old_value && !*site.returns_old_value)
     return Reason::CompareExchangeOutcomeUnavailable;
-  if (form.compare_exchange && !site.dst_vgpr)
+  if (form.compare_exchange && !site.destination_vgpr)
     return Reason::MissingOperands;
   if (!site.scope || !site.raw_th || !site.returns_old_value)
     return Reason::MissingOrderingMetadata;
@@ -99,12 +99,12 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   const uint16_t data_register_count =
       static_cast<uint16_t>(value_register_count * (compare_exchange ? 2u : 1u));
   const bool ordinary_load =
-      !is_rmw && site.dst_vgpr && site.data_vgpr && site.dst_vgpr == site.data_vgpr;
+      !is_rmw && site.destination_vgpr && site.data_vgpr && site.destination_vgpr == site.data_vgpr;
   const uint16_t destination_register_count =
       site.returns_old_value.value_or(false) || ordinary_load ? value_register_count : 0u;
   if ((site.data_vgpr && static_cast<uint32_t>(*site.data_vgpr) + data_register_count > 256u) ||
-      (site.dst_vgpr && destination_register_count != 0u &&
-       static_cast<uint32_t>(*site.dst_vgpr) + destination_register_count > 256u)) {
+      (site.destination_vgpr && destination_register_count != 0u &&
+       static_cast<uint32_t>(*site.destination_vgpr) + destination_register_count > 256u)) {
     return reject(Reason::UnsupportedInputWidth);
   }
   const auto finish = [&](ConSanAtomicLoweringForm form, Reason address_reason = Reason::None) {
@@ -121,7 +121,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     if (site.size != 2u * sizeof(uint32_t) || !site.raw_addr || !site.raw_data0 ||
         !site.raw_ioffset)
       return reject(Reason::UnsupportedEncoding);
-    if (!site.addr_vgpr || !site.data_vgpr || *site.raw_addr != *site.addr_vgpr ||
+    if (!site.address_vgpr || !site.data_vgpr || *site.raw_addr != *site.address_vgpr ||
         *site.raw_data0 != *site.data_vgpr)
       return reject(Reason::MissingOperands);
     if (*site.raw_ioffset < 0 || *site.raw_ioffset > 0xff)
@@ -133,10 +133,10 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
         .value_register_count = value_register_count,
         .data_register_count = data_register_count,
         .destination_register_count = destination_register_count,
-        .address_vgpr = *site.addr_vgpr,
+        .address_vgpr = *site.address_vgpr,
         .address_vgpr_count = 1u,
         .data_vgpr = *site.data_vgpr,
-        .destination_vgpr = site.dst_vgpr,
+        .destination_vgpr = site.destination_vgpr,
         .scalar_base_sgpr = std::nullopt,
         .scalar_offset_sgpr = std::nullopt,
         .signed_byte_offset = *site.raw_ioffset,
@@ -158,12 +158,12 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
         !site.raw_vaddr || !site.raw_ioffset || !site.raw_offen || !site.raw_idxen ||
         !*site.raw_offen || *site.raw_idxen)
       return reject(Reason::UnsupportedEncoding);
-    if (!site.addr_vgpr || !site.saddr_sgpr || !site.data_vgpr ||
-        *site.raw_vaddr != *site.addr_vgpr || *site.raw_rsrc != *site.saddr_sgpr)
+    if (!site.address_vgpr || !site.scalar_address_sgpr || !site.data_vgpr ||
+        *site.raw_vaddr != *site.address_vgpr || *site.raw_rsrc != *site.scalar_address_sgpr)
       return reject(Reason::MissingOperands);
-    if ((*site.saddr_sgpr & 3u) != 0u || *site.saddr_sgpr > 124u ||
+    if ((*site.scalar_address_sgpr & 3u) != 0u || *site.scalar_address_sgpr > 124u ||
         (*site.raw_soffset != kNullScalarOffset && *site.raw_soffset > 127u) ||
-        *site.addr_vgpr > 255u)
+        *site.address_vgpr > 255u)
       return reject(Reason::UnsupportedInputWidth);
     if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
       return reject(Reason::UnsupportedOffset);
@@ -174,11 +174,11 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
         .value_register_count = value_register_count,
         .data_register_count = data_register_count,
         .destination_register_count = destination_register_count,
-        .address_vgpr = *site.addr_vgpr,
+        .address_vgpr = *site.address_vgpr,
         .address_vgpr_count = 1u,
         .data_vgpr = *site.data_vgpr,
-        .destination_vgpr = site.dst_vgpr,
-        .scalar_base_sgpr = site.saddr_sgpr,
+        .destination_vgpr = site.destination_vgpr,
+        .scalar_base_sgpr = site.scalar_address_sgpr,
         .scalar_offset_sgpr = *site.raw_soffset == kNullScalarOffset
                                   ? std::nullopt
                                   : std::optional<uint16_t>(*site.raw_soffset),
@@ -202,7 +202,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     return reject(Reason::UnsupportedEncoding);
   if ((cdna5 && !site.raw_scale_offset) || (!cdna5 && site.raw_scale_offset.value_or(false)))
     return reject(Reason::UnsupportedEncoding);
-  if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
+  if (!site.address_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.address_vgpr)
     return reject(Reason::MissingOperands);
 
   constexpr uint32_t kCdnaGlobalNoSaddr = 0x7fu;
@@ -220,7 +220,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   uint16_t address_register_count;
   std::optional<uint16_t> scalar_base;
   if (*site.raw_saddr == vector_only_saddr) {
-    if (*site.addr_vgpr >= 255u)
+    if (*site.address_vgpr >= 255u)
       return reject(Reason::UnsupportedInputWidth);
     if (flat && *site.raw_ioffset != 0)
       return reject(Reason::UnsupportedOffset);
@@ -232,18 +232,18 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   } else {
     if (!rdna4_or_cdna5 && flat)
       return reject(Reason::UnsupportedEncoding);
-    if (!site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr)
+    if (!site.scalar_address_sgpr || *site.raw_saddr != *site.scalar_address_sgpr)
       return reject(Reason::UnsupportedInputWidth);
-    if (*site.saddr_sgpr > 104u || (*site.saddr_sgpr & 1u) != 0u)
+    if (*site.scalar_address_sgpr > 104u || (*site.scalar_address_sgpr & 1u) != 0u)
       return reject(Reason::UnsupportedEncoding);
     if (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max)
       return reject(Reason::UnsupportedOffset);
-    if (*site.addr_vgpr > 255u)
+    if (*site.address_vgpr > 255u)
       return reject(Reason::UnsupportedInputWidth);
     kind = flat ? ConSanAtomicLoweringFormKind::FlatScalarVectorAddress
                 : ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress;
     address_register_count = 1u;
-    scalar_base = site.saddr_sgpr;
+    scalar_base = site.scalar_address_sgpr;
   }
 
   ConSanAtomicLoweringForm form{
@@ -253,10 +253,10 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
       .value_register_count = value_register_count,
       .data_register_count = data_register_count,
       .destination_register_count = destination_register_count,
-      .address_vgpr = *site.addr_vgpr,
+      .address_vgpr = *site.address_vgpr,
       .address_vgpr_count = address_register_count,
       .data_vgpr = *site.data_vgpr,
-      .destination_vgpr = site.dst_vgpr,
+      .destination_vgpr = site.destination_vgpr,
       .scalar_base_sgpr = scalar_base,
       .scalar_offset_sgpr = std::nullopt,
       .signed_byte_offset = *site.raw_ioffset,

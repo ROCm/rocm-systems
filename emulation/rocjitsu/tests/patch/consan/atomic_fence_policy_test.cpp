@@ -30,10 +30,10 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   site.file_offset = offset;
   site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
   site.width_bits = 32;
-  site.dst_vgpr = 1;
-  site.addr_vgpr = 0;
+  site.destination_vgpr = 1;
+  site.address_vgpr = 0;
   site.data_vgpr = 2;
-  site.saddr_sgpr = 4;
+  site.scalar_address_sgpr = 4;
   site.raw_saddr = 4;
   if (target.arch == ROCJITSU_CODE_ARCH_CDNA5)
     site.raw_scale_offset = false;
@@ -54,8 +54,8 @@ ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
   site.file_offset = offset;
   site.size = 8;
   site.width_bits = 32;
-  site.dst_vgpr = 1;
-  site.addr_vgpr = 0;
+  site.destination_vgpr = 1;
+  site.address_vgpr = 0;
   site.data_vgpr = 2;
   site.scope = ConSanMemoryScope::Workgroup;
   site.raw_addr = 0;
@@ -76,8 +76,8 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
   site.width_bits = 32;
   site.address_vgpr = 0;
-  site.address_sgpr = 4;
-  site.value_vgpr = 2;
+  site.scalar_address_sgpr = 4;
+  site.data_vgpr = 2;
   site.raw_saddr = 4;
   if (target.arch == ROCJITSU_CODE_ARCH_CDNA5)
     site.raw_scale_offset = false;
@@ -100,7 +100,7 @@ ConSanOrdinaryMemorySite make_cdna5_buffer_load_site(uint64_t offset = 32) {
   site.width_bits = 32;
   site.destination_vgpr = 4;
   site.address_vgpr = 5;
-  site.address_sgpr = 24;
+  site.scalar_address_sgpr = 24;
   site.raw_rsrc = 24;
   site.raw_soffset = 0x7c;
   site.raw_vaddr = 5;
@@ -500,7 +500,7 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope
   ConSanOrdinaryMemorySite site = make_global_store_site(gfx1250);
   site.operation = ConSanOrdinaryMemoryOperation::Load;
   site.destination_vgpr = 2;
-  site.value_vgpr.reset();
+  site.data_vgpr.reset();
   site.raw_vsrc.reset();
   site.raw_vdst = 2;
   site.raw_saddr = 0x7cu;
@@ -627,7 +627,7 @@ TEST(ConSanAtomicFencePolicy, EncodingAndOperandFailuresRemainPolicyNotLoweringF
       {"size", [](auto &site) { site.size = 4; }, ConSanAtomicPolicyReason::UnsupportedEncoding},
       {"offset", [](auto &site) { site.raw_ioffset.reset(); },
        ConSanAtomicPolicyReason::UnsupportedEncoding},
-      {"address", [](auto &site) { site.addr_vgpr.reset(); },
+      {"address", [](auto &site) { site.address_vgpr.reset(); },
        ConSanAtomicPolicyReason::MissingOperands},
       {"scope", [](auto &site) { site.scope.reset(); }, ConSanAtomicPolicyReason::MissingScope},
   };

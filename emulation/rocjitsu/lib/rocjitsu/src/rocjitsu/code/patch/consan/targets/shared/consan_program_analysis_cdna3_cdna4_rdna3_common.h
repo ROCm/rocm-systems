@@ -105,9 +105,9 @@ void fill_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, const Raw &raw, 
   site.raw_scope = 2u;
   site.scope = ConSanMemoryScope::Agent;
   if (global) {
-    site.saddr_sgpr = raw.saddr == null_saddr
-                          ? std::nullopt
-                          : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr));
+    site.scalar_address_sgpr = raw.saddr == null_saddr
+                                   ? std::nullopt
+                                   : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr));
   }
 }
 

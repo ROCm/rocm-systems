@@ -1296,11 +1296,15 @@ void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
   site.workgroup_acquire_ordering = encoding.workgroup_acquire_ordering;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
   if (encoding.scalar_provenance_sgpr)
-    site.address_sgpr = encoding.scalar_provenance_sgpr;
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load)
+    site.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
+  if (site.operation == ConSanOrdinaryMemoryOperation::Load) {
     site.destination_vgpr = static_cast<uint16_t>(encoding.raw_vdst);
-  else
-    site.value_vgpr = static_cast<uint16_t>(encoding.raw_vsrc);
+    site.data_vgpr = site.destination_vgpr;
+    site.raw_vdata = encoding.raw_vdst;
+  } else {
+    site.data_vgpr = static_cast<uint16_t>(encoding.raw_vsrc);
+    site.raw_vdata = encoding.raw_vsrc;
+  }
 }
 
 void apply_vector_memory_decode(ConSanOrdinaryMemorySite &site,
@@ -1322,7 +1326,7 @@ void apply_vector_memory_decode(ConSanOrdinaryMemorySite &site,
            site.operation == ConSanOrdinaryMemoryOperation::Load && !site.destination_vgpr)
     site.support_reason = ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr;
   else if (raw.encoding.ordinary_requires_complete_registers &&
-           site.operation == ConSanOrdinaryMemoryOperation::Store && !site.value_vgpr)
+           site.operation == ConSanOrdinaryMemoryOperation::Store && !site.data_vgpr)
     site.support_reason = ConSanOrdinaryMemorySupportReason::MissingValueVgpr;
   else
     site.support_reason = raw.encoding.ordinary_mutation_supported
@@ -1369,12 +1373,15 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
       site.raw_offen = raw.encoding.raw_offen;
       site.raw_idxen = raw.encoding.raw_idxen;
       site.raw_vaddr = raw.encoding.raw_vaddr;
-      site.address_sgpr = raw.encoding.address_sgpr;
+      site.scalar_address_sgpr = raw.encoding.address_sgpr;
       site.address_vgpr = raw.encoding.address_vgpr;
-      if (site.operation == ConSanOrdinaryMemoryOperation::Load)
+      if (site.operation == ConSanOrdinaryMemoryOperation::Load) {
         site.destination_vgpr = raw.encoding.data_vgpr;
-      else
-        site.value_vgpr = raw.encoding.data_vgpr;
+        site.data_vgpr = site.destination_vgpr;
+      } else {
+        site.data_vgpr = raw.encoding.data_vgpr;
+      }
+      site.raw_vdata = raw.encoding.data_vgpr;
       site.support_reason = raw.encoding.well_formed
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
@@ -1388,12 +1395,13 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
     site.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.address_vgpr = vgpr_index(inst.src_operand(0));
     if (mnemonic.starts_with("global_") && inst.num_src_operands() > 1)
-      site.address_sgpr = register_index(inst.src_operand(1), RegClass::SGPR);
+      site.scalar_address_sgpr = register_index(inst.src_operand(1), RegClass::SGPR);
+    site.data_vgpr = site.destination_vgpr;
   } else {
     site.address_vgpr = vgpr_index(inst.src_operand(0));
-    site.value_vgpr = vgpr_index(inst.src_operand(1));
+    site.data_vgpr = vgpr_index(inst.src_operand(1));
     if (mnemonic.starts_with("global_") && inst.num_src_operands() > 2)
-      site.address_sgpr = register_index(inst.src_operand(2), RegClass::SGPR);
+      site.scalar_address_sgpr = register_index(inst.src_operand(2), RegClass::SGPR);
   }
 
   if (mnemonic.starts_with("flat_")) {
@@ -1427,12 +1435,12 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       site.width_bits == 0u) {
     site.width_bits = 32u;
   }
-  site.dst_vgpr = vgpr_index(inst.dst_operand(0));
-  site.addr_vgpr = vgpr_index(inst.src_operand(0));
+  site.destination_vgpr = vgpr_index(inst.dst_operand(0));
+  site.address_vgpr = vgpr_index(inst.src_operand(0));
   site.data_vgpr = vgpr_index(inst.src_operand(1));
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     if (const auto sgpr = register_index(inst.src_operand(i), RegClass::SGPR)) {
-      site.saddr_sgpr = *sgpr;
+      site.scalar_address_sgpr = *sgpr;
       break;
     }
   }
@@ -1444,9 +1452,9 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   // only as an in/out source operand. The raw target-native field is still the
   // authoritative destination selector, so normalize it for downstream atomic
   // engines without inventing a destination for non-returning forms.
-  if (!site.dst_vgpr && site.returns_old_value.value_or(false) && site.raw_vdst &&
+  if (!site.destination_vgpr && site.returns_old_value.value_or(false) && site.raw_vdst &&
       *site.raw_vdst <= std::numeric_limits<uint16_t>::max()) {
-    site.dst_vgpr = static_cast<uint16_t>(*site.raw_vdst);
+    site.destination_vgpr = static_cast<uint16_t>(*site.raw_vdst);
   }
 
   site.mnemonic = std::string(mnemonic);

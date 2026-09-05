@@ -1620,9 +1620,9 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(atomic.file_offset, 0x110u);
   EXPECT_EQ(atomic.size, 8u);
   EXPECT_EQ(atomic.width_bits, 32u);
-  ASSERT_TRUE(atomic.addr_vgpr);
+  ASSERT_TRUE(atomic.address_vgpr);
   ASSERT_TRUE(atomic.data_vgpr);
-  EXPECT_EQ(*atomic.addr_vgpr, 0u);
+  EXPECT_EQ(*atomic.address_vgpr, 0u);
   EXPECT_EQ(*atomic.data_vgpr, 0u);
   ASSERT_TRUE(atomic.raw_op);
   ASSERT_TRUE(atomic.raw_addr);
@@ -3088,10 +3088,10 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
   EXPECT_EQ(site.mnemonic, "flat_atomic_add");
   EXPECT_EQ(site.size, 8u);
   EXPECT_EQ(site.width_bits, 32u);
-  ASSERT_TRUE(site.addr_vgpr && site.data_vgpr && site.dst_vgpr);
-  EXPECT_EQ(*site.addr_vgpr, 2u);
+  ASSERT_TRUE(site.address_vgpr && site.data_vgpr && site.destination_vgpr);
+  EXPECT_EQ(*site.address_vgpr, 2u);
   EXPECT_EQ(*site.data_vgpr, 4u);
-  EXPECT_EQ(*site.dst_vgpr, 5u);
+  EXPECT_EQ(*site.destination_vgpr, 5u);
   ASSERT_TRUE(site.raw_saddr && site.raw_vaddr && site.raw_vsrc && site.raw_vdst &&
               site.raw_ioffset && site.scope && site.returns_old_value);
   EXPECT_EQ(*site.raw_saddr, 0u);
@@ -3191,14 +3191,14 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_EQ(atomic.file_offset, 0x100u);
   EXPECT_EQ(atomic.size, 12u);
   EXPECT_EQ(atomic.width_bits, 32u);
-  ASSERT_TRUE(atomic.dst_vgpr);
-  ASSERT_TRUE(atomic.addr_vgpr);
+  ASSERT_TRUE(atomic.destination_vgpr);
+  ASSERT_TRUE(atomic.address_vgpr);
   ASSERT_TRUE(atomic.data_vgpr);
-  ASSERT_TRUE(atomic.saddr_sgpr);
-  EXPECT_EQ(*atomic.dst_vgpr, 0u);
-  EXPECT_EQ(*atomic.addr_vgpr, 2u);
+  ASSERT_TRUE(atomic.scalar_address_sgpr);
+  EXPECT_EQ(*atomic.destination_vgpr, 0u);
+  EXPECT_EQ(*atomic.address_vgpr, 2u);
   EXPECT_EQ(*atomic.data_vgpr, 1u);
-  EXPECT_EQ(*atomic.saddr_sgpr, 4u);
+  EXPECT_EQ(*atomic.scalar_address_sgpr, 4u);
   ASSERT_TRUE(atomic.raw_saddr);
   ASSERT_TRUE(atomic.raw_vaddr);
   ASSERT_TRUE(atomic.raw_vsrc);
@@ -4126,9 +4126,9 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   EXPECT_EQ(site.mnemonic, "flat_atomic_add_u32");
   EXPECT_EQ(site.size, 3u * sizeof(uint32_t));
   EXPECT_EQ(site.width_bits, 32u);
-  EXPECT_EQ(site.addr_vgpr, 2u);
+  EXPECT_EQ(site.address_vgpr, 2u);
   EXPECT_EQ(site.data_vgpr, 4u);
-  EXPECT_EQ(site.dst_vgpr, 2u);
+  EXPECT_EQ(site.destination_vgpr, 2u);
   EXPECT_EQ(site.raw_saddr, static_cast<uint32_t>(cdna5::OPR_SREG_NULL));
   EXPECT_EQ(site.raw_vaddr, 2u);
   EXPECT_EQ(site.raw_vsrc, 4u);

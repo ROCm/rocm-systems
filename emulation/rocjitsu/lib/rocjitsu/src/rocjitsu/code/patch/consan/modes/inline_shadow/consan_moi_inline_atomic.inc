@@ -274,11 +274,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           " raw_saddr=" +
           (site.raw_saddr ? std::to_string(*site.raw_saddr) : std::string("missing")) +
           " saddr_sgpr=" +
-          (site.saddr_sgpr ? std::to_string(*site.saddr_sgpr) : std::string("missing")) +
+          (site.scalar_address_sgpr ? std::to_string(*site.scalar_address_sgpr)
+                                    : std::string("missing")) +
           " raw_vaddr=" +
           (site.raw_vaddr ? std::to_string(*site.raw_vaddr) : std::string("missing")) +
           " addr_vgpr=" +
-          (site.addr_vgpr ? std::to_string(*site.addr_vgpr) : std::string("missing")));
+          (site.address_vgpr ? std::to_string(*site.address_vgpr) : std::string("missing")));
       continue;
     }
     MoiAtomicEvidenceSitePlan planned_candidate = candidate;

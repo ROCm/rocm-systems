@@ -362,15 +362,15 @@ using consan_moi_detail::kFenceRecordLayout;
   const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
   if (is_compare_exchange) {
-    if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
+    if (!candidate.site.data_vgpr || !candidate.site.destination_vgpr) {
       errors.emplace_back("ConSan MOI atomic record CAS lacks compare/result operands");
       return std::nullopt;
     }
     const uint16_t value_word_count = static_cast<uint16_t>(candidate.site.width_bits / 32u);
     const uint16_t compare_vgpr =
         static_cast<uint16_t>(*candidate.site.data_vgpr + value_word_count);
-    if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(compare_vgpr),
-                                                               *candidate.site.dst_vgpr, arch))) {
+    if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(compare_vgpr), *candidate.site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI atomic record CAS could not capture its outcome mask");
       return std::nullopt;
     }
@@ -382,7 +382,7 @@ using consan_moi_detail::kFenceRecordLayout;
       if (!sequence.emit_all(
               instrumentation::build_v_cmp_eq_u32_vcc(
                   vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
-                  static_cast<uint16_t>(*candidate.site.dst_vgpr + 1u), arch),
+                  static_cast<uint16_t>(*candidate.site.destination_vgpr + 1u), arch),
               instrumentation::build_v_and_b32(success_lo, kAmdGpuVccLo, success_lo, arch),
               instrumentation::build_v_and_b32(success_hi, kAmdGpuVccHi, success_hi, arch))) {
         errors.emplace_back(

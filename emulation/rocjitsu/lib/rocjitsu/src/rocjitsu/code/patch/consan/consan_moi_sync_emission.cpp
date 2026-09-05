@@ -123,7 +123,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     break;
   case ConSanSyncRmwOutcome::CompareExchange:
     if (!plan.site.returns_old_value.value_or(false) || !plan.site.data_vgpr ||
-        !plan.site.dst_vgpr) {
+        !plan.site.destination_vgpr) {
       return reject(Reason::CompareExchangeDynamicOutcomeUnavailable);
     }
     semantics.outcome = ConSanMoiSampledSyncOutcome::CasSuccess;
@@ -180,40 +180,6 @@ std::string_view sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReas
       consan_enum(Reason::SampledSyncAbiRejectedCasFailure,
                   "sampled-sync-abi-rejected-cas-failure"));
   return vocabulary.name(reason);
-}
-
-[[nodiscard]] ConSanAtomicSite
-normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
-  ConSanAtomicSite normalized;
-  if (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group)
-    normalized.address_space_hint = ConSanAtomicAddressSpaceHint::FlatGroup;
-  normalized.text_offset = site.text_offset;
-  normalized.file_offset = site.file_offset;
-  normalized.size = site.size;
-  normalized.width_bits = site.width_bits;
-  normalized.dst_vgpr = site.destination_vgpr;
-  normalized.addr_vgpr = site.address_vgpr;
-  normalized.data_vgpr = site.operation == ConSanOrdinaryMemoryOperation::Load
-                             ? site.destination_vgpr
-                             : site.value_vgpr;
-  normalized.saddr_sgpr = site.address_sgpr;
-  normalized.raw_vaddr = site.raw_vaddr;
-  normalized.raw_vdata = site.operation == ConSanOrdinaryMemoryOperation::Load
-                             ? std::optional<uint32_t>(site.destination_vgpr)
-                             : std::optional<uint32_t>(site.value_vgpr);
-  normalized.raw_rsrc = site.raw_rsrc;
-  normalized.raw_soffset = site.raw_soffset;
-  normalized.raw_offen = site.raw_offen;
-  normalized.raw_idxen = site.raw_idxen;
-  normalized.raw_saddr = site.raw_saddr;
-  normalized.raw_scale_offset = site.raw_scale_offset;
-  normalized.raw_ioffset = site.raw_ioffset;
-  normalized.raw_scope = site.raw_scope;
-  normalized.scope = site.scope;
-  normalized.raw_th = site.raw_th;
-  normalized.returns_old_value = false;
-  normalized.mnemonic = site.mnemonic;
-  return normalized;
 }
 
 /// Project admitted Record/Replay fence evidence directly into the common MOI
@@ -331,7 +297,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
         errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
         return {};
       }
-      plan.communication_site = normalize_ordinary_fence_communication(*site);
+      plan.communication_site = consan_atomic_communication_site(*site);
       if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
         if (sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
@@ -500,7 +466,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
         return {};
       }
-      plan.site = normalize_ordinary_fence_communication(*site);
+      plan.site = consan_atomic_communication_site(*site);
     }
     if (sequence->scope)
       plan.site.scope = sequence->scope;

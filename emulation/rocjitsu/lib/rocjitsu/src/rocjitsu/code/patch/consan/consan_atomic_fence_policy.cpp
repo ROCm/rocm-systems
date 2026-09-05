@@ -97,40 +97,6 @@ source_container_names(const SynchronizationInventoryView &inventory,
   return inventory.program_site<ConSanOrdinaryMemorySite>(event.source_site);
 }
 
-[[nodiscard]] ConSanAtomicSite normalize_ordinary_site(const ConSanOrdinaryMemorySite &site) {
-  ConSanAtomicSite result;
-  if (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group)
-    result.address_space_hint = ConSanAtomicAddressSpaceHint::FlatGroup;
-  result.text_offset = site.text_offset;
-  result.file_offset = site.file_offset;
-  result.size = site.size;
-  result.width_bits = site.width_bits;
-  result.dst_vgpr = site.destination_vgpr;
-  result.addr_vgpr = site.address_vgpr;
-  result.data_vgpr = site.operation == ConSanOrdinaryMemoryOperation::Load ? site.destination_vgpr
-                                                                           : site.value_vgpr;
-  result.saddr_sgpr = site.address_sgpr;
-  result.raw_saddr = site.raw_saddr;
-  result.raw_scale_offset = site.raw_scale_offset;
-  result.raw_vaddr = site.raw_vaddr;
-  result.raw_vsrc = site.raw_vsrc;
-  result.raw_vdst = site.raw_vdst;
-  result.raw_vdata = site.operation == ConSanOrdinaryMemoryOperation::Load
-                         ? std::optional<uint32_t>(site.destination_vgpr)
-                         : std::optional<uint32_t>(site.value_vgpr);
-  result.raw_rsrc = site.raw_rsrc;
-  result.raw_soffset = site.raw_soffset;
-  result.raw_offen = site.raw_offen;
-  result.raw_idxen = site.raw_idxen;
-  result.raw_ioffset = site.raw_ioffset;
-  result.raw_scope = site.raw_scope;
-  result.scope = site.scope;
-  result.raw_th = site.raw_th;
-  result.returns_old_value = false;
-  result.mnemonic = site.mnemonic;
-  return result;
-}
-
 [[nodiscard]] std::optional<ConSanCapabilityForm>
 atomic_capability_form(const SynchronizationInventoryView &inventory,
                        const ConSanSyncEvent &event) {
@@ -212,7 +178,7 @@ struct AtomicEncodingDecision {
       ordinary ? find_ordinary_site(inventory, event) : nullptr;
   if ((ordinary && ordinary_site == nullptr) || (!ordinary && native == nullptr))
     return {.reason = ConSanAtomicPolicyReason::MissingOperands, .form = std::nullopt};
-  ConSanAtomicSite site = ordinary ? normalize_ordinary_site(*ordinary_site) : *native;
+  ConSanAtomicSite site = ordinary ? consan_atomic_communication_site(*ordinary_site) : *native;
 
   // Synchronization analysis owns normalized semantic scope. It may preserve
   // an encoded value or derive a stronger fact from address-space provenance

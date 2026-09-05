@@ -188,9 +188,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
   const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas) {
-    assert(candidate.site.data_vgpr && candidate.site.dst_vgpr);
+    assert(candidate.site.data_vgpr && candidate.site.destination_vgpr);
     state.cas_compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
-    state.cas_result_vgpr = *candidate.site.dst_vgpr;
+    state.cas_result_vgpr = *candidate.site.destination_vgpr;
   }
   const bool guest_first =
       spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.lowering_form);
@@ -330,7 +330,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
 
   const bool is_cas = candidate.is_rmw && consan_atomic_is_compare_exchange(candidate.site);
-  if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
+  if (is_cas && (!candidate.site.data_vgpr || !candidate.site.destination_vgpr ||
                  !candidate.site.returns_old_value.value_or(false)))
     return std::nullopt;
   const auto descriptor_for = [&](ConSanMoiSampledSyncOutcome outcome) -> std::optional<uint32_t> {
@@ -592,7 +592,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   }
 
   const bool is_cas = candidate.is_rmw && consan_atomic_is_compare_exchange(candidate.site);
-  if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
+  if (is_cas && (!candidate.site.data_vgpr || !candidate.site.destination_vgpr ||
                  !candidate.site.returns_old_value.value_or(false))) {
     errors.emplace_back("ConSan MOI sampled atomic metadata requires an exact CAS outcome");
     return std::nullopt;
