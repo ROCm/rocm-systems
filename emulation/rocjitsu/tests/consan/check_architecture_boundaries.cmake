@@ -4001,6 +4001,14 @@ if(NOT _perturbation_body MATCHES "stage_consan_text_fragments" OR
         "ConSan perturbation must stage semantic fragments and must not regain a private placement/publication backend"
     )
 endif()
+file(READ "${_consan_dir}/consan_unmatched_barrier_abort.cpp" _unmatched_barrier_abort_body)
+if(NOT _unmatched_barrier_abort_body MATCHES "stage_consan_text_fragments" OR
+   NOT _unmatched_barrier_abort_body MATCHES "finalize_consan_text_rewrites" OR
+   _unmatched_barrier_abort_body MATCHES "CodeObjectPatcher|replace_consan_text")
+    message(FATAL_ERROR
+        "ConSan unmatched-barrier abort must publish through the shared text transaction"
+    )
+endif()
 
 file(READ "${_consan_dir}/consan_growth_policy.h" _growth_policy_contract)
 if(_growth_policy_contract MATCHES "ConSanOptions" OR
