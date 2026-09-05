@@ -282,6 +282,18 @@ struct ConSanVectorMemoryCapability {
   bool operator==(const ConSanVectorMemoryCapability &) const = default;
 };
 
+/// Target-native LDS encoding facts needed after instruction decoding has
+/// classified an access but has deliberately not classified it as a
+/// synchronization operation. Most single-range DS/VDS offsets occupy sixteen
+/// bits; CDNA3/4 access-only atomic forms expose only their low eight-bit
+/// `offset0` field. Keeping that exception here prevents the common inventory
+/// from reconstructing an encoding family from a product set.
+struct ConSanNativeLdsCapability {
+  uint8_t single_range_atomic_offset_bits = 16;
+
+  bool operator==(const ConSanNativeLdsCapability &) const = default;
+};
+
 /// Target-wide access-lowering mechanisms shared by the MOI engines.
 ///
 /// These are deliberately implementation capabilities rather than product
@@ -365,6 +377,7 @@ struct ConSanTargetProfile {
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
   ConSanVectorMemoryCapability vector_memory;
+  ConSanNativeLdsCapability native_lds;
   ConSanMoiAccessCapability moi_access;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
@@ -561,6 +574,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanScaleOffsetCapability::Supported) ||
         (profile.vector_memory.instruction_word_count == 2u &&
          profile.vector_memory.scale_offset != ConSanScaleOffsetCapability::Absent) ||
+        (profile.native_lds.single_range_atomic_offset_bits != 8u &&
+         profile.native_lds.single_range_atomic_offset_bits != 16u) ||
         (profile.moi_access.clobbered_address_spill_reload &&
          !profile.moi_access.native_lds_spill_recovery) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&

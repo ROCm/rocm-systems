@@ -37,6 +37,7 @@ struct ExpectedTargetProfile {
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
   ConSanVectorMemoryCapability vector_memory;
+  ConSanNativeLdsCapability native_lds;
   ConSanMoiAccessCapability moi_access;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
   bool moi_access_reports_need_explicit_dispatch_identity;
@@ -98,6 +99,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
+        .native_lds = {.single_range_atomic_offset_bits = 8},
         .moi_access =
             {
                 .native_lds_spill_recovery = true,
@@ -161,6 +163,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
+        .native_lds = {.single_range_atomic_offset_bits = 8},
         .moi_access =
             {
                 .native_lds_spill_recovery = true,
@@ -224,6 +227,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Absent,
             },
+        .native_lds = {.single_range_atomic_offset_bits = 16},
         .moi_access = {.native_lds_spill_recovery = true},
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
@@ -293,6 +297,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Disabled,
             },
+        .native_lds = {.single_range_atomic_offset_bits = 16},
         .moi_access =
             {
                 .dynamic_stack_uses_scalar_reservoir = true,
@@ -368,6 +373,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
                 .scale_offset = ConSanScaleOffsetCapability::Supported,
             },
+        .native_lds = {.single_range_atomic_offset_bits = 16},
         .moi_access =
             {
                 .dynamic_stack_uses_scalar_reservoir = true,
@@ -423,6 +429,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.atomic_address_materialization, expected.atomic_address_materialization);
   EXPECT_EQ(actual.vector_memory, expected.vector_memory);
+  EXPECT_EQ(actual.native_lds, expected.native_lds);
   EXPECT_EQ(actual.moi_access, expected.moi_access);
   EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
   EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
@@ -539,6 +546,9 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].vector_memory.global_vector_only_saddr = 128u; });
   expect_invalid("scale-offset capability on a two-word encoding", [](auto &profiles) {
     profiles[0].vector_memory.scale_offset = ConSanScaleOffsetCapability::Supported;
+  });
+  expect_invalid("unsupported native LDS atomic offset width", [](auto &profiles) {
+    profiles[0].native_lds.single_range_atomic_offset_bits = 12u;
   });
   expect_invalid("clobbered-address reload without native spill recovery",
                  [](auto &profiles) { profiles[0].moi_access.native_lds_spill_recovery = false; });

@@ -1109,25 +1109,36 @@ private:
            (static_cast<uint32_t>(bytes[offset + 3]) << 24u);
   }
 
-  /// Decode the static byte displacement of a one-range native LDS access.
-  /// CDNA3/4 DS atomics use the low eight-bit offset field; other admitted
-  /// one-range DS/VDS forms use the low sixteen bits. Direct-to-LDS transfers
-  /// address their destination through M0 and therefore contribute no encoded
-  /// displacement. Returning absence preserves unreadable pristine bytes as a
-  /// typed inventory gap instead of silently treating them as offset zero.
+  /// Recover the static byte displacement of a one-range native LDS access.
+  /// The target-owned atomic decoder has already normalized an atomic's exact
+  /// offset into this program site's semantic facet; consuming that fact here
+  /// avoids a second target-dependent interpretation of the same instruction.
+  /// Other admitted one-range DS/VDS forms use the low sixteen bits.
+  /// Direct-to-LDS transfers address their destination through M0 and therefore
+  /// contribute no encoded displacement. Returning absence preserves a missing
+  /// atomic facet or unreadable pristine bytes as a typed inventory gap instead
+  /// of silently treating either as offset zero.
   [[nodiscard]] std::optional<int64_t>
   single_range_native_static_byte_offset(const ConSanProgramSite &site,
                                          std::span<const uint8_t> bytes) const {
     if (site.origin == ConSanAccessOrigin::DirectToLds)
       return 0;
+    if (site.kind == ConSanLdsAccessKind::Atomic) {
+      const ConSanAtomicSite *atomic = site.get_if<ConSanAtomicSite>();
+      if (atomic != nullptr && atomic->raw_ioffset)
+        return static_cast<int64_t>(*atomic->raw_ioffset);
+      const ConSanTargetProfile *target = consan_target_profile(storage_->arch);
+      if (target == nullptr)
+        return std::nullopt;
+      const uint32_t mask = (1u << target->native_lds.single_range_atomic_offset_bits) - 1u;
+      const std::optional<uint32_t> word0 =
+          read_little_endian_u32(bytes, site.decoded_file_offset());
+      return word0 ? std::optional<int64_t>{static_cast<int64_t>(*word0 & mask)} : std::nullopt;
+    }
     const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.decoded_file_offset());
     if (!word0)
       return std::nullopt;
-    const uint32_t mask =
-        consan_arch_is_cdna3_or_cdna4(storage_->arch) && site.kind == ConSanLdsAccessKind::Atomic
-            ? 0xffu
-            : 0xffffu;
-    return static_cast<int64_t>(*word0 & mask);
+    return static_cast<int64_t>(*word0 & 0xffffu);
   }
 
   [[nodiscard]] SemanticSiteId access_range_id(uint64_t text_offset, uint32_t range_ordinal) const {

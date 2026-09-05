@@ -858,25 +858,53 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
                                   [](const auto &site) { return site.container.name == "owner"; }));
 }
 
-TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecificEncoding) {
+TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreferNormalizedAtomicFacet) {
   const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
-  for (const auto [arch, kind, expected] : {
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ConSanLdsAccessKind::Atomic, int64_t{0x34}},
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ConSanLdsAccessKind::Read, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ConSanLdsAccessKind::Atomic, int64_t{0x34}},
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ConSanLdsAccessKind::Read, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA5, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_CDNA5, ConSanLdsAccessKind::Read, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ConSanLdsAccessKind::Read, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
-           std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ConSanLdsAccessKind::Write, int64_t{0x1234}},
+  for (const auto [kind, decoded_atomic_offset, expected] : {
+           std::tuple{ConSanLdsAccessKind::Atomic, std::optional<int32_t>{0x56},
+                      std::optional<int64_t>{0x56}},
+           std::tuple{ConSanLdsAccessKind::Read, std::optional<int32_t>{},
+                      std::optional<int64_t>{0x1234}},
+           std::tuple{ConSanLdsAccessKind::Write, std::optional<int32_t>{},
+                      std::optional<int64_t>{0x1234}},
        }) {
     ProgramInventoryBuilder builder(bytes);
-    builder.set_code_object_facts(true, 0, arch, ROCJITSU_CODE_TARGET_INVALID);
+    builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942);
     ConSanProgramContainer kernel = make_inventory_kernel();
     ConSanProgramSite site = make_inventory_lds_site("ds_single", 16, 0, 32);
     site.kind = kind;
+    stage_inventory_access(builder, kernel, std::move(site));
+    if (kind == ConSanLdsAccessKind::Atomic) {
+      ConSanAtomicSite atomic;
+      atomic.text_offset = 16;
+      atomic.file_offset = 0;
+      atomic.size = 8;
+      atomic.mnemonic = "ds_single";
+      atomic.raw_ioffset = decoded_atomic_offset;
+      builder.add_semantic_site(
+          make_consan_program_site(consan_program_container_ref(kernel), std::move(atomic)));
+    }
+    builder.add_kernel(std::move(kernel));
+    builder.publish_decoded_accesses(bytes);
+    ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
+    EXPECT_EQ(builder.view().access_sites().front().ranges.front().static_byte_offset, expected);
+  }
+}
+
+TEST(ConSanProgramInventory, AccessOnlyNativeAtomicOffsetsUseTheTargetEncodingFact) {
+  const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
+  for (const auto [arch, target, expected] : {
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, int64_t{0x34}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, int64_t{0x34}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250, int64_t{0x1234}},
+       }) {
+    ProgramInventoryBuilder builder(bytes);
+    builder.set_code_object_facts(true, 0, arch, target);
+    ConSanProgramContainer kernel = make_inventory_kernel();
+    ConSanProgramSite site = make_inventory_lds_site("ds_access_only_atomic", 16, 0, 32);
+    site.kind = ConSanLdsAccessKind::Atomic;
     stage_inventory_access(builder, kernel, std::move(site));
     builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
