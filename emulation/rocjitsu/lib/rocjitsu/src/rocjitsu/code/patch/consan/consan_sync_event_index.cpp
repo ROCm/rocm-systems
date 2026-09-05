@@ -13,8 +13,9 @@ template <typename FindEvent, typename FindSource>
 [[nodiscard]] bool sequence_has_exact_members_impl(const ConSanSyncSequence &sequence,
                                                    FindEvent find_event, FindSource find_source) {
   uint64_t prior_end = sequence.begin_text_offset;
-  for (SemanticSiteId event_identity : sequence.member_semantic_ids) {
-    event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  for (const SemanticSiteId &member_identity : sequence.member_semantic_ids) {
+    const SemanticSiteId event_identity =
+        member_identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent);
     const ConSanSyncEvent *event = find_event(event_identity);
     const ConSanProgramSite *source = event == nullptr ? nullptr : find_source(*event);
     if (event == nullptr || event->container_name != sequence.container_name || source == nullptr ||
@@ -50,16 +51,40 @@ build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
   SyncEventSemanticIndex index;
   index.events.reserve(sync_events.size());
   index.program_sites = program_sites;
-  for (const ConSanSyncEvent &event : sync_events)
-    index.events.emplace(event.semantic_id, &event);
+  for (const ConSanSyncEvent &event : sync_events) {
+    const auto [entry, inserted] = index.events.emplace(event.semantic_id, &event);
+    if (!inserted)
+      entry->second = nullptr;
+  }
   return index;
 }
 
 const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
                                                   SemanticSiteId identity) {
-  identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  identity = identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent);
   const auto event = index.events.find(identity);
   return event == index.events.end() ? nullptr : event->second;
+}
+
+SyncSequenceMembershipIndex
+build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences) {
+  size_t member_count = 0;
+  for (const ConSanSyncSequence &sequence : sequences)
+    member_count += sequence.member_semantic_ids.size();
+  SyncSequenceMembershipIndex result;
+  result.reserve(member_count);
+  for (const ConSanSyncSequence &sequence : sequences) {
+    for (const SemanticSiteId &member : sequence.member_semantic_ids) {
+      const SemanticSiteId event = member.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent);
+      const auto [entry, inserted] =
+          result.try_emplace(event, SyncSequenceMembership{&sequence, false});
+      if (!inserted) {
+        entry->second.sequence = nullptr;
+        entry->second.ambiguous = true;
+      }
+    }
+  }
+  return result;
 }
 
 bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,

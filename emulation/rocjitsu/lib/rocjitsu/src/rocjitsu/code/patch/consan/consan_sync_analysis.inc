@@ -602,9 +602,8 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.in_kernel = event.in_kernel;
     sequence.begin_text_offset = event.text_offset();
     sequence.end_text_offset = event.text_offset() + source.size();
-    SemanticSiteId member_id = event.semantic_id;
-    member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-    sequence.member_semantic_ids.push_back(std::move(member_id));
+    sequence.member_semantic_ids.push_back(
+        event.semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember));
     sequence.scope = event.scope;
     if (const ConSanBarrierSite *site = source.get_if<ConSanBarrierSite>()) {
       sequence.barrier_id = site->barrier_id;
@@ -1670,32 +1669,10 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     return source == nullptr ? nullptr : source->get_if<ConSanFenceSite>();
   };
 
-  struct SequenceMembership {
-    const ConSanSyncSequence *sequence = nullptr;
-    bool unique = true;
-  };
-  std::unordered_map<SemanticSiteId, SequenceMembership, SyncEventSemanticIdHash> sequence_by_event;
-  sequence_by_event.reserve(sync_events.size());
-  for (const ConSanSyncSequence &sequence : sync_sequences) {
-    for (SemanticSiteId identity : sequence.member_semantic_ids) {
-      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-      const auto [membership, inserted] =
-          sequence_by_event.try_emplace(std::move(identity), SequenceMembership{&sequence, true});
-      if (!inserted) {
-        membership->second.sequence = nullptr;
-        membership->second.unique = false;
-      }
-    }
-  }
-
-  std::unordered_map<SemanticSiteId, const ConSanSyncEvent *, SyncEventSemanticIdHash>
-      event_by_identity;
-  event_by_identity.reserve(sync_events.size());
-  for (const ConSanSyncEvent &event : sync_events) {
-    const auto [indexed, inserted] = event_by_identity.try_emplace(event.semantic_id, &event);
-    if (!inserted)
-      indexed->second = nullptr;
-  }
+  const SyncSequenceMembershipIndex sequence_by_event =
+      build_sync_sequence_membership_index(sync_sequences);
+  const SyncEventSemanticIndex event_by_identity =
+      build_sync_event_semantic_index(sync_events, inventory.program_sites);
 
   for (const ConSanSyncEvent &fence : sync_events) {
     if (fence.kind != ConSanSyncEventKind::Fence)
@@ -1705,7 +1682,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     candidate.fence_event = fence.semantic_id;
 
     const auto membership = sequence_by_event.find(fence.semantic_id);
-    if (membership == sequence_by_event.end() || !membership->second.unique ||
+    if (membership == sequence_by_event.end() || membership->second.ambiguous ||
         membership->second.sequence == nullptr) {
       candidate.association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
       candidates.push_back(std::move(candidate));
@@ -1736,14 +1713,14 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     }
 
     const auto sequence_has_cache_member = [&](ConSanCacheOperation operation) {
-      return std::ranges::any_of(sequence->member_semantic_ids, [&](SemanticSiteId identity) {
-        identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-        const auto event = event_by_identity.find(identity);
-        if (event == event_by_identity.end() || event->second == nullptr)
-          return false;
-        const ConSanFenceSite *source = fence_source(*event->second);
-        return source != nullptr && source->cache_operation == operation;
-      });
+      return std::ranges::any_of(
+          sequence->member_semantic_ids, [&](const SemanticSiteId &identity) {
+            const ConSanSyncEvent *event = find_sequence_member_event(event_by_identity, identity);
+            if (event == nullptr)
+              return false;
+            const ConSanFenceSite *source = fence_source(*event);
+            return source != nullptr && source->cache_operation == operation;
+          });
     };
     const ConSanFenceSite *fence_site = fence_source(fence);
     if (fence_site == nullptr) {
@@ -1785,14 +1762,12 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
 
     const ConSanSyncEvent *communication = nullptr;
     bool malformed_member = false;
-    for (SemanticSiteId identity : sequence->member_semantic_ids) {
-      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-      const auto indexed = event_by_identity.find(identity);
-      if (indexed == event_by_identity.end() || indexed->second == nullptr) {
+    for (const SemanticSiteId &identity : sequence->member_semantic_ids) {
+      const ConSanSyncEvent *member = find_sequence_member_event(event_by_identity, identity);
+      if (member == nullptr) {
         malformed_member = true;
         break;
       }
-      const ConSanSyncEvent *member = indexed->second;
       if (member->kind != ConSanSyncEventKind::Atomic &&
           member->kind != ConSanSyncEventKind::OrdinaryMemory)
         continue;
@@ -2304,20 +2279,8 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
       entry->second = nullptr;
   }
 
-  size_t sequence_member_count = 0;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences)
-    sequence_member_count += sequence.member_semantic_ids.size();
-  std::unordered_map<SemanticSiteId, const ConSanSyncSequence *, SyncEventSemanticIdHash>
-      sequence_by_event;
-  sequence_by_event.reserve(sequence_member_count);
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    for (SemanticSiteId identity : sequence.member_semantic_ids) {
-      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-      const auto [entry, inserted] = sequence_by_event.emplace(std::move(identity), &sequence);
-      if (!inserted)
-        entry->second = nullptr;
-    }
-  }
+  const SyncSequenceMembershipIndex sequence_by_event =
+      build_sync_sequence_membership_index(result.program_inventory.sync().sync_sequences);
 
   for (ConSanFaultSite &site : result.fault_sites) {
     const ConSanSyncEventKind expected_kind =
@@ -2339,7 +2302,7 @@ void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &resul
     site.sync_event_identity = event->identity;
     const auto sequence_entry = sequence_by_event.find(event->semantic_id);
     const ConSanSyncSequence *sequence =
-        sequence_entry == sequence_by_event.end() ? nullptr : sequence_entry->second;
+        sequence_entry == sequence_by_event.end() ? nullptr : sequence_entry->second.sequence;
     if (sequence == nullptr)
       continue;
     site.sync_sequence_identity = sequence->identity;
@@ -2518,27 +2481,23 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan
   // makes owner annotation quadratic in the sync inventory size.
-  std::unordered_map<SemanticSiteId, const ConSanSyncEvent *, SyncEventSemanticIdHash>
-      sync_event_by_identity;
-  sync_event_by_identity.reserve(inventory.sync_events.size());
-  for (const ConSanSyncEvent &event : inventory.sync_events)
-    sync_event_by_identity.emplace(event.semantic_id, &event);
+  const SyncEventSemanticIndex sync_event_by_identity =
+      build_sync_event_semantic_index(inventory.sync_events, inventory.program_sites);
   for (ConSanSyncSequence &sequence : inventory.sync_sequences) {
     bool first = true;
-    for (SemanticSiteId identity : sequence.member_semantic_ids) {
-      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-      const auto event = sync_event_by_identity.find(identity);
-      if (event == sync_event_by_identity.end()) {
+    for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
+      const ConSanSyncEvent *event = find_sequence_member_event(sync_event_by_identity, identity);
+      if (event == nullptr) {
         sequence.execution_owners.clear();
         first = false;
         break;
       }
       if (first) {
-        sequence.execution_owners = event->second->execution_owners;
+        sequence.execution_owners = event->execution_owners;
         first = false;
       } else {
         sequence.execution_owners =
-            intersect_execution_owners(sequence.execution_owners, event->second->execution_owners);
+            intersect_execution_owners(sequence.execution_owners, event->execution_owners);
       }
     }
   }

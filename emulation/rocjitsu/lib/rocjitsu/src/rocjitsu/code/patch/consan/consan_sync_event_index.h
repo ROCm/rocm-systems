@@ -20,12 +20,26 @@ struct SyncEventSemanticIndex {
   std::span<const ConSanProgramSite> program_sites;
 };
 
+/// Unique logical sequence membership for one event. A null sequence with an
+/// ambiguous flag is distinct from a missing map entry so policy can retain
+/// the reason that a graph edge was rejected.
+struct SyncSequenceMembership {
+  const ConSanSyncSequence *sequence = nullptr;
+  bool ambiguous = false;
+};
+
+using SyncSequenceMembershipIndex =
+    std::unordered_map<SemanticSiteId, SyncSequenceMembership, SyncEventSemanticIdHash>;
+
 [[nodiscard]] SyncEventSemanticIndex
 build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events,
                                 std::span<const ConSanProgramSite> program_sites);
 
 [[nodiscard]] const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
                                                                 SemanticSiteId identity);
+
+[[nodiscard]] SyncSequenceMembershipIndex
+build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences);
 
 /// Verify that every declared sequence member resolves to the same ordered,
 /// bounded event in the immutable program inventory.

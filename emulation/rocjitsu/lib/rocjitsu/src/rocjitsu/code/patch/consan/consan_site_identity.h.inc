@@ -135,5 +135,14 @@ struct SemanticSiteId {
     return physical.valid() && domain != ConSanSemanticSiteDomain::Count;
   }
 
+  /// Reinterpret the same physical fact in another semantic vocabulary.
+  /// Synchronization events and their sequence edges deliberately share
+  /// physical identity while remaining unequal typed graph nodes.
+  [[nodiscard]] SemanticSiteId in_domain(ConSanSemanticSiteDomain selected_domain) const {
+    SemanticSiteId result = *this;
+    result.domain = selected_domain;
+    return result;
+  }
+
   bool operator==(const SemanticSiteId &) const = default;
 };

@@ -345,8 +345,7 @@ struct SynchronizationInventoryView {
   /// arena. Sequence membership uses a distinct semantic domain so callers
   /// cannot accidentally treat a graph edge as an event record.
   [[nodiscard]] const ConSanSyncEvent *find_sequence_member(SemanticSiteId identity) const {
-    identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-    return find_event(identity);
+    return find_event(identity.in_domain(ConSanSemanticSiteDomain::SynchronizationEvent));
   }
 
   /// Materialize stable diagnostic names only at an external presentation or
@@ -425,8 +424,8 @@ struct SynchronizationInventoryView {
   /// of several contradictory causal interpretations.
   [[nodiscard]] const ConSanSyncSequence *
   find_unique_sequence_containing(const SemanticSiteId &event_identity) const {
-    SemanticSiteId member_identity = event_identity;
-    member_identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+    const SemanticSiteId member_identity =
+        event_identity.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
     const ConSanSyncSequence *match = nullptr;
     for (const ConSanSyncSequence &sequence : sync_sequences) {
       if (std::ranges::find(sequence.member_semantic_ids, member_identity) ==

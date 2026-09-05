@@ -8,7 +8,6 @@
 #include <map>
 #include <ranges>
 #include <tuple>
-#include <unordered_map>
 
 namespace rocjitsu {
 namespace {
@@ -18,36 +17,6 @@ namespace {
 /// The pointer borrows immutable inventory for the duration of a pure policy
 /// call. `ambiguous` is distinct from a missing pointer so policy can preserve
 /// whether no sequence or multiple incompatible sequences caused rejection.
-struct SequenceMembership {
-  const ConSanSyncSequence *sequence = nullptr;
-  bool ambiguous = false;
-};
-
-/// Read-only join from stable event identity to its sequence-membership fact.
-using SequenceMembershipIndex =
-    std::unordered_map<SemanticSiteId, SequenceMembership, SyncEventSemanticIdHash>;
-
-[[nodiscard]] SequenceMembershipIndex
-build_sequence_membership_index(std::span<const ConSanSyncSequence> sequences) {
-  SequenceMembershipIndex result;
-  size_t member_count = 0;
-  for (const ConSanSyncSequence &sequence : sequences)
-    member_count += sequence.member_semantic_ids.size();
-  result.reserve(member_count);
-  for (const ConSanSyncSequence &sequence : sequences) {
-    for (SemanticSiteId identity : sequence.member_semantic_ids) {
-      identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-      const auto [entry, inserted] =
-          result.try_emplace(std::move(identity), SequenceMembership{&sequence, false});
-      if (!inserted) {
-        entry->second.sequence = nullptr;
-        entry->second.ambiguous = true;
-      }
-    }
-  }
-  return result;
-}
-
 [[nodiscard]] bool owner_semantics_equal(std::span<const ConSanExecutionOwner> lhs,
                                          std::span<const ConSanExecutionOwner> rhs) {
   return std::ranges::equal(lhs, rhs, [](const auto &left, const auto &right) {
@@ -272,7 +241,8 @@ struct AtomicEncodingDecision {
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
-classify_atomic_semantics(const ConSanSyncEvent &event, const SequenceMembership &membership) {
+classify_atomic_semantics(const ConSanSyncEvent &event,
+                          const SyncSequenceMembership &membership) {
   if (membership.ambiguous)
     return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
   const ConSanSyncSequence *sequence = membership.sequence;
@@ -353,8 +323,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
-  const SequenceMembershipIndex memberships =
-      build_sequence_membership_index(synchronization.sync_sequences);
+  const SyncSequenceMembershipIndex memberships =
+      build_sync_sequence_membership_index(synchronization.sync_sequences);
   std::map<std::pair<ConSanSyncEventKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
       aliases_by_site;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
@@ -368,8 +338,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     (void)site_key;
     const ConSanSyncEvent &event = *aliases.front();
     const auto membership_entry = memberships.find(event.semantic_id);
-    const SequenceMembership membership =
-        membership_entry == memberships.end() ? SequenceMembership{} : membership_entry->second;
+    const SyncSequenceMembership membership =
+        membership_entry == memberships.end() ? SyncSequenceMembership{} : membership_entry->second;
     // Ordinary memory belongs to access policy unless synchronization
     // analysis associated an acquire/release sequence around it.
     if (event.kind == ConSanSyncEventKind::OrdinaryMemory &&

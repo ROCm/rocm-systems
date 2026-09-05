@@ -215,10 +215,9 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
                                              ? sync.find_event(*primary->sync_event_identity)
                                              : nullptr;
   SemanticSiteId primary_member_id;
-  if (primary_event != nullptr) {
-    primary_member_id = primary_event->semantic_id;
-    primary_member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
-  }
+  if (primary_event != nullptr)
+    primary_member_id = primary_event->semantic_id.in_domain(
+        ConSanSemanticSiteDomain::SynchronizationSequenceMember);
   if (primary == nullptr || !primary->sync_event_identity || !primary->sync_sequence_identity ||
       primary_event == nullptr || *primary->sync_sequence_identity != sequence->identity ||
       std::ranges::find(sequence->member_semantic_ids, primary_member_id) ==

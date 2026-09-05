@@ -43,8 +43,8 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
       event->in_kernel != decoded.container.is_kernel() ||
       synchronization.source(*event) != &decoded)
     return;
-  SemanticSiteId member_identity = event->semantic_id;
-  member_identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  const SemanticSiteId member_identity =
+      event->semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
   const bool belongs_to_sequence =
       std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
         return sequence.kind == ConSanSyncSequenceKind::Barrier &&
