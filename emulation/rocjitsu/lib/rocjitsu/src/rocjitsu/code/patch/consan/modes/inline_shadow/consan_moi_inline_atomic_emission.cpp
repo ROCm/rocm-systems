@@ -1923,6 +1923,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success && !message.empty())
+      errors.emplace_back(message);
+    sequence.require(success);
+  };
   words.reserve(
       candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
       (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
@@ -1939,6 +1944,12 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                    scalar_spill->restore_words.end());
     if (spill)
       words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  };
+  const auto finish_words = [&]() -> std::optional<std::vector<uint32_t>> {
+    if (!sequence.finish(arch))
+      return std::nullopt;
+    append_spill_restore();
+    return words;
   };
   if (address_plan.requires_materialization()) {
     const auto address_words = build_consan_moi_atomic_address_materialization(
@@ -1970,45 +1981,34 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const auto load_workgroup = instrumentation::build_private_load_b32(
         materialized_workgroup_key, private_state.workgroup_key_offset, arch);
     const auto wait_private = instrumentation::build_s_wait_private_load0(arch);
-    if (!sequence.emit_all(load_epoch, load_workgroup, wait_private)) {
-      errors.emplace_back(
-          "ConSan MOI inline atomic patch could not load private epoch/workgroup state");
-      return std::nullopt;
-    }
+    require_emission(sequence.emit_all(load_epoch, load_workgroup, wait_private),
+                     "ConSan MOI inline atomic patch could not load private epoch/workgroup state");
     if (private_state.workitem_owner) {
       const ConSanTargetProfile *target = consan_target_profile(arch);
-      if (target == nullptr ||
-          !consan_detail::append_moi_workitem_owner_derivation(
-              words, {.plan = *private_state.workitem_owner, .result_vgpr = materialized_owner},
-              *target)) {
-        errors.emplace_back("ConSan MOI inline atomic patch could not load private owner state");
-        return std::nullopt;
-      }
+      require_emission(
+          target != nullptr &&
+              consan_detail::append_moi_workitem_owner_derivation(
+                  words, {.plan = *private_state.workitem_owner, .result_vgpr = materialized_owner},
+                  *target),
+          "ConSan MOI inline atomic patch could not load private owner state");
     } else if (private_state.resident_wave_owner) {
       const uint16_t owner_sgpr = private_state.resident_wave_owner->destination_sgpr;
       if (private_state.resident_wave_owner_is_borrowed) {
-        if (!sequence.emit(
-                instrumentation::build_v_writelane_b32(private_temporary, owner_sgpr, 0u, arch))) {
-          errors.emplace_back("ConSan MOI inline atomic patch could not save borrowed owner state");
-          return std::nullopt;
-        }
+        require_emission(sequence.emit(instrumentation::build_v_writelane_b32(
+                             private_temporary, owner_sgpr, 0u, arch)),
+                         "ConSan MOI inline atomic patch could not save borrowed owner state");
       }
       const ConSanTargetProfile *target = consan_target_profile(arch);
-      if (target == nullptr || !consan_detail::append_moi_resident_wave_owner(
-                                   words, *private_state.resident_wave_owner, *target)) {
-        errors.emplace_back("ConSan MOI inline atomic patch could not derive resident-wave owner");
-        return std::nullopt;
-      }
+      require_emission(target != nullptr && consan_detail::append_moi_resident_wave_owner(
+                                                words, *private_state.resident_wave_owner, *target),
+                       "ConSan MOI inline atomic patch could not derive resident-wave owner");
       words.push_back(build_v_mov_b32_e32(materialized_owner, owner_sgpr, arch));
       if (private_state.resident_wave_owner_is_borrowed) {
         const auto restore_owner =
             instrumentation::build_v_readlane_b32(owner_sgpr, private_temporary, 0u, arch);
         const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
-        if (!sequence.emit_all(restore_owner, wait_owner)) {
-          errors.emplace_back(
-              "ConSan MOI inline atomic patch could not restore borrowed owner state");
-          return std::nullopt;
-        }
+        require_emission(sequence.emit_all(restore_owner, wait_owner),
+                         "ConSan MOI inline atomic patch could not restore borrowed owner state");
       }
     } else {
       errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
@@ -2027,13 +2027,10 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       const auto read_dispatch_high = instrumentation::build_v_readfirstlane_b32(
           static_cast<uint16_t>(dispatch_id_sgpr + 1u), materialized_workgroup_key, arch);
       const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
-      if (!sequence.emit_all(load_dispatch_low, load_dispatch_high, wait_dispatch,
-                             read_dispatch_low, read_dispatch_high, wait_scalar)) {
-        errors.emplace_back("ConSan MOI inline atomic patch could not reload private dispatch ID");
-        return std::nullopt;
-      }
-      if (!sequence.emit_all(load_workgroup, wait_private))
-        return std::nullopt;
+      require_emission(sequence.emit_all(load_dispatch_low, load_dispatch_high, wait_dispatch,
+                                         read_dispatch_low, read_dispatch_high, wait_scalar),
+                       "ConSan MOI inline atomic patch could not reload private dispatch ID");
+      sequence.append(load_workgroup, wait_private);
     }
   }
   if (candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
@@ -2046,16 +2043,13 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // must reserve and stage metadata before the guest store, but must not
     // inherit an unrelated predecessor's causal frontier.
     const bool import_claimed_predecessor = claims_release_predecessor && candidate.is_rmw;
-    if (!append_inline_versioned_release_transaction(
-            words, bytes, candidate, address_plan, plan, arch,
-            /*emit_guest_instruction=*/true, import_claimed_predecessor,
-            /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
-      errors.emplace_back(
-          "ConSan MOI inline release could not emit a versioned causal transaction");
-      return std::nullopt;
-    }
-    append_spill_restore();
-    return words;
+    require_emission(append_inline_versioned_release_transaction(
+                         words, bytes, candidate, address_plan, plan, arch,
+                         /*emit_guest_instruction=*/true, import_claimed_predecessor,
+                         /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset,
+                         errors),
+                     "ConSan MOI inline release could not emit a versioned causal transaction");
+    return finish_words();
   }
   // CDNA4 can let a following wave reach the guest RMW before the preceding
   // wave has published an initially empty release slot. Serialize non-CAS
@@ -2066,17 +2060,14 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       claims_release_predecessor &&
       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
-    if (!append_inline_versioned_release_transaction(
+    require_emission(
+        append_inline_versioned_release_transaction(
             words, bytes, candidate, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
-            /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
-      errors.emplace_back(
-          "ConSan MOI inline acquire-release could not emit a claimed causal transaction");
-      return std::nullopt;
-    }
-    append_spill_restore();
-    return words;
+            /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors),
+        "ConSan MOI inline acquire-release could not emit a claimed causal transaction");
+    return finish_words();
   }
 
   // A returning release CAS exposes its success result only after the guest
@@ -2088,17 +2079,14 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       claims_release_predecessor && is_compare_exchange &&
       candidate.event_kind != ConSanMoiAtomicEventKind::Acquire;
   if (claimed_compare_exchange_release) {
-    if (!append_inline_versioned_release_transaction(
+    require_emission(
+        append_inline_versioned_release_transaction(
             words, bytes, candidate, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
-            /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors)) {
-      errors.emplace_back(
-          "ConSan MOI inline compare-exchange could not emit a claimed causal transaction");
-      return std::nullopt;
-    }
-    append_spill_restore();
-    return words;
+            /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors),
+        "ConSan MOI inline compare-exchange could not emit a claimed causal transaction");
+    return finish_words();
   }
 
   // A compiler-lowered atomic load plus its acquire cache suffix is safe to
@@ -2109,18 +2097,15 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const bool claimed_read_only_acquire = claims_release_predecessor && !candidate.is_rmw &&
                                          candidate.event_kind == ConSanMoiAtomicEventKind::Acquire;
   if (claimed_read_only_acquire) {
-    if (!append_inline_versioned_release_transaction(
+    require_emission(
+        append_inline_versioned_release_transaction(
             words, bytes, candidate, address_plan, plan, arch,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors,
-            trailing_guest_words)) {
-      errors.emplace_back(
-          "ConSan MOI inline read-only acquire could not emit a claimed causal transaction");
-      return std::nullopt;
-    }
-    append_spill_restore();
-    return words;
+            trailing_guest_words),
+        "ConSan MOI inline read-only acquire could not emit a claimed causal transaction");
+    return finish_words();
   }
 
   // A successful guest acquire must observe one immutable release
@@ -2134,16 +2119,15 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const uint16_t version_retry_count = static_cast<uint16_t>(plan.exec_save_sgpr + 20u);
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
         kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch);
-    if (!restore_original_exec || !append_save_moi_special_state(words, plan.special_state, arch) ||
-        !append_inline_workgroup_key(words, plan.workgroup_sources, plan.workgroup_key_registers,
-                                     workgroup_key_vgpr, temporary_vgpr, value_vgpr,
-                                     /*original_exec_save_offset=*/12u, arch) ||
-        !append_inline_atomic_release_slot_address(
-            words, slot_base, plan.report_layout.inline_atomic_release_capacity, address_vgpr,
-            scratch_vgpr, arch)) {
-      errors.emplace_back("ConSan MOI inline acquire could not snapshot release version");
-      return std::nullopt;
-    }
+    require_emission(
+        restore_original_exec && append_save_moi_special_state(words, plan.special_state, arch) &&
+            append_inline_workgroup_key(words, plan.workgroup_sources, plan.workgroup_key_registers,
+                                        workgroup_key_vgpr, temporary_vgpr, value_vgpr,
+                                        /*original_exec_save_offset=*/12u, arch) &&
+            append_inline_atomic_release_slot_address(
+                words, slot_base, plan.report_layout.inline_atomic_release_capacity, address_vgpr,
+                scratch_vgpr, arch),
+        "ConSan MOI inline acquire could not snapshot release version");
     // A release publisher keeps the direct-mapped slot odd while its guest
     // RMW and causal snapshot are in flight. In particular, a consumer can
     // observe the guest RMW before that publisher commits its metadata. Wait
@@ -2152,42 +2136,33 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // the still-active publisher. The bounded retry preserves fail-closed
     // behavior for malformed or abandoned odd slots.
     constexpr uint16_t kScalarLiteralSource = 255u;
-    (void)sequence.emit_all(build_s_mov_b32(version_retry_count, kScalarLiteralSource, arch),
-                            kConSanMoiInlineMetadataPublicationRetryLimit);
+    sequence.append(build_s_mov_b32(version_retry_count, kScalarLiteralSource, arch),
+                    kConSanMoiInlineMetadataPublicationRetryLimit);
     const InstructionSequence::Label version_retry_begin = sequence.mark_label();
-    if (!append_atomic_load_u32(words, scratch_vgpr, version_before, arch)) {
-      errors.emplace_back("ConSan MOI inline acquire could not load its release version");
-      return std::nullopt;
-    }
-    if (!sequence.emit_all(
-            instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, version_before, arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), temporary_vgpr,
-                                                    arch))) {
-      errors.emplace_back("ConSan MOI inline acquire could not encode its version retry");
-      return std::nullopt;
-    }
+    require_emission(append_atomic_load_u32(words, scratch_vgpr, version_before, arch),
+                     "ConSan MOI inline acquire could not load its release version");
+    require_emission(sequence.emit_all(instrumentation::build_v_and_b32_literal(
+                                           temporary_vgpr, 1u, version_before, arch),
+                                       instrumentation::build_v_cmp_eq_u32_vcc(
+                                           scalar_positive_inline_u32(0), temporary_vgpr, arch)),
+                     "ConSan MOI inline acquire could not encode its version retry");
     const InstructionSequence::Label version_retry_exit = sequence.make_label();
-    if (!sequence.emit_branch(version_retry_exit, InstructionSequence::BranchKind::VccNonzero))
-      return std::nullopt;
-    if (!sequence.emit_all(
-            build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch),
-            instrumentation::build_s_sub_u32(version_retry_count, version_retry_count,
-                                             scalar_positive_inline_u32(1), arch),
-            instrumentation::build_s_cmp_lg_u32(version_retry_count, scalar_positive_inline_u32(0),
-                                                arch)))
-      return std::nullopt;
-    if (!sequence.emit_branch(version_retry_exit, InstructionSequence::BranchKind::SccZero) ||
-        !sequence.emit_branch(version_retry_begin,
-                              InstructionSequence::BranchKind::Unconditional) ||
-        !sequence.bind(version_retry_exit) || !sequence.resolve_branches(arch)) {
+    sequence.branch(version_retry_exit, InstructionSequence::BranchKind::VccNonzero)
+        .append(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch),
+                instrumentation::build_s_sub_u32(version_retry_count, version_retry_count,
+                                                 scalar_positive_inline_u32(1), arch),
+                instrumentation::build_s_cmp_lg_u32(version_retry_count,
+                                                    scalar_positive_inline_u32(0), arch))
+        .branch(version_retry_exit, InstructionSequence::BranchKind::SccZero)
+        .branch(version_retry_begin, InstructionSequence::BranchKind::Unconditional)
+        .bind_label(version_retry_exit);
+    if (!sequence.finish(arch)) {
       errors.emplace_back("ConSan MOI inline acquire version exit is out of branch range");
       return std::nullopt;
     }
     words.push_back(*restore_original_exec);
-    if (!append_restore_moi_special_state(words, plan.special_state, arch)) {
-      errors.emplace_back("ConSan MOI inline acquire could not restore pre-guest state");
-      return std::nullopt;
-    }
+    require_emission(append_restore_moi_special_state(words, plan.special_state, arch),
+                     "ConSan MOI inline acquire could not restore pre-guest state");
   }
   guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -2196,8 +2171,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     words.push_back(word);
   }
   if (candidate.is_rmw) {
-    if (!append_moi_flat_load_wait(words, arch))
-      return std::nullopt;
+    sequence.require(append_moi_flat_load_wait(words, arch));
   } else {
     if (trailing_guest_words.empty()) {
       errors.emplace_back(
@@ -2207,28 +2181,25 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
   }
 
-  if (!append_save_moi_special_state(words, plan.special_state, arch) ||
-      !append_inline_workgroup_key(words, plan.workgroup_sources, plan.workgroup_key_registers,
-                                   workgroup_key_vgpr, temporary_vgpr, value_vgpr,
-                                   /*original_exec_save_offset=*/12u, arch) ||
-      !append_inline_atomic_release_slot_address(words, slot_base,
-                                                 plan.report_layout.inline_atomic_release_capacity,
-                                                 address_vgpr, scratch_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic patch could not derive an address-indexed slot");
-    return std::nullopt;
-  }
+  require_emission(append_save_moi_special_state(words, plan.special_state, arch) &&
+                       append_inline_workgroup_key(words, plan.workgroup_sources,
+                                                   plan.workgroup_key_registers, workgroup_key_vgpr,
+                                                   temporary_vgpr, value_vgpr,
+                                                   /*original_exec_save_offset=*/12u, arch) &&
+                       append_inline_atomic_release_slot_address(
+                           words, slot_base, plan.report_layout.inline_atomic_release_capacity,
+                           address_vgpr, scratch_vgpr, arch),
+                   "ConSan MOI inline atomic patch could not derive an address-indexed slot");
 
-  if ((candidate.event_kind == ConSanMoiAtomicEventKind::Acquire ||
-       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease) &&
-      !append_inline_atomic_acquire_import(
-          words, plan, scratch_vgpr, address_vgpr, workgroup_key_vgpr, producer_owner_vgpr,
-          token_value_vgpr, temporary_vgpr, snapshot_table_base,
-          plan.report_layout.inline_causal_snapshot_capacity, token_table_base,
-          plan.report_layout.inline_acquired_epoch_token_capacity,
-          /*source_slot_claimed=*/false,
-          /*release_sequence_only=*/false, plan.inline_access_present, arch, errors)) {
-    return std::nullopt;
-  }
+  if (candidate.event_kind == ConSanMoiAtomicEventKind::Acquire ||
+      candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease)
+    sequence.require(append_inline_atomic_acquire_import(
+        words, plan, scratch_vgpr, address_vgpr, workgroup_key_vgpr, producer_owner_vgpr,
+        token_value_vgpr, temporary_vgpr, snapshot_table_base,
+        plan.report_layout.inline_causal_snapshot_capacity, token_table_base,
+        plan.report_layout.inline_acquired_epoch_token_capacity,
+        /*source_slot_claimed=*/false,
+        /*release_sequence_only=*/false, plan.inline_access_present, arch, errors));
 
   if (candidate.event_kind != ConSanMoiAtomicEventKind::Acquire) {
     // AcquireRelease must first import the release observed by the guest RMW;
@@ -2236,34 +2207,23 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // the same ABI-v6 transaction. CAS publication is narrowed to lanes whose
     // dynamic compare succeeded inside the transaction, after its original
     // EXEC mask has been preserved.
-    if (!append_restore_moi_special_state(words, plan.special_state, arch) ||
-        !append_inline_versioned_release_transaction(
-            words, bytes, candidate, address_plan, plan, arch,
-            /*emit_guest_instruction=*/false,
-            /*import_claimed_predecessor=*/false,
-            /*predicate_on_compare_exchange_success=*/is_compare_exchange, guest_instruction_offset,
-            errors)) {
-      errors.emplace_back(
-          "ConSan MOI inline release could not emit a versioned causal transaction");
-      return std::nullopt;
-    }
-    append_spill_restore();
-    return words;
+    require_emission(append_restore_moi_special_state(words, plan.special_state, arch) &&
+                         append_inline_versioned_release_transaction(
+                             words, bytes, candidate, address_plan, plan, arch,
+                             /*emit_guest_instruction=*/false,
+                             /*import_claimed_predecessor=*/false,
+                             /*predicate_on_compare_exchange_success=*/is_compare_exchange,
+                             guest_instruction_offset, errors),
+                     "ConSan MOI inline release could not emit a versioned causal transaction");
+    return finish_words();
   }
 
-  if (!sequence.emit(instrumentation::build_s_mov_b64(
-          kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch))) {
-    errors.emplace_back("ConSan MOI inline atomic patch could not restore original EXEC");
-    return std::nullopt;
-  }
-
-  if (!append_restore_moi_special_state(words, plan.special_state, arch)) {
-    errors.emplace_back("ConSan MOI inline atomic patch could not restore VCC/SCC");
-    return std::nullopt;
-  }
-
-  append_spill_restore();
-  return words;
+  require_emission(sequence.emit(instrumentation::build_s_mov_b64(
+                       kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch)),
+                   "ConSan MOI inline atomic patch could not restore original EXEC");
+  require_emission(append_restore_moi_special_state(words, plan.special_state, arch),
+                   "ConSan MOI inline atomic patch could not restore VCC/SCC");
+  return finish_words();
 }
 } // namespace consan_moi_impl
 } // namespace rocjitsu
