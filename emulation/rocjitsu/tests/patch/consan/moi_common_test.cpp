@@ -442,7 +442,6 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   plan.source_site = {0u};
   plan.address_capture_intent = {.value = 3u};
   plan.evidence_intent = {.value = 4u};
-  plan.container_name = "kernel:atomic";
   plan.site.text_offset = 16u;
   plan.site.size = 4u;
   plan.site.width_bits = 32u;
@@ -480,7 +479,6 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   plan.source_site = {0u};
   plan.address_capture_intent = {.value = 6u};
   plan.evidence_intent = {.value = 7u};
-  plan.container_name = "kernel:fence";
   plan.communication_site.size = 12u;
   plan.communication_site.width_bits = 32u;
   plan.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
@@ -527,7 +525,6 @@ TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
   plan.sequence = {0u};
   plan.source_site = {0u};
   plan.evidence_intent = {.value = 9u};
-  plan.container_name = "kernel:barrier";
   plan.site.text_offset = 64u;
   plan.site.size = 4u;
   EXPECT_TRUE(plan.is_well_formed());

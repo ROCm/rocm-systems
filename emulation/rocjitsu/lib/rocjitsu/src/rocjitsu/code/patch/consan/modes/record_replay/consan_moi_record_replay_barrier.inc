@@ -64,8 +64,9 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     MoiBarrierEvidenceSitePlan candidate = candidates[index];
     const ConSanBarrierSite &site = candidate.site;
     if (site.size != sizeof(uint32_t)) {
-      result.warnings.emplace_back("ConSan MOI barrier record patch skipped non-32-bit barrier " +
-                                   site.mnemonic + " in " + candidate.container_name);
+      result.warnings.emplace_back(
+          "ConSan MOI barrier record patch skipped non-32-bit barrier " + site.mnemonic + " in " +
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     if (site.text_offset > text.size() || site.size > text.size() - site.text_offset) {
@@ -90,7 +91,7 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     if (!scratch) {
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch has no usable resource plan in " +
-          candidate.container_name);
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     auto event =
@@ -122,12 +123,18 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
                });
       });
   for (const PlannedBarrierRecord &planned : selected) {
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(result.program_inventory, planned.candidate.source_site);
+    if (container == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier record emission lost its source container");
+      return;
+    }
     uint32_t barrier_word = 0u;
     std::memcpy(&barrier_word, text.data() + planned.candidate.site.text_offset,
                 sizeof(barrier_word));
     uint32_t guest_offset = 0u;
     auto words = build_barrier_record_cave_words(
-        active_bytes, planned.candidate, planned.emission,
+        active_bytes, planned.candidate, *container, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, barrier_word, result.errors,

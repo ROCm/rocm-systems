@@ -7,34 +7,27 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] std::optional<MoiEvidenceContainerView>
-resolve_moi_evidence_container(const ProgramInventory &inventory, bool in_kernel,
-                               std::string_view container_name,
-                               std::span<const ConSanExecutionOwner> execution_owners) {
-  const auto make_view = [in_kernel](const auto &container, uint64_t code_size) {
-    return MoiEvidenceContainerView{
-        .qualified_name = std::string(in_kernel ? "kernel:" : "function:") + container.name,
-        .entry_text_offset = container.entry_text_offset,
-        .text_file_offset = container.text_file_offset,
-        .code_size = code_size,
-        .uses_cluster_workgroup_id = in_kernel && container.uses_cluster_workgroup_id,
-    };
-  };
-  if (!in_kernel) {
-    const ConSanProgramContainer *function = inventory.find_function_by_name(container_name);
-    if (function == nullptr)
-      return std::nullopt;
-    return make_view(*function, function->code_size);
+const ConSanProgramContainer *resolve_moi_evidence_container(const ProgramInventory &inventory,
+                                                             ConSanProgramSiteId source_site) {
+  const ConSanProgramSite *site = inventory.program_site(source_site);
+  const ConSanProgramContainer *container =
+      site == nullptr ? nullptr : inventory.container(site->container.id);
+  if (site == nullptr || container == nullptr || site->container.kind != container->kind ||
+      site->container.name != container->name ||
+      (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name))) {
+    return nullptr;
   }
+  return container;
+}
 
-  const ConSanProgramContainer *kernel = inventory.find_kernel_by_name(container_name);
-  if (kernel == nullptr && execution_owners.size() == 1u) {
-    kernel = inventory.kernel(execution_owners.front());
-  }
-  if (kernel == nullptr || is_rocclr_runtime_kernel_name(kernel->name))
-    return std::nullopt;
+std::string moi_evidence_container_name(const ConSanProgramContainer &container) {
+  return std::string(container.is_kernel() ? "kernel:" : "function:") + container.name;
+}
 
-  return make_view(*kernel, kernel->has_text_range ? kernel->code_size : 0u);
+std::string moi_evidence_container_name(const ProgramInventory &inventory,
+                                        ConSanProgramSiteId source_site) {
+  const ConSanProgramContainer *container = resolve_moi_evidence_container(inventory, source_site);
+  return container == nullptr ? "<invalid-container>" : moi_evidence_container_name(*container);
 }
 
 } // namespace rocjitsu::consan_moi_impl

@@ -182,8 +182,11 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
   for (const PlannedFenceRecord &planned : selected) {
     const ConSanSyncEvent *fence_event =
         result.program_inventory.sync().find_event(planned.candidate.event);
-    if (fence_event == nullptr) {
-      result.errors.emplace_back("ConSan MOI fence record emission lost its evidence event");
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(result.program_inventory, planned.candidate.source_site);
+    if (fence_event == nullptr || container == nullptr) {
+      result.errors.emplace_back(
+          "ConSan MOI fence record emission lost its evidence event or container");
       return;
     }
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
@@ -191,8 +194,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     const uint32_t patch_size = planned.candidate.patch_size;
     uint32_t guest_instruction_offset = 0u;
     auto cave_words = build_fence_record_cave_words(
-        active_bytes, planned.candidate, fence_event->text_offset(), planned.address_plan,
-        candidate_options, planned.spill ? &*planned.spill : nullptr,
+        active_bytes, planned.candidate, *container, fence_event->text_offset(),
+        planned.address_plan, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset,
         /*displaced_tail_words=*/{}, result.errors, &guest_instruction_offset);

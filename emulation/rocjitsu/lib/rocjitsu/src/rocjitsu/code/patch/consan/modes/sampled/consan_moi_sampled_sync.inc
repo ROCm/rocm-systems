@@ -757,6 +757,12 @@ void try_apply_sampled_barrier_sync_patch(
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);
     const ConSanBarrierSite &site = planned.candidate.barrier.site;
+    const ConSanProgramContainer *container = resolve_moi_evidence_container(
+        result.program_inventory, planned.candidate.barrier.source_site);
+    if (container == nullptr) {
+      result.errors.emplace_back("ConSan MOI sampled barrier lost its source container");
+      return;
+    }
     const auto emission_plan = plan_sampled_sync_emission(
         options, options, planned.point, result.moi_operating_point,
         planned.resources.owner_descriptor_file_offsets,
@@ -766,9 +772,9 @@ void try_apply_sampled_barrier_sync_patch(
         /*transient_assignment_already_resolved=*/true, "sampled barrier sync", result.errors);
     if (!emission_plan)
       return;
-    const std::optional<uint16_t> selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
-        arch, active_bytes, planned.candidate.barrier.text_file_offset,
-        planned.candidate.barrier.container_entry_text_offset, site.file_offset);
+    const std::optional<uint16_t> selectable_vgpr_bank_mode =
+        consan_selectable_vgpr_bank_mode_at(arch, active_bytes, container->text_file_offset,
+                                            container->entry_text_offset, site.file_offset);
     uint32_t guest_instruction_offset = 0u;
     auto words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, *emission_plan, planned.spill ? &*planned.spill : nullptr,
@@ -872,7 +878,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (!role || !scope || atomic.site.width_bits == 0u || atomic.site.width_bits % 8u != 0u) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync skipped an unqualified ordinary atomic sequence in " +
-          atomic.container_name);
+          moi_evidence_container_name(result.program_inventory, atomic.source_site));
       continue;
     }
     consan_detail::SampledAtomicSemantics semantics{
@@ -894,7 +900,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (encoded.classification != ConSanMoiSampledSyncClassification::Valid) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync rejected ordinary atomic metadata in " +
-          atomic.container_name);
+          moi_evidence_container_name(result.program_inventory, atomic.source_site));
       continue;
     }
     semantics.descriptor = encoded.packed.descriptor;
@@ -1283,9 +1289,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const auto resources =
         resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
     if (!resources) {
-      result.warnings.emplace_back("ConSan MOI sampled atomic sync has no " +
-                                   std::to_string(scratch_count) + "-VGPR resource plan in " +
-                                   candidate.atomic.container_name);
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync has no " + std::to_string(scratch_count) +
+          "-VGPR resource plan in " +
+          moi_evidence_container_name(result.program_inventory, candidate.atomic.source_site));
       continue;
     }
     ConSanMoiOperatingPoint candidate_point = operating_point;

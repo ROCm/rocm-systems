@@ -277,9 +277,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plan.patch_text_offset = fence_event->text_offset();
     plan.patch_file_offset = fence_source->file_offset;
     plan.patch_size = fence_source->size;
-    auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*fence_event),
-                                                    graph.container_name(*fence_event),
-                                                    graph.execution_owners(*communication));
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(inventory, fence_event->source_site);
     if (!container || !decision.communication_lowering_form) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
@@ -325,9 +324,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     if (sequence->scope)
       plan.communication_site.scope = sequence->scope;
     plan.communication_lowering_form = *decision.communication_lowering_form;
-    plan.container_name = std::move(container->qualified_name);
-    plan.container_entry_text_offset = container->entry_text_offset;
-    plan.text_file_offset = container->text_file_offset;
     if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
@@ -449,9 +445,8 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     plan.is_rmw = event->kind == ConSanSyncKind::Atomic;
     plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
     plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-    auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*event),
-                                                    graph.container_name(*event),
-                                                    graph.execution_owners(*event));
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(inventory, event->source_site);
     if (!container || !decision.lowering_form) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
@@ -475,8 +470,6 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     if (sequence->scope)
       plan.site.scope = sequence->scope;
     plan.lowering_form = *decision.lowering_form;
-    plan.container_name = std::move(container->qualified_name);
-    plan.uses_cluster_workgroup_id = container->uses_cluster_workgroup_id;
     if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};

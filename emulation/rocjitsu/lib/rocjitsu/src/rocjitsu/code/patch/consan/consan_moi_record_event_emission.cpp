@@ -41,10 +41,10 @@ using consan_moi_detail::kFenceRecordLayout;
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const MoiBarrierEvidenceSitePlan &candidate,
-    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
-    size_t barrier_records_offset, uint32_t original_barrier_word, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset) {
+    const ConSanProgramContainer &container, const MoiRecordEventEmissionPlan &options,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -94,8 +94,8 @@ using consan_moi_detail::kFenceRecordLayout;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const std::optional<uint16_t> vgpr_msb_mode =
       target != nullptr && target->has_selectable_vgpr_bank
-          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, candidate.text_file_offset,
-                                                candidate.container_entry_text_offset,
+          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
+                                                container.entry_text_offset,
                                                 candidate.site.file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
@@ -487,10 +487,10 @@ using consan_moi_detail::kFenceRecordLayout;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
-    uint64_t fence_text_offset, const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t record_index,
-    uint32_t record_capacity_or_count, size_t fence_records_offset,
+    const ConSanProgramContainer &container, uint64_t fence_text_offset,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     std::span<const uint32_t> displaced_tail_words, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset) {
   (void)record_index;
@@ -561,8 +561,8 @@ using consan_moi_detail::kFenceRecordLayout;
   }
   const std::optional<uint16_t> vgpr_msb_mode =
       target->has_selectable_vgpr_bank
-          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, candidate.text_file_offset,
-                                                candidate.container_entry_text_offset,
+          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
+                                                container.entry_text_offset,
                                                 candidate.patch_file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;

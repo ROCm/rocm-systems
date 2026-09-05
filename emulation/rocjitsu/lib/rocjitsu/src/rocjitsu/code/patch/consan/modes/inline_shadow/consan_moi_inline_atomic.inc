@@ -207,7 +207,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
         result.warnings.emplace_back(
             "ConSan MOI inline atomic patch could not relocate an ordinary acquire suffix in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       relocated_guest_size = static_cast<uint32_t>(sequence_size);
@@ -236,7 +236,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (overlaps_existing_patch) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch skipped an overlapping patch in " +
-          candidate.container_name);
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
@@ -259,7 +259,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch has no usable resource plan in " +
-          candidate.container_name);
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
@@ -267,7 +267,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch has no usable address plan in " +
-          candidate.container_name + ": " +
+          moi_evidence_container_name(result.program_inventory, candidate.source_site) + ": " +
           std::string(consan_moi_atomic_address_support_name(address_plan.support)) +
           " raw_saddr=" +
           (site.raw_saddr ? std::to_string(*site.raw_saddr) : std::string("missing")) +
@@ -321,7 +321,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!candidate_point.moi_exec_save_sgpr) {
         result.warnings.emplace_back(
             "ConSan MOI inline atomic spill-backed scalar state has no SGPR window in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       const uint16_t scalar_base = *candidate_point.moi_exec_save_sgpr;
@@ -331,7 +331,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         result.warnings.emplace_back(
             "ConSan MOI inline atomic spill-backed scalar window aliases a guest atomic "
             "address input in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
     }

@@ -670,9 +670,6 @@ struct MoiAtomicEvidenceSitePlan {
   /// Engine-specific after-guest evidence intent implemented by this plan.
   ConSanProbeIntentId evidence_intent;
 
-  /// Diagnostic container spelling, including `kernel:` or `function:`.
-  std::string container_name;
-
   /// Decoded operands and encoding fields required to relocate the guest and
   /// materialize its address. Semantic ordering does not come from this copy.
   ConSanAtomicSite site;
@@ -686,9 +683,6 @@ struct MoiAtomicEvidenceSitePlan {
 
   /// Normalized release/acquire role selected from the shared sequence.
   ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
-
-  /// Whether kernel identity includes the cluster workgroup coordinate.
-  bool uses_cluster_workgroup_id = false;
 
   /// True for a native RMW/CAS and false for an ordered ordinary load/store.
   bool is_rmw = true;
@@ -707,8 +701,7 @@ struct MoiAtomicEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() &&
            address_capture_intent.valid() && evidence_intent.valid() &&
-           address_capture_intent != evidence_intent && !container_name.empty() &&
-           site.size != 0u && site.width_bits != 0u &&
+           address_capture_intent != evidence_intent && site.size != 0u && site.width_bits != 0u &&
            lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            ordered_sequence_end_text_offset >= site.text_offset + site.size;
   }
@@ -740,11 +733,8 @@ struct MoiFenceEvidenceSitePlan {
   /// operation while `event` names the completing fence.
   ConSanProbeIntentId address_capture_intent;
 
-  /// Diagnostic container spelling, including `kernel:` or `function:`.
-  std::string container_name;
-
   /// Operand-rich address-bearing atomic or ordinary-memory instruction.
-  /// Ordering meaning remains owned by `association`, not this decode copy.
+  /// Ordering meaning remains owned by `sequence`, not this decode copy.
   ConSanAtomicSite communication_site;
 
   /// Classifier-owned address form for the communication operation.
@@ -755,12 +745,6 @@ struct MoiFenceEvidenceSitePlan {
 
   /// Stable communication source whose operands and owners scope lowering.
   ConSanProgramSiteId source_site;
-
-  /// Original text entry of the containing kernel or local function.
-  uint64_t container_entry_text_offset = 0;
-
-  /// File offset corresponding to the container's original text section.
-  uint64_t text_file_offset = 0;
 
   /// Beginning of the exact original byte range replaced by the probe.
   uint64_t patch_text_offset = 0;
@@ -785,8 +769,7 @@ struct MoiFenceEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
            address_capture_intent.valid() && evidence_intent != address_capture_intent &&
-           !container_name.empty() && communication_site.size != 0u &&
-           communication_site.width_bits != 0u &&
+           communication_site.size != 0u && communication_site.width_bits != 0u &&
            communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            (memory_role == ConSanSyncMemoryRole::Release ||
             memory_role == ConSanSyncMemoryRole::Acquire) &&
@@ -815,33 +798,18 @@ struct MoiBarrierEvidenceSitePlan {
   /// Engine-specific barrier evidence intent implemented by this plan.
   ConSanProbeIntentId evidence_intent;
 
-  /// Diagnostic container spelling, including `kernel:` or `function:`.
-  std::string container_name;
-
-  /// Whether the containing symbol is a dispatchable kernel.
-  bool in_kernel = true;
-
   /// Decoded completing barrier instruction used only for native lowering.
   ConSanBarrierSite site;
 
   /// Stable decoded source whose operands and execution owners scope lowering.
   ConSanProgramSiteId source_site;
 
-  /// Original text entry of the containing kernel or local function.
-  uint64_t container_entry_text_offset = 0;
-
-  /// Original byte extent of the containing symbol when statically known.
-  uint64_t container_code_size = 0;
-
-  /// File offset corresponding to the container's original text section.
-  uint64_t text_file_offset = 0;
-
   /// Verify that the policy intent, graph event, and decoded insertion site
   /// form one complete barrier lowering operation.
   [[nodiscard]] std::array<ConSanProbeIntentId, 1> intent_ids() const { return {evidence_intent}; }
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
-           !container_name.empty() && site.size != 0u;
+           site.size != 0u;
   }
 };
 

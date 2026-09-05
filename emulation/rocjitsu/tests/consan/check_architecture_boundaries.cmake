@@ -229,6 +229,7 @@ foreach(_plan IN ITEMS
        NOT _site_plan_contract MATCHES "ConSanProgramSiteId source_site" OR
        _site_plan_contract MATCHES "SemanticSiteId semantic_site" OR
        _site_plan_contract MATCHES "ConSanSynchronizationAssociationId association" OR
+       _site_plan_contract MATCHES "container_name|container_entry_text_offset|text_file_offset" OR
        _site_plan_contract MATCHES "kernel_descriptor_file_offset")
         message(FATAL_ERROR
             "ConSan ${_plan} must retain stable graph/source handles, not copied identities or descriptors"

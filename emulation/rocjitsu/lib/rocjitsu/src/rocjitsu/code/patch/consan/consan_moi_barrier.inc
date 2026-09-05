@@ -58,20 +58,14 @@
     plan.sequence = graph.sequence_id(*sequence);
     plan.source_site = event->source_site;
     plan.evidence_intent = id;
-    plan.in_kernel = graph.in_kernel(*event);
-    auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*event),
-                                                    graph.container_name(*event),
-                                                    graph.execution_owners(*event));
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(inventory, event->source_site);
     const ConSanBarrierSite *site = inventory.program_site<ConSanBarrierSite>(event->source_site);
-    if (site == nullptr) {
+    if (container == nullptr || site == nullptr) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
     }
-    plan.container_name = std::move(container->qualified_name);
     plan.site = *site;
-    plan.container_entry_text_offset = container->entry_text_offset;
-    plan.container_code_size = container->code_size;
-    plan.text_file_offset = container->text_file_offset;
     if (!plan.is_well_formed() || plan.site.text_offset != event->text_offset()) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
@@ -315,7 +309,8 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     if (site.size != sizeof(uint32_t)) {
       result.warnings.emplace_back(
           "ConSan MOI inline-shadow barrier epoch patch skipped non-32-bit barrier " +
-          site.mnemonic + " in " + candidate.container_name);
+          site.mnemonic + " in " +
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset) {
@@ -352,7 +347,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no owned resource scope in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
@@ -360,7 +355,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point, owners)) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier lost its owner-local persistent assignment in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       if (!owner_point.automatic_moi_private_epoch)
@@ -375,7 +370,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (access_patch == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no common access-probe state in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       auto planned = plan_private_body(MoiPrivateBarrierPlanningContext{
@@ -437,7 +432,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (plan == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no resource plan in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       const auto resources = resolve_moi_scratch_plan(*plan, candidate_point,
@@ -445,7 +440,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       if (!resources) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
-            candidate.container_name);
+            moi_evidence_container_name(result.program_inventory, candidate.source_site));
         continue;
       }
       // A one-VGPR Record/Replay resource can be used solely as the scalar
@@ -514,17 +509,23 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
   for (const PlannedBarrierLowering &planned : planned_candidates) {
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
+    const ConSanProgramContainer *container =
+        resolve_moi_evidence_container(result.program_inventory, candidate.source_site);
+    if (container == nullptr) {
+      result.errors.emplace_back("ConSan MOI barrier emission lost its source container");
+      return;
+    }
     uint32_t original_barrier_word = 0u;
     std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
-    const std::optional<uint16_t> selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
-        arch, active_bytes, candidate.text_file_offset, candidate.container_entry_text_offset,
-        site.file_offset);
+    const std::optional<uint16_t> selectable_vgpr_bank_mode =
+        consan_selectable_vgpr_bank_mode_at(arch, active_bytes, container->text_file_offset,
+                                            container->entry_text_offset, site.file_offset);
     uint32_t guest_instruction_offset = 0u;
     std::optional<std::vector<uint32_t>> words;
     if (const auto *record = std::get_if<MoiRecordEventEmissionPlan>(&planned.body)) {
       words = build_barrier_record_cave_words(
-          active_bytes, candidate, *record, planned.spill ? &*planned.spill : nullptr,
+          active_bytes, candidate, *container, *record, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
           original_barrier_word, result.errors, &guest_instruction_offset);

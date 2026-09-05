@@ -89,7 +89,7 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     if (incompatible_overlap) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch skipped an overlapping patch in " +
-          candidate.container_name);
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
@@ -109,7 +109,7 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable resource plan in " +
-          candidate.container_name);
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
       continue;
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
@@ -117,7 +117,7 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable address plan in " +
-          candidate.container_name + ": " +
+          moi_evidence_container_name(result.program_inventory, candidate.source_site) + ": " +
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }

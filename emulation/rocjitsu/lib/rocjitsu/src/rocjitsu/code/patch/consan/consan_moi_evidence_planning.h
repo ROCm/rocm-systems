@@ -10,20 +10,15 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-/// Immutable projection of the one decoded program container that owns an
-/// admitted evidence site. Kernel symbol fallback, runtime-kernel exclusion,
-/// and descriptor provenance are resolved once at this boundary rather than
-/// being rediscovered by each evidence kind.
-struct MoiEvidenceContainerView {
-  std::string qualified_name;
-  uint64_t entry_text_offset = 0, text_file_offset = 0, code_size = 0;
-  bool uses_cluster_workgroup_id = false;
-};
+/// Resolve an evidence source's authoritative container through its stable
+/// arena handle. Runtime kernels and stale or inconsistent handles fail closed.
+[[nodiscard]] const ConSanProgramContainer *
+resolve_moi_evidence_container(const ProgramInventory &inventory, ConSanProgramSiteId source_site);
 
-[[nodiscard]] std::optional<MoiEvidenceContainerView>
-resolve_moi_evidence_container(const ProgramInventory &inventory, bool in_kernel,
-                               std::string_view container_name,
-                               std::span<const ConSanExecutionOwner> execution_owners);
+/// Materialize the qualified spelling only at a diagnostic boundary.
+[[nodiscard]] std::string moi_evidence_container_name(const ConSanProgramContainer &container);
+[[nodiscard]] std::string moi_evidence_container_name(const ProgramInventory &inventory,
+                                                      ConSanProgramSiteId source_site);
 
 [[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
 build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,
