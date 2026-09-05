@@ -562,8 +562,6 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     ConSanSyncSequence sequence;
     static_cast<ConSanSyncSemantics &>(sequence) = event;
     sequence.identity = event.identity + "|sequence=singleton";
-    sequence.container_name = source.container.name;
-    sequence.in_kernel = source.container.is_kernel();
     sequence.begin_text_offset = event.text_offset();
     sequence.end_text_offset = event.text_offset() + source.size();
     sequence.member_event_ids.push_back({static_cast<uint32_t>(event_ordinal)});
@@ -640,25 +638,28 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
   return mnemonic == "v_add_nc_u32_e32" || mnemonic == "s_add_nc_u64" || mnemonic == "s_mov_b32";
 }
 
-[[nodiscard]] bool compatible_barrier_pair_identity(const ConSanSyncSequence &signal,
+[[nodiscard]] bool compatible_barrier_pair_identity(const SynchronizationInventoryView &events,
+                                                    const ConSanSyncSequence &signal,
                                                     const ConSanSyncSequence &wait) {
   return signal.kind == ConSanSyncKind::Barrier &&
          signal.operation == ConSanSyncOperation::BarrierSignal &&
          wait.kind == ConSanSyncKind::Barrier &&
-         wait.operation == ConSanSyncOperation::BarrierWait && signal.in_kernel == wait.in_kernel &&
-         signal.container_name == wait.container_name && signal.basic_block_index &&
+         wait.operation == ConSanSyncOperation::BarrierWait && events.same_container(signal, wait) &&
+         signal.basic_block_index &&
          wait.basic_block_index && !signal.inside_scalar_clause && !wait.inside_scalar_clause &&
          compatible_barrier_participants(signal, wait);
 }
 
-[[nodiscard]] bool compatible_barrier_pair_metadata(const ConSanSyncSequence &signal,
+[[nodiscard]] bool compatible_barrier_pair_metadata(const SynchronizationInventoryView &events,
+                                                    const ConSanSyncSequence &signal,
                                                     const ConSanSyncSequence &wait) {
-  return compatible_barrier_pair_identity(signal, wait) &&
+  return compatible_barrier_pair_identity(events, signal, wait) &&
          signal.basic_block_index == wait.basic_block_index;
 }
 
 [[nodiscard]] bool
-is_safe_bounded_barrier_pair(const ConSanSyncSequence &signal, const ConSanSyncSequence &wait,
+is_safe_bounded_barrier_pair(const SynchronizationInventoryView &events,
+                             const ConSanSyncSequence &signal, const ConSanSyncSequence &wait,
                              const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              bool allow_extended_pair) {
   constexpr uint32_t kMaximumBookkeepingInstructions = 4u;
@@ -677,7 +678,7 @@ is_safe_bounded_barrier_pair(const ConSanSyncSequence &signal, const ConSanSyncS
       allow_extended_pair ? std::numeric_limits<uint32_t>::max() : kMaximumBookkeepingInstructions;
   const uint64_t maximum_bytes =
       allow_extended_pair ? std::numeric_limits<uint64_t>::max() : kMaximumBookkeepingBytes;
-  if (!compatible_barrier_pair_metadata(signal, wait) ||
+  if (!compatible_barrier_pair_metadata(events, signal, wait) ||
       signal.end_text_offset > wait.begin_text_offset ||
       wait.begin_text_offset - signal.end_text_offset > maximum_bytes) {
     return false;
@@ -708,6 +709,7 @@ is_safe_bounded_barrier_pair(const ConSanSyncSequence &signal, const ConSanSyncS
 [[nodiscard]] bool
 is_safe_cluster_triangle_barrier_pair(const ConSanSyncSequence &signal,
                                       const ConSanSyncSequence &wait,
+                                      const SynchronizationInventoryView &events,
                                       const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   // Cluster arrive lowers to a conditional diamond: one path executes the
   // signal and the other bypasses it, then both paths join at the completing
@@ -717,7 +719,7 @@ is_safe_cluster_triangle_barrier_pair(const ConSanSyncSequence &signal,
   // before the wait.
   constexpr uint32_t kMaximumJoinPrefixInstructions = 4u;
   constexpr uint64_t kMaximumJoinPrefixBytes = 24u;
-  if (!compatible_barrier_pair_identity(signal, wait) ||
+  if (!compatible_barrier_pair_identity(events, signal, wait) ||
       signal.barrier_scope != ConSanBarrierSite::Scope::Cluster ||
       signal.basic_block_index == wait.basic_block_index ||
       signal.end_text_offset > wait.begin_text_offset ||
@@ -779,6 +781,7 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
                                       bool allow_extended_pairs,
                                       SynchronizationInventoryBuildView inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
+  const SynchronizationInventoryView events = inventory.view();
   const auto has_unresolved_preceding_signal = [&](size_t signal_index) {
     for (size_t cursor = signal_index; cursor > 0; --cursor) {
       const ConSanSyncSequence &prior = sync_sequences[cursor - 1u];
@@ -786,8 +789,7 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
         continue;
       if (prior.operation == ConSanSyncOperation::BarrierSignal) {
         const ConSanSyncSequence &signal = sync_sequences[signal_index];
-        return prior.in_kernel == signal.in_kernel &&
-               prior.container_name == signal.container_name &&
+        return events.same_container(prior, signal) &&
                prior.basic_block_index == signal.basic_block_index;
       }
       // Any non-signal barrier terminates this ambiguity search. In
@@ -804,9 +806,10 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
   associated.reserve(sync_sequences.size());
   for (size_t i = 0; i < sync_sequences.size();) {
     if (i + 1 < sync_sequences.size() &&
-        (is_safe_bounded_barrier_pair(sync_sequences[i], sync_sequences[i + 1], blocks,
+        (is_safe_bounded_barrier_pair(events, sync_sequences[i], sync_sequences[i + 1], blocks,
                                       allow_extended_pairs) ||
-         is_safe_cluster_triangle_barrier_pair(sync_sequences[i], sync_sequences[i + 1], blocks)) &&
+         is_safe_cluster_triangle_barrier_pair(sync_sequences[i], sync_sequences[i + 1], events,
+                                               blocks)) &&
         !unresolved_preceding_signal[i]) {
       ConSanSyncSequence sequence = std::move(sync_sequences[i]);
       ConSanSyncSequence &wait = sync_sequences[i + 1];
@@ -884,8 +887,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     };
     const auto is_contiguous = [&](const ConSanSyncSequence &sequence) {
       return basic_block_index && sequence.basic_block_index == basic_block_index &&
-             sequence.container_name == init.container_name && sequence.in_kernel == init.in_kernel &&
-             sequence.begin_text_offset == end_text_offset;
+             events.same_container(sequence, init) && sequence.begin_text_offset == end_text_offset;
     };
     const auto has_matching_static_id = [&](const ConSanSyncSequence &sequence) {
       return init.barrier_id && sequence.barrier_id == init.barrier_id &&
@@ -1029,8 +1031,8 @@ void build_barrier_move_destination_inventory(
           continue;
 
         ConSanBarrierMoveDestination destination;
-        destination.container_name = sequence.container_name;
-        destination.in_kernel = sequence.in_kernel;
+        destination.container_name = source->container.name;
+        destination.in_kernel = source->container.is_kernel();
         destination.basic_block_index = static_cast<uint32_t>(block_index);
         destination.text_offset = instruction.src_loc();
         destination.file_offset = text_file_offset + instruction.src_loc();
@@ -1039,7 +1041,8 @@ void build_barrier_move_destination_inventory(
         destination.memory_operation = instruction.is_memory_op();
         destination.identity =
             event->semantic_id.physical.code_object.fingerprint + "|" +
-            std::string(sequence.in_kernel ? "kernel=" : "function=") + sequence.container_name +
+            std::string(destination.in_kernel ? "kernel=" : "function=") +
+            destination.container_name +
             "|destination=instruction|pc=0x" + consan_fixed_hex(destination.text_offset, 16) +
             "|mnemonic=" + destination.mnemonic + "|size=" + std::to_string(destination.size);
         if (!seen.insert(destination.identity).second)
@@ -1226,11 +1229,12 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
   return std::nullopt;
 }
 
-[[nodiscard]] bool has_only_waits_between(const ConSanSyncSequence &before,
+[[nodiscard]] bool has_only_waits_between(const SynchronizationInventoryView &events,
+                                          const ConSanSyncSequence &before,
                                           const ConSanSyncSequence &after,
                                           const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   if (!before.basic_block_index || before.basic_block_index != after.basic_block_index ||
-      before.container_name != after.container_name || before.in_kernel != after.in_kernel ||
+      !events.same_container(before, after) ||
       before.end_text_offset > after.begin_text_offset ||
       *before.basic_block_index >= blocks.size()) {
     return false;
@@ -1269,7 +1273,7 @@ is_exact_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSeq
   return first_source != nullptr && second_source != nullptr &&
          first_source->cache_operation == ConSanCacheOperation::AcquirePairPrefix &&
          second_source->cache_operation == ConSanCacheOperation::AcquirePairCompletion &&
-         has_only_waits_between(first, second, blocks);
+         has_only_waits_between(events, first, second, blocks);
 }
 
 enum class BoundedAcquirePathKind { SameBlock, ExactFallthroughJoin, ExactSelfLoopExit };
@@ -1303,12 +1307,13 @@ enum class BoundedAcquirePathKind { SameBlock, ExactFallthroughJoin, ExactSelfLo
 
 [[nodiscard]] std::optional<BoundedAcquirePathKind>
 prove_bounded_acquire_path(const ConSanSyncSequence &before, const ConSanSyncSequence &after,
+                           const SynchronizationInventoryView &events,
                            const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                            bool require_wait_for_same_block = false) {
   constexpr uint64_t kMaximumBookkeepingBytes = 64u;
   constexpr uint64_t kMaximumPollingLoopPrefixBytes = 128u;
   if (!before.basic_block_index || !after.basic_block_index ||
-      before.container_name != after.container_name || before.in_kernel != after.in_kernel ||
+      !events.same_container(before, after) ||
       before.end_text_offset > after.begin_text_offset ||
       after.begin_text_offset - before.end_text_offset > kMaximumBookkeepingBytes ||
       before.inside_scalar_clause || after.inside_scalar_clause ||
@@ -1483,7 +1488,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         i + 1 < sync_sequences.size()) {
       const ConSanSyncSequence &atomic = sync_sequences[i + 1];
       if (atomic.kind == ConSanSyncKind::Atomic &&
-          has_only_waits_between(current, atomic, blocks)) {
+          has_only_waits_between(events, current, atomic, blocks)) {
         const ConSanSyncSequence *acquire = nullptr;
         const ConSanSyncSequence *acquire_tail = nullptr;
         if (i + 2 < sync_sequences.size()) {
@@ -1491,11 +1496,11 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
           if (candidate.kind == ConSanSyncKind::Fence &&
               is_acquire_cache_event(inventory.program_sites,
                                      first_sequence_event(events, candidate)) &&
-              prove_bounded_acquire_path(atomic, candidate, blocks)) {
+              prove_bounded_acquire_path(atomic, candidate, events, blocks)) {
             acquire = &candidate;
           } else if (i + 3 < sync_sequences.size() && candidate.kind == ConSanSyncKind::Fence &&
                      sync_sequences[i + 3].kind == ConSanSyncKind::Fence &&
-                     prove_bounded_acquire_path(atomic, candidate, blocks) &&
+                     prove_bounded_acquire_path(atomic, candidate, events, blocks) &&
                      is_exact_acquire_cache_pair(candidate, sync_sequences[i + 3], events,
                                                  blocks)) {
             acquire = &candidate;
@@ -1512,14 +1517,14 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
       const ConSanSyncSequence &acquire = sync_sequences[i + 1];
       if (acquire.kind == ConSanSyncKind::Fence &&
           is_acquire_cache_event(inventory.program_sites, first_sequence_event(events, acquire)) &&
-          prove_bounded_acquire_path(current, acquire, blocks)) {
+          prove_bounded_acquire_path(current, acquire, events, blocks)) {
         associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire));
         i += 2;
         continue;
       }
       if (i + 2 < sync_sequences.size() && acquire.kind == ConSanSyncKind::Fence &&
           sync_sequences[i + 2].kind == ConSanSyncKind::Fence &&
-          prove_bounded_acquire_path(current, acquire, blocks) &&
+          prove_bounded_acquire_path(current, acquire, events, blocks) &&
           is_exact_acquire_cache_pair(acquire, sync_sequences[i + 2], events, blocks)) {
         associated.push_back(
             associate_atomic_cache_sequence(nullptr, current, &acquire, &sync_sequences[i + 2]));
@@ -1997,7 +2002,7 @@ void associate_ordinary_acquire_sync_sequences(
         continue;
       }
       bounded_metadata_matches.push_back(cache_index);
-      const auto path = prove_bounded_acquire_path(load_sequence, cache_sequence, blocks,
+      const auto path = prove_bounded_acquire_path(load_sequence, cache_sequence, events, blocks,
                                                    /*require_wait_for_same_block=*/true);
       if (!path)
         continue;
@@ -2035,7 +2040,7 @@ void associate_ordinary_acquire_sync_sequences(
             !is_exact_acquire_cache_pair(first, tail, events, blocks)) {
           continue;
         }
-        const auto path = prove_bounded_acquire_path(load_sequence, first, blocks,
+        const auto path = prove_bounded_acquire_path(load_sequence, first, events, blocks,
                                                      /*require_wait_for_same_block=*/true);
         if (!path)
           continue;

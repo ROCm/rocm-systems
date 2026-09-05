@@ -215,6 +215,9 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   }
 
   const ConSanFaultSite *companion = nullptr;
+  const ConSanProgramContainerRef *sequence_container = sync.container(*sequence);
+  if (sequence_container == nullptr)
+    return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
   for (ConSanSyncEventId member_id : sequence->member_event_ids) {
     const ConSanSyncEvent *member = sync.find_event(member_id);
     if (member == nullptr)
@@ -223,8 +226,8 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
         std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
                  sync.find_event(candidate.source_site) == member &&
-                 candidate.container_name == sequence->container_name &&
-                 candidate.in_kernel == sequence->in_kernel &&
+                 candidate.container_name == sequence_container->name &&
+                 candidate.in_kernel == sequence_container->is_kernel() &&
                  consan_execution_owners_include_requested_kernel(
                      candidate.execution_owners, inventory, selection.kernel_name_filter);
         });
@@ -287,8 +290,7 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
             .issue = Issue::PairsOverlapOrUnordered,
             .member_issue = ExactBarrierDropPairIssue::None};
   }
-  if (first.pair->sequence->container_name != second.pair->sequence->container_name ||
-      first.pair->sequence->in_kernel != second.pair->sequence->in_kernel ||
+  if (!sync.same_container(*first.pair->sequence, *second.pair->sequence) ||
       !consan_nonempty_execution_owners_equal(first_owners, second_owners)) {
     return {.group = std::nullopt,
             .issue = Issue::PairsHaveDifferentOwners,

@@ -496,11 +496,14 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   ConSanProgramSite first_source;
+  first_source.container = {
+      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "shared-owner"};
   first_source.execution_owners = {
       {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::KernelLocal},
       {.descriptor_file_offset = 128, .proof = ConSanOwnerProofKind::DirectCall},
   };
   ConSanProgramSite second_source;
+  second_source.container = first_source.container;
   second_source.execution_owners = {
       {.descriptor_file_offset = 64, .proof = ConSanOwnerProofKind::RecoveredIndirectCall},
       {.descriptor_file_offset = 256, .proof = ConSanOwnerProofKind::KernelLocal},
@@ -520,6 +523,8 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
 
   const ProgramInventory inventory = builder.view();
   const SynchronizationInventoryView graph = inventory.sync();
+  ASSERT_NE(graph.container(graph.sync_sequences.front()), nullptr);
+  EXPECT_EQ(graph.container_name(graph.sync_sequences.front()), "shared-owner");
   EXPECT_EQ(graph.execution_owners(graph.sync_sequences.front()),
             (std::vector<ConSanExecutionOwner>{{.descriptor_file_offset = 64,
                                                 .proof = ConSanOwnerProofKind::RecoveredIndirectCall}}));
@@ -529,6 +534,13 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   const ProgramInventory malformed_inventory = malformed.view();
   const SynchronizationInventoryView malformed_graph = malformed_inventory.sync();
   EXPECT_TRUE(malformed_graph.execution_owners(malformed_graph.sync_sequences.front()).empty());
+
+  ProgramInventoryBuilder cross_container(builder.view());
+  cross_container.program_sites()[1].container.name = "different-owner";
+  const ProgramInventory cross_container_inventory = cross_container.view();
+  EXPECT_EQ(cross_container_inventory.sync().container(
+                cross_container_inventory.sync().sync_sequences.front()),
+            nullptr);
 }
 
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {

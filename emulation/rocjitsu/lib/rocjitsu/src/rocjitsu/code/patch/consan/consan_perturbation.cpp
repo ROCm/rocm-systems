@@ -58,8 +58,8 @@ materialize_perturbation_plan(const ProgramInventory &inventory,
   return ConSanPerturbationPlan{
       .candidate = candidate,
       .sequence_identity = facts.sequence->identity,
-      .container_name = facts.sequence->container_name,
-      .in_kernel = facts.sequence->in_kernel,
+      .container_name = facts.anchor_source->container.name,
+      .in_kernel = facts.anchor_source->container.is_kernel(),
       .anchor_text_offset = facts.anchor->text_offset(),
       .anchor_size = facts.anchor_source->size(),
       .sleep_imm = sleep_imm,
@@ -168,8 +168,8 @@ void build_perturbation_plan(const ProgramInventory &program_inventory, const Co
             perturbation_candidate_facts(program_inventory, candidate);
         return candidate.eligible && candidate.kind == translated.kind &&
                candidate.edge == translated.edge && facts.complete() &&
-               facts.sequence->container_name == carried.container_name &&
-               facts.sequence->in_kernel == carried.in_kernel &&
+               facts.anchor_source->container.name == carried.container_name &&
+               facts.anchor_source->container.is_kernel() == carried.in_kernel &&
                facts.anchor->text_offset() == carried.anchor_text_offset &&
                facts.anchor_source->size() == carried.anchor_size;
       };
@@ -196,8 +196,8 @@ void build_perturbation_plan(const ProgramInventory &program_inventory, const Co
               perturbation_candidate_facts(program_inventory, *candidate);
           facts.complete()) {
         plan.sequence_identity = facts.sequence->identity;
-        plan.container_name = facts.sequence->container_name;
-        plan.in_kernel = facts.sequence->in_kernel;
+        plan.container_name = facts.anchor_source->container.name;
+        plan.in_kernel = facts.anchor_source->container.is_kernel();
         plan.anchor_text_offset = facts.anchor->text_offset();
         plan.anchor_size = facts.anchor_source->size();
       }
@@ -220,7 +220,8 @@ void build_perturbation_plan(const ProgramInventory &program_inventory, const Co
     if (!candidate.eligible || candidate.kind != options.sc_perturb_kind ||
         candidate.edge != options.sc_perturb_edge || !facts.complete() ||
         (!options.test_kernel_name_filter.empty() &&
-         facts.sequence->container_name.find(options.test_kernel_name_filter) == std::string::npos))
+         facts.anchor_source->container.name.find(options.test_kernel_name_filter) ==
+             std::string::npos))
       continue;
     if (!options.sc_perturb_identity.empty() &&
         consan_perturbation_candidate_identity(program_inventory, candidate) !=

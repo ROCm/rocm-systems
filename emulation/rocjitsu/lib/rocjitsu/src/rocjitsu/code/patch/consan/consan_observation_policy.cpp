@@ -117,9 +117,9 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
     }
     const ConSanProgramSite *communication_source =
         communication == nullptr ? nullptr : sync.source(*communication);
-    if (communication_source == nullptr ||
-        communication_source->container.name != sequence.container_name ||
-        communication_source->container.is_kernel() != sequence.in_kernel) {
+    const ConSanProgramContainerRef *sequence_container = sync.container(sequence);
+    if (communication_source == nullptr || sequence_container == nullptr ||
+        communication_source->container != *sequence_container) {
       continue;
     }
     for (const ConSanProgramSite &access : inventory.access_sites()) {

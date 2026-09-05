@@ -4268,6 +4268,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
       const std::vector<rocjitsu::ConSanExecutionOwner> sequence_owners =
           sync.execution_owners(sequence);
+      const rocjitsu::ConSanProgramContainerRef *sequence_container = sync.container(sequence);
       const OwnerLogFields owners =
           owner_log_fields(sequence_owners, transform_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
@@ -4363,8 +4364,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           sync_memory_role_name(sequence.memory_role),
           sync_confidence_name(sequence.memory_role_confidence),
           sync_rmw_outcome_name(sequence.rmw_outcome), sync_confidence_name(sequence.confidence),
-          reason.c_str(), sequence.container_name.c_str(),
-          sequence.in_kernel ? "kernel" : "function", block.c_str(),
+          reason.c_str(),
+          sequence_container != nullptr ? sequence_container->name.c_str() : "<unresolved>",
+          sequence_container != nullptr && sequence_container->is_kernel() ? "kernel" : "function",
+          block.c_str(),
           static_cast<unsigned long long>(sequence.begin_text_offset),
           static_cast<unsigned long long>(sequence.end_text_offset),
           memory != nullptr ? memory->width_bits : 0u, static_offset.c_str(), raw_scope.c_str(),

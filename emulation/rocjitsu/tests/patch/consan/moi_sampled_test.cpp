@@ -5987,7 +5987,6 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   sequence.confidence = ConSanSemanticConfidence::Conservative;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
-  sequence.in_kernel = true;
   sequence.basic_block_index = 0;
   sequence.begin_text_offset = 8;
   sequence.end_text_offset = 16;
@@ -6018,28 +6017,7 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
   rejects([](auto &item) { item.inside_scalar_clause = true; });
   EXPECT_FALSE(consan_moi_sampled_qualifies_barrier_sequence(sequence, false));
-  ConSanSyncSequence callable = sequence;
-  callable.in_kernel = false;
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(callable, true));
   rejects([](auto &item) { item.member_event_ids.emplace_back(); });
-}
-
-TEST(ConSanMoi, SampledBarrierQualificationRequiresProofButNotUniqueOwnership) {
-  ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncKind::Barrier;
-  sequence.operation = ConSanSyncOperation::BarrierFull;
-  sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
-  sequence.confidence = ConSanSemanticConfidence::Conservative;
-  sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
-  sequence.in_kernel = true;
-  sequence.basic_block_index = 0;
-  sequence.begin_text_offset = 8;
-  sequence.end_text_offset = 16;
-  sequence.member_event_ids.resize(2);
-  sequence.barrier_id = 0;
-  sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
-  sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
-  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence, true));
 }
 
 TEST(ConSanMoi, SampledBarrierSnapshotMustStartAtPairedSelectedEpoch) {

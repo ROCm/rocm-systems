@@ -48,7 +48,7 @@ perturbation_rejection_reason(const SynchronizationInventoryView &events,
     return Reason::CyclicCfgComponent;
   if (sequence.inside_scalar_clause)
     return Reason::InsideScalarClause;
-  if (is_rocclr_runtime_kernel_name(sequence.container_name))
+  if (is_rocclr_runtime_kernel_name(events.container_name(sequence)))
     return Reason::RuntimeHelper;
   if (!sequence_has_exact_members(events, sequence))
     return Reason::NonExactSequenceMembers;

@@ -423,9 +423,11 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected barrier-move destination outside the requested "
                 "dispatch owner");
-          } else if (!sequence->basic_block_index ||
-                     destination->container_name != sequence->container_name ||
-                     destination->in_kernel != sequence->in_kernel) {
+          } else if (const ConSanProgramContainerRef *sequence_container =
+                         sync.container(*sequence);
+                     !sequence->basic_block_index || sequence_container == nullptr ||
+                     destination->container_name != sequence_container->name ||
+                     destination->in_kernel != sequence_container->is_kernel()) {
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected barrier-move destination across a control-flow "
                 "or container boundary");

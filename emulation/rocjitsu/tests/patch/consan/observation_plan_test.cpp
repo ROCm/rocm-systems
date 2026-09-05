@@ -240,7 +240,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = "sequence";
-  sequence.container_name = "kernel";
   sequence.begin_text_offset = 8;
   sequence.end_text_offset = 12;
   sequence.basic_block_index = 0;

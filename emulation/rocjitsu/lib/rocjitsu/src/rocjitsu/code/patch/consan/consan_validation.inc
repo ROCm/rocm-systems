@@ -1516,9 +1516,14 @@ void validate_sc_perturbation_semantics(const FinalValidationEnvironment &enviro
       errors.emplace_back("ConSan SC perturbation proof lost its sequence arena edge");
       continue;
     }
-    if (sequence->in_kernel) {
+    const ConSanProgramContainerRef *sequence_container = pristine_events.container(*sequence);
+    if (sequence_container == nullptr) {
+      errors.emplace_back("ConSan SC perturbation proof lost its sequence container");
+      continue;
+    }
+    if (sequence_container->is_kernel()) {
       const ConSanProgramContainer *owner =
-          semantic_inventory.find_kernel_by_name(sequence->container_name);
+          semantic_inventory.find_kernel_by_name(sequence_container->name);
       if (owner == nullptr || patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {
         errors.emplace_back("ConSan SC perturbation proof did not retain its exact kernel owner");
@@ -1551,8 +1556,7 @@ void validate_sc_perturbation_semantics(const FinalValidationEnvironment &enviro
     if (candidate->anchor_event != sequence->member_event_ids[outer_member_index] ||
         anchor_event == nullptr ||
         anchor_source == nullptr ||
-        anchor_source->container.name != sequence->container_name ||
-        anchor_source->container.is_kernel() != sequence->in_kernel ||
+        anchor_source->container != *sequence_container ||
         anchor_event->text_offset() > original_text.size() ||
         anchor_source->size() > original_text.size() - anchor_event->text_offset() ||
         patch.original_size != anchor_source->size()) {

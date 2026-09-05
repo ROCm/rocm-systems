@@ -310,8 +310,6 @@ struct ConSanSyncEvent : ConSanSyncSemantics {
 /// exceed its least-certain member.
 struct ConSanSyncSequence : ConSanSyncSemantics {
   std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
   uint64_t begin_text_offset = 0;
   uint64_t end_text_offset = 0;
   /// Exact same-block architecture-specific release-wait boundary associated

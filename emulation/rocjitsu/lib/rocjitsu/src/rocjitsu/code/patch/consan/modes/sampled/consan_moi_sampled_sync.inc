@@ -527,6 +527,8 @@ void try_apply_sampled_barrier_sync_patch(
       return;
     }
     const ConSanSyncSequence &sequence = *sequence_ptr;
+    const std::string_view sequence_container_name =
+        result.program_inventory.sync().container_name(sequence);
     std::vector<SampledBarrierWindow> windows;
     bool every_owner_has_window = true;
     std::string owner_lowering_failure;
@@ -607,14 +609,15 @@ void try_apply_sampled_barrier_sync_patch(
       // records a durable placement/lowering failure instead of hiding a
       // descriptor or CFG incompatibility as a missing causal window.
       result.warnings.emplace_back("ConSan MOI sampled barrier sync cannot lower every owner in " +
-                                   sequence.container_name + ": " + owner_lowering_failure);
+                                   std::string(sequence_container_name) + ": " +
+                                   owner_lowering_failure);
       continue;
     }
     if (!every_owner_has_window || windows.empty()) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier sync has no preceding selected causal window for every "
           "owner in " +
-          sequence.container_name);
+          std::string(sequence_container_name));
       continue;
     }
     if (sequence_owners.empty()) {

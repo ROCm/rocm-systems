@@ -396,6 +396,33 @@ struct SynchronizationInventoryView {
     return left != nullptr && right != nullptr && *left == *right;
   }
 
+  /// Resolve the one source container shared by every sequence member.
+  /// Missing members or cross-container associations fail closed.
+  [[nodiscard]] const ConSanProgramContainerRef *
+  container(const ConSanSyncSequence &sequence) const {
+    const ConSanProgramContainerRef *result = nullptr;
+    for (ConSanSyncEventId member : sequence.member_event_ids) {
+      const ConSanSyncEvent *event = find_event(member);
+      const ConSanProgramContainerRef *current = event == nullptr ? nullptr : container(*event);
+      if (current == nullptr || (result != nullptr && *result != *current))
+        return nullptr;
+      result = current;
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::string_view container_name(const ConSanSyncSequence &sequence) const {
+    const ConSanProgramContainerRef *record = container(sequence);
+    return record == nullptr ? std::string_view{} : std::string_view(record->name);
+  }
+
+  [[nodiscard]] bool same_container(const ConSanSyncSequence &lhs,
+                                    const ConSanSyncSequence &rhs) const {
+    const ConSanProgramContainerRef *left = container(lhs);
+    const ConSanProgramContainerRef *right = container(rhs);
+    return left != nullptr && right != nullptr && *left == *right;
+  }
+
   [[nodiscard]] std::vector<std::string>
   source_container_names(const PhysicalSiteId &physical_site) const {
     return consan_source_container_names(program_sites, physical_site);

@@ -175,8 +175,6 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = std::move(identity);
-  sequence.container_name = event.identity.substr(0, event.identity.find('|'));
-  sequence.in_kernel = true;
   sequence.begin_text_offset = event.text_offset();
   sequence.end_text_offset = event.text_offset() + 12u;
   sequence.basic_block_index = 0;

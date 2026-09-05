@@ -50,8 +50,6 @@ make_barrier_sequence(std::span<const ConSanSyncEvent> events,
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = "barrier-sequence";
-  sequence.container_name = events.front().identity.substr(0, events.front().identity.find('|'));
-  sequence.in_kernel = true;
   sequence.begin_text_offset = events.front().text_offset();
   sequence.end_text_offset = events.back().text_offset() + sizeof(uint32_t);
   sequence.basic_block_index = 0;
