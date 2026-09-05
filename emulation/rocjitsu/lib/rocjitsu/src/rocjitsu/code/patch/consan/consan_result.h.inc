@@ -3,10 +3,10 @@
 /// Its `ConSanProgramSite` base is the exact normalized record selected
 /// by the observation plan. Lowering reads that snapshot without re-decoding
 /// or reclassifying it. The remaining members are facts created only after
-/// admission: target execution state, the selected execution owner, and the
-/// compact nonnegative ranges consumed by current emitters. Extending the
-/// inventory value keeps its established field vocabulary without maintaining
-/// an independent access identity, operand, or decode schema.
+/// admission: coalesced policy intents and target execution state. Extending
+/// the inventory value keeps its established field vocabulary without
+/// maintaining an independent access identity, operand, owner, or decode
+/// schema.
 struct ConSanMoiCandidate : ConSanProgramSite {
   /// Every observation intent coalesced onto this physical access.
   std::vector<ConSanProbeIntentId> intent_ids;
@@ -64,9 +64,6 @@ struct ConSanMoiCandidate : ConSanProgramSite {
   /// banks leave this absent; a present zero value records the ordinary low
   /// bank explicitly.
   std::optional<uint16_t> incoming_vgpr_bank_mode;
-  /// Descriptor selected as the concrete execution owner for this lowering
-  /// operation. Shared helper sites may be copied once per reachable owner.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
 };
 
 /// Stable policy reason crossing from perturbation admission into planning

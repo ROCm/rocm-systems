@@ -190,6 +190,7 @@ endif()
 # the publication boundary. Other completed analysis products still expose
 # their immutable presentation facet directly.
 file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
+file(READ "${_consan_dir}/consan_result.h.inc" _consan_result_contract)
 file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
 file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
 string(REGEX MATCH "struct ConSanExecutionOwner [{][^}]*[}];" _execution_owner_contract
@@ -198,6 +199,21 @@ if(NOT _execution_owner_contract MATCHES "ConSanProgramContainerId kernel" OR
    _execution_owner_contract MATCHES "descriptor_file_offset")
     message(FATAL_ERROR
         "ConSan semantic execution owners must retain kernel handles, not physical descriptors"
+    )
+endif()
+string(FIND "${_consan_result_contract}" "struct ConSanMoiCandidate" _moi_candidate_begin)
+string(FIND "${_consan_result_contract}" "enum class ConSanPerturbationRejectionReason"
+       _moi_candidate_end)
+if(_moi_candidate_begin LESS 0 OR _moi_candidate_end LESS_EQUAL _moi_candidate_begin)
+    message(FATAL_ERROR "Could not isolate the ConSan MOI candidate contract")
+endif()
+math(EXPR _moi_candidate_length "${_moi_candidate_end} - ${_moi_candidate_begin}")
+string(SUBSTRING "${_consan_result_contract}" ${_moi_candidate_begin}
+       ${_moi_candidate_length} _moi_candidate_contract)
+if(NOT _moi_candidate_contract MATCHES "ConSanMoiCandidate : ConSanProgramSite" OR
+   _moi_candidate_contract MATCHES "kernel_descriptor_file_offset")
+    message(FATAL_ERROR
+        "ConSan MOI access candidates must inherit stable semantic owners, not cache a physical descriptor"
     )
 endif()
 string(REGEX MATCH "struct ConSanFaultSite [{][^}]*[}];" _fault_site_contract

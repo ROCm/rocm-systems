@@ -16,10 +16,6 @@
 
 namespace rocjitsu::consan_detail {
 
-/// Invalidate a direct kernel_descriptor_file_offset hint after an alias merge.
-inline constexpr auto invalidate_physical_site_single_owner_hint =
-    [](auto &retained, const auto &) { retained.kernel_descriptor_file_offset.reset(); };
-
 template <typename Candidate, typename ContainerName>
 void append_physical_site_alias_conflict(std::vector<std::string> &errors,
                                          std::string_view site_description, uint64_t file_offset,
@@ -147,10 +143,7 @@ template <typename Candidate, typename FileOffset, typename ContainerName, typen
 /// semantically equivalent aliases into it.
 ///
 /// Callers own the candidate-specific semantic comparison and alias merge.
-/// If a candidate carries a single-owner hint, merge_alias must invalidate it:
-/// one canonical physical site can execute through every aliasing owner. Use
-/// invalidate_physical_site_single_owner_hint when that hint is stored directly
-/// as kernel_descriptor_file_offset. On failure, candidates is unchanged.
+/// On failure, candidates is unchanged.
 template <typename Candidate, typename FileOffset, typename ContainerName, typename SemanticsEqual,
           typename MergeAlias>
 [[nodiscard]] bool canonicalize_physical_site_aliases(

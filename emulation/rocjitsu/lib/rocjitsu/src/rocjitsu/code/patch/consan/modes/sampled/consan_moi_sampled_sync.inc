@@ -460,25 +460,21 @@ void try_apply_sampled_barrier_sync_patch(
   const ConSanRuntimeStaticMapping runtime_mapping =
       sampled_runtime_mapping_including_staged(result);
   const ConSanRuntimeStaticMapping::Sampled *sampled_accesses = runtime_mapping.sampled();
-  struct SelectedWindow {
-    const ConSanSampledStaticAccessMapping *mapping = nullptr;
-    const ConSanMoiCandidate *access = nullptr;
-  };
-  std::vector<SelectedWindow> selected_windows;
+  std::vector<const ConSanSampledStaticAccessMapping *> selected_windows;
   selected_windows.reserve(sampled_accesses == nullptr ? 0u : sampled_accesses->size());
-  std::unordered_map<uint64_t, const ConSanMoiCandidate *> access_by_offset;
-  access_by_offset.reserve(admitted.size());
+  std::unordered_set<uint64_t> admitted_offsets;
+  admitted_offsets.reserve(admitted.size());
   for (const ConSanMoiCandidate &candidate : admitted) {
     if (candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write)
-      access_by_offset.try_emplace(candidate.anchor(), &candidate);
+      admitted_offsets.insert(candidate.anchor());
   }
   bool has_multi_range_window = false;
   if (sampled_accesses != nullptr) {
     for (const ConSanSampledStaticAccessMapping &mapping : *sampled_accesses) {
-      const auto access = access_by_offset.find(mapping.access.original_site.original_text_offset);
-      if (access == access_by_offset.end() || mapping.range_count == 0u || mapping.bank_count == 0u)
+      if (!admitted_offsets.contains(mapping.access.original_site.original_text_offset) ||
+          mapping.range_count == 0u || mapping.bank_count == 0u)
         continue;
-      selected_windows.push_back({&mapping, access->second});
+      selected_windows.push_back(&mapping);
       has_multi_range_window |= mapping.range_count > 1u;
     }
   }
@@ -496,16 +492,13 @@ void try_apply_sampled_barrier_sync_patch(
     result.warnings.emplace_back("ConSan MOI sampled barrier sync lacks a complete kernel CFG");
     return;
   }
-  std::unordered_map<uint64_t, std::vector<const SelectedWindow *>> windows_by_descriptor;
-  for (const SelectedWindow &window : selected_windows) {
-    if (!window.mapping->access.execution_owner_kernel_ids.empty()) {
-      for (ConSanProgramContainerId owner : window.mapping->access.execution_owner_kernel_ids) {
-        const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
-        if (kernel != nullptr && kernel->is_kernel())
-          windows_by_descriptor[kernel->descriptor_file_offset].push_back(&window);
-      }
-    } else if (window.access->kernel_descriptor_file_offset) {
-      windows_by_descriptor[*window.access->kernel_descriptor_file_offset].push_back(&window);
+  std::unordered_map<uint64_t, std::vector<const ConSanSampledStaticAccessMapping *>>
+      windows_by_descriptor;
+  for (const ConSanSampledStaticAccessMapping *window : selected_windows) {
+    for (ConSanProgramContainerId owner : window->access.execution_owner_kernel_ids) {
+      const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
+      if (kernel != nullptr && kernel->is_kernel())
+        windows_by_descriptor[kernel->descriptor_file_offset].push_back(window);
     }
   }
 
@@ -585,16 +578,13 @@ void try_apply_sampled_barrier_sync_patch(
       }
       std::optional<SampledBarrierWindow> selected_window;
       std::optional<SampledCfgDistance> closest;
-      for (const SelectedWindow *window : owner_windows->second) {
-        if (!window->access || window->mapping == nullptr)
-          continue;
+      for (const ConSanSampledStaticAccessMapping *window : owner_windows->second) {
         const auto distance = moi_cfg_forward_distance(
-            *distance_index, window->mapping->access.original_site.original_text_offset);
+            *distance_index, window->access.original_site.original_text_offset);
         if (!distance || (closest && *closest <= *distance))
           continue;
         closest = *distance;
-        selected_window =
-            SampledBarrierWindow{window->mapping->first_slot, window->mapping->bank_count};
+        selected_window = SampledBarrierWindow{window->first_slot, window->bank_count};
       }
       if (!selected_window) {
         every_owner_has_window = false;

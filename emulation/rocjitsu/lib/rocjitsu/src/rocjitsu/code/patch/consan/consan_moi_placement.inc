@@ -753,6 +753,7 @@ struct MoiResourcePlanningState {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   BlockOffsetIndex block_index;
   std::vector<MoiKernelResourceContext> contexts;
+  std::unordered_map<uint32_t, MoiKernelResourceContext *> context_by_kernel_id;
   std::unordered_map<uint64_t, MoiKernelResourceContext *> context_by_descriptor;
   mutable std::unordered_map<uint64_t, RegisterSet> dynamic_frame_saves_by_site;
   bool valid = false;
@@ -900,9 +901,12 @@ struct MoiResourcePlanningState {
       }
       stored.descriptor_valid = true;
     }
+    context_by_kernel_id.reserve(contexts.size());
     context_by_descriptor.reserve(contexts.size());
-    for (MoiKernelResourceContext &context : contexts)
+    for (MoiKernelResourceContext &context : contexts) {
+      context_by_kernel_id.try_emplace(context.kernel->id.ordinal, &context);
       context_by_descriptor.try_emplace(context.kernel->descriptor_file_offset, &context);
+    }
     valid = true;
   }
 
@@ -1663,7 +1667,13 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     owners.push_back(&context);
     plan.owner_descriptor_file_offsets.push_back(context.kernel->descriptor_file_offset);
   };
-  if (kernel_descriptor_file_offset) {
+  if (access_candidate != nullptr) {
+    for (const ConSanExecutionOwner &execution_owner : access_candidate->execution_owners) {
+      const auto owner = state.context_by_kernel_id.find(execution_owner.kernel.ordinal);
+      if (owner != state.context_by_kernel_id.end())
+        add_owner(*owner->second);
+    }
+  } else if (kernel_descriptor_file_offset) {
     const auto owner = state.context_by_descriptor.find(*kernel_descriptor_file_offset);
     if (owner != state.context_by_descriptor.end())
       add_owner(*owner->second);
@@ -1958,7 +1968,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
             .access_scratch_vgpr_count(request, resources, site_resource_facts, candidate);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
         state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
-        candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
+        candidate.anchor(), std::nullopt, scratch_count, &candidate);
     // Persistent placement can deliberately mix private state with
     // component-local VGPR tuples. The first plan discovers the physical
     // site's complete owner set; size and place its final scratch window for
@@ -1973,9 +1983,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
               .access_scratch_vgpr_count(request, resources, owner_resource_facts, candidate);
       if (owner_scratch_count != scratch_count) {
         scratch_count = owner_scratch_count;
-        plan = plan_moi_resource_site(
-            state, request, debug, owner_point, ConSanResourceSiteKind::Access, candidate_index,
-            candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
+        plan = plan_moi_resource_site(state, request, debug, owner_point,
+                                      ConSanResourceSiteKind::Access, candidate_index,
+                                      candidate.anchor(), std::nullopt, scratch_count, &candidate);
       }
       site_resource_facts = owner_resource_facts;
       site_point = std::move(owner_point);
@@ -1998,8 +2008,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     if (spill_scratch_count) {
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
           state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
-          candidate.anchor(), candidate.kernel_descriptor_file_offset, *spill_scratch_count,
-          &candidate, /*atomic_form=*/nullptr, /*require_spill=*/true);
+          candidate.anchor(), std::nullopt, *spill_scratch_count, &candidate,
+          /*atomic_form=*/nullptr, /*require_spill=*/true);
       adopt_moi_resource_plan_fallback(
           plan, std::move(spill_plan),
           ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, *spill_scratch_count);

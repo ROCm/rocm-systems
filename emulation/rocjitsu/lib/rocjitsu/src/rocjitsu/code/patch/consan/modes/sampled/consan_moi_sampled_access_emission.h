@@ -57,8 +57,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const MoiSampledAccessEmissionPlan &plan, const VgprSpillSequence *spill, rj_code_arch_t arch,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
-    uint32_t *guest_instruction_word_count = nullptr);
+    uint64_t owner_descriptor_file_offset, const MoiSampledAccessEmissionPlan &plan,
+    const VgprSpillSequence *spill, rj_code_arch_t arch, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr, uint32_t *guest_instruction_word_count = nullptr);
 
 } // namespace rocjitsu::consan_moi_impl

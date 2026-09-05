@@ -268,11 +268,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_range_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanAccessRange &access_range, const MoiSampledAccessEmissionPlan &plan,
-    rj_code_arch_t arch, uint32_t record_index, std::span<const uint32_t> prior_record_indices,
-    bool relocate_instruction, std::optional<uint16_t> preserved_lds_byte_offset_vgpr,
-    const VgprSpillSequence *spill, std::optional<uint16_t> spilled_lds_byte_offset_vgpr,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    uint64_t owner_descriptor_file_offset, const ConSanAccessRange &access_range,
+    const MoiSampledAccessEmissionPlan &plan, rj_code_arch_t arch, uint32_t record_index,
+    std::span<const uint32_t> prior_record_indices, bool relocate_instruction,
+    std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
+    std::optional<uint16_t> spilled_lds_byte_offset_vgpr, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
@@ -319,9 +320,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return std::nullopt;
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
-  if (!plan.owner_epoch_vgprs.owner && candidate.kernel_descriptor_file_offset) {
+  if (!plan.owner_epoch_vgprs.owner) {
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+        moi_descriptor_owner_shift(bytes, owner_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
@@ -836,9 +837,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const MoiSampledAccessEmissionPlan &plan, const VgprSpillSequence *spill, rj_code_arch_t arch,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
-    uint32_t *guest_instruction_word_count) {
+    uint64_t owner_descriptor_file_offset, const MoiSampledAccessEmissionPlan &plan,
+    const VgprSpillSequence *spill, rj_code_arch_t arch, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, uint32_t *guest_instruction_word_count) {
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
@@ -983,7 +984,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     uint32_t range_guest_instruction_offset = 0;
     uint32_t range_guest_instruction_word_count = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
-        bytes, candidate, access_ranges[range_index], plan, arch,
+        bytes, candidate, owner_descriptor_file_offset, access_ranges[range_index], plan, arch,
         plan.first_record_index + range_index * plan.window_bank_count, prior_record_indices,
         range_index == 0u && !plan.spill_backed_operand_recovery, preserved_lds_byte_offset_vgpr,
         spill, spilled_lds_byte_offset_vgpr, errors,

@@ -144,11 +144,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (!resources) {
       continue;
     }
-    std::optional<uint64_t> workgroup_descriptor = candidate.kernel_descriptor_file_offset;
-    if (!workgroup_descriptor) {
-      workgroup_descriptor =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-    }
+    const std::optional<uint64_t> workgroup_descriptor =
+        common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
     if (!workgroup_descriptor)
       continue;
     std::optional<ConSanMoiPrivateStateLayout> private_layout;
@@ -227,8 +224,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             : std::nullopt;
     const bool runtime_workgroup_gate_in_body =
         options.moi_runtime_sample_stride > 1u && !eligible_runtime_fast_gate;
-    ConSanMoiCandidate lowered_candidate = candidate;
-    lowered_candidate.kernel_descriptor_file_offset = workgroup_descriptor;
     const auto prior_patch = std::find_if(
         planned_patches.rbegin(), planned_patches.rend(), [&](const PlannedSampledPatch &planned) {
           return planned.workgroup_descriptor_file_offset == *workgroup_descriptor;
@@ -280,8 +275,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t probe_guest_instruction_offset = 0;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_direct_sampled_watchpoint_words(
-        bytes, lowered_candidate, emission, spill ? &*spill : nullptr, arch, candidate_errors,
-        &probe_guest_instruction_offset, &guest_instruction_word_count);
+        bytes, candidate, *workgroup_descriptor, emission, spill ? &*spill : nullptr, arch,
+        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -350,13 +345,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   fragments.reserve(planned_patches.size());
   for (const PlannedSampledPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    ConSanMoiCandidate lowered_candidate = candidate;
-    lowered_candidate.kernel_descriptor_file_offset =
-        planned_patch.workgroup_descriptor_file_offset;
     uint32_t probe_guest_offset = 0u;
     uint32_t guest_word_count = 0u;
     auto probe_words = build_direct_sampled_watchpoint_words(
-        bytes, lowered_candidate, planned_patch.emission,
+        bytes, candidate, planned_patch.workgroup_descriptor_file_offset, planned_patch.emission,
         planned_patch.spill ? &*planned_patch.spill : nullptr, arch, result.errors,
         &probe_guest_offset, &guest_word_count);
     if (!probe_words)

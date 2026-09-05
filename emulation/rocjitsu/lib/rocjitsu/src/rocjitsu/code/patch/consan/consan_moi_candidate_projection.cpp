@@ -9,16 +9,11 @@
 namespace rocjitsu::consan_detail {
 namespace {
 
-[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ProgramInventory &inventory,
-                                                    const ConSanProgramSite &access,
+[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanProgramSite &access,
                                                     ConSanProbeIntentId intent_id) {
   ConSanMoiCandidate candidate;
   static_cast<ConSanProgramSite &>(candidate) = access;
   candidate.intent_ids.push_back(intent_id);
-  if (access.execution_owners.size() == 1u) {
-    if (const ConSanProgramContainer *kernel = inventory.kernel(access.execution_owners.front()))
-      candidate.kernel_descriptor_file_offset = kernel->descriptor_file_offset;
-  }
   return candidate;
 }
 
@@ -49,7 +44,7 @@ std::vector<ConSanMoiCandidate> build_moi_candidates(const ProgramInventory &inv
     const auto [position, inserted] = candidate_index_by_offset.try_emplace(
         access->physical_id.original_text_offset, candidates.size());
     if (inserted) {
-      candidates.push_back(make_moi_candidate(inventory, *access, intent.id));
+      candidates.push_back(make_moi_candidate(*access, intent.id));
     } else {
       ConSanMoiCandidate &candidate = candidates[position->second];
       if (candidate.physical_id != access->physical_id) {
