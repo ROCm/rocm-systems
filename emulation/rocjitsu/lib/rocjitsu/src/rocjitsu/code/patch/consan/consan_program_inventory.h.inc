@@ -816,6 +816,33 @@ public:
       });
     });
   }
+  /// Return every kernel that can execute a site, including the containing
+  /// kernel when symbol-range ownership did not already publish it.
+  ///
+  /// This is the semantic owner representation. Consumers should retain these
+  /// handles until they reach a descriptor-byte boundary.
+  [[nodiscard]] std::vector<ConSanProgramContainerId>
+  execution_owner_kernels(const ConSanProgramSite &site) const {
+    std::vector<ConSanProgramContainerId> owners = execution_owner_kernels(site.execution_owners);
+    owners.reserve(owners.size() + 1u);
+    if (const ConSanProgramContainer *record = container(site.container);
+        record != nullptr && record->is_kernel())
+      owners.push_back(site.container);
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    return owners;
+  }
+  [[nodiscard]] std::vector<ConSanProgramContainerId>
+  execution_owner_kernels(std::span<const ConSanExecutionOwner> execution_owners) const {
+    std::vector<ConSanProgramContainerId> owners;
+    owners.reserve(execution_owners.size());
+    for (const ConSanExecutionOwner &owner : execution_owners)
+      if (kernel(owner) != nullptr)
+        owners.push_back(owner.kernel);
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    return owners;
+  }
   /// Return whether every decoded record owns its exact arena handle.
   [[nodiscard]] bool program_site_ids_well_formed() const {
     const std::span<const ConSanProgramSite> records = program_sites();
@@ -845,18 +872,7 @@ public:
   /// complete returned set.
   [[nodiscard]] std::vector<uint64_t>
   execution_owner_descriptors(const ConSanProgramSite &site) const {
-    std::vector<uint64_t> owners;
-    owners.reserve(site.execution_owners.size() + 1u);
-    for (const ConSanExecutionOwner &owner : site.execution_owners) {
-      if (const ConSanProgramContainer *record = kernel(owner))
-        owners.push_back(record->descriptor_file_offset);
-    }
-    if (const ConSanProgramContainer *record = container(site.container);
-        record != nullptr && record->is_kernel())
-      owners.push_back(record->descriptor_file_offset);
-    std::ranges::sort(owners);
-    owners.erase(std::ranges::unique(owners).begin(), owners.end());
-    return owners;
+    return kernel_descriptors(execution_owner_kernels(site)).value_or(std::vector<uint64_t>{});
   }
   [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(ConSanProgramSiteId site) const {
     const ConSanProgramSite *record = program_site(site);

@@ -3877,6 +3877,17 @@ _consan_assert_no_match(
     "record_replay_accesses|sampled_accesses|inline_compact_accesses"
     "runtime static attribution must not regain parallel mode containers"
 )
+file(READ
+    "${_consan_dir}/modes/supercollider/consan_supercollider_common.inc"
+    _supercollider_owner_analysis_contract
+)
+if(_supercollider_owner_analysis_contract MATCHES
+       "unordered_map<uint64_t, (const ConSanProgramContainer|ScOwnerContext|KernelMaxRegisterRefs)" OR
+   _supercollider_owner_analysis_contract MATCHES "find_kernel_by_descriptor")
+    message(FATAL_ERROR
+        "SuperCollider owner analysis must retain stable kernel handles instead of rebuilding descriptor-keyed identity maps"
+    )
+endif()
 file(READ "${_consan_dir}/consan_observation_plan.h.inc" _runtime_mapping_contract)
 if(NOT _runtime_mapping_contract MATCHES
    "std::variant<std::monostate, RecordReplay, Sampled>"

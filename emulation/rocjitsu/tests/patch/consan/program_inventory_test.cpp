@@ -313,6 +313,12 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   owned.execution_owners = {{.kernel = inventory.kernels()[1].id},
                             {.kernel = inventory.kernels()[0].id},
                             {.kernel = inventory.kernels()[1].id}};
+  EXPECT_EQ(inventory.execution_owner_kernels(owned),
+            (std::vector<ConSanProgramContainerId>{inventory.kernels()[0].id,
+                                                   inventory.kernels()[1].id}));
+  EXPECT_EQ(inventory.execution_owner_kernels(owned.execution_owners),
+            (std::vector<ConSanProgramContainerId>{inventory.kernels()[0].id,
+                                                   inventory.kernels()[1].id}));
   EXPECT_EQ(inventory.execution_owner_descriptors(owned), (std::vector<uint64_t>{512, 768}));
   EXPECT_TRUE(inventory.execution_owners_well_formed());
 

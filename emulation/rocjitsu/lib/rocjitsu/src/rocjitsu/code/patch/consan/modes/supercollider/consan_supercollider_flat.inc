@@ -178,14 +178,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         result.program_inventory.container(site.container);
     if (site_container == nullptr)
       continue;
-    std::vector<uint64_t> owners = result.program_inventory.execution_owner_descriptors(site);
+    std::vector<ConSanProgramContainerId> owners =
+        result.program_inventory.execution_owner_kernels(site);
     for (const ConSanFaultSite &fault : result.fault_sites) {
       const ConSanProgramSite *fault_source = result.program_inventory.program_site(fault);
       if (fault_source == nullptr || fault_source->container != site.container ||
           site_container->is_kernel())
         continue;
-      const std::vector<uint64_t> fault_owners =
-          result.program_inventory.execution_owner_descriptors(fault_source->execution_owners);
+      const std::vector<ConSanProgramContainerId> fault_owners =
+          result.program_inventory.execution_owner_kernels(fault_source->execution_owners);
       owners.insert(owners.end(), fault_owners.begin(), fault_owners.end());
     }
     auto facts = owner_analysis.site_facts(site, std::move(owners));
@@ -200,9 +201,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool selected_by_filter =
         options.test_kernel_name_filter.empty() ||
         site_container->name.find(options.test_kernel_name_filter) != std::string::npos ||
-        std::ranges::any_of(facts->descriptor_file_offsets, [&](uint64_t owner) {
-          const ConSanProgramContainer *kernel = owner_analysis.kernel(owner);
-          return kernel && kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
+        std::ranges::any_of(facts->contexts, [&](const ScOwnerContext *owner) {
+          return owner != nullptr &&
+                 owner->kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
         });
     if (!selected_by_filter)
       continue;

@@ -50,6 +50,7 @@ struct ScOwnerContext {
   const ConSanProgramContainer *kernel = nullptr;
   KernelCfgScope scope;
   std::unique_ptr<LivenessAnalysis> liveness;
+  KernelMaxRegisterRefs max_refs;
 };
 
 struct ScSiteOwnerFacts {
@@ -72,11 +73,10 @@ class ScOwnerAnalysis {
 public:
   ScOwnerAnalysis(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
                   rj_code_arch_t arch, bool restrict_to_preflight_candidates)
-      : arch_(arch), original_bytes_(reinterpret_cast<const uint8_t *>(code_object.image_data()),
-                                     code_object.image_size()),
+      : inventory_(inventory), arch_(arch),
+        original_bytes_(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                        code_object.image_size()),
         decoder_(Decoder::create(arch)) {
-    for (const ConSanProgramContainer &kernel : inventory.kernels())
-      kernels_.emplace(kernel.descriptor_file_offset, &kernel);
     if (!decoder_)
       return;
 
@@ -110,66 +110,69 @@ public:
       pristine_text_ =
           std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
     }
-    contexts_.reserve(inventory.kernels().size());
-    failed_contexts_.reserve(inventory.kernels().size());
-    max_refs_.reserve(inventory.kernels().size());
+    contexts_.resize(inventory.containers().size());
+    failed_contexts_.resize(inventory.containers().size());
   }
 
-  [[nodiscard]] const ConSanProgramContainer *kernel(uint64_t descriptor_file_offset) const {
-    const auto found = kernels_.find(descriptor_file_offset);
-    return found == kernels_.end() ? nullptr : found->second;
+  [[nodiscard]] const ConSanProgramContainer *kernel(ConSanProgramContainerId id) const {
+    const ConSanProgramContainer *record = inventory_.container(id);
+    return record != nullptr && record->is_kernel() ? record : nullptr;
   }
 
-  [[nodiscard]] const ScOwnerContext *context(uint64_t descriptor_file_offset) {
-    if (const auto found = contexts_.find(descriptor_file_offset); found != contexts_.end())
-      return &found->second;
-    const ConSanProgramContainer *owner = kernel(descriptor_file_offset);
+  [[nodiscard]] const ScOwnerContext *context(ConSanProgramContainerId id) {
+    if (!id.valid() || id.ordinal >= contexts_.size())
+      return nullptr;
+    if (contexts_[id.ordinal])
+      return &*contexts_[id.ordinal];
+    const ConSanProgramContainer *owner = kernel(id);
     if (!decoder_ || owner == nullptr || !owner->has_text_range ||
-        failed_contexts_.contains(descriptor_file_offset))
+        failed_contexts_[id.ordinal])
       return nullptr;
     auto scope = build_kernel_cfg_scope(blocks_, block_index_,
                                         KernelScopeRequest{.entry_offset = owner->entry_text_offset,
                                                            .additional_entry_offsets = {}},
                                         kernel_entries_, pristine_text_);
     if (!scope) {
-      failed_contexts_.insert(descriptor_file_offset);
+      failed_contexts_[id.ordinal] = true;
       return nullptr;
     }
-    ScOwnerContext built{.kernel = owner, .scope = std::move(*scope), .liveness = nullptr};
+    ScOwnerContext &built = contexts_[id.ordinal].emplace(
+        ScOwnerContext{.kernel = owner,
+                       .scope = std::move(*scope),
+                       .liveness = nullptr,
+                       .max_refs = {}});
     built.liveness =
         std::make_unique<LivenessAnalysis>(KernelBlockScope(built.scope.blocks),
                                            LivenessAnalysisOptions{}, built.scope.liveness_edges);
-    return &contexts_.emplace(descriptor_file_offset, std::move(built)).first->second;
+    built.max_refs = max_register_refs_in_kernel(*owner, KernelBlockScope(built.scope.blocks));
+    return &built;
   }
 
-  [[nodiscard]] std::optional<ScSiteOwnerFacts> site_facts(const ConSanProgramSite &site,
-                                                           std::vector<uint64_t> owners) {
+  [[nodiscard]] std::optional<ScSiteOwnerFacts>
+  site_facts(const ConSanProgramSite &site, std::vector<ConSanProgramContainerId> owners) {
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
     ScSiteOwnerFacts facts;
-    facts.descriptor_file_offsets = std::move(owners);
     facts.instruction = find_instruction_at_text_offset(KernelBlockScope(block_ptrs_),
                                                         site.physical_id.original_text_offset);
-    if (!facts.instruction || facts.descriptor_file_offsets.empty())
+    if (!facts.instruction || owners.empty())
       return std::nullopt;
 
-    for (uint64_t owner_id : facts.descriptor_file_offsets) {
+    for (ConSanProgramContainerId owner_id : owners) {
       const ScOwnerContext *owner = context(owner_id);
-      const auto descriptor = read_kernel_descriptor(original_bytes_, owner_id);
       const Instruction *owner_instruction =
           owner == nullptr ? nullptr
                            : find_instruction_at_text_offset(KernelBlockScope(owner->scope.blocks),
                                                              site.physical_id.original_text_offset);
       if (owner == nullptr || owner->kernel->preflight_action == ConSanPreflightAction::Blocked ||
-          owner->liveness == nullptr || owner_instruction != facts.instruction || !descriptor)
+          owner->liveness == nullptr || owner_instruction != facts.instruction)
+        return std::nullopt;
+      const auto descriptor =
+          read_kernel_descriptor(original_bytes_, owner->kernel->descriptor_file_offset);
+      if (!descriptor)
         return std::nullopt;
 
-      auto refs = max_refs_.find(owner_id);
-      if (refs == max_refs_.end())
-        refs = max_refs_
-                   .emplace(owner_id, max_register_refs_in_kernel(
-                                          *owner->kernel, KernelBlockScope(owner->scope.blocks)))
-                   .first;
+      facts.descriptor_file_offsets.push_back(owner->kernel->descriptor_file_offset);
       facts.contexts.push_back(owner);
       facts.liveness.push_back(owner->liveness.get());
       const uint16_t ordinary = descriptor_ordinary_vgpr_allocation_count(*descriptor, arch_);
@@ -183,12 +186,14 @@ public:
       facts.common_sgpr_count = minimum(facts.common_sgpr_count, sgprs);
       facts.max_private_segment_size =
           std::max(facts.max_private_segment_size, descriptor->private_segment_fixed_size);
-      if (refs->second.vgpr)
-        facts.max_vgpr_ref = facts.max_vgpr_ref ? std::max(*facts.max_vgpr_ref, *refs->second.vgpr)
-                                                : refs->second.vgpr;
-      if (refs->second.sgpr)
-        facts.max_sgpr_ref = facts.max_sgpr_ref ? std::max(*facts.max_sgpr_ref, *refs->second.sgpr)
-                                                : refs->second.sgpr;
+      if (owner->max_refs.vgpr)
+        facts.max_vgpr_ref =
+            facts.max_vgpr_ref ? std::max(*facts.max_vgpr_ref, *owner->max_refs.vgpr)
+                               : owner->max_refs.vgpr;
+      if (owner->max_refs.sgpr)
+        facts.max_sgpr_ref =
+            facts.max_sgpr_ref ? std::max(*facts.max_sgpr_ref, *owner->max_refs.sgpr)
+                               : owner->max_refs.sgpr;
       const bool dynamic = owner->kernel->uses_dynamic_stack.value_or(false);
       facts.any_dynamic_stack |= dynamic;
       facts.every_dynamic_stack &= dynamic;
@@ -198,6 +203,7 @@ public:
   }
 
 private:
+  const ProgramInventory &inventory_;
   rj_code_arch_t arch_;
   std::span<const uint8_t> original_bytes_;
   std::unique_ptr<Decoder> decoder_;
@@ -206,10 +212,8 @@ private:
   BlockOffsetIndex block_index_;
   std::vector<uint64_t> kernel_entries_;
   std::span<const uint8_t> pristine_text_;
-  std::unordered_map<uint64_t, const ConSanProgramContainer *> kernels_;
-  std::unordered_map<uint64_t, ScOwnerContext> contexts_;
-  std::unordered_set<uint64_t> failed_contexts_;
-  std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_;
+  std::vector<std::optional<ScOwnerContext>> contexts_;
+  std::vector<bool> failed_contexts_;
 };
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_access_scratch_vgpr(

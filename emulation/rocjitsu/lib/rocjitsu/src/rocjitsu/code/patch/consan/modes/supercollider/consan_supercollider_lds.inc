@@ -21,11 +21,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const bool has_plannable_supported_site =
       std::ranges::any_of(admitted_sites, [&](const auto &entry) {
-        const std::vector<uint64_t> owners =
-            result.program_inventory.execution_owner_descriptors(*entry.second);
-        return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
-          const ConSanProgramContainer *kernel =
-              result.program_inventory.find_kernel_by_descriptor(owner);
+        const std::vector<ConSanProgramContainerId> owners =
+            result.program_inventory.execution_owner_kernels(*entry.second);
+        return !owners.empty() && std::ranges::all_of(owners, [&](ConSanProgramContainerId owner) {
+          const ConSanProgramContainer *kernel = result.program_inventory.container(owner);
           return kernel != nullptr && kernel->preflight_action != ConSanPreflightAction::Blocked;
         });
       });
@@ -91,7 +90,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const auto &[file_offset, site] : admitted_sites) {
     (void)file_offset;
     auto facts = owner_analysis.site_facts(
-        *site, result.program_inventory.execution_owner_descriptors(*site));
+        *site, result.program_inventory.execution_owner_kernels(*site));
     if (!facts) {
       (void)publish_sc_access_rejection(
           result.coverage_ledger, result.errors, site->physical_id,
@@ -131,19 +130,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       const bool container_matches =
           consan_container_selected(request, debug, site_container->name);
       const bool owner_matches =
-          !site_context.owners.descriptor_file_offsets.empty() &&
+          !site_context.owners.contexts.empty() &&
           (options.kernel_name_allowlist.empty()
-               ? std::ranges::any_of(site_context.owners.descriptor_file_offsets,
-                                     [&](uint64_t owner) {
-                                       const ConSanProgramContainer *kernel =
-                                           owner_analysis.kernel(owner);
-                                       return kernel && consan_container_selected(request, debug,
-                                                                                  kernel->name);
+               ? std::ranges::any_of(site_context.owners.contexts,
+                                     [&](const ScOwnerContext *owner) {
+                                       return owner != nullptr &&
+                                              consan_container_selected(request, debug,
+                                                                        owner->kernel->name);
                                      })
                : std::ranges::all_of(
-                     site_context.owners.descriptor_file_offsets, [&](uint64_t owner) {
-                       const ConSanProgramContainer *kernel = owner_analysis.kernel(owner);
-                       return kernel && consan_container_selected(request, debug, kernel->name);
+                     site_context.owners.contexts, [&](const ScOwnerContext *owner) {
+                       return owner != nullptr &&
+                              consan_container_selected(request, debug, owner->kernel->name);
                      }));
       if (!container_matches && !owner_matches)
         continue;
