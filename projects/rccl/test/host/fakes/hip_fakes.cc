@@ -200,7 +200,7 @@ hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 int        g_hipDirectManagedMemAccess   = 1;
-int        g_hipMemcpyAsyncCalls        = 0;
+int        g_hipMemcpyAsyncCalls         = 0;
 std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
 // Restore every HIP hook to its default.

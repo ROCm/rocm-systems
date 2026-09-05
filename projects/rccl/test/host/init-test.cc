@@ -57,6 +57,9 @@ static void* MicroMalloc(std::size_t n) {
 static int g_tunerFinalizeCalls = 0;
 static void* g_tunerFinalizeLastContext = nullptr;
 static ncclResult_t g_tunerFinalizeResult = ncclSuccess;
+// What the Tr_NetDevices / Tr_CollNetDevices plugin fakes report. Declared here so TearDown can reset them.
+static int g_trNetDeviceCount = 0;
+static int g_trCollNetDeviceCount = 0;
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
@@ -88,9 +91,10 @@ static ncclResult_t MicroTopoGetStrFromSys(const char* path, const char* file, c
   return g_microTopoGetStrFromSys(path, file, out, maxLen);
 }
 
-static std::function<bool(const char*)> g_microIommuPassthroughOk = [](const char* c) {
-  return ncclIommuPassthroughOk(c);
-};
+static std::function<bool(const char*)> g_microIommuPassthroughOk =
+    [](const char* cmdline) {
+      return ncclIommuPassthroughOk(cmdline);
+    };
 static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPassthroughOk(cmdline); }
 
 #define free(p) MicroFree(p)
@@ -98,10 +102,8 @@ static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPa
 #define ncclOsTopoGetStrFromSys(p, f, o, n) MicroTopoGetStrFromSys(p, f, o, n)
 #define ncclIommuPassthroughOk(c) MicroIommuPassthroughOk(c)
 
-// What the Tr_NetDevices / Tr_CollNetDevices plugin fakes report. At file scope so TearDown can reset them.
-static int g_trNetDeviceCount = 0;
-static int g_trCollNetDeviceCount = 0;
-static int g_trRingChannelsInstalled = -1;  // -1 = the AllGather3 mirror tripwire does not check nChannels
+// -1 means the AllGather3 mirror tripwire does not cross-check graphInfo[RING].nChannels.
+static int g_trRingChannelsInstalled = -1;
 
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
@@ -211,6 +213,70 @@ class InitMicrotest : public ::testing::Test {
 class InitMicrotestIsolated : public InitMicrotest {};
 
 namespace {
+// Every NCCL_PARAM body in this TU routes through g_loadParam(env, deft); this maps an env name to a forced value.
+using ParamMap = std::map<std::string, int64_t>;
+
+// Override specific NCCL_PARAM values; captured by value because the installed g_loadParam outlives this call.
+void SetParams(ParamMap overrides) {
+  g_loadParam = [overrides](const char* env, int64_t deft) {
+    const auto it = overrides.find(env);
+    return it == overrides.end() ? deft : it->second;
+  };
+}
+
+// Raises the log level for a capture; WARN needs no lift, so warn-only sites call CaptureLog directly.
+std::string CaptureInfoLog(const std::function<void()>& body) {
+  RcclUnitTesting::ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  return RcclUnitTesting::CaptureLog(body);
+}
+
+// Heap ncclComm carrying a fresh NCCL_CONFIG_INITIALIZER; owns config.netName, which envConfigOverride re-mallocs.
+class ConfigComm {
+ public:
+  ConfigComm() : comm_(new ncclComm{}) {
+    const ncclConfig_t fresh = NCCL_CONFIG_INITIALIZER;
+    comm_->config = fresh;
+  }
+  ~ConfigComm() {
+    if (ran_) {
+      ::free(const_cast<char*>(comm_->config.netName));
+    }
+  }
+  ConfigComm(const ConfigComm&) = delete;
+  ConfigComm& operator=(const ConfigComm&) = delete;
+
+  ncclConfig_t& config() { return comm_->config; }
+  ncclComm* comm() { return comm_.get(); }
+  ncclResult_t result() const { return result_; }
+
+  ncclResult_t Run(const ParamMap& params) {
+    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
+      const auto it = params.find(env);
+      return it == params.end() ? deft : it->second;
+    });
+    ran_ = true;
+    result_ = envConfigOverride(comm_.get());
+    return result_;
+  }
+
+  ncclResult_t RunParse(ncclConfig_t* cfg) {
+    ran_ = true;
+    result_ = parseCommConfig(comm_.get(), cfg);
+    return result_;
+  }
+
+  std::string RunCapturingLog(const ParamMap& params) {
+    const std::string log = CaptureInfoLog([&] { Run(params); });
+    EXPECT_EQ(ncclSuccess, result_) << "actual log:\n" << log;
+    return log;
+  }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  ncclResult_t result_ = ncclNumResults;
+  bool ran_ = false;
+};
+
 // uniformRanksPerHost reads ONLY peerInfo[i].hostHash; each initializer value is a host id.
 class HostPattern {
  public:
@@ -741,9 +807,7 @@ class P2pScheduleComm {
 
 // A negative NCCL_P2P_SCHEDULE_GROUP_SIZE yields a negative nGroups, so ncclCalloc is asked for a bogus size and fails.
 TEST_F(InitMicrotest, P2pSchedule_NegativeGroupSizeParam_FailsInAllocation) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(-2) : deft;
-  };
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", -2}});
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
@@ -751,9 +815,7 @@ TEST_F(InitMicrotest, P2pSchedule_NegativeGroupSizeParam_FailsInAllocation) {
 
 // ERANGE is checked (param.cc:93-97) but the int64->int narrowing at :1313 is not, so GROUP_SIZE=0 or 2^32 SIGFPEs.
 TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(0) : deft;
-  };
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 0}});
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   // Pin the signal: EXPECT_DEATH("") would also accept ::abort(), _exit(1) or a null deref at the same spot.
@@ -775,9 +837,7 @@ TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
 
 TEST_F(InitMicrotest, P2pSchedule_MultiNode_Rank1OnNode1_FullScheduleContents) {
   // localRank=1 matters: at localRank=0 both `local` and `group` are identically 0, hiding the whole group walk.
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(2) : deft;
-  };
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 2}});
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/1, /*localRank=*/1, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
@@ -807,9 +867,7 @@ TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
 // EQUIVALENT MUTANT: dropping `|| localRanks < groupSize` at :1316 -- the first disjunct fires unless localRanks==0.
 TEST_F(InitMicrotest, P2pSchedule_EmptyNode_SkipsGroupLoop) {
   // localRanks=0 on node 1 -> nGroupsInNode = 0, so the inner loop at init.cc:1337 is entered zero times.
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(4) : deft;
-  };
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 4}});
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
                     /*maxLocalRanks=*/4, {4, 0});
   EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
@@ -899,11 +957,6 @@ int RunCtaPolicyEnv(const char* value) {
   return ctaPolicyEnv;
 }
 
-// Several inputs are state-indistinguishable ("7" and unset both leave UNDEF), so the diagnostic is the only oracle.
-std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
-  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-  return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
-}
 }  // namespace
 
 TEST_F(InitMicrotest, GetEnvCtaPolicy_Unset_LeavesPolicyUndefined) {
@@ -923,7 +976,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_DigitTwo_SelectsZero) {
 // LATENT BUG (init.cc:160): the `default:` arm logs "Using DEFAULT instead" but never assigns it, leaving UNDEF.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownDigit_LogsDefaultButLeavesUnset) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("7", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("7"); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   // "Unknown CTA policy" is shared with the per-token message at :174; this phrase occurs exactly once in init.cc.
   EXPECT_TRUE(LogHas(log, "Using DEFAULT instead")) << "actual log:\n" << log;
@@ -934,7 +987,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedDefault_SelectsDefault) {
 }
 TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedEfficiency_SelectsEfficiencyAndLogsParse) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("EFFICIENCY", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("EFFICIENCY"); });
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, policy);
   // Assert the interpolated payload, not just the sentence: a wrong policy value still satisfies the bare needle.
   EXPECT_TRUE(LogHas(log, "NCCL_CTA_POLICY=EFFICIENCY to 1")) << "actual log:\n" << log;
@@ -962,7 +1015,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownTokenAmongValid_IgnoresOnlyTheUnkno
 }
 TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("BOGUS", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("BOGUS"); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   EXPECT_TRUE(LogHas(log, "Unknown CTA policy BOGUS")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
@@ -970,7 +1023,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) 
 // isdigit('\0') is false, so an empty value takes the combine arm but strtok yields no token and the loop never runs.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_EmptyString_ParsesNoTokens) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv(""); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
 }
@@ -1240,38 +1293,20 @@ TEST_F(InitMicrotest, SetAsyncError_NullComm_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(nullptr, ncclSuccess));
 }
 
-namespace {
-std::unique_ptr<ncclComm> UndefConfigComm() {
-  auto comm = std::make_unique<ncclComm>();
-  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
-  comm->config = cfg;
-  return comm;
-}
-}  // namespace
-
 TEST_F(InitMicrotest, EnvConfigOverride_BlockingEnv_OverridesBlocking) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "COMM_BLOCKING") == 0 ? int64_t(1) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(1, comm->config.blocking);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"COMM_BLOCKING", 1}}));
+  EXPECT_EQ(1, c.config().blocking);
 }
 TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeTooBig_ClampedToMax) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(NCCL_MAX_CGA_CLUSTER_SIZE + 1) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, comm->config.cgaClusterSize);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE + 1}}));
+  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
 }
 TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(2) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(2, comm->config.cgaClusterSize);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", 2}}));
+  EXPECT_EQ(2, c.config().cgaClusterSize);
 }
 // TODO(AICOMRCCL-1685): a MIN_CTAS override does not apply, unlike COMM_BLOCKING on the same g_loadParam path.
 
@@ -1404,9 +1439,7 @@ TEST_F(InitMicrotest, CopyCommConfig_LeavesParentConfigUntouched) {
 }
 
 TEST_F(InitMicrotest, CopyCommConfig_EnvOverrideLandsOnTopOfTheCopy) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "COMM_BLOCKING") == 0 ? int64_t(1) : deft;
-  };
+  SetParams({{"COMM_BLOCKING", 1}});
   auto parent = std::make_unique<ncclComm>();
   auto child = std::make_unique<ncclComm>();
   FillParentConfig(parent->config);
@@ -2385,14 +2418,6 @@ class ScopedTopoGetSystem {
   }
 };
 
-// Override specific NCCL_PARAM/RCCL_PARAM values; everything else keeps its compiled-in default.
-void SetParams(std::vector<std::pair<std::string, int64_t>> overrides) {
-  g_loadParam = [overrides](const char* env, int64_t deft) {
-    for (const auto& o : overrides)
-      if (o.first == env) return o.second;
-    return deft;
-  };
-}
 }  // namespace
 
 // --- AllGather1: allocation, fillInfo, the allgather itself (init.cc:1462-1466) ---
@@ -3925,6 +3950,24 @@ TEST_F(InitMicrotest, DestructorFnCudaFree_ObjUntrackedByManager_FreesThatExactP
   EXPECT_EQ(&obj, freed);
 }
 
+TEST_F(InitMicrotest, DestructorFnCudaFree_DeviceFreeFails_PropagatesTheErrorAndSkipsTheFree) {
+  Dtor_PushComm c;
+  int other = 0;
+  Dtor_ReleasedManager mgr(&other);
+  c.get()->memManager = mgr.get();
+  int obj = 0;
+  ncclCommPushCudaFree(c.get(), &obj);
+
+  g_hipAsyncOpsResult = hipSuccess;
+  ScopedHook memRange(g_hipMemGetAddressRange, [](hipDeviceptr_t*, std::size_t*, hipDeviceptr_t) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook hipFree(g_hipFree, [](void*) { return hipSuccess; });
+  EXPECT_EQ(ncclUnhandledCudaError, ncclDestructorFnCudaFree(c.get()->destructorHead));
+  EXPECT_EQ(1, memRange.calls);
+  EXPECT_EQ(0, hipFree.calls);
+}
+
 TEST_F(InitMicrotest, DestructorFnCudaHostFree_PassesTheObjectPointerToTheHostFree) {
   Dtor_PushComm c;
   int obj = 0;
@@ -3997,9 +4040,7 @@ TEST_F(InitMicrotest, DestructorFnCudaGdrFree_DevMemUntracked_FreesDevMemThrough
 TEST_F(InitMicrotest, InitGdrCopy_EnabledOnSupportedArch_PublishesTheGdrHandle) {
   Dtor_GdrCopyGuard guard;
   ncclGdrCopy = Dtor_kGdrPoison;
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "GDRCOPY_ENABLE") == 0 ? int64_t(1) : deft;
-  };
+  SetParams({{"GDRCOPY_ENABLE", 1}});
   g_hipGetDeviceProperties = [](hipDeviceProp_t* prop, int) {
     *prop = hipDeviceProp_t{};
     std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942:sramecc+:xnack-");
@@ -4012,9 +4053,7 @@ TEST_F(InitMicrotest, InitGdrCopy_EnabledOnSupportedArch_PublishesTheGdrHandle) 
 TEST_F(InitMicrotest, InitGdrCopy_EnabledOnUnsupportedArch_ClearsTheGdrHandle) {
   Dtor_GdrCopyGuard guard;
   ncclGdrCopy = Dtor_kGdrPoison;
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "GDRCOPY_ENABLE") == 0 ? int64_t(1) : deft;
-  };
+  SetParams({{"GDRCOPY_ENABLE", 1}});
   g_hipGetDeviceProperties = [](hipDeviceProp_t* prop, int) {
     *prop = hipDeviceProp_t{};
     std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx90a:sramecc+:xnack-");
@@ -4027,9 +4066,7 @@ TEST_F(InitMicrotest, InitGdrCopy_EnabledOnUnsupportedArch_ClearsTheGdrHandle) {
 TEST_F(InitMicrotest, InitGdrCopy_ParamNotExactlyOne_LeavesTheGdrHandleUntouched) {
   Dtor_GdrCopyGuard guard;
   ncclGdrCopy = Dtor_kGdrPoison;
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "GDRCOPY_ENABLE") == 0 ? int64_t(2) : deft;
-  };
+  SetParams({{"GDRCOPY_ENABLE", 2}});
   g_hipGetDeviceProperties = [](hipDeviceProp_t*, int) -> hipError_t {
     ADD_FAILURE() << "ncclGdrInit must not run unless GDRCOPY_ENABLE is exactly 1";
     return hipErrorInvalidValue;
@@ -4101,6 +4138,34 @@ TEST_F(InitMicrotest, GetAsyncError_GinWithoutProgressThread_IgnoresTheGinAsyncR
   ncclResult_t e = ncclInternalError;
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(c.get(), &e));
   EXPECT_EQ(ncclSuccess, e);
+}
+
+TEST_F(InitMicrotest, CommPoison_ClearsBothMagicsAndTheIdentity_KeepingIntraComm0) {
+  constexpr uint64_t kLiveStartMagic = 0x1111111111111111ull;
+  constexpr uint64_t kLiveEndMagic = 0x2222222222222222ull;
+  constexpr int kLiveRank = 5;
+  constexpr int kLiveCudaDev = 6;
+  constexpr int64_t kLiveBusId = 7;
+  constexpr int kLiveNRanks = 8;
+  auto comm = std::make_unique<ncclComm>();
+  auto neighbour = std::make_unique<ncclComm>();
+  comm->rank = kLiveRank;
+  comm->cudaDev = kLiveCudaDev;
+  comm->busId = kLiveBusId;
+  comm->nRanks = kLiveNRanks;
+  comm->startMagic = kLiveStartMagic;
+  comm->endMagic = kLiveEndMagic;
+  comm->intraComm0 = neighbour.get();
+
+  commPoison(comm.get());
+
+  EXPECT_EQ(-1, comm->rank);
+  EXPECT_EQ(-1, comm->cudaDev);
+  EXPECT_EQ(-1, comm->busId);
+  EXPECT_EQ(-1, comm->nRanks);
+  EXPECT_EQ(0u, comm->startMagic);
+  EXPECT_EQ(0u, comm->endMagic);
+  EXPECT_EQ(neighbour.get(), comm->intraComm0);
 }
 
 TEST_F(InitMicrotest, CommFinalizeAsyncJobFree_ReturnsTheJobToTheHeap) {
@@ -4208,7 +4273,7 @@ constexpr const char Dtor_kNumaBalancingWarning[] = "NUMA auto balancing enabled
 constexpr const char Dtor_kIommuWarning[] = "Missing \"iommu=pt\" from kernel command line";
 
 // ncclInit() reads numa_balancing, /proc/version and bios_version through this one entry point.
-ncclResult_t Dtor_SysFileText(const char* file, const char* numaBalancing, char* out, int maxLen) {
+ncclResult_t SysFileText(const char* file, const char* numaBalancing, char* out, int maxLen) {
   if (!out || maxLen <= 0) return ncclSuccess;
   if (file && std::strcmp(file, "numa_balancing") == 0) {
     std::snprintf(out, maxLen, "%s", numaBalancing);
@@ -4218,7 +4283,7 @@ ncclResult_t Dtor_SysFileText(const char* file, const char* numaBalancing, char*
   return ncclSuccess;
 }
 
-int Dtor_CpuidWithoutHypervisorBit(unsigned, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
+int CpuidWithoutHypervisorBit(unsigned, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
   if (a) *a = 0;
   if (b) *b = 0;
   if (c) *c = 0;
@@ -4234,9 +4299,9 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOnAndIommuNotPassthrough_War
       []() {
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
-                             return Dtor_SysFileText(file, "1", out, maxLen);
+                             return SysFileText(file, "1", out, maxLen);
                            });
-        ScopedHook cpuid(g_microCpuid, Dtor_CpuidWithoutHypervisorBit);
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
         ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
         std::string log = RcclUnitTesting::CaptureLog([] { ASSERT_EQ(ncclSuccess, ncclInit()); });
         ASSERT_TRUE(LogHas(log, Dtor_kNumaBalancingWarning)) << "actual log:\n" << log;
@@ -4251,9 +4316,9 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
       []() {
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
-                             return Dtor_SysFileText(file, "0", out, maxLen);
+                             return SysFileText(file, "0", out, maxLen);
                            });
-        ScopedHook cpuid(g_microCpuid, Dtor_CpuidWithoutHypervisorBit);
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
         ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return true; });
         ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
         std::string log = RcclUnitTesting::CaptureLog([] { ASSERT_EQ(ncclSuccess, ncclInit()); });
@@ -4283,25 +4348,18 @@ TEST_F(InitMicrotestIsolated, InitEnv_PluginFails_LatchesThatErrorAndCallsThePlu
 namespace {
 constexpr char ParseCfg_kNetName[] = "microfake-net";
 
+// Large enough that a minCTAs boundary case never also trips the min > max arm of the same condition.
+constexpr int ParseCfg_kAmpleMaxCTAs = 64;
+
 class ParseCfg_Scene {
  public:
-  ParseCfg_Scene() : comm_(new ncclComm{}) {}
-  // envConfigOverride re-mallocs config.netName and never frees it, so the scene owns that buffer.
-  ~ParseCfg_Scene() { free(const_cast<char*>(comm_->config.netName)); }
   ncclConfig_t& config() { return cfg_; }
-  const ncclConfig_t& result_config() const { return comm_->config; }
-  ncclResult_t Run() { return parseCommConfig(comm_.get(), &cfg_); }
-  std::string RunCapturingWarn(ncclResult_t* result) {
-    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
-  }
-  std::string RunCapturingInfo(ncclResult_t* result) {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
-  }
+  const ncclConfig_t& result_config() { return comm_.config(); }
+  ncclResult_t Run() { return comm_.RunParse(&cfg_); }
 
  private:
   ncclConfig_t cfg_ = NCCL_CONFIG_INITIALIZER;
-  std::unique_ptr<ncclComm> comm_;
+  ConfigComm comm_;
 };
 
 // The return code alone cannot tell which field's check fired, so the diagnostic carries the oracle.
@@ -4309,7 +4367,7 @@ void ParseCfg_ExpectRejected(const std::function<void(ncclConfig_t&)>& tweak, co
   ParseCfg_Scene s;
   tweak(s.config());
   ncclResult_t res = ncclSuccess;
-  const std::string log = s.RunCapturingWarn(&res);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclInvalidArgument, res);
   EXPECT_TRUE(LogHas(log, warning)) << "actual log:\n" << log;
 }
@@ -4354,6 +4412,22 @@ TEST_F(InitMicrotest, ParseCommConfig_BadGraphStreamOrdering_RejectsAndNamesTheF
                           "Invalid config graphStreamOrdering attribute value 13");
 }
 
+TEST_F(InitMicrotest, ParseCommConfig_ZeroCgaClusterSize_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().cgaClusterSize = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().cgaClusterSize);
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroMinCTAsBelowMaxCTAs_IsRejectedAtTheBoundary) {
+  const std::string warning =
+      "Invalid config min/max channels attribute value 0/" + std::to_string(ParseCfg_kAmpleMaxCTAs);
+  ParseCfg_ExpectRejected(
+      [](ncclConfig_t& c) {
+        c.minCTAs = 0;
+        c.maxCTAs = ParseCfg_kAmpleMaxCTAs;
+      },
+      warning.c_str());
+}
 TEST_F(InitMicrotest, ParseCommConfig_ZeroNvlsCTAs_IsRejectedAtTheBoundary) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = 0; },
                           "Invalid config nvlsCTAs attribute value 0");
@@ -4618,7 +4692,7 @@ TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithGraphMixing_WarnsAnd
   s.config().graphStreamOrdering = 0;
   s.config().graphUsageMode = 2;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingWarn(&res);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, s.result_config().graphStreamOrdering);
   EXPECT_EQ(2, s.result_config().graphUsageMode);
@@ -4629,7 +4703,7 @@ TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithoutGraphMixing_Stays
   s.config().graphStreamOrdering = 0;
   s.config().graphUsageMode = 1;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(0, s.result_config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
@@ -4640,7 +4714,7 @@ TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneA
   s.config().graphStreamOrdering = 1;
   s.config().graphUsageMode = 2;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, s.result_config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
@@ -4838,7 +4912,7 @@ struct Teardown_DtorNode {
   ncclResult_t result;
 };
 
-ncclResult_t Teardown_LogDtor(struct ncclDestructor* me) {
+ncclResult_t Teardown_RecordingDtor(struct ncclDestructor* me) {
   auto* node = reinterpret_cast<Teardown_DtorNode*>(me);
   node->log->push_back(node->id);
   return node->result;
@@ -4854,7 +4928,7 @@ ncclResult_t Teardown_LogTaskQueueState(struct ncclDestructor* me) {
 
 void Teardown_ChainDtors(Teardown_DtorNode* nodes, int n, std::vector<int>* log) {
   for (int i = 0; i < n; ++i) {
-    nodes[i].base.fn = Teardown_LogDtor;
+    nodes[i].base.fn = Teardown_RecordingDtor;
     nodes[i].base.next = (i + 1 < n) ? &nodes[i + 1].base : nullptr;
     nodes[i].log = log;
     nodes[i].result = ncclSuccess;
@@ -5287,7 +5361,7 @@ struct Teardown_ChainMember {
   Teardown_TunerRecord rec;
 };
 
-void Teardown_BuildChain(Teardown_ChainMember* members, int n) {
+void BuildCommChain(Teardown_ChainMember* members, int n) {
   for (int i = 0; i < n; ++i) {
     ASSERT_NO_FATAL_FAILURE(
         Teardown_MakeFreeableComm(&members[i].comm, &members[i].abortFlag, &members[i].abortRefCount));
@@ -5314,7 +5388,7 @@ TEST_F(InitMicrotest, CommReclaim_NoIntraComm0_ReturnsSuccessWithoutTouchingTheC
 TEST_F(InitMicrotest, CommReclaim_NotLastIntraRank_BumpsLeaderCounterAndDefersCleanup) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
   EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm));
@@ -5333,7 +5407,7 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
   Teardown_AllowStreamCaptureExchange();
   const int kChainLength = 3;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
@@ -5348,7 +5422,7 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
 TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclInternalError; });
 
@@ -5362,7 +5436,7 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
 TEST_F(InitMicrotest, CommReclaim_RevokedComm_DrainsLegacyQueueInsteadOfDestroySync) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   members[0].comm->revokedFlag = 1;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
@@ -5385,7 +5459,7 @@ TEST_F(InitMicrotest, CommReclaim_RevokedComm_DrainsLegacyQueueInsteadOfDestroyS
 TEST_F(InitMicrotest, CommReclaim_FinalizedButNotRevoked_SkipsBothSyncAndDrain) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
@@ -5937,7 +6011,7 @@ TEST_F(InitMicrotest, CommRevokeAsync_ProxyThreadsRunning_JoinsBothAfterStopping
 TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyClear) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   ncclComm* comm = members[0].comm;
   comm->finalizeCalled = true;
   comm->revokedFlag = 1;
@@ -5958,7 +6032,7 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyCl
 TEST_F(InitMicrotest, CommReclaim_RevokedCommLegacyCallbackFails_WarnsAndKeepsDraining) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   members[0].comm->revokedFlag = 1;
 
@@ -5986,7 +6060,7 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
   Teardown_AllowStreamCaptureExchange();
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ncclComm* firstComm = members[0].comm;
   ScopedHook unload(g_ncclTunerPluginUnload,
@@ -6026,12 +6100,10 @@ TEST_F(InitMicrotest, CommAbort_LaunchFails_PropagatesTheLaunchError) {
   rec.Release();
 }
 
+// The launch failure is the only fail-path arrival that is guaranteed to have allocated the job.
 // envConfigOverride (init.cc:2963): the NCCL_* env and ncclConfig_t validation ladders.
 
 namespace {
-// Every NCCL_PARAM body in this TU routes through g_loadParam(env, deft); this maps an env name to a forced value.
-using Env_ParamMap = std::map<std::string, int64_t>;
-
 // NCCL_CONFIG_UNDEF_INT is INT_MIN, so an undefined config field always trips the 0/1 clamps at :3189 and :3194.
 constexpr char Env_kUndefSplitShareLog[] = "splitShare -2147483648 is not a valid value 0/1, set it to 0";
 constexpr char Env_kUndefCollnetLog[] = "collnetEnable -2147483648 is not a valid value 0/1, set it to 0";
@@ -6039,50 +6111,10 @@ constexpr char Env_kUndefCollnetLog[] = "collnetEnable -2147483648 is not a vali
 // Large enough that a minCTAs case never trips the min > max clamp at :3183.
 constexpr int Env_kAmpleMaxCTAs = 64;
 
-class Env_ConfigComm {
- public:
-  Env_ConfigComm() : comm_(new ncclComm{}) {
-    const ncclConfig_t fresh = NCCL_CONFIG_INITIALIZER;
-    comm_->config = fresh;
-  }
-  ~Env_ConfigComm() {
-    if (ran_) {
-      ::free(const_cast<char*>(comm_->config.netName));
-    }
-  }
-  Env_ConfigComm(const Env_ConfigComm&) = delete;
-  Env_ConfigComm& operator=(const Env_ConfigComm&) = delete;
-
-  ncclConfig_t& config() { return comm_->config; }
-  ncclComm* comm() { return comm_.get(); }
-  ncclResult_t result() const { return result_; }
-
-  ncclResult_t Run(const Env_ParamMap& params) {
-    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
-      const auto it = params.find(env);
-      return it == params.end() ? deft : it->second;
-    });
-    ran_ = true;
-    result_ = envConfigOverride(comm_.get());
-    return result_;
-  }
-
-  std::string RunCapturingLog(const Env_ParamMap& params) {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    std::string log = RcclUnitTesting::CaptureLog([&] { Run(params); });
-    EXPECT_EQ(ncclSuccess, result_) << "actual log:\n" << log;
-    return log;
-  }
-
- private:
-  std::unique_ptr<ncclComm> comm_;
-  ncclResult_t result_ = ncclNumResults;
-  bool ran_ = false;
-};
 }  // namespace
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
   EXPECT_EQ(ncclSuccess, c.result());
   EXPECT_EQ(4, c.config().cgaClusterSize);
@@ -6091,7 +6123,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigUndef_AssignsWithoutRese
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
   EXPECT_EQ(4, c.config().cgaClusterSize);
@@ -6100,7 +6132,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigSet_OverwritesAndLogsRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAtUpperBound_AcceptedNotClamped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE}});
   EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
@@ -6110,14 +6142,14 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaAtUpperBound_AcceptedNotClamped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAtLowerBound_AcceptedAndOverwritesConfig) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", 0}}));
   EXPECT_EQ(0, c.config().cgaClusterSize);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAboveMax_ClampsToMaxAndLogs) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE + 1}});
   EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
   EXPECT_TRUE(LogHas(log, "NCCL_CGA_CLUSTER_SIZE value 9 is too big. Limiting value to 8."))
@@ -6125,7 +6157,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaAboveMax_ClampsToMaxAndLogs) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaNegative_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", -1}});
   EXPECT_EQ(2, c.config().cgaClusterSize);
@@ -6135,7 +6167,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaNegative_LeavesConfigUntouched) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
   EXPECT_EQ(7, c.config().minCTAs);
@@ -6145,7 +6177,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 3;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
@@ -6154,7 +6186,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 5;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 0}});
@@ -6163,7 +6195,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsZero_KeepsConfigAndLogsTooLow) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 5;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", -3}});
@@ -6172,7 +6204,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsNegative_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
   EXPECT_EQ(9, c.config().maxCTAs);
   EXPECT_FALSE(LogHas(log, "maxCTAs reset to")) << "actual log:\n" << log;
@@ -6180,7 +6212,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 3;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
   EXPECT_EQ(9, c.config().maxCTAs);
@@ -6188,7 +6220,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 5;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 0}});
   EXPECT_EQ(5, c.config().maxCTAs);
@@ -6196,7 +6228,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsZero_KeepsConfigAndLogsTooLow) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 5;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", -3}});
   EXPECT_EQ(5, c.config().maxCTAs);
@@ -6204,7 +6236,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsNegative_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinAndMaxCTAsBothSet_EachTakesItsOwnValue) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 1;
   c.config().maxCTAs = 2;
   EXPECT_EQ(ncclSuccess, c.Run({{"MIN_CTAS", 6}, {"MAX_CTAS", 11}}));
@@ -6213,7 +6245,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinAndMaxCTAsBothSet_EachTakesItsOwnValu
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
   EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
   EXPECT_FALSE(LogHas(log, "nChannelsPerNetPeer reset to")) << "actual log:\n" << log;
@@ -6221,7 +6253,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigUndef_A
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 1;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
   EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
@@ -6230,7 +6262,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigSet_Ove
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 2;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 0}});
   EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
@@ -6239,7 +6271,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerZero_KeepsConfigAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 2;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", -5}});
   EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
@@ -6248,7 +6280,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerNegative_KeepsConfigA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
   EXPECT_FALSE(LogHas(log, "nvlinkCentricSched reset to")) << "actual log:\n" << log;
@@ -6256,7 +6288,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigUndef_Assigns
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedZeroConfigOne_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 1;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 0}});
   EXPECT_EQ(0, c.config().nvlinkCentricSched);
@@ -6265,7 +6297,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedZeroConfigOne_Overwrit
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigZero_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 0;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
@@ -6274,7 +6306,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigZero_Overwrit
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedTwo_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 1;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 2}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
@@ -6283,7 +6315,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedTwo_KeepsConfigAndLogs
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedNegative_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 0;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", -1}});
   EXPECT_EQ(0, c.config().nvlinkCentricSched);
@@ -6292,7 +6324,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedNegative_KeepsConfigAn
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigUndef_SetsUsageModeTwoSilently) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
   EXPECT_EQ(2, c.config().graphUsageMode);
   EXPECT_FALSE(LogHas(log, "graphUsageMode reset to")) << "actual log:\n" << log;
@@ -6300,7 +6332,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigUndef_SetsUsa
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigSet_SetsUsageModeTwoAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
   EXPECT_EQ(2, c.config().graphUsageMode);
@@ -6309,7 +6341,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigSet_SetsUsage
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportZeroConfigSet_SetsUsageModeZeroAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 0}});
   EXPECT_EQ(0, c.config().graphUsageMode);
@@ -6318,7 +6350,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportZeroConfigSet_SetsUsag
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportInvalid_KeepsUsageModeAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 5}});
   EXPECT_EQ(7, c.config().graphUsageMode);
@@ -6327,7 +6359,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportInvalid_KeepsUsageMode
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxPositive_AssignsWithoutDisabledLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 4}});
   EXPECT_EQ(4, c.config().numRmaCtx);
@@ -6336,7 +6368,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxPositive_AssignsWithoutDisabled
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxZero_AssignsZeroAndLogsRmaDisabled) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 0}});
   EXPECT_EQ(0, c.config().numRmaCtx);
@@ -6344,7 +6376,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxZero_AssignsZeroAndLogsRmaDisab
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", -1}});
   EXPECT_EQ(9, c.config().numRmaCtx);
@@ -6353,7 +6385,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxNegative_KeepsConfigAndLogsTooL
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
   EXPECT_FALSE(LogHas(log, "maxP2pPeers reset to")) << "actual log:\n" << log;
@@ -6361,7 +6393,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigUndef_AssignsWi
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
@@ -6369,7 +6401,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
@@ -6377,7 +6409,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
@@ -6385,7 +6417,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6394,7 +6426,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_Leaves
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering reset to")) << "actual log:\n" << log;
@@ -6402,7 +6434,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigUndef_Assig
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingOneConfigZero_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 0;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 1}});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6411,7 +6443,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingOneConfigZero_Overwri
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigOne_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
@@ -6420,7 +6452,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigOne_Overwri
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingTwo_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 2}});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6429,7 +6461,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingTwo_KeepsConfigAndLog
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingNegative_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 0;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", -1}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
@@ -6438,7 +6470,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingNegative_KeepsConfigA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigUndef_LeavesNetNameNull) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(nullptr, c.config().netName);
   EXPECT_FALSE(LogHas(log, "netName reset to")) << "actual log:\n" << log;
@@ -6446,7 +6478,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigUndef_LeavesNetNameNull
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigUndef_CopiesEnvValueWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "Socket");
   const std::string log = c.RunCapturingLog({});
   ASSERT_NE(nullptr, c.config().netName);
@@ -6456,7 +6488,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigUndef_CopiesEnvValueWitho
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIb_TranslatesToIbCast) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "ROCM-IB");
   EXPECT_EQ(ncclSuccess, c.Run({}));
   ASSERT_NE(nullptr, c.config().netName);
@@ -6464,7 +6496,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIb_TranslatesToIbCast) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIbLowerCase_TranslatesToIbCast) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "rocm-ib");
   EXPECT_EQ(ncclSuccess, c.Run({}));
   ASSERT_NE(nullptr, c.config().netName);
@@ -6472,7 +6504,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIbLowerCase_TranslatesToIbCast
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigSet_ReplacesConfigNameAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().netName = "IB";
   SetMicroEnv("NCCL_NET", "Socket");
   const std::string log = c.RunCapturingLog({});
@@ -6482,7 +6514,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigSet_ReplacesConfigNameAnd
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigSet_CopiesIntoFreshBufferAndNeverFreesTheIncumbent) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const char* const configured = "IB";
   c.config().netName = configured;
   int incumbentFrees = 0;
@@ -6503,7 +6535,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigSet_CopiesIntoFreshBuff
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().splitShare);
   EXPECT_FALSE(LogHas(log, "splitShare reset to")) << "actual log:\n" << log;
@@ -6511,7 +6543,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigUndef_AssignsWithoutRese
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().splitShare = 0;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().splitShare);
@@ -6520,14 +6552,14 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigSet_OverwritesAndLogsRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareOutOfRange_ClampedToZeroWithLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 5}});
   EXPECT_EQ(0, c.config().splitShare);
   EXPECT_TRUE(LogHas(log, "splitShare 5 is not a valid value 0/1, set it to 0")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().shrinkShare);
   EXPECT_FALSE(LogHas(log, "shrinkShare reset to")) << "actual log:\n" << log;
@@ -6535,7 +6567,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigUndef_AssignsWithoutRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().shrinkShare = 0;
   const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().shrinkShare);
@@ -6544,13 +6576,13 @@ TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigSet_OverwritesAndLogsRe
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareOutOfRange_KeptVerbatimUnlikeSplitShare) {
-  Env_ConfigComm c;
+  ConfigComm c;
   EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SHRINK_SHARE_RESOURCES", 5}}));
   EXPECT_EQ(5, c.config().shrinkShare);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitAndShrinkShareBothSet_EachTakesItsOwnValue) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().splitShare = 9;
   c.config().shrinkShare = 9;
   EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SPLIT_SHARE_RESOURCES", 1}, {"COMM_SHRINK_SHARE_RESOURCES", 0}}));
@@ -6559,7 +6591,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitAndShrinkShareBothSet_EachTakesItsO
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableEnvSetConfigUndef_AssignsAndLogsEnvironment) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(1, c.config().collnetEnable);
@@ -6568,7 +6600,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableEnvSetConfigUndef_AssignsAn
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().collnetEnable = 0;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
   const std::string log = c.RunCapturingLog({});
@@ -6577,7 +6609,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableConfigSet_OverwritesAndLogs
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableHexValue_ParsedBaseZeroThenClampedToZero) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "0x3");
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(0, c.config().collnetEnable);
@@ -6586,7 +6618,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableHexValue_ParsedBaseZeroThen
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableParsesToUndefSentinel_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().collnetEnable = 1;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "-2147483648");
   const std::string log = c.RunCapturingLog({});
@@ -6596,7 +6628,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableParsesToUndefSentinel_Leave
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
   const std::string log = c.RunCapturingLog({});
@@ -6606,7 +6638,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
   c.config().CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
@@ -6618,7 +6650,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyZeroAndEfficiency_UnsetsEfficiencyWithWarn) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY;
   const std::string log = c.RunCapturingLog({});
@@ -6627,7 +6659,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyZeroAndEfficiency_UnsetsEfficie
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
   EXPECT_EQ(4, c.config().nvlsCTAs);
   EXPECT_FALSE(LogHas(log, "nvlsCTAs reset to")) << "actual log:\n" << log;
@@ -6635,7 +6667,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigUndef_AssignsWitho
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
   EXPECT_EQ(4, c.config().nvlsCTAs);
@@ -6643,7 +6675,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigSet_OverwritesAndL
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsZero_AssignedThenRestoredToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 0}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
@@ -6652,7 +6684,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsZero_AssignedThenRestoredToUndef
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsNegative_AssignedThenRestoredToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", -1}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
@@ -6660,7 +6692,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsNegative_AssignedThenRestoredToU
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveChannelLimit_CappedToMaxChannels) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS + 1;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
@@ -6674,7 +6706,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveChannelLimit_CappedToMaxChan
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAtChannelLimit_NotCapped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
@@ -6684,7 +6716,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAtChannelLimit_NotCapped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAboveChannelLimit_CappedToMaxChannels) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = MAXCHANNELS + 1;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
@@ -6695,7 +6727,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAboveChannelLimit_CappedToMaxChan
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAtChannelLimit_NotCapped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
@@ -6704,7 +6736,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAtChannelLimit_NotCapped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveMaxCTAs_LowersMinToMax) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 8;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6714,7 +6746,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveMaxCTAs_LowersMinToMax) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsEqualsMaxCTAs_LeavesBothAlone) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 4;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6725,7 +6757,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsEqualsMaxCTAs_LeavesBothAlone) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveBothLimits_CapsToChannelLimitBeforeLoweringToMaxCTAs) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS + 1;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6740,7 +6772,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveBothLimits_CapsToChannelLimi
 
 // A MIN_CTAS override does apply, then :3183 lowers it to the still-undefined maxCTAs (AICOMRCCL-1685 TODO at :1163).
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBackToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().minCTAs);
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().maxCTAs);
@@ -6749,26 +6781,26 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBa
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NoCheckEnv_ResetsCheckModeToDefault) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.comm()->checkMode = ncclCheckModeDebugGlobal;
   c.RunCapturingLog({});
   EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_DeprecatedCheckPointers_SelectsDebugLocal) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.RunCapturingLog({{"CHECK_POINTERS", 1}});
   EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CheckPointersNotOne_LeavesCheckModeDefault) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.RunCapturingLog({{"CHECK_POINTERS", 2}});
   EXPECT_EQ(ncclCheckModeDefault, c.comm()->checkMode);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugGlobal_SelectsDebugGlobalCaseInsensitively) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_CHECK_MODE", "debug_global");
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(ncclCheckModeDebugGlobal, c.comm()->checkMode);
@@ -6776,14 +6808,14 @@ TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugGlobal_SelectsDebugGlobalC
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CheckModeDebugLocalOverridesCheckPointers_SelectsDebugLocal) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_LOCAL");
   c.RunCapturingLog({{"CHECK_POINTERS", 1}});
   EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CheckModeUnrecognised_KeepsTheCheckPointersChoice) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_CHECK_MODE", "DEBUG_GLOBALLY");
   c.RunCapturingLog({{"CHECK_POINTERS", 1}});
   EXPECT_EQ(ncclCheckModeDebugLocal, c.comm()->checkMode);
@@ -8220,15 +8252,30 @@ TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewco
   EXPECT_EQ(0, spy.calls());
 }
 
-TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesAndClearsNewcomm) {
+TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesClearsNewcommAndReleasesTheJobAndCommId) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
-  Grow_LaunchSpy spy(ncclInternalError);
+  DeleteWatch watch(nullptr);
+  void* commId = nullptr;
+  Grow_LaunchSpy spy(ncclInternalError, [&](ncclCommInitRankAsyncJob* job) {
+    commId = job->commId;
+    watch.Arm(job);
+  });
   ncclComm_t out = nullptr;
+  Grow_FreeSpy frees;
+
   EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+
   EXPECT_EQ(1, spy.calls());
   EXPECT_EQ(nullptr, out) << "a failed launch must not publish a half-built comm";
+  EXPECT_EQ(1, watch.hits()) << "init.cc:4416 must delete the job it owns on this arrival";
+  ASSERT_NE(nullptr, commId);
+  EXPECT_EQ(1, std::count(frees.freed().begin(), frees.freed().end(), commId))
+      << "init.cc:4413 releases the commId before deleting the job";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
 }
 
 namespace {
@@ -8604,11 +8651,25 @@ void Tr_InstallGpuNodes(ncclTopoSystem* topo, int nRanks, const char* gcn) {
   }
 }
 
+// Restores g_bootstrapAllGather when it goes out of scope; the installed lambda captures test-body locals.
+class ScopedBootstrapAllGather {
+ public:
+  ScopedBootstrapAllGather() = default;
+  ScopedBootstrapAllGather(const ScopedBootstrapAllGather&) = delete;
+  ScopedBootstrapAllGather& operator=(const ScopedBootstrapAllGather&) = delete;
+  ~ScopedBootstrapAllGather() {
+    g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  }
+};
+
 // Scripts both allgathers; AllGather3 broadcasts this rank's row so the :2161 folds read back what the UUT computed.
 // An empty specs means one default PeerSpec per rank, which is what almost every call site wants.
-void Tr_InstallGathers(TransportsRankComm& c, std::vector<PeerSpec> specs = {},
-                       std::function<void(int, Tr_AllGatherInfo&)> patch = nullptr) {
-  if (specs.empty()) specs.resize(c.nRanks());
+[[nodiscard]] ScopedBootstrapAllGather Tr_InstallGathers(
+    TransportsRankComm& c, std::vector<PeerSpec> specs = {},
+    std::function<void(int, Tr_AllGatherInfo&)> patch = nullptr) {
+  if (specs.empty()) {
+    specs.resize(c.nRanks());
+  }
   InstallPeerInfoAllGather(c, std::move(specs));
   std::function<ncclResult_t(void*, void*, int)> peerFn = g_bootstrapAllGather;
   const int selfRank = c.rank();
@@ -8642,6 +8703,7 @@ void Tr_InstallGathers(TransportsRankComm& c, std::vector<PeerSpec> specs = {},
     }
     return ncclSuccess;
   };
+  return ScopedBootstrapAllGather{};
 }
 
 // Rung 3's terminator opened, one GPU node per rank, and a ring channel count below the :1883 clamp.
@@ -8664,7 +8726,7 @@ TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_WarnsAndProbesNoPeerLi
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;  // :1801 needs getBusId to answer, or every pair is -1
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   ScopedHook devCount(g_hipGetDeviceCount, [](int*) { return hipErrorInvalidValue; });
   const std::string log = RcclUnitTesting::CaptureLog(
       [&] { EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers())); });
@@ -8677,7 +8739,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerAccessDenied_ProbesNoLinkTypes) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
   EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // g_hipDeviceCanAccessPeer defaults to a hip error
@@ -8689,7 +8751,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerAccessGranted_ProbesEveryOrderedPai
   TransportsRankComm c(kNRanks, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
     *p = 1;
     return hipSuccess;
@@ -8713,7 +8775,7 @@ TEST_F(InitMicrotest, InitTransportsRank_SelfBusIdNotLocallyVisible_StopsAfterTh
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;  // getBusId now answers 0 for every device
   c.get()->busId = 0x1234;                    // ... but fillInfo reports this one for rank 0
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
     *p = 1;
     return hipSuccess;
@@ -8728,7 +8790,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx906AllXgmi_RaisesChannelCountToFour)
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx906");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
     *p = 1;
     return hipSuccess;
@@ -8746,7 +8808,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx906OneNonXgmiLink_KeepsTwoChannels) 
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx906");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   int probe = 0;
   ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
     *p = 1;
@@ -8767,7 +8829,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RankHasNoGpuNode_ReturnsInternalErrorBe
   c.installTopo();  // nodes[GPU].count stays 0, so no node carries rank 0
   InstallTopoComputeSuccess(/*nChannels=*/4);
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclSuccess;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   const std::string log = RcclUnitTesting::CaptureLog(
       [&] { EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers())); });
   EXPECT_TRUE(LogHas(log, "ncclTopoRankToIndex could not find rank 0")) << "actual log:\n" << log;
@@ -8784,7 +8846,7 @@ TEST_F(InitMicrotest, InitTransportsRank_GpuNodesOutOfRankOrder_ReadsArchFromThi
   topo->nodes[GPU].nodes[1].gpu.rank = 0;
   std::snprintf(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn,
                 sizeof(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn), "gfx1250");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);  // the gfx1250 rule at :1937, not gfx942's 16
 }
@@ -8794,7 +8856,7 @@ TEST_F(InitMicrotest, InitTransportsRank_GpuNodesOutOfRankOrder_ReadsArchFromThi
 TEST_F(InitMicrotest, InitTransportsRank_UnknownArch_LeavesChannelCountAtTwo) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, g_ncclTopoPostsetNc);
 }
@@ -8802,7 +8864,7 @@ TEST_F(InitMicrotest, InitTransportsRank_UnknownArch_LeavesChannelCountAtTwo) {
 TEST_F(InitMicrotest, InitTransportsRank_Gfx908_ScalesChannelCountByRingChannels) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/1);
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);  // max(4/1, 2)
 }
@@ -8810,7 +8872,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx908_ScalesChannelCountByRingChannels
 TEST_F(InitMicrotest, InitTransportsRank_Gfx908ManyRingChannels_FloorsChannelCountAtTwo) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/4);
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(4/4, 2), i.e. the floor rather than the quotient
 }
@@ -8818,7 +8880,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx908ManyRingChannels_FloorsChannelCou
 TEST_F(InitMicrotest, InitTransportsRank_Gfx90aFullTopology_RaisesChannelCountToFour) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);
 }
@@ -8828,7 +8890,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx90aPartialTopology_KeepsTwoChannels)
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
   topo->nodes[GPU].count = 5;  // init.cc:1651 pins topo->nRanks to nRanks, so vary the node count
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(2, 4/4)
 }
@@ -8836,7 +8898,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx90aPartialTopology_KeepsTwoChannels)
 TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAboveHalfTheMaximum_CollapsesToOneChannel) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2 + 1);  // :1878 would leave 4
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetNc);
 }
@@ -8844,7 +8906,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAboveHalfTheMaximum_Collaps
 TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAtHalfTheMaximum_KeepsTheArchChannelCount) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2);
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);  // the boundary the strict > at :1883 exists for
 }
@@ -8852,7 +8914,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAtHalfTheMaximum_KeepsTheAr
 TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx1250");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);
   EXPECT_TRUE(c.get()->topo->ll128Enabled);  // :1944 default-enables LL128 on this arch
@@ -8861,7 +8923,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1250_LeavesLl128Disabled) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   g_hipDeviceGetAttributeResult = hipSuccess;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
@@ -8872,7 +8934,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Ll128ForceEnabled_TurnsLl128OnForAnyArc
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   SetParams({{"RCCL_LL128_FORCE_ENABLE", 1}});
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->topo->ll128Enabled);
 }
@@ -8880,7 +8942,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Ll128ForceEnabled_TurnsLl128OnForAnyArc
 TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksOneNode_UsesSixteenChannels) {
   TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx950");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(16, g_ncclTopoPostsetNc);
 }
@@ -8888,7 +8950,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksOneNode_UsesSixteenChanne
 TEST_F(InitMicrotest, InitTransportsRank_Gfx950FourRanksOneNode_UsesEightChannels) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx950");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(8, g_ncclTopoPostsetNc);
 }
@@ -8899,7 +8961,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksTwoNodes_FallsBackToFourC
   Tr_ReachAllGather3(c, "gfx950");
   std::vector<PeerSpec> specs(2);
   specs[1].node = 1;
-  Tr_InstallGathers(c, specs);
+  const auto gathers = Tr_InstallGathers(c, specs);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);
 }
@@ -8907,7 +8969,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksTwoNodes_FallsBackToFourC
 TEST_F(InitMicrotest, InitTransportsRank_Gfx942TwoRanks_UsesSixteenChannels) {
   TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   g_hipDeviceGetAttributeResult = hipSuccess;  // :1906 is a CUDACHECK, so it must not error out
   g_hipDirectManagedMemAccess = 0;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8918,7 +8980,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942TwoRanks_UsesSixteenChannels) {
 TEST_F(InitMicrotest, InitTransportsRank_Gfx942FourRanks_UsesFourChannels) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   g_hipDeviceGetAttributeResult = hipSuccess;
   g_hipDirectManagedMemAccess = 0;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8928,7 +8990,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942FourRanks_UsesFourChannels) {
 TEST_F(InitMicrotest, InitTransportsRank_Gfx942ThreeRanks_LeavesTheChannelCountAtTwo) {
   TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   g_hipDeviceGetAttributeResult = hipSuccess;
   g_hipDirectManagedMemAccess = 0;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8938,7 +9000,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942ThreeRanks_LeavesTheChannelCountA
 TEST_F(InitMicrotest, InitTransportsRank_Gfx942DeviceAttributeFails_PropagatesTheCudaError) {
   TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclUnhandledCudaError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
@@ -8949,7 +9011,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedMultiNode_UsesSixChannels)
   Tr_ReachAllGather3(c, "gfx942");
   std::vector<PeerSpec> specs(2);
   specs[1].node = 1;
-  Tr_InstallGathers(c, specs);
+  const auto gathers = Tr_InstallGathers(c, specs);
   g_hipDeviceGetAttributeResult = hipSuccess;
   g_hipDirectManagedMemAccess = 1;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8960,7 +9022,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedMultiNode_UsesSixChannels)
 TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedSingleNode_TakesTheRankCountArm) {
   TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx942");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   g_hipDeviceGetAttributeResult = hipSuccess;
   g_hipDirectManagedMemAccess = 1;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8972,7 +9034,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx942UnmanagedMultiNode_TakesTheRankCo
   Tr_ReachAllGather3(c, "gfx942");
   std::vector<PeerSpec> specs(2);
   specs[1].node = 1;
-  Tr_InstallGathers(c, specs);
+  const auto gathers = Tr_InstallGathers(c, specs);
   g_hipDeviceGetAttributeResult = hipSuccess;
   g_hipDirectManagedMemAccess = 0;
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -8986,7 +9048,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopology_EnablesP2pOverNetwork) 
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
   SetParams({{"RCCL_P2P_NET_DISABLE", 0}});  // the compiled-in default is 1, i.e. force-disabled
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->p2pNet);
 }
@@ -8996,7 +9058,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyForcedIntra_LeavesP2pOve
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL | RCCL_TOPO_FORCE_INTRA;
   SetParams({{"RCCL_P2P_NET_DISABLE", 0}});
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->p2pNet);
 }
@@ -9006,9 +9068,8 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyP2pNetDisabled_LeavesP2p
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
   SetParams({{"RCCL_P2P_NET_DISABLE", 1}});
-  Tr_InstallGathers(c);
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const auto gathers = Tr_InstallGathers(c);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_EQ(0, c.get()->p2pNet);
@@ -9020,9 +9081,8 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeTopologyWithoutGdr_SkipsTheP2pOverN
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_4P2H_ROME;
-  Tr_InstallGathers(c);
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const auto gathers = Tr_InstallGathers(c);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_EQ(0, c.get()->p2pNet);
@@ -9051,14 +9111,13 @@ TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsItsDeviceCount)
   g_trNetDeviceCount = kNetDevices;
   int rowNetCount = -1;
   int rowCollNetCount = -1;
-  Tr_InstallGathers(c, {}, [&](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [&](int r, Tr_AllGatherInfo& row) {
     if (r == 0) {
       rowNetCount = row.localNetDeviceCount;
       rowCollNetCount = row.localCollNetCount;
     }
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "Rank 0: 7 Net devices")) << "actual log:\n" << log;
@@ -9086,7 +9145,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsBandwidthForThi
                     *bw = 0.0f;
                     return ncclSuccess;
                   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, byBw.calls);
   EXPECT_EQ(kSelfNodeIndex, seenGpu);
@@ -9101,7 +9160,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NoNetPlugin_SkipsTheDeviceProbe) {
     *bw = 0.0f;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
   EXPECT_EQ(0, byBw.calls);  // comm->ncclNet->devices is null, so :1949-1953 never runs
@@ -9116,11 +9175,10 @@ TEST_F(InitMicrotest, InitTransportsRank_CollNetPlugin_ReportsItsDeviceCount) {
   c.get()->ncclCollNet = &collNet;
   g_trCollNetDeviceCount = kCollNetDevices;
   int rowCollNetCount = -1;
-  Tr_InstallGathers(c, {}, [&](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [&](int r, Tr_AllGatherInfo& row) {
     if (r == 0) rowCollNetCount = row.localCollNetCount;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "Rank 0: 3 CollNet devices")) << "actual log:\n" << log;
@@ -9142,7 +9200,7 @@ TEST_F(InitMicrotest, InitTransportsRank_SingleRank_PresetsEightChannels) {
     treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(kSingleRankChannels, ringAtPreset);
   EXPECT_EQ(kSingleRankChannels, treeAtPreset);
@@ -9158,7 +9216,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TwoRanks_PresetsTheComputedChannelCount
     ringAtPreset = comm->graphs[NCCL_ALGO_RING].nChannels;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(kComputedChannels, ringAtPreset);  // positive anchor for the single-rank override
 }
@@ -9170,7 +9228,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusCheck_SeesThisRanksTopolog
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->romeTopoModelIdx = kRomeModelIdx;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_rcclCheckRomeTopoModelIdxConsensusCalls);
   EXPECT_EQ(4, g_rcclRomeConsensusNranks);
@@ -9183,7 +9241,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsTheRomeCons
   Tr_ReachAllGather3(c, "gfx900");
   std::vector<PeerSpec> specs(3);
   specs[2].node = 1;  // two ranks on one host, one on another
-  Tr_InstallGathers(c, specs);
+  const auto gathers = Tr_InstallGathers(c, specs);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
   EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
@@ -9193,7 +9251,7 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclInvalidArgument;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
@@ -9203,7 +9261,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSeco
   Tr_ReachAllGather3(c, "gfx900");
   ScopedHook preset(g_ncclTopoPreset,
                     [](ncclComm*, ncclTopoRanks*) { return ncclInvalidArgument; });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, preset.calls);
   EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
@@ -9215,7 +9273,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsFewerChannels_FoldsDownToTha
   const int kPeerChannels = 2;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 2) {
       row.graphInfo[NCCL_ALGO_RING].nChannels = kPeerChannels;
       row.graphInfo[NCCL_ALGO_TREE].nChannels = kPeerChannels;
@@ -9230,7 +9288,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsMoreChannels_KeepsTheLocalCo
   const int kLocalChannels = 4;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 2) row.graphInfo[NCCL_ALGO_RING].nChannels = kLocalChannels + 3;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9242,7 +9300,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsHigherTypeIntra_FoldsUpToTha
   const int kPeerCrossNic = 1;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 3) {
       row.graphInfo[NCCL_ALGO_RING].typeIntra = kPeerTypeIntra;
       row.graphInfo[NCCL_ALGO_RING].crossNic = kPeerCrossNic;
@@ -9262,7 +9320,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt)
     *bw = kLocalBw;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 1) row.minNetBw = kPeerBw;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9277,7 +9335,7 @@ TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) 
     *v = 1;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 2) row.isAllNvlink = 0;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9292,7 +9350,7 @@ TEST_F(InitMicrotest, InitTransportsRank_EveryPeerAllNvlink_KeepsIsAllNvlinkSet)
     *v = 1;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->isAllNvlink);  // positive anchor for the clear above
 }
@@ -9301,11 +9359,10 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerOnAnotherCpuArch_MarksTheCommMixed)
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   const int localArch = c.get()->cpuArch;
-  Tr_InstallGathers(c, {}, [localArch](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [localArch](int r, Tr_AllGatherInfo& row) {
     if (r == 1) row.cpuArch = localArch + 1;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_EQ(NCCL_TOPO_CPU_ARCH_MIXED, c.get()->cpuArch);
@@ -9318,11 +9375,10 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerFromAnotherCpuVendor_MarksTheCommMi
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   const int localVendor = c.get()->cpuVendor;
-  Tr_InstallGathers(c, {}, [localVendor](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [localVendor](int r, Tr_AllGatherInfo& row) {
     if (r == 3) row.cpuVendor = localVendor + 1;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_EQ(NCCL_TOPO_CPU_VENDOR_MIXED, c.get()->cpuVendor);
@@ -9333,9 +9389,8 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerFromAnotherCpuVendor_MarksTheCommMi
 TEST_F(InitMicrotest, InitTransportsRank_UniformCpus_ReportsNoMixture) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c);
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const auto gathers = Tr_InstallGathers(c);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_FALSE(LogHas(log, "CPUs with mixed")) << "actual log:\n" << log;
@@ -9348,8 +9403,8 @@ TEST_F(InitMicrotest, InitTransportsRank_DistinctRingRoots_MakesEveryRankItsOwnN
   const int kNRanks = 4;
   TransportsRankComm c(kNRanks, /*rank=*/2);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
-                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  const auto gathers = Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                                         [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(kNRanks, c.get()->nNodes);
   EXPECT_EQ(std::vector<int>({0, 1, 2, 3}),
@@ -9366,8 +9421,9 @@ TEST_F(InitMicrotest, InitTransportsRank_InterleavedRingRoots_GroupsRanksByTheir
   const int kSelfRank = 3;
   TransportsRankComm c(kNRanks, kSelfRank);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
-                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + (r % 2); });
+  const auto gathers = Tr_InstallGathers(
+      c, std::vector<PeerSpec>(kNRanks),
+      [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + (r % 2); });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, c.get()->nNodes);
   EXPECT_EQ(std::vector<int>({0, 1, 0, 1}),
@@ -9388,8 +9444,9 @@ TEST_F(InitMicrotest, InitTransportsRank_UnevenNodes_RecordsBothTheMinAndMaxLoca
   const int kNRanks = 4;
   TransportsRankComm c(kNRanks, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
-                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = r == 3 ? 200 : 100; });
+  const auto gathers = Tr_InstallGathers(
+      c, std::vector<PeerSpec>(kNRanks),
+      [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = r == 3 ? 200 : 100; });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, c.get()->nNodes);
   EXPECT_EQ(3, c.get()->maxLocalRanks);
@@ -9403,8 +9460,8 @@ TEST_F(InitMicrotest, InitTransportsRank_OneRankPerNode_SetsIsOneRpn) {
   const int kNRanks = 3;
   TransportsRankComm c(kNRanks, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
-                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  const auto gathers = Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                                         [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->isOneRPN);
 }
@@ -9415,11 +9472,10 @@ TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCounts_WarnsAndFails) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   SetParams({{"IGNORE_NET_MISMATCH", 0}});  // the compiled-in default is 1, i.e. ignore
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     row.localNetDeviceCount = r == 1 ? 1 : 4;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "Rank 1 has 1 local Net devices (max 4).")) << "actual log:\n" << log;
@@ -9433,11 +9489,10 @@ TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsIgnored_ContinuesTo
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   SetParams({{"IGNORE_NET_MISMATCH", 1}});
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     row.localNetDeviceCount = r == 1 ? 1 : 4;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "(min 1, max 4). Ignoring due to NCCL_IGNORE_NET_MISMATCH.")) << "actual log:\n" << log;
@@ -9449,11 +9504,10 @@ TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsOnNonZeroRank_Stays
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
   Tr_ReachAllGather3(c, "gfx900");
   SetParams({{"IGNORE_NET_MISMATCH", 0}});  // the compiled-in default is 1, which would suppress it anyway
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     row.localNetDeviceCount = r == 1 ? 1 : 4;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_FALSE(LogHas(log, "mixed local Net device counts")) << "actual log:\n" << log;
@@ -9463,11 +9517,10 @@ TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsOnNonZeroRank_Stays
 TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCounts_WarnsAndFails) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     row.localCollNetCount = r == 2 ? 0 : 2;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "Rank 2 has 0 local CollNet devices (max 2).")) << "actual log:\n" << log;
@@ -9480,11 +9533,10 @@ TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCountsIgnored_Continu
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   SetParams({{"IGNORE_COLLNET_MISMATCH", 1}});
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     row.localCollNetCount = r == 2 ? 0 : 2;
   });
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_TRUE(LogHas(log, "(min 0, max 2). Ignoring due to NCCL_IGNORE_COLLNET_MISMATCH.")) << "actual log:\n" << log;
@@ -9500,7 +9552,7 @@ TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithMoreCliquesThanOne_EnablesCros
   c.get()->nvlDomainSize = 8;
   c.get()->clique.size = 4;
   SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->p2pCrossClique);
 }
@@ -9512,7 +9564,7 @@ TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithASingleClique_LeavesCrossCliqu
   c.get()->nvlDomainSize = 4;
   c.get()->clique.size = 4;  // not strictly greater, so :2151 stays false
   SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
   EXPECT_FALSE(c.get()->p2pCrossClique);
@@ -9522,7 +9574,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NvlsSupported_TunesNvlsBeforePostset) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   c.get()->nvlsSupport = 1;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclNvlsTuningCalls);
 }
@@ -9532,8 +9584,9 @@ TEST_F(InitMicrotest, InitTransportsRank_NvlsGraphHasNoChannels_DisablesNvlsAndS
   Tr_ReachAllGather3(c, "gfx900");
   c.get()->nvlsSupport = 1;
   c.get()->nvlsChannels = 4;
-  Tr_InstallGathers(c, std::vector<PeerSpec>(4),
-                    [](int, Tr_AllGatherInfo& row) { row.graphInfo[NCCL_ALGO_NVLS].nChannels = 0; });
+  const auto gathers = Tr_InstallGathers(
+      c, std::vector<PeerSpec>(4),
+      [](int, Tr_AllGatherInfo& row) { row.graphInfo[NCCL_ALGO_NVLS].nChannels = 0; });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->nvlsSupport);
   EXPECT_EQ(0, c.get()->nvlsChannels);
@@ -9544,7 +9597,7 @@ TEST_F(InitMicrotest, InitTransportsRank_CollNetChainGraphHasNoChannels_Disables
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   c.get()->config.collnetEnable = 1;
-  Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
     row.graphInfo[NCCL_ALGO_COLLNET_CHAIN].nChannels = 0;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9557,12 +9610,12 @@ TEST_F(InitMicrotest, InitTransportsRank_FewerNodesThanTheCollNetThreshold_Disab
   Tr_ReachAllGather3(c, "gfx900");
   ncclCollNet_t collNet{};
   collNet.devices = Tr_CollNetDevices;
+  g_trCollNetDeviceCount = 2;
   c.get()->ncclCollNet = &collNet;
   c.get()->config.collnetEnable = 1;
   SetParams({{"COLLNET_NODE_THRESHOLD", kCollNetNodeThreshold}});
-  Tr_InstallGathers(c);
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const auto gathers = Tr_InstallGathers(c);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_EQ(0, c.get()->config.collnetEnable);
@@ -9574,10 +9627,11 @@ TEST_F(InitMicrotest, InitTransportsRank_AtTheCollNetNodeThreshold_KeepsCollNetE
   Tr_ReachAllGather3(c, "gfx900");
   ncclCollNet_t collNet{};
   collNet.devices = Tr_CollNetDevices;
+  g_trCollNetDeviceCount = 2;
   c.get()->ncclCollNet = &collNet;
   c.get()->config.collnetEnable = 1;
   SetParams({{"COLLNET_NODE_THRESHOLD", 1}});
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->config.collnetEnable);  // 1 node is not < 1
 }
@@ -9592,7 +9646,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TreeDefinedByTheTopology_RunsTheTreeBas
     topo->treeDefined = true;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTreeBasePostsetCalls);
   EXPECT_EQ(&c.get()->graphs[NCCL_ALGO_TREE], g_ncclTreeBasePostsetGraph);
@@ -9601,7 +9655,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TreeDefinedByTheTopology_RunsTheTreeBas
 TEST_F(InitMicrotest, InitTransportsRank_TreeNotDefined_SkipsTheTreeBasePostset) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoPostsetCalls);
   EXPECT_EQ(0, g_ncclTreeBasePostsetCalls);
@@ -9610,7 +9664,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TreeNotDefined_SkipsTheTreeBasePostset)
 TEST_F(InitMicrotest, InitTransportsRank_Postset_ReceivesTheSevenAlgorithmGraphsWithNvlsAndTreeAliased) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   ncclTopoGraph* const g = c.get()->graphs;
   EXPECT_EQ(std::vector<ncclTopoGraph*>({&g[NCCL_ALGO_TREE], &g[NCCL_ALGO_RING], &g[NCCL_ALGO_COLLNET_DIRECT],
@@ -9627,7 +9681,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithANetNode_TakesTheSma
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
   topo->nodes[GPU].count = 5;
   topo->nodes[NET].count = 1;
-  Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
     row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9641,7 +9695,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithoutANetNode_KeepsThe
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
   topo->nodes[GPU].count = 5;
-  Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
     row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9652,7 +9706,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Cr8gFullTopology_RaisesChannelCountToFo
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_CR8G;
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);
 }
@@ -9662,7 +9716,7 @@ TEST_F(InitMicrotest, InitTransportsRank_Cr8gPartialTopology_KeepsTwoChannels) {
   ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
   topo->type = RCCL_TOPO_CR8G;
   topo->nodes[GPU].count = 5;  // != nRanks, so :1876 does not fire
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, g_ncclTopoPostsetNc);
 }
@@ -9678,7 +9732,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NicFused_ReachesThisRanksAllGatherRow) 
   });
   int rowsSeen = 0;
   int fusedRows = 0;
-  Tr_InstallGathers(c, {}, [&](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [&](int, Tr_AllGatherInfo& row) {
     rowsSeen++;
     if (row.nicFused) fusedRows++;
   });
@@ -9692,7 +9746,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NicNotFused_LeavesTheAllGatherRowClear)
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   int fusedRows = 0;
-  Tr_InstallGathers(c, {}, [&](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [&](int, Tr_AllGatherInfo& row) {
     if (row.nicFused) fusedRows++;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9709,7 +9763,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NicFusedCheckFails_PropagatesBeforeTheM
     *bw = 0.0f;
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, minBw.calls);
 }
@@ -9797,8 +9851,7 @@ TEST_F(InitMicrotest, CommAlloc_LaunchOrderImplicit_TracksTheCudaContext) {
   InstallCommAllocSuccess();
   SetParams({{"LAUNCH_ORDER_IMPLICIT", 1}});
   auto comm = FreshComm();
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
   });
   EXPECT_TRUE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
@@ -9808,8 +9861,7 @@ TEST_F(InitMicrotest, CommAlloc_LaunchOrderImplicit_TracksTheCudaContext) {
 TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_SkipsContextTracking) {
   InstallCommAllocSuccess();
   auto comm = FreshComm();
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
   });
   EXPECT_FALSE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
@@ -9938,7 +9990,7 @@ TEST_F(InitMicrotest, InitTransportsRank_GraphInfoIsMarshalledPerAlgorithm_NotFr
     treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;  // :2188 later overwrites it with ring's
     return ncclSuccess;
   });
-  Tr_InstallGathers(c);
+  const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(kTreeChannels, treeAtPreset);
   EXPECT_EQ(kRingChannels, c.get()->nChannels);  // single node, so :2191 takes the ring count
@@ -9959,7 +10011,7 @@ TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_RelocatesThe
   topo->nodes[GPU].count = 5;
   topo->nodes[NET].count = 1;
   Tr_InstallTopoComputePerGraph(kRingChannels, kTreeChannels);
-  Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int, Tr_AllGatherInfo& row) {
     row.graphInfo[NCCL_ALGO_TREE].nChannels = kFoldedTreeChannels;
   });
   ncclComm* comm = c.get();
@@ -9982,7 +10034,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsFewerChannels_FoldsNcD
   const int kPeerNc = 3;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx950");  // this rank contributes 8, so a peer's 3 has to win
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 2) row.nc = kPeerNc;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -9993,15 +10045,14 @@ TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsMoreChannels_KeepsTheS
   const int kLocalNc = 8;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx950");
-  Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
     if (r == 2) row.nc = kLocalNc + 4;
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(kLocalNc, g_ncclTopoPostsetNc);  // a min(), not a max()
 }
 
-// One shared buffer would let init.cc:992 read channels[0] for every c and still make four calls, so each
-// channel gets its own source and its own destination.
+// One shared buffer would let init.cc:992 read channels[0] and still make four calls, so each channel owns both ends.
 TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesEachChannelsOwnRanks) {
   const int kNRanks = 8;
   const int kChannelsWithRanks = 2;
