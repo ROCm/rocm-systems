@@ -342,20 +342,13 @@ struct ConSanProgramContainerId {
 /// Attribution reference from a semantic site to the symbol range through
 /// which it was decoded.
 ///
-/// The stable arena handle is authoritative. Kind and name remain as cheap
-/// presentation and selection facets; container geometry and descriptor
-/// identity are resolved through `ProgramInventory`. Execution owners are
-/// kept separately because a shared function can execute for several kernels.
+/// The stable arena handle is the sole container identity. Kind, name,
+/// geometry, and descriptor facts remain in `ProgramInventory`; repeating
+/// them on every site created a second presentation record that could drift.
+/// Execution owners remain separate because a shared function can execute for
+/// several kernels.
 struct ConSanProgramContainerRef {
   ConSanProgramContainerId id;
-  /// Whether the symbol is a dispatchable kernel or a helper function.
-  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
-  /// Symbol name retained for diagnostics and symbol-attributed inventory lookup.
-  std::string name;
-
-  /// Return whether this attribution record names a dispatchable kernel. The
-  /// result is derived from `kind`, so no parallel boolean can disagree.
-  [[nodiscard]] bool is_kernel() const { return kind == ConSanProgramContainerKind::Kernel; }
 
   bool operator==(const ConSanProgramContainerRef &) const = default;
 };
@@ -455,8 +448,6 @@ struct ConSanProgramContainer {
 consan_program_container_ref(const ConSanProgramContainer &container) {
   return {
       .id = container.id,
-      .kind = container.kind,
-      .name = container.name,
   };
 }
 

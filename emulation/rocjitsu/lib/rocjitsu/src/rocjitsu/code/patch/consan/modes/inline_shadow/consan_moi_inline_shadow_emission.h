@@ -21,6 +21,7 @@ struct MoiInlineShadowEmissionPlan {
   uint64_t report_generation = 0;
   uint64_t report_dispatch_id = 0;
   bool track_atomics = false;
+  bool source_in_kernel = false;
   bool byte_granular_external_shadow = false;
   bool spill_overlaps_guest_operands = false;
   uint16_t required_exec_save_sgpr_count = 0;

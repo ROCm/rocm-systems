@@ -84,6 +84,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
+    const ConSanProgramContainer *container =
+        result.program_inventory.container(candidate.site().container.id);
+    if (container == nullptr)
+      continue;
     const ConSanCandidateResourcePlan *resource_plan =
         resource_plan_for_candidate(result.resource_plans, candidate);
     if (resource_plan == nullptr)
@@ -316,6 +320,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         .report_generation = options.moi_report_generation,
         .report_dispatch_id = options.moi_report_dispatch_id,
         .track_atomics = options.moi_track_atomics,
+        .source_in_kernel = container->is_kernel(),
         .byte_granular_external_shadow = requires_wave_partitioned_exact_shadow,
         .spill_overlaps_guest_operands = spill.has_value(),
         .required_exec_save_sgpr_count = moi_exec_save_sgpr_count(

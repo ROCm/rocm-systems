@@ -12,8 +12,7 @@ const ConSanProgramContainer *resolve_moi_evidence_container(const ProgramInvent
   const ConSanProgramSite *site = inventory.program_site(source_site);
   const ConSanProgramContainer *container =
       site == nullptr ? nullptr : inventory.container(site->container.id);
-  if (site == nullptr || container == nullptr || site->container.kind != container->kind ||
-      site->container.name != container->name ||
+  if (site == nullptr || container == nullptr ||
       (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name))) {
     return nullptr;
   }
@@ -42,8 +41,7 @@ materialize_moi_communication_site(const ProgramInventory &inventory,
   ConSanAtomicSite result;
   if (const ConSanAtomicSite *atomic = source->get_if<ConSanAtomicSite>()) {
     result = *atomic;
-  } else if (const ConSanOrdinaryMemorySite *ordinary =
-                 source->get_if<ConSanOrdinaryMemorySite>();
+  } else if (const ConSanOrdinaryMemorySite *ordinary = source->get_if<ConSanOrdinaryMemorySite>();
              ordinary != nullptr &&
              (ordinary->support_reason == ConSanOrdinaryMemorySupportReason::Supported ||
               ordinary->support_reason ==
@@ -137,8 +135,8 @@ resolve_moi_fence_evidence_source(const ProgramInventory &inventory,
     return std::nullopt;
   }
 
-  MoiFenceEvidenceSourceView result{association, fence_event, communication_event, sequence,
-                                    fence_site, *communication_site};
+  MoiFenceEvidenceSourceView result{association, fence_event, communication_event,
+                                    sequence,    fence_site,  *communication_site};
   if (result.captures_address_before_guest() &&
       (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
        sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
@@ -150,8 +148,7 @@ resolve_moi_fence_evidence_source(const ProgramInventory &inventory,
     return std::nullopt;
   }
   if (result.patch_size() == 0u ||
-      result.patch_text_offset() >
-          std::numeric_limits<uint64_t>::max() - result.patch_size()) {
+      result.patch_text_offset() > std::numeric_limits<uint64_t>::max() - result.patch_size()) {
     return std::nullopt;
   }
   return result;

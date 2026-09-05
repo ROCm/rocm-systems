@@ -1897,7 +1897,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     words.insert(words.end(), accounting_words.begin(), accounting_words.end());
     words.push_back(*restore_valid_exec);
   }
-  if (candidate.site().container.is_kernel() && candidate.is_flat() &&
+  if (plan.source_in_kernel && candidate.is_flat() &&
       candidate.site().flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
     // Likely provenance deliberately admits flat sites whose static dataflow
     // cannot prove one aperture. Resolve that uncertainty with the same high

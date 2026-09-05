@@ -101,7 +101,8 @@ TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched
   ASSERT_TRUE(consan_patch_succeeded(selected)) << testing::PrintToString(selected.errors);
   ASSERT_TRUE(selected.modified()) << testing::PrintToString(selected.warnings);
   ASSERT_EQ(test_admitted_accesses(selected).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(selected).front().container.name, "unrelated_kernel");
+  EXPECT_EQ(test_program_container_name(selected, test_admitted_accesses(selected).front()),
+            "unrelated_kernel");
   const auto unrelated = std::ranges::find(selected.program_inventory.kernels(), "unrelated_kernel",
                                            &ConSanProgramContainer::name);
   ASSERT_NE(unrelated, selected.program_inventory.kernels().end());
@@ -138,7 +139,8 @@ TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched
   ASSERT_TRUE(complete_shared_ownership.modified())
       << testing::PrintToString(complete_shared_ownership.warnings);
   ASSERT_EQ(test_admitted_accesses(complete_shared_ownership).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(complete_shared_ownership).front().container.name,
+  EXPECT_EQ(test_program_container_name(complete_shared_ownership,
+                                        test_admitted_accesses(complete_shared_ownership).front()),
             "shared_lds_helper");
   const auto shared_patch =
       std::ranges::find(complete_shared_ownership.patches,
@@ -239,8 +241,8 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
   EXPECT_EQ(test_admitted_accesses(result)[0].origin, ConSanAccessOrigin::NativeLds);
   EXPECT_EQ(test_admitted_accesses(result)[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_EQ(test_admitted_accesses(result)[0].container.kind, ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(test_admitted_accesses(result)[0].container.name, "lds_probe");
+  EXPECT_EQ(test_program_container(result, test_admitted_accesses(result)[0]),
+            &result.program_inventory.kernels().front());
   EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic_view(), "ds_store_b32");
   EXPECT_EQ(test_admitted_accesses(result)[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(test_admitted_accesses(result)[0].decoded_file_offset(), 0x100u);
@@ -367,7 +369,8 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_owner_0");
+  EXPECT_EQ(test_program_container_name(result, test_admitted_accesses(result).front()),
+            "shared_owner_0");
   EXPECT_NE(test_admitted_accesses(result).front().execution_owners.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncKind::Barrier);
@@ -2188,7 +2191,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   ASSERT_NE(first_kernel, result.program_inventory.kernels().end());
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().container.name, "lds_probe");
+  EXPECT_EQ(test_program_container_name(result, test_admitted_accesses(result).front()),
+            "lds_probe");
   EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_store_b16");
   EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);

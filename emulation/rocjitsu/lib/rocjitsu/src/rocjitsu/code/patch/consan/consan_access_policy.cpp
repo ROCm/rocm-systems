@@ -88,10 +88,12 @@ namespace {
   return std::ranges::find(sites, site) != sites.end();
 }
 
-[[nodiscard]] bool contains_substring(std::span<const ConSanProgramSite *const> aliases,
+[[nodiscard]] bool contains_substring(const ProgramInventory &inventory,
+                                      std::span<const ConSanProgramSite *const> aliases,
                                       std::string_view filter) {
   return filter.empty() || std::ranges::any_of(aliases, [&](const auto *access) {
-           return access->container.name.find(filter) != std::string::npos;
+           const ConSanProgramContainer *container = inventory.container(access->container.id);
+           return container != nullptr && container->name.find(filter) != std::string::npos;
          });
 }
 
@@ -103,12 +105,16 @@ namespace {
     return container == nullptr ? std::optional<uint64_t>{}
                                 : std::optional{container->entry_text_offset};
   };
-  return std::tuple(lhs.container.kind, container_entry(lhs), lhs.origin, lhs.kind,
+  const auto container_kind = [&](const ConSanProgramSite &site) {
+    const ConSanProgramContainer *container = inventory.container(site.container.id);
+    return container == nullptr ? ConSanProgramContainerKind::Count : container->kind;
+  };
+  return std::tuple(container_kind(lhs), container_entry(lhs), lhs.origin, lhs.kind,
                     lhs.address_space, lhs.provenance, lhs.confidence, lhs.lowering,
                     lhs.decoded_file_offset(), lhs.size(), lhs.decoded_width_bits,
                     lhs.mnemonic_view(), lhs.flat_address_space_hint, lhs.operands, lhs.ranges,
                     lhs.exclusions) ==
-         std::tuple(rhs.container.kind, container_entry(rhs), rhs.origin, rhs.kind,
+         std::tuple(container_kind(rhs), container_entry(rhs), rhs.origin, rhs.kind,
                     rhs.address_space, rhs.provenance, rhs.confidence, rhs.lowering,
                     rhs.decoded_file_offset(), rhs.size(), rhs.decoded_width_bits,
                     rhs.mnemonic_view(), rhs.flat_address_space_hint, rhs.operands, rhs.ranges,
@@ -729,7 +735,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     const bool enabled = flat ? request.group_flat_enabled : request.native_lds_enabled;
     const std::vector<uint64_t> owner_descriptors = inventory.execution_owner_descriptors(aliases);
 
-    if (!contains_substring(aliases, request.container_filter) ||
+    if (!contains_substring(inventory, aliases, request.container_filter) ||
         !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
                                               request.kernel_name_allowlist)) {
       reason = ConSanAccessPolicyReason::ContainerFilterExcluded;

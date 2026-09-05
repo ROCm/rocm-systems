@@ -73,6 +73,17 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
   kernel.descriptor_file_offset = 192;
   kernel.entry_text_offset = 0;
   builder.add_kernel(std::move(kernel));
+  for (const ConSanSyncEvent &event : events) {
+    const std::string name = event.identity.substr(0, event.identity.find('|'));
+    if (std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name) !=
+        builder.kernels().end())
+      continue;
+    ConSanProgramContainer event_kernel{ConSanProgramContainerKind::Kernel};
+    event_kernel.name = name;
+    event_kernel.descriptor_file_offset = 192u + 64u * builder.kernels().size();
+    event_kernel.entry_text_offset = 0;
+    builder.add_kernel(std::move(event_kernel));
+  }
   for (size_t index = 0; index < events.size(); ++index) {
     ConSanSyncEvent &event = events[index];
     ConSanBarrierSite site;
@@ -95,9 +106,14 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     }
     site.mnemonic = "s_barrier";
     event.source_site = {static_cast<uint32_t>(builder.program_sites().size())};
-    stage_decoded_site(builder, builder.kernels().back(), std::move(site));
-    builder.program_sites().back().container.name =
-        event.identity.substr(0, event.identity.find('|'));
+    const std::string_view container_name =
+        std::string_view(event.identity).substr(0, event.identity.find('|'));
+    const auto container =
+        std::ranges::find(builder.kernels(), container_name, &ConSanProgramContainer::name);
+    EXPECT_NE(container, builder.kernels().end());
+    stage_decoded_site(
+        builder, container == builder.kernels().end() ? builder.kernels().front() : *container,
+        std::move(site));
     builder.program_sites().back().execution_owners.push_back({});
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
@@ -329,8 +345,8 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
 
   std::vector ownerless_events{make_barrier_event(32)};
   std::vector ownerless_sequences{make_barrier_sequence(ownerless_events)};
-  ProgramInventoryBuilder ownerless(build_barrier_inventory(std::move(ownerless_events),
-                                                             std::move(ownerless_sequences)));
+  ProgramInventoryBuilder ownerless(
+      build_barrier_inventory(std::move(ownerless_events), std::move(ownerless_sequences)));
   ownerless.program_sites().front().execution_owners.clear();
   const ConSanBarrierPolicyResult ownerless_policy = plan_consan_barrier_observation(
       ownerless.view(), barrier_request(ConSanCapabilityEngine::Sampled));

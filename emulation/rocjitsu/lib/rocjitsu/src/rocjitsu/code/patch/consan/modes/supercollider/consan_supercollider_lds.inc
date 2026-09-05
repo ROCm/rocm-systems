@@ -123,9 +123,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   // so rejected candidates cannot inflate any descriptor.
   std::unordered_map<const ConSanProgramSite *, ScBracketLocalPrivateSpillPlan> private_spill_plans;
   for (const LdsSitePlanningContext &site_context : site_contexts) {
+    const ConSanProgramContainer *site_container =
+        result.program_inventory.container(site_context.site->container.id);
+    if (site_container == nullptr)
+      continue;
     if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       const bool container_matches =
-          consan_container_selected(request, debug, site_context.site->container.name);
+          consan_container_selected(request, debug, site_container->name);
       const bool owner_matches =
           !site_context.owners.descriptor_file_offsets.empty() &&
           (options.kernel_name_allowlist.empty()

@@ -224,7 +224,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   }
 
   const ConSanFaultSite *companion = nullptr;
-  const ConSanProgramContainerRef *sequence_container = sync.container(*sequence);
+  const ConSanProgramContainer *sequence_container = sync.container(*sequence);
   if (sequence_container == nullptr)
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
   for (ConSanSyncEventId member_id : sequence->member_event_ids) {
@@ -236,7 +236,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
           const ConSanProgramSite *candidate_source = inventory.source(candidate);
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
                  sync.find_event(candidate.source_site) == member && candidate_source != nullptr &&
-                 candidate_source->container == *sequence_container &&
+                 candidate_source->container.id == sequence_container->id &&
                  consan_execution_owners_include_requested_kernel(
                      inventory.execution_owners(candidate), inventory,
                      selection.kernel_name_filter);

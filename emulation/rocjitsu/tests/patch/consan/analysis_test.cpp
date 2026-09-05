@@ -136,8 +136,8 @@ TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
 }
 
 TEST(ConSan, AtomicMnemonicWidthConventionIsTargetOwned) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                    ROCJITSU_CODE_ARCH_RDNA3}) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3}) {
     EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 32u) << arch;
     EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 32u) << arch;
   }
@@ -145,9 +145,9 @@ TEST(ConSan, AtomicMnemonicWidthConventionIsTargetOwned) {
     EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 0u) << arch;
     EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 0u) << arch;
   }
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                    ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4,
-                                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add_u32", arch), 32u) << arch;
     EXPECT_EQ(classify_consan_atomic_width_bits("ds_add_u64", arch), 64u) << arch;
   }
@@ -506,8 +506,9 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [](const ConSanProgramSite &site) {
-        return site.container.kind == ConSanProgramContainerKind::Function;
+      result.program_inventory.access_sites(), [&](const ConSanProgramSite &site) {
+        const ConSanProgramContainer *container = test_program_container(result, site);
+        return container != nullptr && !container->is_kernel();
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
   ASSERT_EQ(access->execution_owners.size(), 1u);
@@ -537,8 +538,9 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [](const ConSanProgramSite &site) {
-        return site.container.kind == ConSanProgramContainerKind::Function;
+      result.program_inventory.access_sites(), [&](const ConSanProgramSite &site) {
+        const ConSanProgramContainer *container = test_program_container(result, site);
+        return container != nullptr && !container->is_kernel();
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
   ASSERT_EQ(access->execution_owners.size(), 1u);

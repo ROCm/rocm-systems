@@ -199,7 +199,7 @@ TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch
   const auto site = std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &item) {
     const ConSanProgramSite *source = test_fault_source(inventory, item);
     return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
-           source->container.name == "shared_lds_helper";
+           test_program_container_name(inventory, *source) == "shared_lds_helper";
   });
   ASSERT_NE(site, inventory.fault_sites.end());
   const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
@@ -238,7 +238,7 @@ TEST(ConSan, FaultInventoryProvesRecoveredIndirectSharedHelperOwners) {
   const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &item) {
     const ConSanProgramSite *source = test_fault_source(result, item);
     return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
-           source->container.name == "shared_lds_helper";
+           test_program_container_name(result, *source) == "shared_lds_helper";
   });
   ASSERT_NE(site, result.fault_sites.end());
   const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);

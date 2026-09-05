@@ -212,6 +212,17 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
   kernel.descriptor_file_offset = 384;
   kernel.entry_text_offset = 0;
   builder.add_kernel(std::move(kernel));
+  for (const ConSanSyncEvent &event : events) {
+    const std::string name = event.identity.substr(0, event.identity.find('|'));
+    if (std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name) !=
+        builder.kernels().end())
+      continue;
+    ConSanProgramContainer event_kernel{ConSanProgramContainerKind::Kernel};
+    event_kernel.name = name;
+    event_kernel.descriptor_file_offset = 384u + 64u * builder.kernels().size();
+    event_kernel.entry_text_offset = 0;
+    builder.add_kernel(std::move(event_kernel));
+  }
   for (ConSanAtomicSite &site : atomic_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   for (ConSanOrdinaryMemorySite &site : ordinary_sites)
@@ -258,9 +269,15 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
       site.execution_owners.push_back({});
   }
   for (const ConSanSyncEvent &event : events) {
-    if (event.source_site.valid() && event.source_site.ordinal < builder.program_sites().size())
-      builder.program_sites()[event.source_site.ordinal].container.name =
-          event.identity.substr(0, event.identity.find('|'));
+    if (!event.source_site.valid() || event.source_site.ordinal >= builder.program_sites().size())
+      continue;
+    const std::string_view name =
+        std::string_view(event.identity).substr(0, event.identity.find('|'));
+    const auto container =
+        std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name);
+    if (container != builder.kernels().end())
+      builder.program_sites()[event.source_site.ordinal].container =
+          consan_program_container_ref(*container);
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
@@ -519,8 +536,8 @@ TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSe
   const ConSanSyncEvent &published_event = inventory.sync().sync_events.front();
 
   const std::optional<ConSanAtomicSite> communication =
-      consan_moi_impl::materialize_moi_communication_site(
-          inventory, published_event.source_site, ConSanSyncSequenceId{0u});
+      consan_moi_impl::materialize_moi_communication_site(inventory, published_event.source_site,
+                                                          ConSanSyncSequenceId{0u});
   ASSERT_TRUE(communication.has_value());
   EXPECT_EQ(communication->text_offset, event.text_offset());
   EXPECT_EQ(communication->width_bits, 32u);
@@ -545,11 +562,11 @@ TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSe
   mismatched.event = {1u};
   EXPECT_FALSE(
       consan_moi_impl::resolve_moi_atomic_evidence_source(inventory, mismatched).has_value());
-  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
-                   inventory, {}, ConSanSyncSequenceId{0u})
-                   .has_value());
-  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
-                   inventory, published_event.source_site, {})
+  EXPECT_FALSE(
+      consan_moi_impl::materialize_moi_communication_site(inventory, {}, ConSanSyncSequenceId{0u})
+          .has_value());
+  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(inventory,
+                                                                   published_event.source_site, {})
                    .has_value());
 
   ProgramInventoryBuilder unsupported(inventory);
@@ -925,9 +942,8 @@ TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
   ConSanMoiFenceCandidate first = make_fence_candidate(events[0], events[1], sequences[0]);
   ConSanMoiFenceCandidate conflict = first;
   conflict.memory_role = ConSanSyncMemoryRole::Acquire;
-  const ProgramInventory inventory =
-      build_atomic_inventory(std::move(events), std::move(sequences), {},
-                             {make_global_store_site({})}, {first, conflict});
+  const ProgramInventory inventory = build_atomic_inventory(
+      std::move(events), std::move(sequences), {}, {make_global_store_site({})}, {first, conflict});
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
       inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
   EXPECT_FALSE(policy.valid());
@@ -952,9 +968,9 @@ TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) 
   std::vector sequences{make_atomic_sequence(events.front())};
   ConSanAtomicSite conflicting_site = make_global_atomic_site();
   conflicting_site.width_bits = 64;
-  const ProgramInventory inventory = build_atomic_inventory(
-      std::move(events), std::move(sequences),
-      {make_global_atomic_site(), std::move(conflicting_site)});
+  const ProgramInventory inventory =
+      build_atomic_inventory(std::move(events), std::move(sequences),
+                             {make_global_atomic_site(), std::move(conflicting_site)});
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
       inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
   EXPECT_FALSE(policy.valid());

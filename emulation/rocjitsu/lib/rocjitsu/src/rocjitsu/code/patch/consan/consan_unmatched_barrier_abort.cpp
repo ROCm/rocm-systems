@@ -26,7 +26,9 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
                                    const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
   const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
-  if (site == nullptr || !consan_container_selected(request, debug, decoded.container.name))
+  const ConSanProgramContainer *container = inventory.container(decoded.container.id);
+  if (site == nullptr || container == nullptr ||
+      !consan_container_selected(request, debug, container->name))
     return;
   const SynchronizationInventoryView synchronization = inventory.sync();
   if (site->operation != ConSanBarrierSite::Operation::Wait || site->size != sizeof(uint32_t) ||
@@ -45,10 +47,8 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
                    sequence.member_event_ids.end();
       });
   if (!belongs_to_sequence) {
-    const ConSanProgramContainer *container = inventory.container(decoded.container.id);
-    waits.push_back({site, container != nullptr && container->is_kernel()
-                               ? std::optional{container->descriptor_file_offset}
-                               : std::nullopt});
+    waits.push_back({site, container->is_kernel() ? std::optional{container->descriptor_file_offset}
+                                                  : std::nullopt});
   }
 }
 

@@ -210,7 +210,7 @@ TEST(ConSan, FaultInventoryCarriesDirectOwnersForOrdinaryMemoryInSharedHelper) {
   const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &item) {
     const ConSanProgramSite *source = test_fault_source(result, item);
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory && source != nullptr &&
-           source->container.name == "shared_lds_helper";
+           test_program_container_name(result, *source) == "shared_lds_helper";
   });
   ASSERT_NE(site, result.fault_sites.end());
   const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
@@ -409,8 +409,7 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   cache.operation = ConSanSyncOperation::Fence;
   cache.source_site = {1};
   std::vector<ConSanProgramSite> program_sites(2);
-  program_sites[0].container = {
-      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"};
+  program_sites[0].container = {.id = {0}};
   program_sites[1].container = program_sites[0].container;
   ConSanOrdinaryMemorySite load_source;
   load_source.width_bits = 32u;
@@ -614,8 +613,7 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   store.source_site = {1};
   store.scope = ConSanMemoryScope::Agent;
   std::vector<ConSanProgramSite> program_sites(2);
-  program_sites[0].container = {
-      .id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"};
+  program_sites[0].container = {.id = {0}};
   program_sites[1].container = program_sites[0].container;
   ConSanFenceSite cache_source;
   cache_source.cache_operation = ConSanCacheOperation::Release;

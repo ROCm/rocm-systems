@@ -28,9 +28,11 @@ struct PerturbationCandidateFacts {
   const ConSanSyncSequence *sequence = nullptr;
   const ConSanSyncEvent *anchor = nullptr;
   const ConSanProgramSite *anchor_source = nullptr;
+  const ConSanProgramContainer *anchor_container = nullptr;
 
   [[nodiscard]] bool complete() const {
-    return sequence != nullptr && anchor != nullptr && anchor_source != nullptr;
+    return sequence != nullptr && anchor != nullptr && anchor_source != nullptr &&
+           anchor_container != nullptr;
   }
 };
 
@@ -40,10 +42,14 @@ perturbation_candidate_facts(const ProgramInventory &inventory,
   const SynchronizationInventoryView sync = inventory.sync();
   const ConSanSyncSequence *sequence = sync.find_sequence(candidate.sequence);
   const ConSanSyncEvent *anchor = sync.find_event(candidate.anchor_event);
+  const ConSanProgramSite *anchor_source =
+      anchor == nullptr ? nullptr : inventory.program_site(anchor->source_site);
   return {
       .sequence = sequence,
       .anchor = anchor,
-      .anchor_source = anchor == nullptr ? nullptr : inventory.program_site(anchor->source_site),
+      .anchor_source = anchor_source,
+      .anchor_container =
+          anchor_source == nullptr ? nullptr : inventory.container(anchor_source->container.id),
   };
 }
 
@@ -56,8 +62,8 @@ materialize_perturbation_plan(const ProgramInventory &inventory,
   return ConSanPerturbationPlan{
       .candidate = candidate,
       .sequence_identity = facts.sequence->identity,
-      .container_name = facts.anchor_source->container.name,
-      .in_kernel = facts.anchor_source->container.is_kernel(),
+      .container_name = facts.anchor_container->name,
+      .in_kernel = facts.anchor_container->is_kernel(),
       .anchor_text_offset = facts.anchor->text_offset(),
       .anchor_size = facts.anchor_source->size(),
       .sleep_imm = sleep_imm,
@@ -166,8 +172,8 @@ void build_perturbation_plan(const ProgramInventory &program_inventory,
             perturbation_candidate_facts(program_inventory, candidate);
         return candidate.eligible && candidate.kind == translated.kind &&
                candidate.edge == translated.edge && facts.complete() &&
-               facts.anchor_source->container.name == carried.container_name &&
-               facts.anchor_source->container.is_kernel() == carried.in_kernel &&
+               facts.anchor_container->name == carried.container_name &&
+               facts.anchor_container->is_kernel() == carried.in_kernel &&
                facts.anchor->text_offset() == carried.anchor_text_offset &&
                facts.anchor_source->size() == carried.anchor_size;
       };
@@ -194,8 +200,8 @@ void build_perturbation_plan(const ProgramInventory &program_inventory,
               perturbation_candidate_facts(program_inventory, *candidate);
           facts.complete()) {
         plan.sequence_identity = facts.sequence->identity;
-        plan.container_name = facts.anchor_source->container.name;
-        plan.in_kernel = facts.anchor_source->container.is_kernel();
+        plan.container_name = facts.anchor_container->name;
+        plan.in_kernel = facts.anchor_container->is_kernel();
         plan.anchor_text_offset = facts.anchor->text_offset();
         plan.anchor_size = facts.anchor_source->size();
       }
@@ -218,8 +224,7 @@ void build_perturbation_plan(const ProgramInventory &program_inventory,
     if (!candidate.eligible || candidate.kind != mutation.sc_perturb_kind ||
         candidate.edge != mutation.sc_perturb_edge || !facts.complete() ||
         (!debug.test_kernel_name_filter.empty() &&
-         facts.anchor_source->container.name.find(debug.test_kernel_name_filter) ==
-             std::string::npos))
+         facts.anchor_container->name.find(debug.test_kernel_name_filter) == std::string::npos))
       continue;
     if (!mutation.sc_perturb_identity.empty() &&
         consan_perturbation_candidate_identity(program_inventory, candidate) !=

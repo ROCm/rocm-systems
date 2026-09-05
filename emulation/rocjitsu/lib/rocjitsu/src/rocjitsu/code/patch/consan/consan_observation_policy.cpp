@@ -118,15 +118,13 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
     }
     const ConSanProgramSite *communication_source =
         communication == nullptr ? nullptr : sync.source(*communication);
-    const ConSanProgramContainerRef *sequence_container = sync.container(sequence);
+    const ConSanProgramContainer *sequence_container = sync.container(sequence);
     if (communication_source == nullptr || sequence_container == nullptr ||
-        communication_source->container != *sequence_container) {
+        communication_source->container.id != sequence_container->id) {
       continue;
     }
     for (const ConSanProgramSite &access : inventory.access_sites()) {
-      const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
-      if (in_kernel != communication_source->container.is_kernel() ||
-          access.container.name != communication_source->container.name ||
+      if (access.container.id != communication_source->container.id ||
           access.physical_id.original_text_offset != communication->text_offset() ||
           std::ranges::find(reservations, access.physical_id) != reservations.end()) {
         continue;

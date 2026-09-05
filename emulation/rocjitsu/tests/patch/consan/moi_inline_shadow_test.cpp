@@ -4673,8 +4673,8 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
   EXPECT_TRUE(persistent->dispatch_id_vgpr);
   const std::vector<ConSanProgramSite> candidates = test_admitted_accesses(result);
   const auto full_access_candidate =
-      std::ranges::find_if(candidates, [](const ConSanProgramSite &candidate) {
-        return candidate.container.name == "lds_helper";
+      std::ranges::find_if(candidates, [&](const ConSanProgramSite &candidate) {
+        return test_program_container_name(result, candidate) == "lds_helper";
       });
   ASSERT_NE(full_access_candidate, candidates.end());
   const ConSanIntentCoverageEntry *full_access_site =

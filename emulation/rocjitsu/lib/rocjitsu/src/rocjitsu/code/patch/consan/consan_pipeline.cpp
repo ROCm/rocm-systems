@@ -278,14 +278,16 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
 std::optional<ConSanFaultSiteDiagnostic>
 consan_fault_site_diagnostic(const ProgramInventory &inventory, const ConSanFaultSite &site) {
   const ConSanProgramSite *source = inventory.program_site(site);
-  if (source == nullptr)
+  const ConSanProgramContainer *container =
+      source == nullptr ? nullptr : inventory.container(source->container.id);
+  if (source == nullptr || container == nullptr)
     return std::nullopt;
   ConSanFaultSiteDiagnostic diagnostic;
   static_cast<ConSanDecodedSite &>(diagnostic) = source->decoded_site();
   diagnostic.kind = site.kind;
   diagnostic.identity = site.identity;
-  diagnostic.container_name = source->container.name;
-  diagnostic.in_kernel = source->container.is_kernel();
+  diagnostic.container_name = container->name;
+  diagnostic.in_kernel = container->is_kernel();
   diagnostic.occurrence = site.occurrence;
   diagnostic.execution_owners = source->execution_owners;
   if (const ConSanBarrierSite *barrier = source->get_if<ConSanBarrierSite>()) {

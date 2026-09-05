@@ -2061,8 +2061,9 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-  EXPECT_EQ(candidate.container.kind, ConSanProgramContainerKind::Function);
-  EXPECT_EQ(candidate.container.name, "lds_helper");
+  ASSERT_NE(test_program_container(result, candidate), nullptr);
+  EXPECT_EQ(test_program_container(result, candidate)->kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(test_program_container_name(result, candidate), "lds_helper");
   EXPECT_EQ(candidate.mnemonic_view(), "flat_load_b32");
   EXPECT_EQ(candidate.physical_id.original_text_offset, 24u);
   EXPECT_EQ(candidate.decoded_file_offset(), 0x118u);
@@ -2108,9 +2109,10 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 3u);
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().container.kind,
-            ConSanProgramContainerKind::Function);
-  EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_lds_helper");
+  const ConSanProgramSite candidate = test_admitted_accesses(result).front();
+  ASSERT_NE(test_program_container(result, candidate), nullptr);
+  EXPECT_EQ(test_program_container(result, candidate)->kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(test_program_container_name(result, candidate), "shared_lds_helper");
   ASSERT_EQ(result.resource_plans.size(), 1u);
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   ASSERT_EQ(plan.owner_kernel_ids.size(), 2u);
@@ -3231,7 +3233,7 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
           result.program_inventory.access_sites(), [&](const ConSanProgramSite &access) {
             return access.physical_id.original_text_offset ==
                        candidate.physical_id.original_text_offset &&
-                   access.container.name == candidate.container.name;
+                   access.container.id == candidate.container.id;
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
       EXPECT_EQ(static_cast<const ConSanProgramSite &>(candidate), *site);

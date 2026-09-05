@@ -500,6 +500,17 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
   return candidates;
 }
 
+[[nodiscard]] const ConSanProgramContainer *
+test_program_container(const ConSanTransformArtifacts &result, const ConSanProgramSite &site) {
+  return result.program_inventory.container(site.container.id);
+}
+
+[[nodiscard]] std::string_view test_program_container_name(const ConSanTransformArtifacts &result,
+                                                           const ConSanProgramSite &site) {
+  const ConSanProgramContainer *container = test_program_container(result, site);
+  return container == nullptr ? std::string_view{} : std::string_view(container->name);
+}
+
 /// Add the gfx1250 execution-mode fact that current lowerers derive directly
 /// from pristine code bytes immediately before emission.
 [[nodiscard]] std::optional<uint16_t>

@@ -25,19 +25,25 @@ void expect_observation_enum_contract(const Values &values, Enum count, NameFunc
 }
 
 struct AccessInventoryInput {
+  struct ContainerSelector {
+    ConSanProgramContainerKind kind = ConSanProgramContainerKind::Function;
+    std::string name;
+  };
+
   std::vector<uint8_t> bytes = std::vector<uint8_t>(256, 0);
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_GFX1201;
   std::vector<ConSanProgramContainer> kernels;
   std::vector<ConSanProgramContainer> functions;
   std::vector<ConSanProgramSite> accesses;
+  std::vector<ContainerSelector> access_containers;
 };
 
 template <typename Container>
 void stage_policy_access(AccessInventoryInput &input, const Container &container,
                          ConSanProgramSite site) {
-  site.container = consan_program_container_ref(container);
   input.accesses.push_back(std::move(site));
+  input.access_containers.push_back({.kind = container.kind, .name = container.name});
 }
 
 ConSanProgramSite make_policy_lds_site(std::string mnemonic = "ds_store_b32",
@@ -91,8 +97,20 @@ ProgramInventory build_policy_inventory(AccessInventoryInput input) {
     builder.add_kernel(std::move(kernel));
   for (ConSanProgramContainer &function : input.functions)
     builder.add_function(std::move(function));
-  for (ConSanProgramSite &access : input.accesses)
+  EXPECT_EQ(input.accesses.size(), input.access_containers.size());
+  for (size_t index = 0; index < input.accesses.size(); ++index) {
+    ConSanProgramSite &access = input.accesses[index];
+    const AccessInventoryInput::ContainerSelector &selector = input.access_containers[index];
+    const std::span<const ConSanProgramContainer> containers =
+        selector.kind == ConSanProgramContainerKind::Kernel ? builder.kernels()
+                                                            : builder.functions();
+    const auto container =
+        std::ranges::find(containers, selector.name, &ConSanProgramContainer::name);
+    EXPECT_NE(container, containers.end());
+    if (container != containers.end())
+      access.container = consan_program_container_ref(*container);
     builder.add_access_site(std::move(access));
+  }
   builder.publish_decoded_accesses(input.bytes);
   return builder.view();
 }
@@ -208,6 +226,9 @@ TEST(ConSanObservationPlan, PlanValidationRejectsEveryBrokenTypedRelationship) {
 TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRelationship) {
   ProgramInventoryBuilder builder(std::array<uint8_t, 4>{});
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
+  kernel.name = "kernel";
+  builder.add_kernel(std::move(kernel));
   ConSanSyncEvent event;
   event.semantic_id = {
       .physical = {.code_object = builder.view().code_object_id(), .original_text_offset = 8},
@@ -230,8 +251,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   source.scope = ConSanBarrierSite::Scope::Workgroup;
   source.mnemonic = "s_barrier";
   builder.program_sites().push_back(make_consan_program_site(
-      {.id = {0}, .kind = ConSanProgramContainerKind::Kernel, .name = "kernel"},
-      std::move(source)));
+      consan_program_container_ref(builder.kernels().front()), std::move(source)));
   builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncKind::Barrier;

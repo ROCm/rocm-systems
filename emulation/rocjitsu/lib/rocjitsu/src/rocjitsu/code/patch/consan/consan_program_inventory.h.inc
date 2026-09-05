@@ -297,16 +297,19 @@ template <typename Site>
 /// must not be copied into semantic events or policy decisions.
 [[nodiscard]] inline std::vector<std::string>
 consan_source_container_names(std::span<const ConSanProgramSite> sites,
+                              std::span<const ConSanProgramContainer> containers,
                               const PhysicalSiteId &physical_site) {
   std::vector<std::string> names;
   for (const ConSanProgramSite &site : sites) {
     // The arena belongs to exactly one code object, so the original text
     // offset is the complete lookup key inside this inventory. This also
     // keeps builder views useful before publication binds the code-object ID.
-    if (site.text_offset() != physical_site.original_text_offset ||
-        std::ranges::find(names, site.container.name) != names.end())
+    if (site.text_offset() != physical_site.original_text_offset || !site.container.id.valid() ||
+        site.container.id.ordinal >= containers.size())
       continue;
-    names.push_back(site.container.name);
+    const std::string &name = containers[site.container.id.ordinal].name;
+    if (std::ranges::find(names, name) == names.end())
+      names.push_back(name);
   }
   std::ranges::sort(names);
   return names;
@@ -381,36 +384,35 @@ struct SynchronizationInventoryView {
     return intersection;
   }
 
-  [[nodiscard]] const ConSanProgramContainerRef *container(const ConSanSyncEvent &event) const {
+  [[nodiscard]] const ConSanProgramContainer *container(const ConSanSyncEvent &event) const {
     const ConSanProgramSite *decoded = source(event);
-    return decoded == nullptr ? nullptr : &decoded->container;
+    return decoded == nullptr ? nullptr : container(decoded->container.id);
   }
 
   [[nodiscard]] std::string_view container_name(const ConSanSyncEvent &event) const {
-    const ConSanProgramContainerRef *record = container(event);
+    const ConSanProgramContainer *record = container(event);
     return record == nullptr ? std::string_view{} : std::string_view(record->name);
   }
 
   [[nodiscard]] bool in_kernel(const ConSanSyncEvent &event) const {
-    const ConSanProgramContainerRef *record = container(event);
+    const ConSanProgramContainer *record = container(event);
     return record != nullptr && record->is_kernel();
   }
 
   [[nodiscard]] bool same_container(const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) const {
-    const ConSanProgramContainerRef *left = container(lhs);
-    const ConSanProgramContainerRef *right = container(rhs);
-    return left != nullptr && right != nullptr && *left == *right;
+    const ConSanProgramContainer *left = container(lhs);
+    const ConSanProgramContainer *right = container(rhs);
+    return left != nullptr && right != nullptr && left->id == right->id;
   }
 
   /// Resolve the one source container shared by every sequence member.
   /// Missing members or cross-container associations fail closed.
-  [[nodiscard]] const ConSanProgramContainerRef *
-  container(const ConSanSyncSequence &sequence) const {
-    const ConSanProgramContainerRef *result = nullptr;
+  [[nodiscard]] const ConSanProgramContainer *container(const ConSanSyncSequence &sequence) const {
+    const ConSanProgramContainer *result = nullptr;
     for (ConSanSyncEventId member : sequence.member_event_ids) {
       const ConSanSyncEvent *event = find_event(member);
-      const ConSanProgramContainerRef *current = event == nullptr ? nullptr : container(*event);
-      if (current == nullptr || (result != nullptr && *result != *current))
+      const ConSanProgramContainer *current = event == nullptr ? nullptr : container(*event);
+      if (current == nullptr || (result != nullptr && result->id != current->id))
         return nullptr;
       result = current;
     }
@@ -418,20 +420,20 @@ struct SynchronizationInventoryView {
   }
 
   [[nodiscard]] std::string_view container_name(const ConSanSyncSequence &sequence) const {
-    const ConSanProgramContainerRef *record = container(sequence);
+    const ConSanProgramContainer *record = container(sequence);
     return record == nullptr ? std::string_view{} : std::string_view(record->name);
   }
 
   [[nodiscard]] bool same_container(const ConSanSyncSequence &lhs,
                                     const ConSanSyncSequence &rhs) const {
-    const ConSanProgramContainerRef *left = container(lhs);
-    const ConSanProgramContainerRef *right = container(rhs);
-    return left != nullptr && right != nullptr && *left == *right;
+    const ConSanProgramContainer *left = container(lhs);
+    const ConSanProgramContainer *right = container(rhs);
+    return left != nullptr && right != nullptr && left->id == right->id;
   }
 
   [[nodiscard]] std::vector<std::string>
   source_container_names(const PhysicalSiteId &physical_site) const {
-    return consan_source_container_names(program_sites, physical_site);
+    return consan_source_container_names(program_sites, program_containers, physical_site);
   }
 
   [[nodiscard]] std::vector<uint64_t>
@@ -898,7 +900,7 @@ public:
 
   [[nodiscard]] std::vector<std::string>
   source_container_names(const PhysicalSiteId &physical_site) const {
-    return consan_source_container_names(program_sites(), physical_site);
+    return consan_source_container_names(program_sites(), containers(), physical_site);
   }
 
   /// Resolve one exact source-site handle and require its typed payload.
@@ -1058,26 +1060,11 @@ public:
   /// Repeated publication is idempotent because a completed record has a valid
   /// code-object identity and no longer qualifies as pending decode output.
   void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
-    const auto bind_container = [&](ConSanProgramContainerRef &reference) {
-      if (reference.id.valid())
-        return;
-      const auto matches = [&](const ConSanProgramContainer &container) {
-        return container.kind == reference.kind && container.name == reference.name;
-      };
-      const auto match = std::ranges::find_if(storage_->containers, matches);
-      if (match == storage_->containers.end() ||
-          std::ranges::find_if(std::next(match), storage_->containers.end(), matches) !=
-              storage_->containers.end())
-        return;
-      reference = consan_program_container_ref(*match);
-    };
     for (ConSanProgramSite &access : access_sites()) {
-      bind_container(access.container);
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
     }
     for (ConSanProgramSite &site : storage_->program_sites.sites()) {
-      bind_container(site.container);
       if (!site.physical_id.code_object.valid())
         site.physical_id.code_object = storage_->code_object_id;
     }

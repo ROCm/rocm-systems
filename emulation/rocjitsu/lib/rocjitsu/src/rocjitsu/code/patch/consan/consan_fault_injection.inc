@@ -483,8 +483,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected barrier-move destination outside the requested "
                 "dispatch owner");
-          } else if (const ConSanProgramContainerRef *sequence_container =
-                         sync.container(*sequence);
+          } else if (const ConSanProgramContainer *sequence_container = sync.container(*sequence);
                      !sequence->basic_block_index || sequence_container == nullptr ||
                      destination->container_name != sequence_container->name ||
                      destination->in_kernel != sequence_container->is_kernel()) {
@@ -1945,12 +1944,12 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
   const ConSanProgramSite *best = nullptr;
   for (const ConSanProgramSite &site : inventory.access_sites()) {
-    if (!site.container.is_kernel() || site.origin != ConSanAccessOrigin::NativeLds ||
+    const ConSanProgramContainer *kernel = inventory.container(site.container.id);
+    if (kernel == nullptr || !kernel->is_kernel() || site.origin != ConSanAccessOrigin::NativeLds ||
         site.kind != ConSanLdsAccessKind::Read || !site.lowering.replay_guest_access.available() ||
         site.decoded_width_bits != 32)
       continue;
-    const ConSanProgramContainer *kernel = inventory.container(site.container.id);
-    if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
+    if (kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;
     if (best == nullptr || site.decoded_file_offset() < best->decoded_file_offset())
       best = &site;
@@ -1981,13 +1980,15 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 [[nodiscard]] BarrierSite barrier_site_from_inventory(const ProgramInventory &inventory,
                                                       const ConSanFaultSite &site) {
   const ConSanProgramSite *source = inventory.program_site(site);
-  if (source == nullptr)
+  const ConSanProgramContainer *container =
+      source == nullptr ? nullptr : inventory.container(source->container.id);
+  if (source == nullptr || container == nullptr)
     return {};
   return {.text_offset = source->text_offset(),
           .file_offset = source->decoded_file_offset(),
           .size = source->size(),
-          .range_name = std::string(source->container.is_kernel() ? "kernel:" : "function:") +
-                        source->container.name,
+          .range_name =
+              std::string(container->is_kernel() ? "kernel:" : "function:") + container->name,
           .mnemonic = std::string(source->mnemonic_view())};
 }
 

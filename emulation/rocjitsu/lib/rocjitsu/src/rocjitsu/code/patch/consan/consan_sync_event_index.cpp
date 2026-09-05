@@ -7,15 +7,14 @@ namespace rocjitsu {
 bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
                                 const ConSanSyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
-  const ConSanProgramContainerRef *sequence_container = inventory.container(sequence);
+  const ConSanProgramContainer *sequence_container = inventory.container(sequence);
   if (sequence_container == nullptr)
     return false;
   for (const ConSanSyncEventId member : sequence.member_event_ids) {
     const ConSanSyncEvent *event = inventory.find_event(member);
     const ConSanProgramSite *source = event == nullptr ? nullptr : inventory.source(*event);
-    if (event == nullptr || source == nullptr || source->container != *sequence_container ||
-        event->text_offset() < prior_end ||
-        event->text_offset() < sequence.begin_text_offset ||
+    if (event == nullptr || source == nullptr || source->container.id != sequence_container->id ||
+        event->text_offset() < prior_end || event->text_offset() < sequence.begin_text_offset ||
         event->text_offset() + source->size() > sequence.end_text_offset) {
       return false;
     }
