@@ -21,7 +21,11 @@ class AmdGpuCodeObject;
 void build_perturbation_candidate_inventory(const ProgramInventory &program_inventory,
                                             ConSanPerturbationPlanningState &planning);
 
-void build_perturbation_plan(const ConSanOptions &options,
+[[nodiscard]] std::string
+consan_perturbation_candidate_identity(const ProgramInventory &program_inventory,
+                                       const ConSanPerturbationCandidate &candidate);
+
+void build_perturbation_plan(const ProgramInventory &program_inventory, const ConSanOptions &options,
                              ConSanPerturbationPlanningState &planning, ConSanMutationTally &tally,
                              std::vector<std::string> &errors,
                              std::span<const ConSanPerturbationPlan> carried_plans = {});

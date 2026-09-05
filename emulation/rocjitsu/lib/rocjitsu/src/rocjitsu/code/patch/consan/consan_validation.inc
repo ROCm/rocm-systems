@@ -1420,12 +1420,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation &&
         (patch.perturbation_edge || !patch.perturbation_sequence_identity.empty() ||
-         !patch.perturbation_source_candidate_identity.empty() ||
          !patch.perturbation_source_sequence_identity.empty() ||
-         !patch.perturbation_source_container_name.empty() ||
-         !patch.perturbation_source_anchor_identity.empty() ||
-         patch.perturbation_source_anchor_size != 0u ||
-         patch.perturbation_source_owner_descriptor_file_offset ||
          patch.perturbation_composite_atomic_overlap ||
          patch.perturbation_composite_removed_boundary)) {
       errors.emplace_back(
@@ -1469,24 +1464,13 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       errors.emplace_back("ConSan SC perturbation proof found incomplete semantic identity");
       continue;
     }
-    if (composite && (patch.perturbation_source_candidate_identity.empty() ||
-                      patch.perturbation_source_sequence_identity.empty() ||
-                      patch.perturbation_source_container_name.empty() ||
-                      patch.perturbation_source_anchor_identity.empty() ||
-                      patch.perturbation_source_anchor_size == 0u ||
-                      (patch.perturbation_source_in_kernel &&
-                       !patch.perturbation_source_owner_descriptor_file_offset))) {
-      errors.emplace_back(
-          "ConSan composite perturbation proof found incomplete pristine identity and owner");
+    if (composite && patch.perturbation_source_sequence_identity.empty()) {
+      errors.emplace_back("ConSan composite perturbation proof found no pristine sequence");
       continue;
     }
     const std::string &proof_sequence_identity = composite
                                                      ? patch.perturbation_source_sequence_identity
                                                      : patch.perturbation_sequence_identity;
-    const uint64_t proof_anchor_offset =
-        composite ? patch.perturbation_source_anchor_offset : patch.anchor_offset;
-    const uint32_t proof_anchor_size =
-        composite ? patch.perturbation_source_anchor_size : patch.original_size;
     const std::string proven_edge =
         proof_sequence_identity +
         (*patch.perturbation_edge == ConSanPerturbationEdge::Release ? "|release" : "|acquire");
@@ -1504,9 +1488,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       errors.emplace_back("ConSan SC perturbation proof found a non-exact trampoline size");
       continue;
     }
-    if (proof_anchor_offset > original_text.size() ||
-        proof_anchor_size > original_text.size() - proof_anchor_offset ||
-        patch.anchor_offset > replacement_text.size() ||
+    if (patch.anchor_offset > replacement_text.size() ||
         patch.original_size > replacement_text.size() - patch.anchor_offset ||
         patch.trampoline_offset > replacement_text.size() ||
         patch.trampoline_size > replacement_text.size() - patch.trampoline_offset) {
@@ -1517,11 +1499,10 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     const ProgramInventory &semantic_inventory = pristine.program_inventory;
     const std::span<const ConSanPerturbationCandidate> semantic_candidates = pristine.candidates;
     const auto candidate_matches = [&](const ConSanPerturbationCandidate &candidate) {
-      return candidate.eligible && candidate.sequence_identity == proof_sequence_identity &&
-             candidate.edge == *patch.perturbation_edge &&
-             (!composite || (candidate.identity == patch.perturbation_source_candidate_identity &&
-                             candidate.container_name == patch.perturbation_source_container_name &&
-                             candidate.in_kernel == patch.perturbation_source_in_kernel));
+      const ConSanSyncSequence *sequence = pristine_events.find_sequence(candidate.sequence);
+      return candidate.eligible && sequence != nullptr &&
+             sequence->identity == proof_sequence_identity &&
+             candidate.edge == *patch.perturbation_edge;
     };
     const size_t candidate_count =
         static_cast<size_t>(std::ranges::count_if(semantic_candidates, candidate_matches));
@@ -1531,18 +1512,14 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
           "ConSan SC perturbation proof could not match one pristine admitted sequence edge");
       continue;
     }
-    if (composite && candidate->in_kernel) {
-      const ConSanProgramContainer *source_owner =
-          pristine.program_inventory.find_kernel_by_name(candidate->container_name);
-      if (source_owner == nullptr || patch.perturbation_source_owner_descriptor_file_offset !=
-                                         source_owner->descriptor_file_offset) {
-        errors.emplace_back(
-            "ConSan composite perturbation proof did not retain its pristine kernel owner");
-        continue;
-      }
-    } else if (candidate->in_kernel) {
+    const ConSanSyncSequence *sequence = pristine_events.find_sequence(candidate->sequence);
+    if (sequence == nullptr) {
+      errors.emplace_back("ConSan SC perturbation proof lost its sequence arena edge");
+      continue;
+    }
+    if (sequence->in_kernel) {
       const ConSanProgramContainer *owner =
-          semantic_inventory.find_kernel_by_name(candidate->container_name);
+          semantic_inventory.find_kernel_by_name(sequence->container_name);
       if (owner == nullptr || patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {
         errors.emplace_back("ConSan SC perturbation proof did not retain its exact kernel owner");
@@ -1553,24 +1530,12 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
           "ConSan SC perturbation proof attached a kernel owner to a local function");
       continue;
     }
-    const auto sequence = std::ranges::find(pristine.program_inventory.sync().sync_sequences,
-                                            proof_sequence_identity, &ConSanSyncSequence::identity);
-    const auto member_identities =
-        sequence == pristine.program_inventory.sync().sync_sequences.end()
-            ? std::optional<std::vector<std::string>>{}
-            : pristine.program_inventory.sync().sequence_member_identities(
-                  sequence->member_event_ids);
-    if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
-        !sequence->basic_block_index ||
+    if (!sequence->basic_block_index ||
         !consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) ||
         perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
                                       *patch.perturbation_edge) !=
-            ConSanPerturbationRejectionReason::None ||
-        candidate->container_name != sequence->container_name ||
-        candidate->in_kernel != sequence->in_kernel ||
-        candidate->basic_block_index != *sequence->basic_block_index || !member_identities ||
-        candidate->ordered_member_identities != *member_identities) {
+            ConSanPerturbationRejectionReason::None) {
       errors.emplace_back("ConSan SC perturbation proof could not rederive sequence role, "
                           "confidence, container, and block");
       continue;
@@ -1580,21 +1545,18 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
                                           : sequence->member_event_ids.size() - 1u;
     const ConSanSyncEvent *anchor_event =
         pristine_events.find_event(sequence->member_event_ids[outer_member_index]);
-    const std::string_view outer_member =
-        anchor_event == nullptr ? std::string_view{} : anchor_event->identity;
     const ConSanProgramSite *anchor_source =
         anchor_event == nullptr
             ? nullptr
             : pristine.program_inventory.program_site(anchor_event->source_site);
-    if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
+    if (candidate->anchor_event != sequence->member_event_ids[outer_member_index] ||
+        anchor_event == nullptr ||
         anchor_source == nullptr ||
-        (composite && patch.perturbation_source_anchor_identity != outer_member) ||
         anchor_source->container.name != sequence->container_name ||
         anchor_source->container.is_kernel() != sequence->in_kernel ||
-        candidate->anchor_text_offset != anchor_event->text_offset() ||
-        candidate->anchor_size != anchor_source->size() ||
-        proof_anchor_offset != anchor_event->text_offset() ||
-        proof_anchor_size != anchor_source->size() || patch.original_size != proof_anchor_size) {
+        anchor_event->text_offset() > original_text.size() ||
+        anchor_source->size() > original_text.size() - anchor_event->text_offset() ||
+        patch.original_size != anchor_source->size()) {
       errors.emplace_back(
           "ConSan SC perturbation proof did not target the rederived outer sequence member");
       continue;
@@ -1641,8 +1603,8 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
         if (!all_nops)
           errors.emplace_back("ConSan SC perturbation proof resurrected a removed cache operation");
       }
-    } else if (std::memcmp(original_text.data() + proof_anchor_offset, body, patch.original_size) !=
-               0) {
+    } else if (std::memcmp(original_text.data() + anchor_event->text_offset(), body,
+                           patch.original_size) != 0) {
       errors.emplace_back(
           "ConSan SC perturbation proof did not preserve the exact original boundary bytes");
     }

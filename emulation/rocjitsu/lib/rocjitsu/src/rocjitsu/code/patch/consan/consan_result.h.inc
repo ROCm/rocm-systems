@@ -99,15 +99,8 @@ enum class ConSanPerturbationRejectionReason : uint8_t {
 struct ConSanPerturbationCandidate {
   ConSanPerturbationKind kind = ConSanPerturbationKind::None;
   ConSanPerturbationEdge edge = ConSanPerturbationEdge::Release;
-  std::string identity;
-  std::string sequence_identity;
-  std::string container_name;
-  bool in_kernel = true;
-  uint32_t basic_block_index = 0;
-  std::string anchor_event_identity;
-  uint64_t anchor_text_offset = 0;
-  uint32_t anchor_size = 0;
-  std::vector<std::string> ordered_member_identities;
+  ConSanSyncSequenceId sequence;
+  ConSanSyncEventId anchor_event;
   bool eligible = false;
   ConSanPerturbationRejectionReason rejection_reason = ConSanPerturbationRejectionReason::None;
 };
@@ -123,11 +116,17 @@ struct ConSanPerturbationPlan {
   /// entry into the plan once; composition and emission do not reconstruct
   /// that relationship through copied strings and offsets.
   ConSanPerturbationCandidate candidate;
+  /// Materialized lowering coordinates and stable current-revision identity.
+  /// Candidate inventories retain only arena handles; at most two admitted
+  /// plans pay for this durable selection boundary.
+  std::string sequence_identity;
+  std::string container_name;
+  bool in_kernel = true;
+  uint64_t anchor_text_offset = 0;
+  uint32_t anchor_size = 0;
   uint32_t sleep_imm = 0;
-  /// Pristine candidate retained only while a fault-mutated image is
-  /// reanalyzed. Ordinary plans have no second identity representation.
-  std::optional<ConSanPerturbationCandidate> source_candidate;
-  std::optional<uint64_t> source_owner_descriptor_file_offset;
+  /// Stable pristine sequence identity exists only across composition.
+  std::optional<std::string> source_sequence_identity;
   bool overlaps_atomic_mutation = false;
   bool removed_cache_boundary = false;
   /// Carry-only allowance for a boundary intentionally weakened by the fault.

@@ -31,7 +31,8 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   options.fault_atomic_address_delta = 4;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.sc_perturb_identity = selected_perturbation.plans.front().candidate.identity;
+  options.sc_perturb_identity =
+      test_perturbation_identity(selected, selected_perturbation.plans.front().candidate);
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -48,8 +49,6 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ASSERT_NE(mutation, result.patches.end());
   ASSERT_NE(perturbation, result.patches.end());
   EXPECT_NE(mutation->anchor_offset, perturbation->anchor_offset);
-  EXPECT_EQ(perturbation->perturbation_source_candidate_identity,
-            selected_perturbation.plans.front().candidate.identity);
   ASSERT_EQ(perturbation->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(perturbation->owner_descriptor_file_offsets.front(),
             result.program_inventory.kernels().front().descriptor_file_offset);
@@ -57,11 +56,11 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ConSanTransformArtifacts wrong_owner = result;
   auto &owner_patch = *std::ranges::find(
       wrong_owner.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
-  ASSERT_TRUE(owner_patch.perturbation_source_owner_descriptor_file_offset);
-  *owner_patch.perturbation_source_owner_descriptor_file_offset += sizeof(uint32_t);
+  ASSERT_EQ(owner_patch.owner_descriptor_file_offsets.size(), 1u);
+  owner_patch.owner_descriptor_file_offsets.front() += sizeof(uint32_t);
   const auto owner_errors = validate_consan_modified_elf(bytes, wrong_owner);
   EXPECT_TRUE(std::ranges::any_of(owner_errors, [](const std::string &error) {
-    return error.find("pristine kernel owner") != std::string::npos;
+    return error.find("exact kernel owner") != std::string::npos;
   }));
   ConSanTransformArtifacts stale = result;
   auto &stale_patch = *std::ranges::find(stale.patches, ConSanPatchKind::TrampolineScPerturbation,
@@ -70,14 +69,6 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   const auto identity_errors = validate_consan_modified_elf(bytes, stale);
   EXPECT_TRUE(std::ranges::any_of(identity_errors, [](const std::string &error) {
     return error.find("pristine admitted sequence edge") != std::string::npos;
-  }));
-  ConSanTransformArtifacts stale_anchor = result;
-  auto &stale_anchor_patch = *std::ranges::find(
-      stale_anchor.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
-  stale_anchor_patch.perturbation_source_anchor_identity += "|stale";
-  const auto anchor_errors = validate_consan_modified_elf(bytes, stale_anchor);
-  EXPECT_TRUE(std::ranges::any_of(anchor_errors, [](const std::string &error) {
-    return error.find("outer sequence member") != std::string::npos;
   }));
 }
 

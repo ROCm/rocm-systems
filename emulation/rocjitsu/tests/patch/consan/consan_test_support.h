@@ -16,6 +16,7 @@
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
+#include "rocjitsu/code/patch/consan/consan_perturbation.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -3348,6 +3349,24 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
 [[nodiscard]] const ConSanSyncSequence *test_sync_sequence(const ConSanTransformArtifacts &result,
                                                            const ConSanFaultSite &site) {
   return result.program_inventory.sync().find_unique_sequence_containing(site.source_site);
+}
+
+[[nodiscard]] const ConSanSyncSequence *
+test_perturbation_sequence(const ConSanTransformArtifacts &result,
+                           const ConSanPerturbationCandidate &candidate) {
+  return result.program_inventory.sync().find_sequence(candidate.sequence);
+}
+
+[[nodiscard]] const ConSanSyncEvent *
+test_perturbation_anchor(const ConSanTransformArtifacts &result,
+                         const ConSanPerturbationCandidate &candidate) {
+  return result.program_inventory.sync().find_event(candidate.anchor_event);
+}
+
+[[nodiscard]] std::string
+test_perturbation_identity(const ConSanTransformArtifacts &result,
+                           const ConSanPerturbationCandidate &candidate) {
+  return consan_perturbation_candidate_identity(result.program_inventory, candidate);
 }
 
 std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {

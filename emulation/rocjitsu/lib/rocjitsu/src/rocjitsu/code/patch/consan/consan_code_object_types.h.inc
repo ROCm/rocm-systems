@@ -500,17 +500,8 @@ struct ConSanPatchMutationProof {
   std::string perturbation_sequence_identity;
   std::optional<uint32_t> original_participant_count;
   std::optional<uint32_t> target_participant_count;
-  /// Pristine identity and ownership retained only for a staged barrier
-  /// mutation plus perturbation proof. The ordinary single-stage path leaves
-  /// these fields empty.
-  std::string perturbation_source_candidate_identity;
+  /// Pristine sequence identity retained only across a staged mutation.
   std::string perturbation_source_sequence_identity;
-  std::string perturbation_source_container_name;
-  std::string perturbation_source_anchor_identity;
-  bool perturbation_source_in_kernel = true;
-  uint64_t perturbation_source_anchor_offset = 0;
-  uint32_t perturbation_source_anchor_size = 0;
-  std::optional<uint64_t> perturbation_source_owner_descriptor_file_offset;
   bool perturbation_composite_atomic_overlap = false;
   bool perturbation_composite_removed_boundary = false;
 };

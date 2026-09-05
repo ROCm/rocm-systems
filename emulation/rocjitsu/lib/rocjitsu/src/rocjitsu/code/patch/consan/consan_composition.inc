@@ -64,29 +64,23 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
   carried.reserve(planning.plans.size());
   for (const ConSanPerturbationPlan &plan : planning.plans) {
     const ConSanPerturbationCandidate &candidate = plan.candidate;
-    if (!candidate.eligible || candidate.container_name.empty()) {
+    const SynchronizationInventoryView sync = pristine_inventory.sync();
+    const ConSanSyncSequence *source_sequence = sync.find_sequence(candidate.sequence);
+    const ConSanSyncEvent *source_anchor = sync.find_event(candidate.anchor_event);
+    if (!candidate.eligible || source_sequence == nullptr || source_anchor == nullptr ||
+        plan.sequence_identity.empty() || plan.container_name.empty() || plan.anchor_size == 0u) {
       *error = "selected pristine perturbation identity is incomplete or stale";
       return std::nullopt;
     }
 
-    uint64_t translated_offset = candidate.anchor_text_offset;
+    uint64_t translated_offset = plan.anchor_text_offset;
     bool overlaps_atomic_mutation = false;
     bool removed_cache_boundary = false;
     bool sequence_semantics_weakened = false;
-    std::optional<uint64_t> source_owner_descriptor_file_offset;
-    if (candidate.in_kernel) {
-      const ConSanProgramContainer *owner =
-          pristine_inventory.find_kernel_by_name(candidate.container_name);
-      if (owner == nullptr) {
-        *error = "selected perturbation edge lost its pristine kernel owner";
-        return std::nullopt;
-      }
-      source_owner_descriptor_file_offset = owner->descriptor_file_offset;
-    }
     const auto dropped =
         std::ranges::find_if(mutation_stage.patches, [&](const ConSanPatchMutationProduct &patch) {
           return patch.kind == ConSanPatchKind::InlineBarrierNopRewrite &&
-                 ranges_overlap(candidate.anchor_text_offset, candidate.anchor_size,
+                 ranges_overlap(plan.anchor_text_offset, plan.anchor_size,
                                 patch.anchor_offset, patch.original_size);
         });
     if (dropped != mutation_stage.patches.end()) {
@@ -104,7 +98,7 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
     }
     const auto selected_source =
         std::ranges::find_if(move_sources, [&](const ConSanPatchMutationProduct *patch) {
-          return ranges_overlap(candidate.anchor_text_offset, candidate.anchor_size,
+          return ranges_overlap(plan.anchor_text_offset, plan.anchor_size,
                                 patch->anchor_offset, patch->original_size);
         });
     if (selected_source != move_sources.end()) {
@@ -115,7 +109,7 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
       }
       const uint64_t first_source =
           std::min(move_sources[0]->anchor_offset, move_sources[1]->anchor_offset);
-      const uint64_t source_delta = candidate.anchor_text_offset - first_source;
+      const uint64_t source_delta = plan.anchor_text_offset - first_source;
       const uint64_t pair_offset =
           move_target->trampoline_offset +
           (*move_target->barrier_move_direction == ConSanBarrierMoveDirection::Later
@@ -130,23 +124,24 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
         const auto event =
             std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
               const ConSanProgramSite *source = pristine_inventory.program_site(item.source_site);
-              return source != nullptr && source->container.name == candidate.container_name &&
-                     source->container.is_kernel() == candidate.in_kernel &&
+              return source != nullptr && source->container.name == plan.container_name &&
+                     source->container.is_kernel() == plan.in_kernel &&
                      item.text_offset() == patch.anchor_offset &&
                      source->size() == patch.original_size;
             });
-        if (event != pristine_inventory.sync().sync_events.end() &&
-            std::ranges::find(candidate.ordered_member_identities, event->identity) !=
-                candidate.ordered_member_identities.end()) {
+        if (event != pristine_inventory.sync().sync_events.end() && source_sequence != nullptr &&
+            std::ranges::find(source_sequence->member_event_ids,
+                              pristine_inventory.sync().event_id(*event)) !=
+                source_sequence->member_event_ids.end()) {
           sequence_semantics_weakened = true;
         }
       }
       if (patch.phase != ConSanPatchPhase::Mutation || patch.original_size == 0u ||
-          !ranges_overlap(candidate.anchor_text_offset, candidate.anchor_size, patch.anchor_offset,
+          !ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
                           patch.original_size))
         continue;
-      const bool exact_alias = candidate.anchor_text_offset == patch.anchor_offset &&
-                               candidate.anchor_size == patch.original_size;
+      const bool exact_alias = plan.anchor_text_offset == patch.anchor_offset &&
+                               plan.anchor_size == patch.original_size;
       const bool atomic_mutation = patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite ||
                                    patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite ||
                                    patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
@@ -160,15 +155,13 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
       removed_cache_boundary = patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
     }
 
-    ConSanPerturbationCandidate translated_candidate = candidate;
-    translated_candidate.anchor_text_offset = translated_offset;
-    carried.push_back({.candidate = std::move(translated_candidate),
-                       .sleep_imm = plan.sleep_imm,
-                       .source_candidate = candidate,
-                       .source_owner_descriptor_file_offset = source_owner_descriptor_file_offset,
-                       .overlaps_atomic_mutation = overlaps_atomic_mutation,
-                       .removed_cache_boundary = removed_cache_boundary,
-                       .source_sequence_semantics_weakened = sequence_semantics_weakened});
+    ConSanPerturbationPlan translated = plan;
+    translated.anchor_text_offset = translated_offset;
+    translated.source_sequence_identity = source_sequence->identity;
+    translated.overlaps_atomic_mutation = overlaps_atomic_mutation;
+    translated.removed_cache_boundary = removed_cache_boundary;
+    translated.source_sequence_semantics_weakened = sequence_semantics_weakened;
+    carried.push_back(std::move(translated));
   }
   return carried;
 }
@@ -495,13 +488,13 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   if (options.fault_dry_run) {
     resolve_consan_fault_mutations(*code_object, arch, options, apply_fault_plan, apply_fault_plan,
                                    require_exactly_one_applied_fault, result);
-    build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
-                            carried_plans);
+    build_perturbation_plan(result.program_inventory, options, perturbation,
+                            result.mutation.perturbation, result.errors, carried_plans);
     return result;
   }
   if (has_perturbation) {
-    build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
-                            carried_plans);
+    build_perturbation_plan(result.program_inventory, options, perturbation,
+                            result.mutation.perturbation, result.errors, carried_plans);
     if (!result.errors.empty())
       return result;
   }

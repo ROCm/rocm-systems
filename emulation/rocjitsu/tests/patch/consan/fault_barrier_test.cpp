@@ -128,10 +128,11 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
                                &ConSanFaultSite::kind),
             4u);
   const auto perturb = std::ranges::find_if(
-      perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
+      perturbation.candidates, [&](const ConSanPerturbationCandidate &candidate) {
+        const ConSanSyncEvent *anchor = test_perturbation_anchor(inventory, candidate);
         return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
                candidate.edge == ConSanPerturbationEdge::Release &&
-               candidate.anchor_text_offset == 2u * sizeof(uint32_t);
+               anchor != nullptr && anchor->text_offset() == 2u * sizeof(uint32_t);
       });
   ASSERT_NE(perturb, perturbation.candidates.end());
 
@@ -142,7 +143,7 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
   options.fault_site_identity = inventory.fault_sites.front().identity;
   options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
   options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_identity = perturb->identity;
+  options.sc_perturb_identity = test_perturbation_identity(inventory, *perturb);
   options.sc_perturb_required_count = 1;
   options.max_patches = 1;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -158,11 +159,9 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
   const ConSanPatchInfo &patch = result.patches[1];
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineScPerturbation);
   EXPECT_EQ(patch.anchor_offset, 2u * sizeof(uint32_t));
-  EXPECT_EQ(patch.perturbation_source_candidate_identity, perturb->identity);
-  EXPECT_EQ(patch.perturbation_source_sequence_identity, perturb->sequence_identity);
-  EXPECT_EQ(patch.perturbation_source_container_name, perturb->container_name);
-  EXPECT_EQ(patch.perturbation_source_in_kernel, perturb->in_kernel);
-  EXPECT_EQ(patch.perturbation_source_anchor_offset, perturb->anchor_text_offset);
+  const ConSanSyncSequence *perturb_sequence = test_perturbation_sequence(inventory, *perturb);
+  ASSERT_NE(perturb_sequence, nullptr);
+  EXPECT_EQ(patch.perturbation_source_sequence_identity, perturb_sequence->identity);
   EXPECT_NE(patch.perturbation_sequence_identity, patch.perturbation_source_sequence_identity);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
@@ -202,7 +201,7 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   options.fault_barrier_destination_identity = destination->identity;
   options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
   options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_identity = perturb->identity;
+  options.sc_perturb_identity = test_perturbation_identity(inventory, *perturb);
   options.sc_perturb_required_count = 1;
   options.max_patches = 1;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -219,8 +218,6 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   ASSERT_EQ(move_target.kind, ConSanPatchKind::InlineBarrierMoveTargetRewrite);
   ASSERT_EQ(perturb_patch.kind, ConSanPatchKind::TrampolineScPerturbation);
   EXPECT_EQ(perturb_patch.anchor_offset, move_target.trampoline_offset);
-  EXPECT_EQ(perturb_patch.perturbation_source_anchor_offset, perturb->anchor_text_offset);
-  EXPECT_EQ(perturb_patch.perturbation_source_container_name, perturb->container_name);
   EXPECT_NE(perturb_patch.perturbation_sequence_identity,
             perturb_patch.perturbation_source_sequence_identity);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
