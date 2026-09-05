@@ -31,7 +31,7 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   options.fault_atomic_address_delta = 4;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.sc_perturb_identity = selected_perturbation.plans.front().candidate_identity;
+  options.sc_perturb_identity = selected_perturbation.plans.front().candidate.identity;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -49,7 +49,7 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ASSERT_NE(perturbation, result.patches.end());
   EXPECT_NE(mutation->anchor_offset, perturbation->anchor_offset);
   EXPECT_EQ(perturbation->perturbation_source_candidate_identity,
-            selected_perturbation.plans.front().candidate_identity);
+            selected_perturbation.plans.front().candidate.identity);
   ASSERT_EQ(perturbation->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(perturbation->owner_descriptor_file_offsets.front(),
             result.program_inventory.kernels().front().descriptor_file_offset);

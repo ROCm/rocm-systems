@@ -35,8 +35,8 @@ TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   ASSERT_EQ(release_candidate.ordered_member_identities.size(), 2u);
   EXPECT_EQ(release_candidate.anchor_event_identity,
             release_candidate.ordered_member_identities.front());
-  EXPECT_EQ(release_perturbation.plans[0].candidate_identity, release_candidate.identity);
-  EXPECT_EQ(release_perturbation.plans[0].anchor_text_offset, 0u);
+  EXPECT_EQ(release_perturbation.plans[0].candidate.identity, release_candidate.identity);
+  EXPECT_EQ(release_perturbation.plans[0].candidate.anchor_text_offset, 0u);
   EXPECT_EQ(release_perturbation.plans[0].sleep_imm, 7u);
   EXPECT_FALSE(release.modified());
   EXPECT_TRUE(release.replacement.empty());
@@ -52,7 +52,7 @@ TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   EXPECT_TRUE(acquire_candidate.eligible);
   EXPECT_EQ(acquire_candidate.anchor_event_identity,
             acquire_candidate.ordered_member_identities.back());
-  EXPECT_EQ(acquire_perturbation.plans[0].anchor_text_offset, 4u);
+  EXPECT_EQ(acquire_perturbation.plans[0].candidate.anchor_text_offset, 4u);
 
   ConSanOptions identity_options = acquire_options;
   identity_options.sc_perturb_identity = acquire_candidate.identity;
@@ -63,13 +63,13 @@ TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   ASSERT_TRUE(identity_selected.errors.empty())
       << (identity_selected.errors.empty() ? "" : identity_selected.errors.front());
   ASSERT_EQ(identity_perturbation.plans.size(), 1u);
-  EXPECT_EQ(identity_perturbation.plans[0].candidate_identity, acquire_candidate.identity);
+  EXPECT_EQ(identity_perturbation.plans[0].candidate.identity, acquire_candidate.identity);
   ConSanPerturbationPlanningState repeated_perturbation;
   const ConSanTransformArtifacts repeated =
       test_lower_consan(bytes, acquire_options, &repeated_perturbation);
   ASSERT_EQ(repeated_perturbation.plans.size(), 1u);
-  EXPECT_EQ(repeated_perturbation.plans[0].candidate_identity,
-            acquire_perturbation.plans[0].candidate_identity);
+  EXPECT_EQ(repeated_perturbation.plans[0].candidate.identity,
+            acquire_perturbation.plans[0].candidate.identity);
 }
 
 TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
@@ -98,8 +98,9 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   const ConSanSyncEvent *release_anchor = release.program_inventory.sync().find_sequence_member(
       release.program_inventory.sync().sync_sequences[0].member_semantic_ids.front());
   ASSERT_NE(release_anchor, nullptr);
-  EXPECT_EQ(release_perturbation.plans[0].anchor_event_identity, release_anchor->identity);
-  EXPECT_EQ(release_perturbation.plans[0].anchor_text_offset, 0u);
+  EXPECT_EQ(release_perturbation.plans[0].candidate.anchor_event_identity,
+            release_anchor->identity);
+  EXPECT_EQ(release_perturbation.plans[0].candidate.anchor_text_offset, 0u);
 
   options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
   ConSanPerturbationPlanningState acquire_perturbation;
@@ -110,8 +111,9 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   const ConSanSyncEvent *acquire_anchor = acquire.program_inventory.sync().find_sequence_member(
       acquire.program_inventory.sync().sync_sequences[0].member_semantic_ids.back());
   ASSERT_NE(acquire_anchor, nullptr);
-  EXPECT_EQ(acquire_perturbation.plans[0].anchor_event_identity, acquire_anchor->identity);
-  EXPECT_EQ(acquire_perturbation.plans[0].anchor_text_offset, 32u);
+  EXPECT_EQ(acquire_perturbation.plans[0].candidate.anchor_event_identity,
+            acquire_anchor->identity);
+  EXPECT_EQ(acquire_perturbation.plans[0].candidate.anchor_text_offset, 32u);
 }
 
 TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
@@ -868,7 +870,7 @@ TEST(ConSan, PerturbationAcceptsExactOrderedCasWithoutStaticFlatProvenance) {
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().confidence,
             ConSanSemanticConfidence::Conservative);
   ASSERT_EQ(perturbation.plans.size(), 1u);
-  EXPECT_EQ(perturbation.plans.front().anchor_text_offset, 0u);
+  EXPECT_EQ(perturbation.plans.front().candidate.anchor_text_offset, 0u);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
 }
@@ -995,8 +997,8 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
       test_lower_consan(make_rdna4_lds_code_object(two_pair_words), options, &two_perturbation);
   ASSERT_TRUE(two.errors.empty()) << (two.errors.empty() ? "" : two.errors.front());
   ASSERT_EQ(two_perturbation.plans.size(), 2u);
-  EXPECT_NE(two_perturbation.plans[0].candidate_identity,
-            two_perturbation.plans[1].candidate_identity);
+  EXPECT_NE(two_perturbation.plans[0].candidate.identity,
+            two_perturbation.plans[1].candidate.identity);
 
   options.sc_perturb_index = 1;
   options.sc_perturb_max = 1;
@@ -1006,8 +1008,8 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
       test_lower_consan(make_rdna4_lds_code_object(two_pair_words), options, &indexed_perturbation);
   ASSERT_TRUE(indexed.errors.empty()) << (indexed.errors.empty() ? "" : indexed.errors.front());
   ASSERT_EQ(indexed_perturbation.plans.size(), 1u);
-  EXPECT_EQ(indexed_perturbation.plans[0].candidate_identity,
-            two_perturbation.plans[1].candidate_identity);
+  EXPECT_EQ(indexed_perturbation.plans[0].candidate.identity,
+            two_perturbation.plans[1].candidate.identity);
 }
 
 TEST(ConSan, PerturbationRejectsUnpairedDynamicAmbiguousAndCyclicSequences) {

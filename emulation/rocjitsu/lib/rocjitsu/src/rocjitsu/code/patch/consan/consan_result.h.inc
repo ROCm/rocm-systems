@@ -119,13 +119,10 @@ struct ConSanPerturbationCandidate {
 /// identity and its translated anchor. This is temporary planner-to-emitter
 /// input; mutation tallies and patch metadata are the durable output.
 struct ConSanPerturbationPlan {
-  std::string candidate_identity;
-  std::string sequence_identity;
-  ConSanPerturbationKind kind = ConSanPerturbationKind::None;
-  ConSanPerturbationEdge edge = ConSanPerturbationEdge::Release;
-  std::string anchor_event_identity;
-  uint64_t anchor_text_offset = 0;
-  uint32_t anchor_size = 0;
+  /// Complete admitted candidate. Selection consumes a temporary inventory
+  /// entry into the plan once; composition and emission do not reconstruct
+  /// that relationship through copied strings and offsets.
+  ConSanPerturbationCandidate candidate;
   uint32_t sleep_imm = 0;
   std::string source_candidate_identity;
   std::string source_sequence_identity;

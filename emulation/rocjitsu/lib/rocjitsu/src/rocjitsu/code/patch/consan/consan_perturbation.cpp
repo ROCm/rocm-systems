@@ -150,13 +150,7 @@ void build_perturbation_plan(const ConSanOptions &options,
         continue;
       }
       planning.plans.push_back(
-          {.candidate_identity = candidate->identity,
-           .sequence_identity = candidate->sequence_identity,
-           .kind = candidate->kind,
-           .edge = candidate->edge,
-           .anchor_event_identity = candidate->anchor_event_identity,
-           .anchor_text_offset = candidate->anchor_text_offset,
-           .anchor_size = candidate->anchor_size,
+          {.candidate = *candidate,
            .sleep_imm = carried.sleep_imm,
            .source_candidate_identity = carried.source_candidate_identity,
            .source_sequence_identity = carried.source_sequence_identity,
@@ -195,13 +189,7 @@ void build_perturbation_plan(const ConSanOptions &options,
   for (size_t i = begin; i < matching.size() && planning.plans.size() < options.sc_perturb_max;
        ++i) {
     const ConSanPerturbationCandidate &candidate = *matching[i];
-    planning.plans.push_back({.candidate_identity = candidate.identity,
-                              .sequence_identity = candidate.sequence_identity,
-                              .kind = candidate.kind,
-                              .edge = candidate.edge,
-                              .anchor_event_identity = candidate.anchor_event_identity,
-                              .anchor_text_offset = candidate.anchor_text_offset,
-                              .anchor_size = candidate.anchor_size,
+    planning.plans.push_back({.candidate = candidate,
                               .sleep_imm = options.sc_perturb_sleep,
                               .source_candidate_identity = {},
                               .source_sequence_identity = {},
@@ -269,7 +257,6 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   }
   struct PlannedPatch {
     const ConSanPerturbationPlan *plan = nullptr;
-    const ConSanPerturbationCandidate *candidate = nullptr;
     DbiPatchPlacement placement;
     std::vector<uint32_t> body_words;
   };
@@ -278,35 +265,32 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   const uint32_t nop = build_s_nop(0, arch);
 
   for (const ConSanPerturbationPlan &plan : planning.plans) {
-    const auto candidate = std::ranges::find(planning.candidates, plan.candidate_identity,
-                                             &ConSanPerturbationCandidate::identity);
-    if (candidate == planning.candidates.end() || !candidate->eligible ||
-        candidate->sequence_identity != plan.sequence_identity ||
-        candidate->anchor_event_identity != plan.anchor_event_identity ||
-        candidate->anchor_text_offset != plan.anchor_text_offset ||
-        candidate->anchor_size != plan.anchor_size) {
-      result.errors.emplace_back(
-          "ConSan SC perturbation plan no longer matches its admitted candidate");
+    const ConSanPerturbationCandidate &candidate = plan.candidate;
+    if (!candidate.eligible) {
+      result.errors.emplace_back("ConSan SC perturbation plan retained a rejected candidate");
       return;
     }
-    if (plan.anchor_size != sizeof(uint32_t) && plan.anchor_size != 2u * sizeof(uint32_t) &&
-        plan.anchor_size != 3u * sizeof(uint32_t)) {
+    if (candidate.anchor_size != sizeof(uint32_t) &&
+        candidate.anchor_size != 2u * sizeof(uint32_t) &&
+        candidate.anchor_size != 3u * sizeof(uint32_t)) {
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.warnings.emplace_back(
           "ConSan SC perturbation supports only 4-, 8-, and 12-byte boundary instructions");
       return;
     }
-    if (plan.anchor_text_offset > text.size() ||
-        plan.anchor_size > text.size() - plan.anchor_text_offset) {
+    if (candidate.anchor_text_offset > text.size() ||
+        candidate.anchor_size > text.size() - candidate.anchor_text_offset) {
       result.errors.emplace_back("ConSan SC perturbation anchor exceeds executable text");
       return;
     }
     std::array<uint32_t, 3> original_words{};
-    std::memcpy(original_words.data(), text.data() + plan.anchor_text_offset, plan.anchor_size);
+    std::memcpy(original_words.data(), text.data() + candidate.anchor_text_offset,
+                candidate.anchor_size);
     if (plan.removed_cache_boundary) {
-      const bool all_nops = std::ranges::all_of(
-          std::span<const uint32_t>(original_words.data(), plan.anchor_size / sizeof(uint32_t)),
-          [&](uint32_t word) { return word == nop; });
+      const bool all_nops =
+          std::ranges::all_of(std::span<const uint32_t>(original_words.data(),
+                                                        candidate.anchor_size / sizeof(uint32_t)),
+                              [&](uint32_t word) { return word == nop; });
       if (!plan.overlaps_atomic_mutation || !all_nops) {
         result.errors.emplace_back(
             "ConSan carried removed-cache perturbation boundary is not the staged NOP range");
@@ -316,14 +300,14 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
       std::unique_ptr<Instruction> original;
       std::unique_ptr<Decoder> decoder = Decoder::create(arch);
       if (decoder)
-        original = decode_bounded_instruction(
-            *decoder,
-            std::span<const uint32_t>(original_words).first(plan.anchor_size / sizeof(uint32_t)),
-            plan.anchor_text_offset);
+        original = decode_bounded_instruction(*decoder,
+                                              std::span<const uint32_t>(original_words)
+                                                  .first(candidate.anchor_size / sizeof(uint32_t)),
+                                              candidate.anchor_text_offset);
       std::string relocatable_error;
-      if (!original || static_cast<uint32_t>(original->size()) != plan.anchor_size ||
-          !is_relocatable_consan_barrier_destination(*original, plan.anchor_text_offset, text, arch,
-                                                     &relocatable_error)) {
+      if (!original || static_cast<uint32_t>(original->size()) != candidate.anchor_size ||
+          !is_relocatable_consan_barrier_destination(*original, candidate.anchor_text_offset, text,
+                                                     arch, &relocatable_error)) {
         result.outcome = ConSanTransformOutcome::Unsupported;
         result.warnings.emplace_back("ConSan SC perturbation boundary is not relocatable: " +
                                      relocatable_error);
@@ -332,9 +316,9 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     }
 
     DbiPatchPlacementRequest request;
-    request.anchor_offset = plan.anchor_text_offset;
-    request.original_size = plan.anchor_size;
-    request.body_size = sizeof(uint32_t) + plan.anchor_size;
+    request.anchor_offset = candidate.anchor_text_offset;
+    request.original_size = candidate.anchor_size;
+    request.body_size = sizeof(uint32_t) + candidate.anchor_size;
     request.allow_appended_cave = false;
     std::optional<DbiPatchPlacement> placement;
     for (const LocalNopCave &cave : caves) {
@@ -372,18 +356,16 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
       return;
     }
     std::vector<uint32_t> body_words;
-    body_words.reserve(plan.anchor_size / sizeof(uint32_t) + 2u);
-    if (plan.edge == ConSanPerturbationEdge::Release)
+    body_words.reserve(candidate.anchor_size / sizeof(uint32_t) + 2u);
+    if (candidate.edge == ConSanPerturbationEdge::Release)
       body_words.push_back(build_s_sleep(static_cast<uint16_t>(plan.sleep_imm), arch));
     body_words.insert(body_words.end(), original_words.begin(),
-                      original_words.begin() + plan.anchor_size / sizeof(uint32_t));
-    if (plan.edge == ConSanPerturbationEdge::Acquire)
+                      original_words.begin() + candidate.anchor_size / sizeof(uint32_t));
+    if (candidate.edge == ConSanPerturbationEdge::Acquire)
       body_words.push_back(build_s_sleep(static_cast<uint16_t>(plan.sleep_imm), arch));
     body_words.push_back(build_s_branch(*ret, arch));
-    planned.push_back({.plan = &plan,
-                       .candidate = &*candidate,
-                       .placement = *placement,
-                       .body_words = std::move(body_words)});
+    planned.push_back(
+        {.plan = &plan, .placement = *placement, .body_words = std::move(body_words)});
   }
 
   std::vector<uint8_t> new_text(text.begin(), text.end());
@@ -396,7 +378,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     }
     const uint32_t branch = build_s_branch(*forward, arch);
     std::memcpy(new_text.data() + patch.placement.anchor_offset, &branch, sizeof(branch));
-    for (uint32_t offset = sizeof(uint32_t); offset < patch.plan->anchor_size;
+    for (uint32_t offset = sizeof(uint32_t); offset < patch.plan->candidate.anchor_size;
          offset += sizeof(uint32_t)) {
       std::memcpy(new_text.data() + patch.placement.anchor_offset + offset, &nop, sizeof(nop));
     }
@@ -424,15 +406,15 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     info.kind = ConSanPatchKind::TrampolineScPerturbation;
     info.anchor_offset = patch.placement.anchor_offset;
     info.trampoline_offset = patch.placement.body_offset;
-    info.original_size = patch.plan->anchor_size;
+    info.original_size = patch.plan->candidate.anchor_size;
     info.trampoline_size = static_cast<uint32_t>(patch.body_words.size() * sizeof(uint32_t));
-    info.perturbation_edge = patch.plan->edge;
-    info.perturbation_sequence_identity = patch.plan->sequence_identity;
+    info.perturbation_edge = patch.plan->candidate.edge;
+    info.perturbation_sequence_identity = patch.plan->candidate.sequence_identity;
     info.perturbation_source_candidate_identity = patch.plan->source_candidate_identity;
     info.perturbation_source_sequence_identity = patch.plan->source_sequence_identity;
     info.perturbation_source_container_name = patch.plan->source_container_name;
     info.perturbation_source_anchor_identity = patch.plan->source_anchor_event_identity.empty()
-                                                   ? patch.plan->anchor_event_identity
+                                                   ? patch.plan->candidate.anchor_event_identity
                                                    : patch.plan->source_anchor_event_identity;
     info.perturbation_source_in_kernel = patch.plan->source_in_kernel;
     info.perturbation_source_anchor_offset = patch.plan->source_anchor_text_offset;
@@ -441,9 +423,9 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
         patch.plan->source_owner_descriptor_file_offset;
     info.perturbation_composite_atomic_overlap = patch.plan->overlaps_atomic_mutation;
     info.perturbation_composite_removed_boundary = patch.plan->removed_cache_boundary;
-    if (patch.candidate->in_kernel) {
+    if (patch.plan->candidate.in_kernel) {
       const ConSanProgramContainer *owner =
-          result.program_inventory.find_kernel_by_name(patch.candidate->container_name);
+          result.program_inventory.find_kernel_by_name(patch.plan->candidate.container_name);
       if (owner == nullptr) {
         result.errors.emplace_back("ConSan carried perturbation lost its exact kernel owner");
         result.replacement.clear();
