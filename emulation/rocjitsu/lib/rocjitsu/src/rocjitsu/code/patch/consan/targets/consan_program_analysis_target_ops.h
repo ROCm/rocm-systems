@@ -184,6 +184,9 @@ struct ConSanDirectLdsTransferEncoding {
 /// operations remain null rather than requiring common dispatch code to know
 /// which concrete target implements which decoder.
 struct ConSanProgramAnalysisTargetOperations {
+  /// Width implied by a target-native atomic mnemonic that carries no width
+  /// suffix. Returning zero leaves the instruction's width unknown.
+  uint32_t (*implicit_atomic_width_bits)(std::string_view) = nullptr;
   ConSanCacheOperationEncoding (*classify_cache_operation)(std::string_view) = nullptr;
   ConSanWaitInstructionEncoding (*classify_wait_instruction)(std::string_view, uint32_t,
                                                              rj_code_arch_t) = nullptr;
@@ -209,6 +212,12 @@ struct ConSanProgramAnalysisTargetOperations {
 /// unsupported operation.
 [[nodiscard]] ConSanCacheOperationEncoding
 classify_consan_cache_operation(std::string_view mnemonic, rj_code_arch_t arch);
+
+/// Normalize the width encoded by one target-native atomic mnemonic. Generic
+/// suffixed spellings are handled once; target providers own any implicit
+/// width convention.
+[[nodiscard]] uint32_t classify_consan_atomic_width_bits(std::string_view mnemonic,
+                                                         rj_code_arch_t arch);
 
 [[nodiscard]] ConSanWaitInstructionEncoding
 classify_consan_wait_instruction(std::string_view mnemonic, uint32_t word, rj_code_arch_t arch);

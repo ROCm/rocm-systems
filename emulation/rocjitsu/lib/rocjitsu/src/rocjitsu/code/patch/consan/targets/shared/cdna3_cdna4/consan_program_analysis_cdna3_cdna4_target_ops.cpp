@@ -122,6 +122,8 @@ bool decode_cdna3_cdna4_atomic_site(ConSanAtomicSite &site, std::string_view mne
 namespace rocjitsu {
 
 extern const ConSanProgramAnalysisTargetOperations kConSanCdna3Cdna4ProgramAnalysisOperations = {
+    .implicit_atomic_width_bits =
+        consan_program_analysis_target_detail::implicit_cdna3_cdna4_rdna3_atomic_width_bits,
     .classify_cache_operation =
         consan_program_analysis_target_detail::classify_cdna3_cdna4_cache_operation,
     .classify_wait_instruction =

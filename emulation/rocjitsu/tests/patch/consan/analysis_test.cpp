@@ -135,6 +135,24 @@ TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
             nullptr);
 }
 
+TEST(ConSan, AtomicMnemonicWidthConventionIsTargetOwned) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                    ROCJITSU_CODE_ARCH_RDNA3}) {
+    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 32u) << arch;
+    EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 32u) << arch;
+  }
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 0u) << arch;
+    EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 0u) << arch;
+  }
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                    ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4,
+                                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add_u32", arch), 32u) << arch;
+    EXPECT_EQ(classify_consan_atomic_width_bits("ds_add_u64", arch), 64u) << arch;
+  }
+}
+
 TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {
   constexpr auto gfx942 =
       cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.sc0 = 1u, .addr = 0u, .vdst = 2u});

@@ -360,6 +360,11 @@ foreach(_file IN LISTS _target_component_sources)
         "target providers may not decide mode policy"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_analysis.inc"
+    "consan_arch_is_(cdna3_or_cdna4|rdna4_or_cdna5)"
+    "common program inventory must consume target-normalized instruction semantics"
+)
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
     _consan_assert_no_match(

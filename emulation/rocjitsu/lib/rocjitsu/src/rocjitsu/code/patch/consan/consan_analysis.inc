@@ -1241,11 +1241,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.decoded_site().text_offset = instruction_text_offset;
   site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
   site.decoded_site().size = static_cast<uint32_t>(inst.size());
-  site.decoded_width_bits = lds_width_bits(mnemonic);
-  if (!consan_arch_is_rdna4_or_cdna5(arch) && mnemonic.starts_with("flat_atomic") &&
-      site.decoded_width_bits == 0u) {
-    site.decoded_width_bits = 32u;
-  }
+  site.decoded_width_bits = classify_consan_atomic_width_bits(mnemonic, arch);
   site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
@@ -1432,12 +1428,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
-  site.width_bits = lds_width_bits(mnemonic);
-  if (!consan_arch_is_rdna4_or_cdna5(arch) &&
-      (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
-      site.width_bits == 0u) {
-    site.width_bits = 32u;
-  }
+  site.width_bits = classify_consan_atomic_width_bits(mnemonic, arch);
   site.destination_vgpr = vgpr_index(inst.dst_operand(0));
   site.address_vgpr = vgpr_index(inst.src_operand(0));
   site.data_vgpr = vgpr_index(inst.src_operand(1));

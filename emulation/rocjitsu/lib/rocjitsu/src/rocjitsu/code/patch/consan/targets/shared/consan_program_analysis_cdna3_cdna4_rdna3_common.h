@@ -13,6 +13,11 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+[[nodiscard]] inline uint32_t
+implicit_cdna3_cdna4_rdna3_atomic_width_bits(std::string_view mnemonic) {
+  return mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic") ? 32u : 0u;
+}
+
 template <typename Raw>
 ConSanVectorMemoryDecode
 decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, bool global,

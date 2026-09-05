@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops_internal.h"
 
 namespace rocjitsu {
@@ -26,6 +27,16 @@ invoke_target_operation(rj_code_arch_t arch,
 }
 
 } // namespace
+
+uint32_t classify_consan_atomic_width_bits(std::string_view mnemonic, rj_code_arch_t arch) {
+  const uint32_t explicit_width = lds_width_bits(mnemonic);
+  if (explicit_width != 0u)
+    return explicit_width;
+  const auto *target = operations(arch);
+  return target && target->implicit_atomic_width_bits
+             ? target->implicit_atomic_width_bits(mnemonic)
+             : 0u;
+}
 
 ConSanCacheOperationEncoding classify_consan_cache_operation(std::string_view mnemonic,
                                                              rj_code_arch_t arch) {
