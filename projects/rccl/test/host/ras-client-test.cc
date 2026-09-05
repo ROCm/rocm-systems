@@ -51,6 +51,8 @@
 
 using RcclUnitTesting::CaptureLog;
 
+namespace {
+
 // The errnos the unit perror()'d, in call order.
 //
 // Prefer this over matching the sentence on stderr. Every failure arm in client.cc is report-and-return-1: the arms
@@ -82,6 +84,8 @@ void ResetRasClientGlobals() {
   // repeated getopt_long calls in one process need.
   optind = 0;
 }
+
+}  // namespace
 
 // ===========================================================================
 // Default fixture for every test in this file. Tests that need extra per-test
@@ -130,7 +134,6 @@ constexpr int kParseArgsNoExit = -999;
 
 struct ParseArgsOutcome {
   int exitStatus = kParseArgsNoExit;
-  std::string log;
   // parseArgs stores optarg straight into its globals (client.cc:76 `format = optarg`), so the argv strings must
   // outlive every assertion that reads one, not merely the parseArgs call. Keeping them here ties their lifetime to
   // the outcome the test holds. Returning by value is safe: a vector move steals the buffer, it does not relocate.
@@ -155,7 +158,7 @@ ParseArgsOutcome RunParseArgs(const std::vector<std::string>& args) {
   out.argvStorage.reserve(args.size() + 1);
   out.argvStorage.emplace_back("rccl-ras-client");
   out.argvStorage.insert(out.argvStorage.end(), args.begin(), args.end());
-  out.log = CaptureLog([&]() {
+  CaptureLog([&]() {
     try {
       InvokeParseArgs(out.argvStorage);
     } catch (const MicroExit& e) {
@@ -927,7 +930,7 @@ constexpr const char kUsageProg[] = "ras-client-argv0-probe";
 ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
   ParseArgsOutcome out;
   out.argvStorage.assign(args.begin(), args.end());
-  out.log = CaptureLog([&]() {
+  CaptureLog([&]() {
     try {
       InvokeParseArgs(out.argvStorage);
     } catch (const MicroExit& e) {
@@ -961,7 +964,7 @@ void ExpectAllGlobalsAtDefault() {
 // printUsage writes nowhere but stderr and changes no parse state; without this
 // the two exiting arms cannot be told apart from the function they call.
 TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesNotExit) {
-  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
+  CaptureLog([]() { printUsage(kUsageProg); });
 
   ExpectAllGlobalsAtDefault();
 }
@@ -1084,7 +1087,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_FormatNeverSpecified_WritesNothingRea
     ScopedHook writeHook(g_write, [](int, const void*, size_t count) { return static_cast<ssize_t>(count); });
     ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
 
-    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+    CaptureLog([&]() { rc = setOutputFormat(); });
 
     EXPECT_EQ(0, rc);
     EXPECT_EQ(0, writeHook.calls);
@@ -1124,7 +1127,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOk_SendsExactCommandOnSo
     return 3;
   });
 
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
@@ -1146,7 +1149,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_AcceptedResponses_ReturnZeroAndStillS
     ScriptReadData(reply);
 
     int rc = -1;
-    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+    CaptureLog([&]() { rc = setOutputFormat(); });
 
     EXPECT_EQ(0, rc) << reply;
     EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
@@ -1169,7 +1172,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_RejectedResponses_ReturnOneAfterSendi
     if (*reply != '\0') ScriptReadData(reply);
 
     int rc = -1;
-    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+    CaptureLog([&]() { rc = setOutputFormat(); });
 
     EXPECT_EQ(1, rc) << reply;
     EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
@@ -1190,7 +1193,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_WriteFailsWithEagain_ReportsConnectio
   });
   ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
 
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({});
@@ -1210,7 +1213,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_WriteFailsWithBrokenPipe_ReportsPerro
   });
   ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
 
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({EPIPE});
@@ -1224,7 +1227,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ReadFailsWithEagain_ReportsConnection
   ScriptRead(-1, EAGAIN, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
@@ -1238,7 +1241,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ReadFailsWithConnectionReset_ReportsP
   ScriptRead(-1, ECONNRESET, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
@@ -1254,7 +1257,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_FormatOverflowsMsgBuf_TruncatesComman
   ScriptReadData("OK\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+  CaptureLog([&]() { rc = setOutputFormat(); });
 
   EXPECT_EQ(0, rc);  // truncation is not detected or reported
   ASSERT_EQ(4095u, g_writtenData.size());
@@ -1277,22 +1280,6 @@ constexpr const char kChunk1[] = "alpha";         // 5 bytes
 constexpr const char kChunk2[] = "bravocharlie";  // 12 bytes
 constexpr const char kChunk3[] = "delta7";        // 6 bytes
 
-struct FwriteCall {
-  size_t size;
-  size_t nmemb;
-  FILE* stream;
-};
-
-std::vector<FwriteCall> g_fwriteCalls;
-
-// Records (size, nmemb, stream) then behaves like the default fwrite. Without the (size, nmemb)
-// record the fwrite(buf,1,bytes) vs fwrite(buf,bytes,1) swap is invisible to g_stdoutData.
-size_t RecordingFwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
-  g_fwriteCalls.push_back(FwriteCall{size, nmemb, stream});
-  g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
-  return nmemb;
-}
-
 void ScriptThreeChunks() {
   ScriptReadData(kChunk1);
   ScriptReadData(kChunk2);
@@ -1301,18 +1288,13 @@ void ScriptThreeChunks() {
 
 }  // namespace
 
-// Derived fixture solely so g_fwriteCalls is cleared alongside the shared fakes;
-// suite name RasClientMicrotestGetStatus needs its own registration line.
+// getNCCLStatus runs on a distinctive fd so the descriptor the client forwards is provably its own. The suite used
+// to be a derived fixture only so it could clear its own fwrite record; ResetLibcFakes clears the shared one.
 class RasClientMicrotestGetStatus : public RasClientMicrotest {
  protected:
   void SetUp() override {
     RasClientMicrotest::SetUp();
-    g_fwriteCalls.clear();
-    sock = 17;  // distinctive, so the fd the client forwards is provably its own
-  }
-  void TearDown() override {
-    g_fwriteCalls.clear();
-    RasClientMicrotest::TearDown();
+    sock = 17;
   }
 };
 
@@ -1326,15 +1308,14 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAnd
     g_writtenData.append(static_cast<const char*>(buf), count);
     return static_cast<ssize_t>(count);
   });
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
 
   EXPECT_EQ("STATUS\n", g_writtenData);
   EXPECT_EQ(17, writeFd);
   EXPECT_EQ(1, writeHook.calls);
-  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0, fflushHook.calls);
   EXPECT_EQ("", g_stdoutData);
 }
@@ -1342,26 +1323,24 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAnd
 // Command arm, verbose on: the prefix is "VERBOSE " with its trailing space.
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_Verbose_SendsVerbosePrefixedStatusAndReturnsZero) {
   verbose = true;
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
 
   EXPECT_EQ("VERBOSE STATUS\n", g_writtenData);
-  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_fwriteCalls.size());
 }
 
 // Loop body: three reads of different lengths each become their own
 // fwrite(buf, 1, bytes, stdout) + fflush, in order, then EOF returns 0.
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdoutInOrder) {
   ScriptThreeChunks();
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
 
   EXPECT_EQ("STATUS\n", g_writtenData);
   EXPECT_EQ("alphabravocharliedelta7", g_stdoutData);
-  EXPECT_EQ(3, fwriteHook.calls);
+  EXPECT_EQ(3u, g_fwriteCalls.size());
   EXPECT_EQ(3, fflushHook.calls);
   EXPECT_EQ(3u, g_readScriptPos);  // every scripted read was consumed, then past-the-end EOF
   ASSERT_EQ(3u, g_fwriteCalls.size());
@@ -1377,32 +1356,30 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdou
 // Write arm, EAGAIN: socketWrite returns -1 with a timeout errno.
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEagain_ReportsTimeoutAndReturnsOne) {
   ScriptThreeChunks();  // never consumed: the command write fails first
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
   ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
     errno = EAGAIN;
     return -1;
   });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ(1, writeHook.calls);
-  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0u, g_readScriptPos);
   ExpectPerrors({});
 }
 
 // Write arm, non-EAGAIN: perror prints the label, ": " and the strerror text.
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEpipe_ReportsWriteToSocketAndReturnsOne) {
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
   ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
     errno = EPIPE;
     return -1;
   });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ(1, writeHook.calls);
-  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_fwriteCalls.size());
   ExpectPerrors({EPIPE});
 }
 
@@ -1411,13 +1388,12 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEpipe_ReportsWri
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEwouldblock_ReportsTimeoutAndReturnsOne) {
   ScriptReadData(kChunk1);
   ScriptRead(-1, EWOULDBLOCK, "");
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ("STATUS\n", g_writtenData);
   EXPECT_EQ("alpha", g_stdoutData);
-  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_EQ(1u, g_fwriteCalls.size());
   ExpectPerrors({});
 }
 
@@ -1425,12 +1401,11 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEwouldblock_Repor
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEio_ReportsReadSocketAndReturnsOne) {
   ScriptReadData(kChunk1);
   ScriptRead(-1, EIO, "");
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ("alpha", g_stdoutData);
-  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_EQ(1u, g_fwriteCalls.size());
   ExpectPerrors({EIO});
 }
 
@@ -1439,16 +1414,18 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEio_ReportsReadSo
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndReturnsOne) {
   ScriptThreeChunks();
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
-  int fwriteSeq = 0;  // sequencing only; fwriteHook.calls stays the assertion surface
+  int fwriteSeq = 0;  // sequencing only; g_fwriteCalls is the assertion surface
   ScopedHook fwriteHook(g_fwrite, [&](const void* ptr, size_t size, size_t nmemb, FILE* stream) -> size_t {
+    g_fwriteCalls.push_back(MicroFwriteCall{size, nmemb, stream});  // record first: a short write is still a call
     if (++fwriteSeq == 2) return nmemb - 1;
-    return RecordingFwrite(ptr, size, nmemb, stream);
+    g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
+    return nmemb;
   });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ("alpha", g_stdoutData);
-  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(2u, g_fwriteCalls.size());
   EXPECT_EQ(1, fflushHook.calls);
   EXPECT_EQ(2u, g_readScriptPos);
 }
@@ -1456,7 +1433,6 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndR
 // fflush arm: the second flush fails, after its chunk already reached stdout.
 TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndReturnsOne) {
   ScriptThreeChunks();
-  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
   int fflushSeq = 0;  // sequencing only; fflushHook.calls stays the assertion surface
   ScopedHook fflushHook(g_fflush, [&](FILE*) {
     if (++fflushSeq == 2) {
@@ -1466,10 +1442,10 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndRe
     return 0;
   });
 
-  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+  CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
 
   EXPECT_EQ("alphabravocharlie", g_stdoutData);
-  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(2u, g_fwriteCalls.size());
   EXPECT_EQ(2, fflushHook.calls);
   EXPECT_EQ(2u, g_readScriptPos);
   ExpectPerrors({ENOSPC});
@@ -1547,13 +1523,9 @@ uint32_t AddrOf(const struct sockaddr* sa) {
 }
 
 
-constexpr const char kFailedHeader[] = "Failed to connect to the NCCL RAS service!\n";
-constexpr const char kArgsAdvice[] = "the host/port arguments are correct and match NCCL_RAS_ADDR.\n";
-constexpr const char kLocalAdvice[] = "the RAS client was started on a node where the NCCL job is running.\n";
 
 // The one handshake outcome reachable from a successful connect that cannot
 // reach the `timeout:` label, whose `goto retry` would re-enter the walk.
-constexpr const char kHandshakeEof[] = "NCCL unexpectedly closed the connection\n";
 
 }  // namespace
 
@@ -1572,7 +1544,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetaddrinfoFails_ReportsResolveErrorAnd
   ScopedHook sockHook(g_socket, [](int, int, int) { return 77; });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(1, gai.calls);
@@ -1602,7 +1574,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ResolvesConfiguredEndpoint_PassesUnspec
                      });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(1, resolve.calls);
@@ -1634,7 +1606,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SocketFailsOnFirstEntry_SkipsToNextAddr
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(2, sockHook.calls);
@@ -1666,7 +1638,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrys
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);  // the handshake EOF, not the walk, is what fails here
   EXPECT_EQ(201, sock);
@@ -1688,9 +1660,13 @@ TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrys
   EXPECT_EQ(1, g_freeaddrinfoCalls);
 }
 
-// Arm: every entry's connect fails -> sock == -1 after the walk, and the
-// ternary's false branch (both host and port at their defaults).
-TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnDefaultEndpoint_ReportsLocalNodeAdvice) {
+// Arm: every entry's connect fails, so the walk runs to the end with sock == -1.
+//
+// The advice the unit then prints is chosen by a ternary on hostName/port (client.cc:213-216) that feeds nothing but
+// the fprintf, so which branch it took is not observable here. Two sibling tests used to drive a custom host and a
+// custom port to reach it; with the message unasserted they asserted exactly what this one does, so they are gone
+// rather than left implying a check they do not make.
+TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefused_WalkExhaustsAndClosesEveryDescriptor) {
   g_addrinfoCount = 3;
   g_connectResult = -1;
   g_connectErrno = ECONNREFUSED;
@@ -1699,7 +1675,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnDefaultEndpoint_Repo
   ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(-1, sock);
@@ -1707,45 +1683,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnDefaultEndpoint_Repo
   EXPECT_EQ(std::vector<int>({300, 301, 302}), fds.issued);
   EXPECT_EQ(std::vector<int>({300, 301, 302}), g_closedFds);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // 2 would mean addrInfo was not nulled and fail: freed it again
-}
-
-// Arm: the ternary's true branch reached via a non-default host alone. With
-// `&&` in place of `||` this falls to the localhost advice instead.
-TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomHost_ReportsHostPortAdvice) {
-  hostName = kOtherHost;
-  g_addrinfoCount = 3;
-  g_connectResult = -1;
-
-  FdSequence fds(310);
-  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
-
-  int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
-
-  EXPECT_EQ(1, ret);
-  EXPECT_EQ(-1, sock);
-  EXPECT_EQ(std::vector<int>({310, 311, 312}), fds.issued);
-  EXPECT_EQ(std::vector<int>({310, 311, 312}), g_closedFds);
-}
-
-// Arm: the ternary's true branch reached via a non-default port alone, with
-// hostName left at "localhost" -- the other half of the `||`.
-TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomPort_ReportsHostPortAdvice) {
-  port = kOtherPort;
-  g_addrinfoCount = 3;
-  g_connectResult = -1;
-
-  FdSequence fds(320);
-  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
-
-  int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
-
-  EXPECT_EQ(1, ret);
-  EXPECT_EQ(-1, sock);
-  EXPECT_STREQ("localhost", hostName);
-  EXPECT_EQ(std::vector<int>({320, 321, 322}), fds.issued);
-  EXPECT_EQ(std::vector<int>({320, 321, 322}), g_closedFds);
 }
 
 // Arm: `if (timeout)` false. Zero disables the timeout, so neither socket
@@ -1758,7 +1695,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutZero_SkipsBothSocketTimeoutOptio
   ScopedHook optHook(g_setsockopt, [](int, int, int, const void*, socklen_t) { return 0; });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(0, optHook.calls);
@@ -1782,7 +1719,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeo
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   ASSERT_EQ(2u, opts.size());
@@ -1809,7 +1746,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SendTimeoutOptionFails_SkipsReceiveOpti
   ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(1, optHook.calls);
@@ -1838,7 +1775,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ReceiveTimeoutOptionFails_ReportsAfterB
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(2, optHook.calls);
@@ -1867,7 +1804,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_FormatsTheNumericNameOfThe
   ScopedHook sockHook(g_socket, [](int, int, int) { return 370; });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(1, nameHook.calls);
@@ -1876,9 +1813,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_FormatsTheNumericNameOfThe
   EXPECT_EQ(kEntryPort0, queriedPort);
 }
 
-// Arm: getnameinfo fails -> the strcpy fallback puts the *configured* host and
-// port in the message, discarding whatever getnameinfo left in the buffers.
-TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFails_FallsBackToConfiguredHostAndPort) {
+// Arm: getnameinfo fails on every entry. The fallback it triggers only affects the message, which is not asserted,
+// so what this pins is that a failing getnameinfo does not abort the walk: all three entries are still tried.
+TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFailsOnEveryEntry_WalkStillVisitsThemAll) {
   hostName = kOtherHost;
   port = kOtherPort;
   g_addrinfoCount = 3;
@@ -1886,19 +1823,17 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFails_FallsBackToConfiguredH
 
   FdSequence fds(380);
   ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
-  // Writes a marker first: if the fallback is dropped, the marker is what prints.
-  ScopedHook nameHook(g_getnameinfo, [](const struct sockaddr*, socklen_t, char* host, socklen_t hostlen, char* serv,
-                                        socklen_t servlen, int) {
-    snprintf(host, hostlen, "%s", "STALE_HOST");
-    snprintf(serv, servlen, "%s", "9999");
+  ScopedHook nameHook(g_getnameinfo, [](const struct sockaddr*, socklen_t, char*, socklen_t, char*, socklen_t, int) {
     return EAI_FAMILY;
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(3, nameHook.calls);
+  EXPECT_EQ(std::vector<int>({380, 381, 382}), fds.issued);
+  EXPECT_EQ(std::vector<int>({380, 381, 382}), g_closedFds);
 }
 
 // Arm: freeaddrinfo receives the list *head*, not the exhausted walk cursor,
@@ -1927,7 +1862,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolved
   });
 
   int ret = -1;
-  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+  CaptureLog([&ret]() { ret = connectToNCCL(); });
 
   EXPECT_EQ(1, ret);
   EXPECT_EQ(1, freeHook.calls);
@@ -1951,17 +1886,12 @@ TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolved
 
 namespace {
 
-struct HandshakeOutcome {
-  int ret;
-  std::string log;
-};
-
 // Runs the handshake on the fixture defaults: timeout is -1, so the TIMEOUT
 // negotiation is skipped and connectToNCCL ends right after this block.
-HandshakeOutcome RunConnectToNCCL() {
-  HandshakeOutcome out{-999, {}};
-  out.log = CaptureLog([&]() { out.ret = connectToNCCL(); });
-  return out;
+int RunConnectToNCCL() {
+  int ret = -999;
+  CaptureLog([&]() { ret = connectToNCCL(); });
+  return ret;
 }
 
 // The exact bytes the handshake must put on the wire. Spelled as a literal on
@@ -1992,9 +1922,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTh
     ResetRasClientGlobals();
     ScriptReadData(banner);
 
-    const HandshakeOutcome out = RunConnectToNCCL();
+    const int ret = RunConnectToNCCL();
 
-    EXPECT_EQ(0, out.ret) << banner;
+    EXPECT_EQ(0, ret) << banner;
     EXPECT_EQ(kClientHello, g_writtenData) << banner;
     EXPECT_EQ(kSocketFd, sock) << banner;
     EXPECT_TRUE(g_closedFds.empty()) << banner;  // not the `fail:` arm
@@ -2013,9 +1943,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_RejectedBanners_ReturnOneAndCloseThe
     ResetRasClientGlobals();
     if (*banner != '\0') ScriptReadData(banner);
 
-    const HandshakeOutcome out = RunConnectToNCCL();
+    const int ret = RunConnectToNCCL();
 
-    EXPECT_EQ(1, out.ret) << banner;
+    EXPECT_EQ(1, ret) << banner;
     EXPECT_EQ(kClientHello, g_writtenData) << banner;  // the write arm ran; only the reply is bad
     ExpectClosedExactlyOnce(kSocketFd);
     ExpectPerrors({});
@@ -2030,9 +1960,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
     return -1;
   });
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+  const int ret = RunConnectToNCCL();
 
-  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(1, ret);
   EXPECT_EQ(1, writeHook.calls);
   EXPECT_EQ("", g_writtenData);
   ExpectPerrors({EIO});
@@ -2044,9 +1974,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
 TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEio_PerrorsAndFails) {
   ScriptRead(-1, EIO, "");
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+  const int ret = RunConnectToNCCL();
 
-  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(1, ret);
   EXPECT_EQ(kClientHello, g_writtenData);
   ExpectPerrors({EIO});
   ExpectClosedExactlyOnce(kSocketFd);
@@ -2072,9 +2002,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEagainOnce_RetriesOnce
     return static_cast<ssize_t>(count);
   });
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+  const int ret = RunConnectToNCCL();
 
-  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(0, ret);
   EXPECT_EQ(2, writeHook.calls);
   EXPECT_EQ(2, connectHook.calls);         // the retry re-ran the whole resolve/connect walk
   EXPECT_EQ(kClientHello, g_writtenData);  // only the second, successful write reached the wire
@@ -2090,9 +2020,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEagainOnce_RetriesOnceT
   ScriptReadData("SERVER PROTOCOL 2\n");
   ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
 
-  const HandshakeOutcome out = RunConnectToNCCL();
+  const int ret = RunConnectToNCCL();
 
-  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(0, ret);
   EXPECT_EQ(2, connectHook.calls);
   EXPECT_EQ(std::string(kClientHello) + kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
@@ -2119,6 +2049,7 @@ constexpr const char kCtClientHello[] = "CLIENT PROTOCOL 2\n";
 constexpr int kCtDistinctTimeout = 37;
 
 struct CtSetsockoptCall {
+  int level;
   int optname;
   long tvSec;
   long tvUsec;
@@ -2141,12 +2072,19 @@ std::string CtTrace(const std::vector<CtSetsockoptCall>& calls) {
   return out;
 }
 
-void CtRecord(std::vector<CtSetsockoptCall>* into, int optname, const void* optval, socklen_t optlen) {
+void CtRecord(std::vector<CtSetsockoptCall>* into, int level, int optname, const void* optval, socklen_t optlen) {
   struct timeval tv = {-1, -1};
   if (optval && optlen >= static_cast<socklen_t>(sizeof tv)) {
     std::memcpy(&tv, optval, sizeof tv);
   }
-  into->push_back(CtSetsockoptCall{optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
+  into->push_back(CtSetsockoptCall{level, optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
+}
+
+// Every setsockopt in client.cc is SOL_SOCKET; nothing else asserted it, so changing one was invisible.
+void ExpectAllSolSocket(const std::vector<CtSetsockoptCall>& calls) {
+  for (const CtSetsockoptCall& c : calls) {
+    EXPECT_EQ(SOL_SOCKET, c.level);
+  }
 }
 
 }  // namespace
@@ -2159,19 +2097,19 @@ TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBum
 
   std::vector<CtSetsockoptCall> opts;
   int rc = -1;
-  std::string log;
   {
-    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, optname, optval, optlen);
+    ScopedHook sso(g_setsockopt, [&](int, int level, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, level, optname, optval, optlen);
       return 0;
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(3, sso.calls);
   }
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(std::string(kCtClientHello), g_writtenData);  // no TIMEOUT line was sent
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", CtTrace(opts));
+  ExpectAllSolSocket(opts);
   EXPECT_EQ(42, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
@@ -2186,19 +2124,19 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoS
 
   std::vector<CtSetsockoptCall> opts;
   int rc = -1;
-  std::string log;
   {
-    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, optname, optval, optlen);
+    ScopedHook sso(g_setsockopt, [&](int, int level, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, level, optname, optval, optlen);
       return 0;
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(0, sso.calls);
   }
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 0\n", g_writtenData);
   EXPECT_EQ("", CtTrace(opts));
+  ExpectAllSolSocket(opts);
   EXPECT_EQ(42, sock);
   EXPECT_TRUE(g_closedFds.empty());
 }
@@ -2211,19 +2149,19 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
 
   std::vector<CtSetsockoptCall> opts;
   int rc = -1;
-  std::string log;
   {
-    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, optname, optval, optlen);
+    ScopedHook sso(g_setsockopt, [&](int, int level, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, level, optname, optval, optlen);
       return 0;
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(3, sso.calls);
   }
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  ExpectAllSolSocket(opts);
   EXPECT_EQ(42, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
@@ -2236,10 +2174,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersLowercaseOk_IsAcceptedCas
   ScriptReadData("ok\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+  CaptureLog([&]() { rc = connectToNCCL(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_EQ(SOL_SOCKET, g_lastSetsockoptLevel);
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
@@ -2252,7 +2191,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithConnectionReset_Repo
   ScriptRead(-1, ECONNRESET, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+  CaptureLog([&]() { rc = connectToNCCL(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
@@ -2267,7 +2206,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithBrokenPipe_Report
   ScriptReadData(kCtServerHello);
 
   int rc = -1;
-  std::string log;
   {
     // Content-keyed so only the block's own write fails; the handshake's must not.
     ScopedHook wr(g_write, [](int, const void* buf, size_t count) -> ssize_t {
@@ -2279,7 +2217,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithBrokenPipe_Report
       g_writtenData.append(chunk);
       return static_cast<ssize_t>(count);
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(2, wr.calls);
   }
 
@@ -2288,6 +2226,35 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithBrokenPipe_Report
   ExpectPerrors({EPIPE});
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
+}
+
+// The retry path with the second pass ALSO failing, which nothing else here reaches: every other retry test arranges
+// pass two to succeed.
+//
+// `timeout:` closes sock and jumps to `retry:` without resetting it (client.cc:297-300), so when the retry's
+// getaddrinfo fails, `fail:` runs its `if (sock != -1) close(sock)` on the descriptor already closed one line earlier.
+// g_closedFds == {42, 42} is that double close. It is pinned, not fixed: this PR is tests only, and in the shipping
+// binary the client exits immediately afterwards. A fix would set sock = -1 at `timeout:`.
+TEST_F(RasClientMicrotest, ConnectTimeout_RetryAlsoFails_ClosesTheSameDescriptorTwice) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptRead(-1, EAGAIN, "");  // the TIMEOUT reply times out, so `timeout:` closes sock and retries
+
+  int resolveCalls = 0;
+  auto baseResolve = g_getaddrinfo;
+  ScopedHook resolveHook(g_getaddrinfo, [&](const char* node, const char* svc, const struct addrinfo* hints,
+                                            struct addrinfo** res) {
+    if (++resolveCalls == 2) return EAI_AGAIN;  // the retry cannot resolve, so it reaches `fail:`
+    return baseResolve(node, svc, hints, res);
+  });
+
+  int rc = -1;
+  CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ(2, resolveCalls);
+  EXPECT_EQ(std::vector<int>({42, 42}), g_closedFds);
+  EXPECT_EQ(42, sock);  // and `sock` is left holding the twice-closed descriptor
 }
 
 // goto timeout from the reply read: close, retry the whole walk once, succeed.
@@ -2301,18 +2268,18 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithEagain_RetriesOnceTh
 
   std::vector<CtSetsockoptCall> opts;
   int rc = -1;
-  std::string log;
   {
-    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, optname, optval, optlen);
+    ScopedHook sso(g_setsockopt, [&](int, int level, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, level, optname, optval, optlen);
       return 0;
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
   }
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  ExpectAllSolSocket(opts);
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
   EXPECT_EQ(2, g_freeaddrinfoCalls);
@@ -2329,7 +2296,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithEagain_RetriesOnc
 
   bool stalledOnce = false;
   int rc = -1;
-  std::string log;
   {
     ScopedHook wr(g_write, [&](int, const void* buf, size_t count) -> ssize_t {
       const std::string chunk(static_cast<const char*>(buf), count);
@@ -2341,7 +2307,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithEagain_RetriesOnc
       g_writtenData.append(chunk);
       return static_cast<ssize_t>(count);
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(4, wr.calls);
   }
 
@@ -2349,6 +2315,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithEagain_RetriesOnc
   EXPECT_EQ("CLIENT PROTOCOL 2\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
   ASSERT_EQ(1u, g_closedFds.size());
   EXPECT_EQ(42, g_closedFds[0]);
+  EXPECT_EQ(SOL_SOCKET, g_lastSetsockoptLevel);
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
@@ -2362,24 +2329,24 @@ TEST_F(RasClientMicrotest, ConnectTimeout_BumpSetsockoptFails_ReportsPerrorAndSt
 
   std::vector<CtSetsockoptCall> opts;
   int rc = -1;
-  std::string log;
   {
     // Keyed on the bumped tv so the connect walk's two 1-second calls still pass.
-    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) -> int {
-      CtRecord(&opts, optname, optval, optlen);
+    ScopedHook sso(g_setsockopt, [&](int, int level, int optname, const void* optval, socklen_t optlen) -> int {
+      CtRecord(&opts, level, optname, optval, optlen);
       if (opts.back().tvSec != TIMEOUT_INCREMENT) {
         errno = ENOPROTOOPT;
         return -1;
       }
       return 0;
     });
-    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
     EXPECT_EQ(3, sso.calls);
   }
 
   EXPECT_EQ(0, rc);
   ExpectPerrors({ENOPROTOOPT});  // exactly one, so the retry did not report the same failure twice
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  ExpectAllSolSocket(opts);
   EXPECT_EQ(42, sock);
   EXPECT_TRUE(g_closedFds.empty());
 }
@@ -2389,7 +2356,7 @@ TEST_F(RasClientMicrotest, ConnectFailLabel_SockNeverOpened_ReturnsOneAndClosesN
   g_addrinfoCount = 0;  // no candidate address, so the connect walk never runs
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+  CaptureLog([&]() { rc = connectToNCCL(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_TRUE(g_closedFds.empty());
@@ -2413,16 +2380,9 @@ namespace {
 
 constexpr int kMonitorSock = 91;
 constexpr char kMonitorGroups[] = "lifecycle,trace";
-constexpr char kMonitorBanner[] = "RAS Monitor Mode - watching for peer changes (Ctrl+C to exit)...\n";
-constexpr char kMonitorRule[] = "================================================================\n";
 
 // One (size, nmemb) pair as client.cc handed it to fwrite. Recording both is
 // what makes the fwrite(buf,1,n) vs fwrite(buf,n,1) swap visible.
-struct MonFwriteCall {
-  size_t size;
-  size_t nmemb;
-};
-
 }  // namespace
 
 // --- stage 1: the command on the wire ---------------------------------------
@@ -2432,7 +2392,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_NoEventGroups_SendsBareMonitorCommandAn
   ScriptReadData("OK\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
@@ -2448,7 +2408,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_EventGroupsRequested_SendsThemInTheMoni
   ScriptReadData("OK\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("MONITOR lifecycle,trace\n", g_writtenData);
@@ -2464,7 +2424,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithEagain_ReportsConnectionT
   });
   ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({});
@@ -2482,7 +2442,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithBrokenPipe_ReportsSendFai
   });
   ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({EPIPE});
@@ -2496,7 +2456,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithEagain_ReportsCo
   ScriptRead(-1, EAGAIN, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
@@ -2508,7 +2468,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithConnectionReset_
   ScriptRead(-1, ECONNRESET, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
@@ -2522,12 +2482,12 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcc
   ScriptReadData("OK\nmore");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("more", g_stdoutData);
   // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
-  EXPECT_EQ(stdout, g_lastFwriteStream);
+  EXPECT_EQ(stdout, g_fwriteCalls.back().stream);
 }
 
 // The TIMEOUT reply is checked with one whole-string strcasecmp against "OK\n", so every rejecting reply lands in the
@@ -2544,7 +2504,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RejectedReplies_CloseTheSocketOnceAndR
     if (*reply != '\0') ScriptReadData(reply);
 
     int rc = -1;
-    const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+    CaptureLog([&]() { rc = connectToNCCL(); });
 
     EXPECT_EQ(1, rc) << reply;
     EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData) << reply;
@@ -2567,7 +2527,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_RejectedActivationReplies_ReturnOneBefo
     if (*reply != '\0') ScriptReadData(reply);
 
     int rc = -1;
-    const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+    CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
     EXPECT_EQ(1, rc) << reply;
     EXPECT_EQ(-1, g_lastSetsockoptOptname) << reply;
@@ -2592,27 +2552,28 @@ TEST_F(RasClientMicrotest, MonitorEvents_AcceptedActivationReplies_ReturnZeroAnd
     ScriptReadData(c.reply);
 
     int rc = -1;
-    const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+    CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
     EXPECT_EQ(0, rc) << c.reply;
     EXPECT_EQ(c.leftover, g_stdoutData) << c.reply;
     if (*c.leftover != '\0') {
       // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
-      EXPECT_EQ(stdout, g_lastFwriteStream) << c.reply;
+      EXPECT_EQ(stdout, g_fwriteCalls.back().stream) << c.reply;
     }
   }
 }
 
 // --- stage 1: disabling the receive timeout ---------------------------------
 
-TEST_F(RasClientMicrotest, MonitorEvents_ActivationSucceeds_DisablesTheReceiveTimeoutAndPrintsBothBanners) {
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationSucceeds_DisablesTheReceiveTimeout) {
   sock = kMonitorSock;
   ScriptReadData("OK\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
+  EXPECT_EQ(SOL_SOCKET, g_lastSetsockoptLevel);
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
@@ -2631,7 +2592,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_SetsockoptFails_ReportsPerrorAndReturns
     return -1;
   });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({ENOPROTOOPT});
@@ -2652,10 +2613,10 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseIsExactlyTheOkLine_Sk
   ScopedHook fwriteHook(g_fwrite, [](const void*, size_t, size_t nmemb, FILE*) { return nmemb; });
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0, fflushHook.calls);
 }
 
@@ -2665,20 +2626,14 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverAfterOkLine_FlushesOnlyTheRemai
   ScriptReadData("OK\nabcdef\n");
 
   int rc = -1;
-  std::vector<MonFwriteCall> seen;
-  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
-    seen.push_back(MonFwriteCall{size, nmemb});
-    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
-    return nmemb;
-  });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("abcdef\n", g_stdoutData);
-  ASSERT_EQ(1u, seen.size());
-  EXPECT_EQ(1u, seen[0].size);
-  EXPECT_EQ(7u, seen[0].nmemb);
+  ASSERT_EQ(1u, g_fwriteCalls.size());
+  EXPECT_EQ(1u, g_fwriteCalls[0].size);
+  EXPECT_EQ(7u, g_fwriteCalls[0].nmemb);
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LeftoverIsASingleByte_StillFlushesThatByte) {
@@ -2686,20 +2641,14 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverIsASingleByte_StillFlushesThatB
   ScriptReadData("OK\nX");
 
   int rc = -1;
-  std::vector<MonFwriteCall> seen;
-  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
-    seen.push_back(MonFwriteCall{size, nmemb});
-    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
-    return nmemb;
-  });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("X", g_stdoutData);
-  ASSERT_EQ(1u, seen.size());
-  EXPECT_EQ(1u, seen[0].size);
-  EXPECT_EQ(1u, seen[0].nmemb);
+  ASSERT_EQ(1u, g_fwriteCalls.size());
+  EXPECT_EQ(1u, g_fwriteCalls[0].size);
+  EXPECT_EQ(1u, g_fwriteCalls[0].nmemb);
 }
 
 // The flush is byte-counted, not string-based: an embedded NUL is forwarded.
@@ -2708,7 +2657,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverContainsEmbeddedNul_FlushesEver
   ScriptReadData(std::string("OK\nA\0B\n", 7));
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(std::string("A\0B\n", 4), g_stdoutData);
@@ -2723,14 +2672,17 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFwriteShort_ReportsFwriteFailur
   int rc = -1;
   auto baseRead = g_read;
   ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
-  ScopedHook fwriteHook(g_fwrite, [](const void*, size_t, size_t nmemb, FILE*) { return nmemb - 1; });
+  ScopedHook fwriteHook(g_fwrite, [](const void*, size_t size, size_t nmemb, FILE* f) {
+    g_fwriteCalls.push_back(MicroFwriteCall{size, nmemb, f});
+    return nmemb - 1;
+  });
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(1, readHook.calls);
-  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_EQ(1u, g_fwriteCalls.size());
   EXPECT_EQ(0, fflushHook.calls);
   EXPECT_EQ("", g_stdoutData);
 }
@@ -2747,7 +2699,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBefore
     return -1;
   });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({EIO});
@@ -2760,7 +2712,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBefore
 
 // Three chunks of distinct, unequal length: a mutant that drops, reorders or
 // double-counts one cannot produce this exact concatenation.
-TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemInOrderThenReportsClose) {
+TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemInOrder) {
   sock = kMonitorSock;
   ScriptReadData("OK\n");
   ScriptReadData("alpha\n");
@@ -2768,25 +2720,19 @@ TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemIn
   ScriptReadData("gamma-delta\n");
 
   int rc = -1;
-  std::vector<MonFwriteCall> seen;
-  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
-    seen.push_back(MonFwriteCall{size, nmemb});
-    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
-    return nmemb;
-  });
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("alpha\nbe\ngamma-delta\n", g_stdoutData);
-  ASSERT_EQ(3u, seen.size());
-  EXPECT_EQ(1u, seen[0].size);
-  EXPECT_EQ(6u, seen[0].nmemb);
-  EXPECT_EQ(1u, seen[1].size);
-  EXPECT_EQ(3u, seen[1].nmemb);
-  EXPECT_EQ(1u, seen[2].size);
-  EXPECT_EQ(12u, seen[2].nmemb);
+  ASSERT_EQ(3u, g_fwriteCalls.size());
+  EXPECT_EQ(1u, g_fwriteCalls[0].size);
+  EXPECT_EQ(6u, g_fwriteCalls[0].nmemb);
+  EXPECT_EQ(1u, g_fwriteCalls[1].size);
+  EXPECT_EQ(3u, g_fwriteCalls[1].nmemb);
+  EXPECT_EQ(1u, g_fwriteCalls[2].size);
+  EXPECT_EQ(12u, g_fwriteCalls[2].nmemb);
   EXPECT_EQ(3, fflushHook.calls);
 }
 
@@ -2799,7 +2745,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopReadInterrupted_IsRetriedInsideRasR
   ScriptReadData("beta\n");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("beta\n", g_stdoutData);
@@ -2812,7 +2758,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopReadFailsWithConnectionReset_Report
   ScriptRead(-1, ECONNRESET, "");
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("alpha\n", g_stdoutData);
@@ -2830,19 +2776,20 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFwriteShort_ReportsFwriteFailureAft
   int rc = -1;
   auto baseRead = g_read;
   auto baseFwrite = g_fwrite;
-  std::vector<MonFwriteCall> seen;
   ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
-  ScopedHook fwriteHook(g_fwrite, [&seen, baseFwrite](const void* p, size_t size, size_t nmemb, FILE* f) -> size_t {
-    seen.push_back(MonFwriteCall{size, nmemb});
-    if (seen.size() == 2) return nmemb - 1;  // the second chunk is the one that fails
+  ScopedHook fwriteHook(g_fwrite, [baseFwrite](const void* p, size_t size, size_t nmemb, FILE* f) -> size_t {
+    if (g_fwriteCalls.size() == 1) {                    // the second chunk is the one that short-writes
+      g_fwriteCalls.push_back(MicroFwriteCall{size, nmemb, f});
+      return nmemb - 1;
+    }
     return baseFwrite(p, size, nmemb, f);
   });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ("alpha\n", g_stdoutData);
-  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(2u, g_fwriteCalls.size());
   EXPECT_EQ(3, readHook.calls);
 }
 
@@ -2859,12 +2806,12 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturns
     return -1;
   });
 
-  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(1, rc);
   ExpectPerrors({ENOSPC});
   EXPECT_EQ("data1\n", g_stdoutData);
-  EXPECT_EQ(stdout, g_lastFwriteStream);
+  EXPECT_EQ(stdout, g_fwriteCalls.back().stream);
   EXPECT_EQ(2, readHook.calls);
   EXPECT_EQ(1, fflushHook.calls);
 }
@@ -2913,10 +2860,9 @@ TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsBeforeAnySocket_ReturnsOneA
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  std::string log;
   {
     ScopedHook socketHook(g_socket, [](int, int, int) { return kMainSockFd; });
-    log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+    CaptureLog([&]() { rc = CallRasClientMain(args); });
     EXPECT_EQ(0, socketHook.calls);
   }
 
@@ -2934,7 +2880,7 @@ TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsAfterSocketOpened_ClosesOnc
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+  CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
@@ -2951,7 +2897,7 @@ TEST_F(RasClientMicrotest, RasClientMain_SetOutputFormatFails_ClosesSockOnceAndR
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+  CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(kMainClientHello + "SET FORMAT json\n", g_writtenData);
@@ -2967,7 +2913,7 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorModeClear_RunsGetNcclStatusAndRe
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+  CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
@@ -2985,7 +2931,7 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorFlagInArgv_RunsMonitorNcclEvents
   RasArgv args{"rccl-ras-client", "--monitor"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+  CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(0, rc);
   EXPECT_TRUE(monitorMode);
@@ -3001,7 +2947,7 @@ TEST_F(RasClientMicrotest, RasClientMain_WorkerReturnsNonZero_ClosesSockOnceAndR
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+  CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
@@ -3018,14 +2964,13 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
 
   std::vector<int> closed;
   int rc = -1;
-  std::string log;
   {
     ScopedHook closeHook(g_close, [&](int fd) {
       closed.push_back(fd);
       errno = EIO;
       return -1;
     });
-    log = CaptureLog([&]() { rc = CallRasClientMain(args); });
+    CaptureLog([&]() { rc = CallRasClientMain(args); });
     EXPECT_EQ(1, closeHook.calls);
   }
 

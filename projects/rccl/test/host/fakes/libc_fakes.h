@@ -42,12 +42,14 @@ struct MicroExit {
   int status;
 };
 
-// One scripted result for the read seam. `ret` < 0 makes the read fail with
-// `err` in errno; `ret` == 0 is EOF; a positive `ret` is the byte count the
-// step promises and must equal data.size(), which ScriptReadData derives for
-// you. The delivery is truncated to the caller's buffer, so a read asking for
-// fewer bytes than the step offers gets a short read, not an overrun; the tail
-// is dropped rather than requeued, and the step is spent either way.
+// One fwrite() the unit made. `stream` is what separates a write to stdout from one to stderr, which the bytes alone
+// cannot show; `size` and `nmemb` are kept apart so an fwrite(buf,1,n) / fwrite(buf,n,1) swap is visible.
+struct MicroFwriteCall {
+  size_t size;
+  size_t nmemb;
+  FILE* stream;
+};
+
 // One perror() the unit made. `err` is errno as the unit left it at the call, which for every diagnostic in a
 // report-and-return-1 unit IS the branch condition: asserting it checks which arm ran, without matching the prose.
 struct MicroPerrorCall {
@@ -55,6 +57,12 @@ struct MicroPerrorCall {
   int err;
 };
 
+// One scripted result for the read seam. `ret` < 0 makes the read fail with
+// `err` in errno; `ret` == 0 is EOF; a positive `ret` is the byte count the
+// step promises and must equal data.size(), which ScriptReadData derives for
+// you. The delivery is truncated to the caller's buffer, so a read asking for
+// fewer bytes than the step offers gets a short read, not an overrun; the tail
+// is dropped rather than requeued, and the step is spent either way.
 struct MicroReadStep {
   ssize_t ret;
   int err;
@@ -85,16 +93,19 @@ extern std::function<void(int)> g_exit;
 // ---------------------------------------------------------------------------
 extern std::string g_writtenData;       // every byte the unit wrote to a descriptor
 extern std::string g_stdoutData;        // every byte the unit fwrite()'d, whichever stream it chose
-extern FILE* g_lastFwriteStream;        // stream of the last fwrite; distinguishes stdout from stderr
+extern std::vector<MicroFwriteCall> g_fwriteCalls;   // every fwrite(), in order, with its stream
 extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order; prefer this over matching stderr text
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
-extern std::vector<int> g_writtenFds;   // fds passed to write(), in order; without it a unit writing to the wrong
-extern std::vector<int> g_readFds;      // descriptor still produces the expected bytes and no test notices
+// fds passed to write() and read(), in order. Without them a unit writing to the wrong descriptor still produces
+// the expected bytes and no test notices.
+extern std::vector<int> g_writtenFds;
+extern std::vector<int> g_readFds;
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;
 extern int g_nextSocketFd;              // what the default socket() hands back (-1 to fail it)
 extern int g_socketFailErrno;           // errno the default socket() sets when g_nextSocketFd is -1; no test drives it
                                         // yet, since the one socket-failure test needs per-call behaviour and hooks
+extern int g_lastSetsockoptLevel;       // level of the last setsockopt; without it SOL_SOCKET is unasserted
 extern int g_lastSetsockoptOptname;     // SO_SNDTIMEO / SO_RCVTIMEO of the last setsockopt
 extern struct timeval g_lastSetsockoptTimeval;
 extern int g_getaddrinfoResult;         // non-zero makes the default getaddrinfo fail with that code

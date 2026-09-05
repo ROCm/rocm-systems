@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 13 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 14 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -28,7 +28,7 @@
 
 std::string g_writtenData;
 std::string g_stdoutData;
-FILE* g_lastFwriteStream = nullptr;
+std::vector<MicroFwriteCall> g_fwriteCalls;
 std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
 std::vector<int> g_writtenFds;
@@ -37,6 +37,7 @@ std::vector<MicroReadStep> g_readScript;
 size_t g_readScriptPos = 0;
 int g_nextSocketFd = 42;
 int g_socketFailErrno = EAFNOSUPPORT;
+int g_lastSetsockoptLevel = -1;
 int g_lastSetsockoptOptname = -1;
 struct timeval g_lastSetsockoptTimeval = {-1, -1};
 int g_getaddrinfoResult = 0;
@@ -98,7 +99,8 @@ static int DefaultConnect(int, const struct sockaddr*, socklen_t) {
   return g_connectResult;
 }
 
-static int DefaultSetsockopt(int, int, int optname, const void* optval, socklen_t optlen) {
+static int DefaultSetsockopt(int, int level, int optname, const void* optval, socklen_t optlen) {
+  g_lastSetsockoptLevel = level;
   g_lastSetsockoptOptname = optname;
   if (optval && optlen >= static_cast<socklen_t>(sizeof(struct timeval))) {
     std::memcpy(&g_lastSetsockoptTimeval, optval, sizeof(struct timeval));
@@ -168,10 +170,11 @@ static int DefaultGetnameinfo(const struct sockaddr* sa, socklen_t salen, char* 
 
 static const char* DefaultGaiStrerror(int code) { return gai_strerror(code); }
 
-// Records the stream too: without it g_stdoutData reads identically whether the unit chose stdout or stderr, so a
-// stream swap in the unit under test would leave every assertion on the bytes green.
+// Records the shape of each call, not just the bytes: g_stdoutData reads identically whether the unit chose stdout or
+// stderr, and identically for fwrite(buf,1,n) and fwrite(buf,n,1). Recording here rather than in a per-test hook means
+// every unit sharing this seam gets the same oracle.
 static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
-  g_lastFwriteStream = stream;
+  g_fwriteCalls.push_back(MicroFwriteCall{size, nmemb, stream});
   g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
   return nmemb;
 }
@@ -233,7 +236,7 @@ void ResetLibcFakes() {
 
   g_writtenData.clear();
   g_stdoutData.clear();
-  g_lastFwriteStream = nullptr;
+  g_fwriteCalls.clear();
   g_perrorCalls.clear();
   g_closedFds.clear();
   g_writtenFds.clear();
@@ -242,6 +245,7 @@ void ResetLibcFakes() {
   g_readScriptPos = 0;
   g_nextSocketFd = 42;
   g_socketFailErrno = EAFNOSUPPORT;
+  g_lastSetsockoptLevel = -1;
   g_lastSetsockoptOptname = -1;
   g_lastSetsockoptTimeval = {-1, -1};
   g_getaddrinfoResult = 0;
