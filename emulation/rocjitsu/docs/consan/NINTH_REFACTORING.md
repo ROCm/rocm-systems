@@ -85,6 +85,13 @@ retried under a new name and makes an eventual negative result falsifiable.
   refactoring; removing them and their stale boundary assertion deleted 40
   governing lines. There is therefore no large compiled-but-unreachable
   implementation reservoir.
+- A second symbol-level ownership pass after the intent cleanup found only two
+  surviving production operations with exclusively test-side callers:
+  exact-shadow epoch retirement and the aggregate intent-coverage query.
+  Moving those operations into test support deleted another 74 governing
+  production lines. The other link-discarded definitions are production
+  functions inlined at all production call sites, so this exhausts the
+  evidenced test-only production reservoir rather than opening a larger one.
 - Exact and identifier-normalized clone searches, including repeated regions
   within the same large source file, found no copied implementation on a
   subsystem scale. The largest meaningful normalized region was 48 lines;
@@ -121,6 +128,34 @@ retried under a new name and makes an eventual negative result falsifiable.
   program site. The entire construction, type, index, and query envelope is
   only a few hundred lines, so this is a worthwhile later identity cleanup,
   not a macro shrinkage route.
+- Replacing the flavor/engine pair with one universal mode discriminator does
+  not expose a hidden Cartesian implementation. Only 58 production predicates
+  inspect the pair together, while the migration would touch roughly 1,500
+  references across production and tests. Most consumers intentionally ask
+  either for evidence semantics or for the selected implementation engine.
+  A new enum would therefore be an adapter-heavy vocabulary rewrite with a
+  sub-hundred-line deletion envelope.
+- Target-policy leakage is similarly no longer a macro reservoir. Only 46
+  production predicates directly select target families, and most of them
+  already sit behind or consume `ConSanTargetProfile`. The former estimate of
+  250--700 removable lines from strategy lifting is no longer supported by
+  the current tree.
+- The apparent placement duplication was checked inside the 890-line
+  automatic persistent-VGPR allocator rather than inferred from its size.
+  `MoiScalarPlacementDomain` already shares the register-domain mechanism;
+  the large branches encode materially different RDNA, CDNA exact-allocation,
+  and CDNA generic-allocation policies and lifetimes. A universal resource
+  record would relocate those policies into callbacks and indexed optionals.
+  Some repeated tail/hole planning remains a credible medium cleanup, but the
+  placement solver is not a second parallel lifecycle comparable to the one
+  removed by whole-text relocation.
+- Historical comparison confirms what made the previous multi-thousand-line
+  commits possible: whole-text relocation made an entire incremental routing,
+  application, and ownership lifecycle obsolete. The largest deletions were
+  approximately 4,292, 3,876, 2,111, and 1,794 lines. Current analysis found no
+  second independently maintained lifecycle of comparable scope; the large
+  remaining files are dominated by policy or distinct algorithms rather than
+  an alternate backend waiting to be retired.
 - Expected-failure plumbing has 2,355 diagnostic or early-failure markers. A
   deliberately generous seven-line neighborhood around every marker covers
   12,932 lines, but most of those lines perform the guarded work and are not
