@@ -144,9 +144,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks*
 }
 // Controllable (was fail-loud). :1994 fills this rank's topoRanks slot in the AllGather3 payload.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
-extern int g_ncclTopoPresetCalls;
-ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks* topoRanks) {
-  g_ncclTopoPresetCalls++;
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&)[NCCL_NUM_ALGORITHMS],
+                            struct ncclTopoRanks* topoRanks) {
   return g_ncclTopoPreset(comm, topoRanks);
 }
 // Controllable (was fail-loud). :1999, gated on uniformRanksPerHost.

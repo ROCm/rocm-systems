@@ -13,16 +13,16 @@
 #include <string>
 #include <vector>
 
-#include "bootstrap_stubs.h"  // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
-#include "env_fakes.h"    // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
+#include "bootstrap_stubs.h"   // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
+#include "env_fakes.h"         // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
-#include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
-#include "nccl_stubs.h"  // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
-#include "rccl_wrap_fakes.h"  // src/rccl_wrap.cc seams (shared)
-#include "recorder_fakes.h"  // rccl::Recorder no-ops (shared)
-#include "transport_stubs.h"  // g_rcclUseAinic (shared)
-#include "tuning_fakes.h"  // g_tuningIndexValue / g_tuningIndexLastArch (shared)
+#include "nccl_stubs.h"        // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
+#include "os.h"                // ncclAffinity, for the initTransportsRank affinity seams below
+#include "rccl_wrap_fakes.h"   // src/rccl_wrap.cc seams (shared)
+#include "recorder_fakes.h"    // rccl::Recorder no-ops (shared)
+#include "transport_stubs.h"   // g_rcclUseAinic (shared)
+#include "tuning_fakes.h"      // g_tuningIndexValue / g_tuningIndexLastArch (shared)
 
 struct ncclTopoSystem;
 // Forward-declared, not #include "bootstrap.h": including it here would pull src/include/recorder.h in alongside the
@@ -86,6 +86,8 @@ extern ncclResult_t g_ncclNetInitResult;
 extern ncclResult_t g_ncclGinInitResult;
 extern ncclResult_t g_ncclStrongStreamResult;
 extern ncclResult_t g_ncclMemManagerInitResult;
+// The fake writes nothing to comm->memManager, so the call count is the only proof init.cc:806 ran.
+extern int g_ncclMemManagerInitCalls;
 extern ncclResult_t g_amdSmiInitResult;
 
 // A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
@@ -198,7 +200,6 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 // -------------------------------------------------------------------------
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
-extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 // AllGather3 seams (:1786-2213), rung 4; ncclTopoPostset ends it with ncclInvalidUsage, not rung 3's ncclTimeout.
 extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
@@ -206,7 +207,6 @@ extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTo
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
-extern int g_ncclTopoPresetCalls;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
 extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
 // What :1999's three lambdas answer for rank 0, i.e. the romeTopoModelIdx and hostname :1974-1975 marshalled.
