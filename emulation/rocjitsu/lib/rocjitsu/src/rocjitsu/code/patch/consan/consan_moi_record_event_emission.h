@@ -36,14 +36,6 @@ struct MoiRecordEventEmissionPlan {
   uint16_t required_sgpr_count = 0;
 };
 
-[[nodiscard]] inline bool append_dynamic_record_store_moi_report_dispatch_id_pair(
-    std::vector<uint32_t> &words, const consan_moi_detail::DynamicRecordLayout &layout,
-    uint64_t low_field_address, const MoiRecordEventEmissionPlan &plan, uint16_t slot_vgpr,
-    uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return consan_moi_detail::append_dynamic_record_store_moi_report_dispatch_id_pair(
-      words, layout, low_field_address, plan.dispatch_id_sources, slot_vgpr, scratch_vgpr, arch);
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiBarrierEvidenceSitePlan &candidate,
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,

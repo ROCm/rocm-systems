@@ -31,12 +31,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_atomic_candidate_scratch_overlap;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
-using consan_moi_detail::append_dynamic_record_event_index_store;
-using consan_moi_detail::append_dynamic_record_store_moi_report_dispatch_id_pair;
-using consan_moi_detail::append_dynamic_record_store_u32_literal;
-using consan_moi_detail::append_dynamic_record_store_u32_scalar_src;
-using consan_moi_detail::append_dynamic_record_store_u32_vgpr;
-using consan_moi_detail::append_dynamic_record_store_workgroup_source;
+using consan_moi_detail::DynamicRecordEmitter;
 using consan_moi_detail::kAtomicRecordLayout;
 using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
@@ -146,55 +141,27 @@ using consan_moi_detail::kFenceRecordLayout;
 
   std::vector<uint32_t> record_words;
   record_words.reserve(128);
+  DynamicRecordEmitter record(record_words, kBarrierRecordLayout, barrier_record_base, slot_vgpr,
+                              *options.scratch_vgpr, arch);
   record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
-  if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
-                                 record_words, kBarrierRecordLayout,
-                                 barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-                                 *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_dynamic_record_store_moi_report_dispatch_id_pair(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, generation), options, slot_vgpr,
-          *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_event_index_store(
-          record_words, kBarrierRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, event_index), slot_vgpr,
-          *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_x), workgroup_sources.x,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_y), workgroup_sources.y,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_z), workgroup_sources.z,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_scalar_src(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask),
-          *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_scalar_src(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask) + sizeof(uint32_t),
-          static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr, *options.scratch_vgpr,
-          arch) ||
-      (options.moi_owner_epoch_vgprs.owner() &&
-       !append_dynamic_record_store_u32_vgpr(
-           record_words, kBarrierRecordLayout,
-           barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-           options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_persistent_sgprs.owner() &&
-       !append_dynamic_record_store_u32_scalar_src(
-           record_words, kBarrierRecordLayout,
-           barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-           *options.moi_persistent_sgprs.owner(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kBarrierRecordLayout,
-          barrier_record_base + offsetof(ConSanMoiBarrierRecord, instruction_offset),
-          static_cast<uint32_t>(candidate.site.text_offset), slot_vgpr, *options.scratch_vgpr,
-          arch)) {
+  if (derived_owner_vgpr)
+    record.vgpr(offsetof(ConSanMoiBarrierRecord, wave_id), *derived_owner_vgpr);
+  record.dispatch_id(offsetof(ConSanMoiBarrierRecord, generation), options.dispatch_id_sources)
+      .event_index(offsetof(ConSanMoiBarrierRecord, event_index),
+                   base + offsetof(ConSanMoiReportHeader, event_counter))
+      .workgroup(offsetof(ConSanMoiBarrierRecord, workgroup_x), workgroup_sources.x)
+      .workgroup(offsetof(ConSanMoiBarrierRecord, workgroup_y), workgroup_sources.y)
+      .workgroup(offsetof(ConSanMoiBarrierRecord, workgroup_z), workgroup_sources.z)
+      .scalar(offsetof(ConSanMoiBarrierRecord, lane_mask), *options.moi_exec_save_sgpr)
+      .scalar(offsetof(ConSanMoiBarrierRecord, lane_mask) + sizeof(uint32_t),
+              static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u));
+  if (options.moi_owner_epoch_vgprs.owner())
+    record.vgpr(offsetof(ConSanMoiBarrierRecord, wave_id), options.moi_owner_epoch_vgprs->owner);
+  if (options.moi_persistent_sgprs.owner())
+    record.scalar(offsetof(ConSanMoiBarrierRecord, wave_id), *options.moi_persistent_sgprs.owner());
+  record.literal(offsetof(ConSanMoiBarrierRecord, instruction_offset),
+                 static_cast<uint32_t>(candidate.site.text_offset));
+  if (!record.finish()) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode record stores");
     return std::nullopt;
   }
@@ -471,124 +438,61 @@ using consan_moi_detail::kFenceRecordLayout;
                                                     : ConSanMoiAtomicOutcome::NotApplicable;
   std::vector<uint32_t> record_words;
   record_words.reserve(128);
+  DynamicRecordEmitter record(record_words, kAtomicRecordLayout, atomic_record_base, slot_vgpr,
+                              *options.scratch_vgpr, arch);
   if (is_compare_exchange) {
-    if (!append_dynamic_record_store_u32_vgpr(
-            record_words, kAtomicRecordLayout,
-            atomic_record_base + offsetof(ConSanMoiAtomicRecord, success_lane_mask),
-            static_cast<uint16_t>(*options.scratch_vgpr + 3u), slot_vgpr, *options.scratch_vgpr,
-            arch) ||
-        !append_dynamic_record_store_u32_vgpr(
-            record_words, kAtomicRecordLayout,
-            atomic_record_base + offsetof(ConSanMoiAtomicRecord, success_lane_mask) +
-                sizeof(uint32_t),
-            static_cast<uint16_t>(*options.scratch_vgpr + 4u), slot_vgpr, *options.scratch_vgpr,
-            arch)) {
+    record
+        .vgpr(offsetof(ConSanMoiAtomicRecord, success_lane_mask),
+              static_cast<uint16_t>(*options.scratch_vgpr + 3u))
+        .vgpr(offsetof(ConSanMoiAtomicRecord, success_lane_mask) + sizeof(uint32_t),
+              static_cast<uint16_t>(*options.scratch_vgpr + 4u));
+    if (!record) {
       errors.emplace_back("ConSan MOI atomic record patch could not preserve CAS outcome");
       return std::nullopt;
     }
   }
   record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
-  const auto append_record_event_index = [&]() {
+  const auto emit_record_event_index = [&]() {
     if (reserve_event_before_guest) {
-      return append_dynamic_record_store_u32_vgpr(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index),
-          reserved_event_index_vgpr, slot_vgpr, *options.scratch_vgpr, arch);
+      record.vgpr(offsetof(ConSanMoiAtomicRecord, event_index), reserved_event_index_vgpr);
+    } else {
+      record.event_index(offsetof(ConSanMoiAtomicRecord, event_index),
+                         base + offsetof(ConSanMoiReportHeader, event_counter));
     }
-    return append_dynamic_record_event_index_store(
-        record_words, kAtomicRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
-        atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,
-        *options.scratch_vgpr, arch);
   };
   // Probe-local owner derivation uses the record-emitter temporary. Preserve
   // it before reserving the event index, which reuses that VGPR.
-  if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
-                                 record_words, kAtomicRecordLayout,
-                                 atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
-                                 *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_persistent_sgprs.owner() &&
-       !append_dynamic_record_store_u32_scalar_src(
-           record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
-           *options.moi_persistent_sgprs.owner(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_dynamic_record_store_moi_report_dispatch_id_pair(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation), options, slot_vgpr,
-          *options.scratch_vgpr, arch) ||
-      !append_record_event_index() ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_x), workgroup_sources.x,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_y), workgroup_sources.y,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_workgroup_source(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_z), workgroup_sources.z,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
-      (options.moi_owner_epoch_vgprs.owner() &&
-       !append_dynamic_record_store_u32_vgpr(
-           record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
-           options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_owner_epoch_vgprs.epoch() &&
-       !append_dynamic_record_store_u32_vgpr(
-           record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
-           options.moi_owner_epoch_vgprs->epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_persistent_sgprs.epoch() &&
-       !append_dynamic_record_store_u32_scalar_src(
-           record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
-           *options.moi_persistent_sgprs.epoch(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_dynamic_record_store_u32_vgpr(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address),
-          recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_vgpr(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t),
-          static_cast<uint16_t>(recorded_address_vgpr + 1u), slot_vgpr, *options.scratch_vgpr,
-          arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, instruction_offset),
-          static_cast<uint32_t>(candidate.site.text_offset), slot_vgpr, *options.scratch_vgpr,
-          arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, kind),
-          static_cast<uint32_t>(candidate.event_kind), slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope), *report_scope, slot_vgpr,
-          *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, semantics),
-          candidate.site.raw_th.value_or(0u), slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, operation),
-          static_cast<uint32_t>(atomic_operation), slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_record_store_u32_literal(
-          record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, outcome),
-          static_cast<uint32_t>(atomic_outcome), slot_vgpr, *options.scratch_vgpr, arch) ||
-      (is_compare_exchange
-           ? (!append_dynamic_record_store_u32_scalar_src(
-                  record_words, kAtomicRecordLayout,
-                  atomic_record_base + offsetof(ConSanMoiAtomicRecord, lane_mask),
-                  *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-              !append_dynamic_record_store_u32_scalar_src(
-                  record_words, kAtomicRecordLayout,
-                  atomic_record_base + offsetof(ConSanMoiAtomicRecord, lane_mask) +
-                      sizeof(uint32_t),
-                  static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr,
-                  *options.scratch_vgpr, arch))
-           : false)) {
+  if (derived_owner_vgpr)
+    record.vgpr(offsetof(ConSanMoiAtomicRecord, owner_id), *derived_owner_vgpr);
+  if (options.moi_persistent_sgprs.owner())
+    record.scalar(offsetof(ConSanMoiAtomicRecord, owner_id), *options.moi_persistent_sgprs.owner());
+  record.dispatch_id(offsetof(ConSanMoiAtomicRecord, generation), options.dispatch_id_sources);
+  emit_record_event_index();
+  record.workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_x), workgroup_sources.x)
+      .workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_y), workgroup_sources.y)
+      .workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_z), workgroup_sources.z);
+  if (options.moi_owner_epoch_vgprs.owner())
+    record.vgpr(offsetof(ConSanMoiAtomicRecord, owner_id), options.moi_owner_epoch_vgprs->owner);
+  if (options.moi_owner_epoch_vgprs.epoch())
+    record.vgpr(offsetof(ConSanMoiAtomicRecord, epoch), options.moi_owner_epoch_vgprs->epoch);
+  if (options.moi_persistent_sgprs.epoch())
+    record.scalar(offsetof(ConSanMoiAtomicRecord, epoch), *options.moi_persistent_sgprs.epoch());
+  record.vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address), recorded_address_vgpr)
+      .vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t),
+            static_cast<uint16_t>(recorded_address_vgpr + 1u))
+      .literal(offsetof(ConSanMoiAtomicRecord, instruction_offset),
+               static_cast<uint32_t>(candidate.site.text_offset))
+      .literal(offsetof(ConSanMoiAtomicRecord, kind), static_cast<uint32_t>(candidate.event_kind))
+      .literal(offsetof(ConSanMoiAtomicRecord, scope), *report_scope)
+      .literal(offsetof(ConSanMoiAtomicRecord, semantics), candidate.site.raw_th.value_or(0u))
+      .literal(offsetof(ConSanMoiAtomicRecord, operation), static_cast<uint32_t>(atomic_operation))
+      .literal(offsetof(ConSanMoiAtomicRecord, outcome), static_cast<uint32_t>(atomic_outcome));
+  if (is_compare_exchange) {
+    record.scalar(offsetof(ConSanMoiAtomicRecord, lane_mask), *options.moi_exec_save_sgpr)
+        .scalar(offsetof(ConSanMoiAtomicRecord, lane_mask) + sizeof(uint32_t),
+                static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u));
+  }
+  if (!record.finish()) {
     errors.emplace_back("ConSan MOI atomic record patch could not encode record stores");
     return std::nullopt;
   }
@@ -806,74 +710,38 @@ using consan_moi_detail::kFenceRecordLayout;
       return std::nullopt;
     }
     std::vector<uint32_t> record_words;
+    DynamicRecordEmitter record(record_words, kFenceRecordLayout, record_base, slot_vgpr,
+                                *options.scratch_vgpr, arch);
     record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
-    if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
-                                   record_words, kFenceRecordLayout,
-                                   record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-                                   *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        !append_dynamic_record_event_index_store(
-            record_words, kFenceRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
-            record_base + offsetof(ConSanMoiFenceRecord, event_index), slot_vgpr,
-            *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_moi_report_dispatch_id_pair(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, generation), options, slot_vgpr,
-            *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_workgroup_source(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x,
-            slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_workgroup_source(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y,
-            slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_workgroup_source(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z,
-            slot_vgpr, *options.scratch_vgpr, arch) ||
-        (options.moi_owner_epoch_vgprs.owner() &&
-         !append_dynamic_record_store_u32_vgpr(
-             record_words, kFenceRecordLayout,
-             record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-             options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (options.moi_persistent_sgprs.owner() &&
-         !append_dynamic_record_store_u32_scalar_src(
-             record_words, kFenceRecordLayout,
-             record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-             *options.moi_persistent_sgprs.owner(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (options.moi_owner_epoch_vgprs.epoch() &&
-         !append_dynamic_record_store_u32_vgpr(
-             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
-             options.moi_owner_epoch_vgprs->epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (options.moi_persistent_sgprs.epoch() &&
-         !append_dynamic_record_store_u32_scalar_src(
-             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
-             *options.moi_persistent_sgprs.epoch(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-        !append_dynamic_record_store_u32_literal(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
-            static_cast<uint32_t>(candidate.semantic_site.physical.original_text_offset), slot_vgpr,
-            *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_u32_literal(
-            record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, kind),
-            static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_u32_literal(
-            record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, scope),
-            *report_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_u32_literal(record_words, kFenceRecordLayout,
-                                                 record_base +
-                                                     offsetof(ConSanMoiFenceRecord, semantics),
-                                                 candidate.communication_site.raw_th.value_or(0u),
-                                                 slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_u32_vgpr(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, communication_token),
-            recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_record_store_u32_vgpr(
-            record_words, kFenceRecordLayout,
-            record_base + offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
-            static_cast<uint16_t>(recorded_address_vgpr + 1u), slot_vgpr, *options.scratch_vgpr,
-            arch)) {
+    if (derived_owner_vgpr)
+      record.vgpr(offsetof(ConSanMoiFenceRecord, owner_id), *derived_owner_vgpr);
+    record
+        .event_index(offsetof(ConSanMoiFenceRecord, event_index),
+                     base + offsetof(ConSanMoiReportHeader, event_counter))
+        .dispatch_id(offsetof(ConSanMoiFenceRecord, generation), options.dispatch_id_sources)
+        .workgroup(offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x)
+        .workgroup(offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y)
+        .workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z);
+    if (options.moi_owner_epoch_vgprs.owner())
+      record.vgpr(offsetof(ConSanMoiFenceRecord, owner_id), options.moi_owner_epoch_vgprs->owner);
+    if (options.moi_persistent_sgprs.owner())
+      record.scalar(offsetof(ConSanMoiFenceRecord, owner_id),
+                    *options.moi_persistent_sgprs.owner());
+    if (options.moi_owner_epoch_vgprs.epoch())
+      record.vgpr(offsetof(ConSanMoiFenceRecord, epoch), options.moi_owner_epoch_vgprs->epoch);
+    if (options.moi_persistent_sgprs.epoch())
+      record.scalar(offsetof(ConSanMoiFenceRecord, epoch), *options.moi_persistent_sgprs.epoch());
+    record
+        .literal(offsetof(ConSanMoiFenceRecord, instruction_offset),
+                 static_cast<uint32_t>(candidate.semantic_site.physical.original_text_offset))
+        .literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind))
+        .literal(offsetof(ConSanMoiFenceRecord, scope), *report_scope)
+        .literal(offsetof(ConSanMoiFenceRecord, semantics),
+                 candidate.communication_site.raw_th.value_or(0u))
+        .vgpr(offsetof(ConSanMoiFenceRecord, communication_token), recorded_address_vgpr)
+        .vgpr(offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
+              static_cast<uint16_t>(recorded_address_vgpr + 1u));
+    if (!record.finish()) {
       errors.emplace_back("ConSan MOI dynamic fence record could not encode record stores");
       return std::nullopt;
     }

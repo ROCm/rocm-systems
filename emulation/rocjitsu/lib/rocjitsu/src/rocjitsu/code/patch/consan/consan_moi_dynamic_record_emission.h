@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 
+#include <cstddef>
 #include <vector>
 
 namespace rocjitsu::consan_moi_detail {
@@ -20,6 +21,48 @@ inline constexpr DynamicRecordLayout kAtomicRecordLayout = {sizeof(ConSanMoiAtom
 inline constexpr DynamicRecordLayout kFenceRecordLayout = {sizeof(ConSanMoiFenceRecord), 5};
 inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoiDiagnosticRecord),
                                                                 4};
+
+/// Transactional serializer for one dynamically indexed report record.
+///
+/// The record table, slot, scratch window, and target are invariants of the
+/// complete record rather than properties of each field. Keeping them here
+/// makes record schemas read as field/source mappings and prevents individual
+/// stores from accidentally mixing layouts or bases. Any failed field rolls
+/// the complete record contribution back to its construction point.
+class DynamicRecordEmitter {
+public:
+  DynamicRecordEmitter(std::vector<uint32_t> &words, const DynamicRecordLayout &layout,
+                       uint64_t record_base, uint16_t slot_vgpr, uint16_t scratch_vgpr,
+                       rj_code_arch_t arch);
+  ~DynamicRecordEmitter();
+
+  DynamicRecordEmitter(const DynamicRecordEmitter &) = delete;
+  DynamicRecordEmitter &operator=(const DynamicRecordEmitter &) = delete;
+
+  DynamicRecordEmitter &vgpr(size_t field_offset, uint16_t value_vgpr);
+  DynamicRecordEmitter &scalar(size_t field_offset, uint16_t scalar_src);
+  DynamicRecordEmitter &literal(size_t field_offset, uint32_t value);
+  DynamicRecordEmitter &dispatch_id(size_t field_offset,
+                                    const ConSanMoiReportDispatchIdSource &source);
+  DynamicRecordEmitter &workgroup(size_t field_offset, const ConSanMoiWorkgroupSource &source);
+  DynamicRecordEmitter &event_index(size_t field_offset, uint64_t counter_address);
+
+  [[nodiscard]] explicit operator bool() const { return !failed_; }
+  [[nodiscard]] bool finish() const { return !failed_; }
+
+private:
+  void require(bool success);
+  DynamicRecordEmitter &private_value(size_t field_offset, uint32_t private_offset);
+
+  std::vector<uint32_t> &words_;
+  const DynamicRecordLayout &layout_;
+  uint64_t record_base_ = 0;
+  uint16_t slot_vgpr_ = 0;
+  uint16_t scratch_vgpr_ = 0;
+  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  size_t initial_size_ = 0;
+  bool failed_ = false;
+};
 
 enum class MoiVisibleEvidencePublicationResult : uint8_t {
   Appended,
@@ -44,31 +87,6 @@ append_publish_first_active_lane_visible_evidence_if_zero(
                                                  const DynamicRecordLayout &layout,
                                                  uint64_t field_address, uint16_t slot_vgpr,
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_u32_vgpr(std::vector<uint32_t> &words,
-                                                        const DynamicRecordLayout &layout,
-                                                        uint64_t field_address, uint16_t value_vgpr,
-                                                        uint16_t slot_vgpr, uint16_t scratch_vgpr,
-                                                        rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_u32_literal(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint32_t value, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_u32_scalar_src(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint16_t scalar_src, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_u32_private(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint32_t private_offset, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanMoiReportDispatchIdSource &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_store_workgroup_source(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    const ConSanMoiWorkgroupSource &source, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch);
-[[nodiscard]] bool append_dynamic_record_event_index_store(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t counter_address,
-    uint64_t field_address, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,
                                                             uint64_t address, uint16_t slot,
                                                             uint16_t address_vgpr,

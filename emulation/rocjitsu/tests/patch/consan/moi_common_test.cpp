@@ -4,6 +4,7 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
+#include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
@@ -20,6 +21,22 @@
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanMoi, DynamicRecordEmitterRollsBackCompleteRecordAfterFieldFailure) {
+  constexpr uint16_t kScratchVgpr = 40u;
+  std::vector<uint32_t> words = {0xfeedfaceu};
+  {
+    consan_moi_detail::DynamicRecordEmitter record(words, consan_moi_detail::kAccessRecordLayout,
+                                                   0x100000u, 42u, kScratchVgpr,
+                                                   ROCJITSU_CODE_ARCH_RDNA4);
+    record.literal(offsetof(ConSanMoiAccessRecord, instruction_offset), 17u)
+        .vgpr(offsetof(ConSanMoiAccessRecord, wave_id), kScratchVgpr)
+        .literal(offsetof(ConSanMoiAccessRecord, access_kind), 23u);
+    EXPECT_FALSE(record.finish());
+    EXPECT_EQ(words, std::vector<uint32_t>{0xfeedfaceu});
+  }
+  EXPECT_EQ(words, std::vector<uint32_t>{0xfeedfaceu});
+}
 
 TEST(ConSanMoi, VisibleEvidenceScratchLayoutIsTargetOwned) {
   struct Case {

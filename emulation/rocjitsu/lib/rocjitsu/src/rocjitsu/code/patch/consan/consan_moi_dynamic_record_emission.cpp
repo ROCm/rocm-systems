@@ -135,124 +135,145 @@ append_publish_first_active_lane_visible_evidence_if_zero(
                                                    *target);
 }
 
-[[nodiscard]] bool append_dynamic_record_store_u32_vgpr(std::vector<uint32_t> &words,
-                                                        const DynamicRecordLayout &layout,
-                                                        uint64_t field_address, uint16_t value_vgpr,
-                                                        uint16_t slot_vgpr, uint16_t scratch_vgpr,
-                                                        rj_code_arch_t arch) {
-  if (value_vgpr == scratch_vgpr || value_vgpr == static_cast<uint16_t>(scratch_vgpr + 1u)) {
-    return false;
+DynamicRecordEmitter::DynamicRecordEmitter(std::vector<uint32_t> &words,
+                                           const DynamicRecordLayout &layout, uint64_t record_base,
+                                           uint16_t slot_vgpr, uint16_t scratch_vgpr,
+                                           rj_code_arch_t arch)
+    : words_(words), layout_(layout), record_base_(record_base), slot_vgpr_(slot_vgpr),
+      scratch_vgpr_(scratch_vgpr), arch_(arch), initial_size_(words.size()) {}
+
+DynamicRecordEmitter::~DynamicRecordEmitter() {
+  if (failed_)
+    words_.resize(initial_size_);
+}
+
+void DynamicRecordEmitter::require(bool success) {
+  if (failed_ || success)
+    return;
+  words_.resize(initial_size_);
+  failed_ = true;
+}
+
+DynamicRecordEmitter &DynamicRecordEmitter::vgpr(size_t field_offset, uint16_t value_vgpr) {
+  if (failed_)
+    return *this;
+  if (value_vgpr == scratch_vgpr_ || value_vgpr == static_cast<uint16_t>(scratch_vgpr_ + 1u)) {
+    require(false);
+    return *this;
   }
-  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
-  if (!store ||
-      !append_dynamic_record_address(words, layout, field_address, slot_vgpr, scratch_vgpr, arch))
-    return false;
-  words.insert(words.end(), store->begin(), store->end());
-  return true;
+  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
+  require(store && append_dynamic_record_address(words_, layout_, record_base_ + field_offset,
+                                                 slot_vgpr_, scratch_vgpr_, arch_));
+  if (!failed_)
+    words_.insert(words_.end(), store->begin(), store->end());
+  return *this;
 }
 
-[[nodiscard]] bool append_dynamic_record_store_u32_literal(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint32_t value, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  if (value_vgpr == slot_vgpr ||
-      !append_dynamic_record_address(words, layout, field_address, slot_vgpr, scratch_vgpr, arch))
-    return false;
-  const auto mov_value = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch);
-  if (!mov_value)
-    return false;
-  words.insert(words.end(), mov_value->begin(), mov_value->end());
-  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
-  if (!store)
-    return false;
-  words.insert(words.end(), store->begin(), store->end());
-  return true;
+DynamicRecordEmitter &DynamicRecordEmitter::scalar(size_t field_offset, uint16_t scalar_src) {
+  if (failed_)
+    return *this;
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
+  require(value_vgpr != slot_vgpr_ &&
+          append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
+                                        scratch_vgpr_, arch_));
+  if (failed_)
+    return *this;
+  words_.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch_));
+  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
+  require(store.has_value());
+  if (!failed_)
+    words_.insert(words_.end(), store->begin(), store->end());
+  return *this;
 }
 
-[[nodiscard]] bool append_dynamic_record_store_u32_scalar_src(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint16_t scalar_src, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  if (value_vgpr == slot_vgpr ||
-      !append_dynamic_record_address(words, layout, field_address, slot_vgpr, scratch_vgpr, arch))
-    return false;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch));
-  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
-  if (!store)
-    return false;
-  words.insert(words.end(), store->begin(), store->end());
-  return true;
+DynamicRecordEmitter &DynamicRecordEmitter::literal(size_t field_offset, uint32_t value) {
+  if (failed_)
+    return *this;
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
+  require(value_vgpr != slot_vgpr_ &&
+          append_dynamic_record_address(words_, layout_, record_base_ + field_offset, slot_vgpr_,
+                                        scratch_vgpr_, arch_));
+  if (failed_)
+    return *this;
+  const auto mov_value = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch_);
+  require(mov_value.has_value());
+  if (failed_)
+    return *this;
+  words_.insert(words_.end(), mov_value->begin(), mov_value->end());
+  const auto store = instrumentation::build_flat_store_b32(scratch_vgpr_, value_vgpr, arch_);
+  require(store.has_value());
+  if (!failed_)
+    words_.insert(words_.end(), store->begin(), store->end());
+  return *this;
 }
 
-[[nodiscard]] bool append_dynamic_record_store_u32_private(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    uint32_t private_offset, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch);
-  const auto wait = instrumentation::build_s_wait_private_load0(arch);
-  if (!load || !wait)
-    return false;
-  words.insert(words.end(), load->begin(), load->end());
-  words.push_back(*wait);
-  return append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
-                                              scratch_vgpr, arch);
+DynamicRecordEmitter &DynamicRecordEmitter::private_value(size_t field_offset,
+                                                          uint32_t private_offset) {
+  if (failed_)
+    return *this;
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
+  const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch_);
+  const auto wait = instrumentation::build_s_wait_private_load0(arch_);
+  require(load.has_value() && wait.has_value());
+  if (failed_)
+    return *this;
+  words_.insert(words_.end(), load->begin(), load->end());
+  words_.push_back(*wait);
+  return vgpr(field_offset, value_vgpr);
 }
 
-[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanMoiReportDispatchIdSource &source, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch) {
-  if (!source.is_well_formed())
-    return false;
+DynamicRecordEmitter &
+DynamicRecordEmitter::dispatch_id(size_t field_offset,
+                                  const ConSanMoiReportDispatchIdSource &source) {
+  if (failed_)
+    return *this;
+  if (!source.is_well_formed()) {
+    require(false);
+    return *this;
+  }
   for (const bool high_word : {false, true}) {
-    const uint64_t field_address = low_field_address + (high_word ? sizeof(uint32_t) : 0u);
+    const size_t word_offset = field_offset + (high_word ? sizeof(uint32_t) : 0u);
     const uint16_t register_word = high_word ? 1u : 0u;
-    const bool stored =
-        source.sgpr
-            ? append_dynamic_record_store_u32_scalar_src(
-                  words, layout, field_address, static_cast<uint16_t>(*source.sgpr + register_word),
-                  slot_vgpr, scratch_vgpr, arch)
-        : source.vgpr
-            ? append_dynamic_record_store_u32_vgpr(
-                  words, layout, field_address, static_cast<uint16_t>(*source.vgpr + register_word),
-                  slot_vgpr, scratch_vgpr, arch)
-        : source.private_offset
-            ? append_dynamic_record_store_u32_private(
-                  words, layout, field_address,
-                  *source.private_offset + (high_word ? SpillManager::kSlotBytes : 0u), slot_vgpr,
-                  scratch_vgpr, arch)
-            : append_dynamic_record_store_u32_literal(
-                  words, layout, field_address,
-                  static_cast<uint32_t>(*source.literal >> (high_word ? 32u : 0u)), slot_vgpr,
-                  scratch_vgpr, arch);
-    if (!stored)
-      return false;
+    if (source.sgpr)
+      scalar(word_offset, static_cast<uint16_t>(*source.sgpr + register_word));
+    else if (source.vgpr)
+      vgpr(word_offset, static_cast<uint16_t>(*source.vgpr + register_word));
+    else if (source.private_offset)
+      private_value(word_offset,
+                    *source.private_offset + (high_word ? SpillManager::kSlotBytes : 0u));
+    else
+      literal(word_offset, static_cast<uint32_t>(*source.literal >> (high_word ? 32u : 0u)));
   }
-  return true;
+  return *this;
 }
 
-[[nodiscard]] bool append_dynamic_record_store_workgroup_source(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
-    const ConSanMoiWorkgroupSource &source, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch) {
-  if (!source.is_well_formed())
-    return false;
+DynamicRecordEmitter &DynamicRecordEmitter::workgroup(size_t field_offset,
+                                                      const ConSanMoiWorkgroupSource &source) {
+  if (failed_)
+    return *this;
+  if (!source.is_well_formed()) {
+    require(false);
+    return *this;
+  }
   if (!source.has_value())
-    return true;
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  if (!consan_detail::append_workgroup_source_value(words, source, value_vgpr, arch))
-    return false;
-  return append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
-                                              scratch_vgpr, arch);
+    return *this;
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
+  require(consan_detail::append_workgroup_source_value(words_, source, value_vgpr, arch_));
+  if (!failed_)
+    vgpr(field_offset, value_vgpr);
+  return *this;
 }
 
-[[nodiscard]] bool append_dynamic_record_event_index_store(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t counter_address,
-    uint64_t field_address, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  return append_atomic_fetch_add_one_u32(words, counter_address, value_vgpr, scratch_vgpr, arch) &&
-         append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
-                                              scratch_vgpr, arch);
+DynamicRecordEmitter &DynamicRecordEmitter::event_index(size_t field_offset,
+                                                        uint64_t counter_address) {
+  if (failed_)
+    return *this;
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr_ + layout_.value_vgpr_offset);
+  require(
+      append_atomic_fetch_add_one_u32(words_, counter_address, value_vgpr, scratch_vgpr_, arch_));
+  if (!failed_)
+    vgpr(field_offset, value_vgpr);
+  return *this;
 }
 
 [[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,
