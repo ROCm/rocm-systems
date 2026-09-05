@@ -179,18 +179,30 @@ namespace RcclUnitTesting
   ErrCode CollectiveArgs::DeallocateMem()
   {
     // Mitigation for intermittent wrong data in pooled workers (AICOMRCCL-2275).
-    // Measured to remove the failure; the mechanism is not established.
-    if (this->inputGpu.ptr && this->numInputBytesAllocated)
+    // A teardown-timing effect: prep rewrites these buffers before every use.
+    // Scrub only what this function frees, and never skip the frees on error.
+    hipError_t scrubErr = hipSuccess;
+    if (this->inPlace)
     {
-      CHECK_HIP(hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated));
+      if (this->funcType != ncclCollGather && this->inputGpu.ptr && this->numInputBytesAllocated)
+      {
+        scrubErr = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
+      }
     }
-    if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+    else
     {
-      CHECK_HIP(hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated));
-    }
-    if (this->expectedGpu.ptr && this->numOutputBytesAllocated)
-    {
-      CHECK_HIP(hipMemset(this->expectedGpu.ptr, 0, this->numOutputBytesAllocated));
+      if (this->inputGpu.ptr && this->numInputBytesAllocated)
+      {
+        scrubErr = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
+      }
+      if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+      {
+        hipError_t const e = hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated);
+        if (scrubErr == hipSuccess)
+        {
+          scrubErr = e;
+        }
+      }
     }
 
     // If in-place, either only inputGpu or outputGpu was allocated
@@ -229,6 +241,7 @@ namespace RcclUnitTesting
       this->biasRegHandle = nullptr;
     }
 
+    CHECK_HIP(scrubErr);
     return TEST_SUCCESS;
   }
 
