@@ -919,7 +919,10 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids.size(), 1u);
-  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().original_semantic_sites.size(), 2u);
+  EXPECT_EQ(consan_committed_semantic_sites(
+                result, result.coverage_ledger.lowering_commits().front())
+                .size(),
+            2u);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6088,7 +6091,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
       consan_committed_lowering_for_intent_kind(result, ConSanProbeIntentKind::SampledBarrierEpoch);
   ASSERT_NE(barrier_commit, nullptr);
   EXPECT_EQ(barrier_commit->intent_ids.size(), 1u);
-  EXPECT_EQ(barrier_commit->original_semantic_sites.size(), 2u);
+  EXPECT_EQ(consan_committed_semantic_sites(result, *barrier_commit).size(), 2u);
   EXPECT_EQ(barrier_commit->locations.size(), 1u);
   EXPECT_EQ(barrier_commit->locations.front().emitted_text_offset, patch->trampoline_offset);
   ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 2u);

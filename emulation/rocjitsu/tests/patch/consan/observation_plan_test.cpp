@@ -430,7 +430,6 @@ TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
   ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids,
             (std::vector{ConSanProbeIntentId{0}, ConSanProbeIntentId{1}}));
-  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().original_physical_sites.size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
@@ -484,7 +483,6 @@ TEST(ConSanObservationPlan, InstrumentedPatchGeometryBuildsOneLocationPairPerOri
   };
   const auto commit = make_consan_instrumented_patch_lowering(plan, intent_ids, patch);
   ASSERT_TRUE(commit);
-  ASSERT_EQ(commit->original_physical_sites.size(), 1u);
   ASSERT_EQ(commit->locations.size(), 2u);
   EXPECT_EQ(commit->locations[0], (ConSanCommittedLoweringLocation{
                                       .original_site = plan.probe_intents.front().physical_site,

@@ -886,16 +886,12 @@ struct ConSanCommittedLoweringLocation {
 ///
 /// A single emitted operation can satisfy several coalesced intents, while a
 /// synchronization sequence can require several emitted locations for one
-/// intent. Original sites are copied from the immutable observation plan when
-/// the transaction is prepared; no consumer reconstructs them from patch
-/// kinds, anchors, or resource-plan geometry.
+/// intent. Original sites remain authoritative on the ledger-owned observation
+/// plan and are resolved through `intent_ids`; the transaction does not copy a
+/// second identity projection from that plan.
 struct ConSanCommittedLowering {
   /// Every admitted intent completed or rejected by this transaction.
   std::vector<ConSanProbeIntentId> intent_ids;
-  /// Unique original physical sites owned by the bound intents.
-  std::vector<PhysicalSiteId> original_physical_sites;
-  /// Unique semantic sites covered by the bound intents.
-  std::vector<SemanticSiteId> original_semantic_sites;
   /// One or more committed locations, empty for a rejected transaction.
   std::vector<ConSanCommittedLoweringLocation> locations;
   /// Runtime-facing semantic/static mapping created by this same transaction.

@@ -3522,8 +3522,10 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   EXPECT_EQ(fence_commit->outcome, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_TRUE(consan_committed_lowering_has_intent_kind(
       result, *fence_commit, ConSanProbeIntentKind::AtomicAddressCapture));
-  EXPECT_EQ(fence_commit->original_physical_sites.size(), 3u);
-  for (const PhysicalSiteId &site : fence_commit->original_physical_sites) {
+  const std::vector<PhysicalSiteId> original_physical_sites =
+      consan_committed_physical_sites(result, *fence_commit);
+  EXPECT_EQ(original_physical_sites.size(), 3u);
+  for (const PhysicalSiteId &site : original_physical_sites) {
     EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
       return location.original_site == site;
     }));

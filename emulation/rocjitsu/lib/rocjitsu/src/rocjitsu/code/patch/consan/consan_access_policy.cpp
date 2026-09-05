@@ -340,8 +340,6 @@ std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
     std::optional<ConSanRegisterPlanReason> resource_rejection_reason) {
   ConSanCommittedLowering commit{
       .intent_ids = {},
-      .original_physical_sites = {},
-      .original_semantic_sites = {},
       .locations = std::vector(locations.begin(), locations.end()),
       .runtime_mapping = std::move(runtime_mapping),
       .outcome = outcome,
@@ -354,16 +352,6 @@ std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
     if (intent == nullptr)
       return std::nullopt;
     commit.intent_ids.push_back(id);
-    if (std::ranges::find(commit.original_physical_sites, intent->physical_site) ==
-        commit.original_physical_sites.end()) {
-      commit.original_physical_sites.push_back(intent->physical_site);
-    }
-    for (const SemanticSiteId &site : intent->covered_semantic_sites) {
-      if (std::ranges::find(commit.original_semantic_sites, site) ==
-          commit.original_semantic_sites.end()) {
-        commit.original_semantic_sites.push_back(site);
-      }
-    }
   }
   if (!committed_lowering_is_valid(commit, [&](ConSanProbeIntentId id) { return plan.intent(id); }))
     return std::nullopt;
@@ -377,11 +365,16 @@ bool runtime_static_mapping_matches_commit(const ConSanCommittedLowering &commit
     return commit.runtime_mapping.empty();
 
   std::vector<ConSanProbeIntentId> mapped_intents;
+  const auto owns_physical_site = [&](const PhysicalSiteId &site) {
+    return std::ranges::any_of(commit.intent_ids, [&](ConSanProbeIntentId id) {
+      const ConSanProbeIntent *intent = resolve_intent(id);
+      return intent != nullptr && intent->physical_site == site;
+    });
+  };
   const auto valid_attribution = [&](const ConSanStaticAccessAttribution &access,
                                      ConSanProbeIntentKind expected_kind) {
     if (access.intent_ids.empty() || !access.original_site.valid() ||
-        std::ranges::find(commit.original_physical_sites, access.original_site) ==
-            commit.original_physical_sites.end()) {
+        !owns_physical_site(access.original_site)) {
       return false;
     }
     if (access.owner_provenance_complete && access.execution_owner_kernel_ids.empty()) {
@@ -462,14 +455,9 @@ bool committed_lowering_is_valid(const ConSanCommittedLowering &commit,
   if (instrumented) {
     for (const ConSanCommittedLoweringLocation &location : commit.locations) {
       if (!location.original_site.valid() || location.emitted_size == 0u ||
-          std::ranges::find(commit.original_physical_sites, location.original_site) ==
-              commit.original_physical_sites.end()) {
-        return false;
-      }
-    }
-    for (const PhysicalSiteId &site : commit.original_physical_sites) {
-      if (std::ranges::none_of(commit.locations, [&](const auto &location) {
-            return location.original_site == site;
+          std::ranges::none_of(commit.intent_ids, [&](ConSanProbeIntentId id) {
+            const ConSanProbeIntent *intent = resolve_intent(id);
+            return intent != nullptr && intent->physical_site == location.original_site;
           })) {
         return false;
       }
@@ -478,12 +466,10 @@ bool committed_lowering_is_valid(const ConSanCommittedLowering &commit,
   for (ConSanProbeIntentId id : commit.intent_ids) {
     const ConSanProbeIntent *intent = resolve_intent(id);
     if (intent == nullptr || std::ranges::count(commit.intent_ids, id) != 1 ||
-        std::ranges::find(commit.original_physical_sites, intent->physical_site) ==
-            commit.original_physical_sites.end() ||
-        std::ranges::any_of(intent->covered_semantic_sites, [&](const SemanticSiteId &site) {
-          return std::ranges::find(commit.original_semantic_sites, site) ==
-                 commit.original_semantic_sites.end();
-        })) {
+        (instrumented &&
+         std::ranges::none_of(commit.locations, [&](const auto &location) {
+           return location.original_site == intent->physical_site;
+         }))) {
       return false;
     }
   }
@@ -556,8 +542,6 @@ bool ConSanCoverageLedger::publish_coalescing_instrumented_commits(
       if (accepted.outcome != ConSanLoweringOutcomeKind::Instrumented)
         return false;
       append_unique(incoming.intent_ids, accepted.intent_ids);
-      append_unique(incoming.original_physical_sites, accepted.original_physical_sites);
-      append_unique(incoming.original_semantic_sites, accepted.original_semantic_sites);
       append_unique(incoming.locations, accepted.locations);
       if (!incoming.runtime_mapping.append(std::move(accepted.runtime_mapping)))
         return false;

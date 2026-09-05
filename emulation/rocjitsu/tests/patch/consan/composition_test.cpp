@@ -966,7 +966,8 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
                                     return consan_committed_lowering_has_intent_kind(
                                                result, commit,
                                                ConSanProbeIntentKind::SampledBarrierEpoch) &&
-                                           commit.original_semantic_sites.size() == 2u;
+                                           consan_committed_semantic_sites(result, commit).size() ==
+                                               2u;
                                   }),
             kBarrierCount);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {

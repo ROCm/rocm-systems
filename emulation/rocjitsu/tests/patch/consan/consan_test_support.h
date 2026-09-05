@@ -612,6 +612,40 @@ consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result
   return commit == commits.end() ? nullptr : &*commit;
 }
 
+template <typename Identity, typename Project>
+[[nodiscard]] std::vector<Identity>
+consan_committed_intent_identities(const ConSanTransformArtifacts &result,
+                                   const ConSanCommittedLowering &commit, Project project) {
+  std::vector<Identity> identities;
+  for (ConSanProbeIntentId id : commit.intent_ids) {
+    const ConSanProbeIntent *intent = result.observation_plan().intent(id);
+    if (intent == nullptr)
+      continue;
+    for (const Identity &identity : project(*intent)) {
+      if (std::ranges::find(identities, identity) == identities.end())
+        identities.push_back(identity);
+    }
+  }
+  return identities;
+}
+
+[[nodiscard]] std::vector<PhysicalSiteId>
+consan_committed_physical_sites(const ConSanTransformArtifacts &result,
+                                const ConSanCommittedLowering &commit) {
+  return consan_committed_intent_identities<PhysicalSiteId>(
+      result, commit, [](const ConSanProbeIntent &intent) {
+        return std::array{intent.physical_site};
+      });
+}
+
+[[nodiscard]] std::vector<SemanticSiteId>
+consan_committed_semantic_sites(const ConSanTransformArtifacts &result,
+                                const ConSanCommittedLowering &commit) {
+  return consan_committed_intent_identities<SemanticSiteId>(
+      result, commit,
+      [](const ConSanProbeIntent &intent) { return intent.covered_semantic_sites; });
+}
+
 [[nodiscard]] size_t consan_committed_semantic_site_count_at(const ConSanTransformArtifacts &result,
                                                              ConSanProbeIntentKind kind,
                                                              uint64_t emitted_text_offset) {
@@ -622,7 +656,7 @@ consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result
              return location.emitted_text_offset == emitted_text_offset;
            });
   });
-  return commit == commits.end() ? 0u : commit->original_semantic_sites.size();
+  return commit == commits.end() ? 0u : consan_committed_semantic_sites(result, *commit).size();
 }
 
 [[nodiscard]] size_t
@@ -631,12 +665,14 @@ consan_committed_semantic_site_count_for_source_offset(const ConSanTransformArti
                                                        uint64_t original_text_offset) {
   const auto commits = result.coverage_ledger.lowering_commits();
   const auto commit = std::ranges::find_if(commits, [&](const ConSanCommittedLowering &candidate) {
+    const std::vector<SemanticSiteId> semantic_sites =
+        consan_committed_semantic_sites(result, candidate);
     return consan_committed_lowering_has_intent_kind(result, candidate, kind) &&
-           std::ranges::any_of(candidate.original_semantic_sites, [&](const auto &site) {
+           std::ranges::any_of(semantic_sites, [&](const auto &site) {
              return site.physical.original_text_offset == original_text_offset;
            });
   });
-  return commit == commits.end() ? 0u : commit->original_semantic_sites.size();
+  return commit == commits.end() ? 0u : consan_committed_semantic_sites(result, *commit).size();
 }
 
 [[nodiscard]] ConSanRuntimeStaticMapping::Sampled
