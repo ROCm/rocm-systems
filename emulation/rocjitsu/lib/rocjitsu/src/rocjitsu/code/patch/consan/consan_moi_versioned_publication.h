@@ -27,25 +27,28 @@ namespace rocjitsu::consan_moi_impl {
 /// without encoding the evidence domain.
 class MoiPublicationExec {
 public:
-  MoiPublicationExec(std::vector<uint32_t> &words, uint16_t narrow_save, rj_code_arch_t arch)
-      : sequence_(words), narrow_save_(narrow_save), arch_(arch) {}
+  MoiPublicationExec(InstructionSequence &sequence, uint16_t narrow_save, rj_code_arch_t arch)
+      : sequence_(sequence), narrow_save_(narrow_save), arch_(arch) {}
 
   [[nodiscard]] bool restore(uint16_t source) {
-    return sequence_.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
+    sequence_.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
+    return static_cast<bool>(sequence_);
   }
 
   [[nodiscard]] bool save(uint16_t destination) {
-    return sequence_.emit(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
+    sequence_.append(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
+    return static_cast<bool>(sequence_);
   }
 
   [[nodiscard]] bool narrow_vcc() {
-    return sequence_.emit(
-        instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+    sequence_.append(instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+    return static_cast<bool>(sequence_);
   }
 
   template <typename Predicate> [[nodiscard]] bool narrow(const Predicate &predicate) {
-    return sequence_.emit_all(
-        predicate, instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+    sequence_.append(predicate,
+                     instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+    return static_cast<bool>(sequence_);
   }
 
   [[nodiscard]] bool require_literal(uint16_t value, uint32_t literal, bool equal) {
@@ -57,7 +60,7 @@ public:
   }
 
 private:
-  InstructionSequence sequence_;
+  InstructionSequence &sequence_;
   uint16_t narrow_save_ = 0;
   rj_code_arch_t arch_{};
 };

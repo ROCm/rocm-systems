@@ -758,7 +758,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
-  MoiPublicationExec exec_masks(words, temporary_exec_sgpr, arch);
+  MoiPublicationExec exec_masks(sequence, temporary_exec_sgpr, arch);
   const auto set_stage = [&](std::string_view stage) { require_emission.stage(stage); };
   const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) {
     return exec_masks.require_literal(value_vgpr, literal, true);

@@ -329,8 +329,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t skipped = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t eligible = static_cast<uint16_t>(exec_base + 6u);
 
-  MoiPublicationExec exec_masks(words, exec_base, arch);
   InstructionSequence sequence(words);
+  MoiPublicationExec exec_masks(sequence, exec_base, arch);
   const auto restore_exec = [&](uint16_t source) { sequence.require(exec_masks.restore(source)); };
   const auto save_exec = [&](uint16_t destination) {
     sequence.require(exec_masks.save(destination));
@@ -714,12 +714,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     rj_code_arch_t arch, std::vector<std::string> &errors) {
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
   const uint16_t exec_base = plan.exec_save_sgpr;
-  MoiPublicationExec valid_exec_masks(words, exec_base, arch);
-  MoiPublicationExec low_match_exec_masks(words, static_cast<uint16_t>(exec_base + 2u), arch);
-  MoiPublicationExec high_match_exec_masks(words, static_cast<uint16_t>(exec_base + 4u), arch);
-  MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u), arch);
-  MoiPublicationExec other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u), arch);
   InstructionSequence sequence(words);
+  MoiPublicationExec valid_exec_masks(sequence, exec_base, arch);
+  MoiPublicationExec low_match_exec_masks(sequence, static_cast<uint16_t>(exec_base + 2u), arch);
+  MoiPublicationExec high_match_exec_masks(sequence, static_cast<uint16_t>(exec_base + 4u), arch);
+  MoiPublicationExec workgroup_match_exec_masks(sequence, static_cast<uint16_t>(exec_base + 6u),
+                                                arch);
+  MoiPublicationExec other_owner_exec_masks(sequence, static_cast<uint16_t>(exec_base + 14u), arch);
   MoiEmissionRequirement require_emission(sequence, errors);
   // The low/high address-match journals are dead once owner qualification
   // begins. Reuse them for the longer-lived same-owner and validated masks.
@@ -1037,7 +1038,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   sequence.branch(scan_done, InstructionSequence::BranchKind::ExecZero)
       .append(instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch));
 
-  MoiPublicationExec exec_masks(words, narrow_save, arch);
+  MoiPublicationExec exec_masks(sequence, narrow_save, arch);
   const auto restore_exec = [&](uint16_t source) { sequence.require(exec_masks.restore(source)); };
   const auto save_exec = [&](uint16_t destination) {
     sequence.require(exec_masks.save(destination));
@@ -1347,8 +1348,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t guest_address = address_plan.result_address_vgpr;
   const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
-  MoiPublicationExec exec_masks(words, narrow_save, arch);
   InstructionSequence sequence(words);
+  MoiPublicationExec exec_masks(sequence, narrow_save, arch);
   MoiStagedEmission require_emission(sequence, errors,
                                      "ConSan MOI inline versioned release transaction");
   const auto set_stage = [&](std::string_view stage) { require_emission.stage(stage); };

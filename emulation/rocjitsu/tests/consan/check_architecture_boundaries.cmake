@@ -2678,11 +2678,18 @@ file(READ
     _moi_versioned_publication_owner
 )
 if(NOT _moi_versioned_publication_owner MATCHES "class MoiPublicationExec" OR
+   NOT _moi_versioned_publication_owner MATCHES
+       "MoiPublicationExec[(]InstructionSequence &sequence" OR
    NOT _moi_versioned_publication_owner MATCHES "append_moi_bounded_version_claim")
     message(FATAL_ERROR
-        "ConSan versioned publication lost its shared EXEC-mask or bounded-claim authority"
+        "ConSan versioned publication lost its shared transaction, EXEC-mask, or bounded-claim authority"
     )
 endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_versioned_publication.h"
+    "InstructionSequence sequence_;"
+    "versioned publication must participate in its caller's instruction transaction"
+)
 if(NOT _moi_inline_atomic_emission_owner MATCHES "append_moi_bounded_version_claim" OR
    NOT _moi_inline_shadow_emission_owner MATCHES "append_moi_bounded_version_claim")
     message(FATAL_ERROR
