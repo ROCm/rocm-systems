@@ -738,7 +738,7 @@ TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
-                                   return sequence.kind == ConSanSyncSequenceKind::Atomic &&
+                                   return sequence.kind == ConSanSyncKind::Atomic &&
                                           sequence.memory_role == ConSanSyncMemoryRole::Acquire;
                                  });
   };
@@ -3654,7 +3654,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
         result.program_inventory.sync().moi_fence_candidates.front().sequence_identity,
         &ConSanSyncSequence::identity);
     ASSERT_NE(candidate_sequence, result.program_inventory.sync().sync_sequences.end());
-    EXPECT_EQ(candidate_sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+    EXPECT_EQ(candidate_sequence->kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
     EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset());
     const ConSanProgramSite *fence_source = result.program_inventory.sync().source(*fence_event);
@@ -3695,7 +3695,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
 
     const auto sequence = std::ranges::find_if(
         result.program_inventory.sync().sync_sequences, [](const auto &candidate) {
-          return candidate.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+          return candidate.kind == ConSanSyncKind::OrdinaryMemory &&
                  candidate.memory_role == ConSanSyncMemoryRole::Acquire;
         });
     ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());

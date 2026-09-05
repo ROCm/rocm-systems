@@ -105,13 +105,13 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   const SynchronizationInventoryView synchronization = inventory.sync();
   std::map<uint64_t, std::vector<const ConSanSyncEvent *>> events_by_offset;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
-    if (event.kind == ConSanSyncEventKind::Barrier)
+    if (event.kind == ConSanSyncKind::Barrier)
       events_by_offset[event.semantic_id.physical.original_text_offset].push_back(&event);
   }
 
   std::map<uint64_t, std::vector<const ConSanSyncSequence *>> sequences_by_member_offset;
   for (const ConSanSyncSequence &sequence : synchronization.sync_sequences) {
-    if (sequence.kind != ConSanSyncSequenceKind::Barrier)
+    if (sequence.kind != ConSanSyncKind::Barrier)
       continue;
     for (const ConSanSyncEventId member : sequence.member_event_ids) {
       const ConSanSyncEvent *member_event = synchronization.find_event(member);

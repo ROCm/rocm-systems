@@ -436,7 +436,7 @@ struct SynchronizationInventoryView {
   /// Duplicate physical records fail closed even if their decoded fields are
   /// otherwise identical; published production inventories canonicalize valid
   /// aliases before policy observes them.
-  [[nodiscard]] const ConSanSyncEvent *find_unique_event(ConSanSyncEventKind kind,
+  [[nodiscard]] const ConSanSyncEvent *find_unique_event(ConSanSyncKind kind,
                                                          const PhysicalSiteId &physical) const {
     const ConSanSyncEvent *match = nullptr;
     for (const ConSanSyncEvent &event : sync_events) {

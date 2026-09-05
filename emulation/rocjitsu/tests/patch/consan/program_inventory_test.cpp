@@ -444,7 +444,7 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   SynchronizationInventoryBuildView build = builder.synchronization();
 
   ConSanSyncEvent first;
-  first.kind = ConSanSyncEventKind::Atomic;
+  first.kind = ConSanSyncKind::Atomic;
   first.identity = "first";
   first.semantic_id.physical.original_text_offset = 12;
   first.semantic_id = {
@@ -474,8 +474,7 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
 
   const ProgramInventory inventory = builder.view();
   const SynchronizationInventoryView graph = inventory.sync();
-  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, first.semantic_id.physical),
-            nullptr);
+  EXPECT_EQ(graph.find_unique_event(ConSanSyncKind::Atomic, first.semantic_id.physical), nullptr);
   EXPECT_EQ(graph.find_unique_sequence_containing(first.semantic_id), nullptr);
   EXPECT_EQ(graph.find_unique_sequence_containing("first"), nullptr);
   EXPECT_EQ(graph.find_unique_sequence("sequence"), &graph.sync_sequences[0]);
@@ -486,7 +485,7 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
 
   ProgramInventoryBuilder unique_event(builder.view());
   unique_event.synchronization().sync_events.pop_back();
-  EXPECT_EQ(unique_event.view().sync().find_unique_event(ConSanSyncEventKind::Atomic,
+  EXPECT_EQ(unique_event.view().sync().find_unique_event(ConSanSyncKind::Atomic,
                                                          first.semantic_id.physical),
             &unique_event.view().sync().sync_events.front());
 }
@@ -631,7 +630,7 @@ TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
 
   const SynchronizationInventoryView graph = result.program_inventory.sync();
   const auto event =
-      std::ranges::find(graph.sync_events, ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
+      std::ranges::find(graph.sync_events, ConSanSyncKind::Atomic, &ConSanSyncEvent::kind);
   ASSERT_NE(event, graph.sync_events.end());
   ASSERT_TRUE(event->scope);
   EXPECT_EQ(*event->scope, ConSanMemoryScope::Workgroup);

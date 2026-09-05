@@ -93,7 +93,7 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
   std::vector<PhysicalSiteId> reservations;
   const SynchronizationInventoryView sync = inventory.sync();
   for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
-    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+    if (sequence.kind != ConSanSyncKind::OrdinaryMemory ||
         (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
          sequence.memory_role != ConSanSyncMemoryRole::Release) ||
         !consan_sync_confidence_meets(sequence.confidence,
@@ -105,7 +105,7 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
     const ConSanSyncEvent *communication = nullptr;
     for (ConSanSyncEventId identity : sequence.member_event_ids) {
       const ConSanSyncEvent *event = sync.find_event(identity);
-      if (event == nullptr || event->kind != ConSanSyncEventKind::OrdinaryMemory)
+      if (event == nullptr || event->kind != ConSanSyncKind::OrdinaryMemory)
         continue;
       if (communication != nullptr) {
         communication = nullptr;

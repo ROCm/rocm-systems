@@ -72,7 +72,7 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
         std::ranges::find(first.program_inventory.sync().sync_events,
                           *first_sites[i]->sync_event_identity, &ConSanSyncEvent::identity);
     ASSERT_NE(event, first.program_inventory.sync().sync_events.end());
-    EXPECT_EQ(event->kind, ConSanSyncEventKind::OrdinaryMemory);
+    EXPECT_EQ(event->kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(event->operation, i % 2u == 0u ? ConSanSyncOperation::OrdinaryLoad
                                              : ConSanSyncOperation::OrdinaryStore);
     EXPECT_EQ(event->rmw_outcome, ConSanSyncRmwOutcome::NotApplicable);
@@ -242,7 +242,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
   const ConSanSyncSequence *sequence =
       result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
-  EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(sequence->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryLoad);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
@@ -350,7 +350,7 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
         test_lower_consan(make_rdna4_lds_code_object(words, "inexact_acquire"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
-                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                   return sequence.kind == ConSanSyncKind::OrdinaryMemory &&
                                           sequence.memory_role == ConSanSyncMemoryRole::Acquire;
                                  });
   };
@@ -396,14 +396,14 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
 
 TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   ConSanSyncEvent load;
-  load.kind = ConSanSyncEventKind::OrdinaryMemory;
+  load.kind = ConSanSyncKind::OrdinaryMemory;
   load.operation = ConSanSyncOperation::OrdinaryLoad;
   load.confidence = ConSanSemanticConfidence::Conservative;
   load.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
   load.source_site = {0};
   load.scope = ConSanMemoryScope::Agent;
   ConSanSyncEvent cache = load;
-  cache.kind = ConSanSyncEventKind::Fence;
+  cache.kind = ConSanSyncKind::Fence;
   cache.operation = ConSanSyncOperation::Fence;
   cache.source_site = {1};
   std::vector<ConSanProgramSite> program_sites(2);
@@ -421,12 +421,12 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   program_sites[1].payload = std::move(cache_source);
   program_sites[1].execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence load_sequence;
-  load_sequence.kind = ConSanSyncSequenceKind::OrdinaryMemory;
+  load_sequence.kind = ConSanSyncKind::OrdinaryMemory;
   load_sequence.operation = ConSanSyncOperation::OrdinaryLoad;
   load_sequence.basic_block_index = 3u;
   load_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence cache_sequence;
-  cache_sequence.kind = ConSanSyncSequenceKind::Fence;
+  cache_sequence.kind = ConSanSyncKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
   cache_sequence.execution_owners = program_sites[1].execution_owners;
@@ -476,7 +476,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
   const ConSanSyncSequence *sequence =
       result.program_inventory.sync().find_unique_sequence_containing(*store->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
-  EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(sequence->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryStore);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
@@ -494,7 +494,7 @@ TEST(ConSan, OrdinaryReleaseAssociationFailsClosedOnInexactShapes) {
         test_lower_consan(make_rdna4_lds_code_object(words, "inexact_release"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
-                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                   return sequence.kind == ConSanSyncKind::OrdinaryMemory &&
                                           sequence.memory_role == ConSanSyncMemoryRole::Release;
                                  });
   };
@@ -582,7 +582,7 @@ TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
         test_lower_consan(make_rdna4_lds_code_object(words, "scoped_release_reject"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
-                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                   return sequence.kind == ConSanSyncKind::OrdinaryMemory &&
                                           sequence.memory_role == ConSanSyncMemoryRole::Release;
                                  });
   };
@@ -605,13 +605,13 @@ TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
 
 TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   ConSanSyncEvent cache;
-  cache.kind = ConSanSyncEventKind::Fence;
+  cache.kind = ConSanSyncKind::Fence;
   cache.operation = ConSanSyncOperation::Fence;
   cache.source_site = {0};
   cache.confidence = ConSanSemanticConfidence::Conservative;
   cache.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
   ConSanSyncEvent store = cache;
-  store.kind = ConSanSyncEventKind::OrdinaryMemory;
+  store.kind = ConSanSyncKind::OrdinaryMemory;
   store.operation = ConSanSyncOperation::OrdinaryStore;
   store.source_site = {1};
   store.scope = ConSanMemoryScope::Agent;
@@ -632,12 +632,12 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   program_sites[1].payload = std::move(store_source);
   program_sites[1].execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence cache_sequence;
-  cache_sequence.kind = ConSanSyncSequenceKind::Fence;
+  cache_sequence.kind = ConSanSyncKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
   cache_sequence.basic_block_index = 3u;
   cache_sequence.execution_owners = program_sites[0].execution_owners;
   ConSanSyncSequence store_sequence;
-  store_sequence.kind = ConSanSyncSequenceKind::OrdinaryMemory;
+  store_sequence.kind = ConSanSyncKind::OrdinaryMemory;
   store_sequence.operation = ConSanSyncOperation::OrdinaryStore;
   store_sequence.basic_block_index = 3u;
   store_sequence.execution_owners = program_sites[1].execution_owners;

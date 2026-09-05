@@ -227,7 +227,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     const ConSanSyncEvent *fence_event = graph.find_event(decision.semantic_site);
     if (intent == nullptr || intent->physical_site != decision.semantic_site.physical ||
         intent->synchronization_association != decision.association || fence_event == nullptr ||
-        fence_event->kind != ConSanSyncEventKind::Fence) {
+        fence_event->kind != ConSanSyncKind::Fence) {
       errors.emplace_back("ConSan MOI admitted fence record lost its synchronization event");
       return {};
     }
@@ -250,8 +250,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
             ? graph.find_event(*association->communication_event)
             : nullptr;
     if (association == nullptr || sequence == nullptr || communication == nullptr ||
-        (communication->kind != ConSanSyncEventKind::Atomic &&
-         communication->kind != ConSanSyncEventKind::OrdinaryMemory) ||
+        (communication->kind != ConSanSyncKind::Atomic &&
+         communication->kind != ConSanSyncKind::OrdinaryMemory) ||
         !graph.same_container(*communication, *fence_event) ||
         graph.execution_owners(*communication).empty()) {
       errors.emplace_back("ConSan MOI admitted fence record lost its communication sequence");
@@ -280,7 +280,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
     }
-    if (communication->kind == ConSanSyncEventKind::Atomic) {
+    if (communication->kind == ConSanSyncKind::Atomic) {
       const ConSanAtomicSite *site =
           inventory.program_site<ConSanAtomicSite>(communication->source_site);
       if (site == nullptr) {
@@ -300,7 +300,7 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       }
       plan.communication_site = consan_atomic_communication_site(*site);
       if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
-        if (sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        if (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
             sequence->begin_text_offset != site->text_offset ||
             sequence->end_text_offset <= sequence->begin_text_offset ||
@@ -426,8 +426,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     const ConSanSyncSequence *sequence = graph.find_unique_sequence(decision.association->value);
     if (event == nullptr || sequence == nullptr ||
         graph.find_unique_sequence_containing(event->semantic_id) != sequence ||
-        (event->kind != ConSanSyncEventKind::Atomic &&
-         event->kind != ConSanSyncEventKind::OrdinaryMemory)) {
+        (event->kind != ConSanSyncKind::Atomic && event->kind != ConSanSyncKind::OrdinaryMemory)) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its synchronization graph");
       return {};
     }
@@ -443,7 +442,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     plan.address_capture_intent = address_capture;
     plan.evidence_intent = evidence;
     plan.event_kind = *event_kind;
-    plan.is_rmw = event->kind == ConSanSyncEventKind::Atomic;
+    plan.is_rmw = event->kind == ConSanSyncKind::Atomic;
     plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
     plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
     auto container = resolve_moi_evidence_container(inventory, graph.in_kernel(*event),
@@ -453,7 +452,7 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }
-    if (event->kind == ConSanSyncEventKind::Atomic) {
+    if (event->kind == ConSanSyncKind::Atomic) {
       const ConSanAtomicSite *site = inventory.program_site<ConSanAtomicSite>(event->source_site);
       if (site == nullptr) {
         errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");

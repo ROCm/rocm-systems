@@ -370,7 +370,7 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_owner_0");
   EXPECT_NE(test_admitted_accesses(result).front().execution_owners.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
-  EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
+  EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
@@ -11409,7 +11409,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().kind,
-            ConSanSyncSequenceKind::OrdinaryMemory);
+            ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
             ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().begin_text_offset,

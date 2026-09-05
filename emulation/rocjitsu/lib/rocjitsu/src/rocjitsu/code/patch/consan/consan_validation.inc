@@ -2325,11 +2325,10 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       return false;
-    const auto event = std::ranges::find_if(result.program_inventory.sync().sync_events,
-                                            [&](const ConSanSyncEvent &item) {
-                                              return item.kind == ConSanSyncEventKind::Atomic &&
-                                                     item.text_offset() == patch.anchor_offset;
-                                            });
+    const auto event = std::ranges::find_if(
+        result.program_inventory.sync().sync_events, [&](const ConSanSyncEvent &item) {
+          return item.kind == ConSanSyncKind::Atomic && item.text_offset() == patch.anchor_offset;
+        });
     if (event == result.program_inventory.sync().sync_events.end())
       return false;
     const ConSanSyncSequence *sequence =

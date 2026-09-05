@@ -36,15 +36,14 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
       !site->barrier_id || site->operand_source != ConSanBarrierSite::OperandSource::Immediate)
     return;
   const ConSanSyncEvent *event =
-      synchronization.find_unique_event(ConSanSyncEventKind::Barrier, decoded.physical_id);
+      synchronization.find_unique_event(ConSanSyncKind::Barrier, decoded.physical_id);
   if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
       synchronization.source(*event) != &decoded)
     return;
   const ConSanSyncEventId member_identity = synchronization.event_id(*event);
   const bool belongs_to_sequence =
       std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
-        return sequence.kind == ConSanSyncSequenceKind::Barrier &&
-               sequence.member_event_ids.size() > 1u &&
+        return sequence.kind == ConSanSyncKind::Barrier && sequence.member_event_ids.size() > 1u &&
                std::ranges::find(sequence.member_event_ids, member_identity) !=
                    sequence.member_event_ids.end();
       });

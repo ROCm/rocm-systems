@@ -188,7 +188,9 @@ struct ConSanBarrierMoveDestinationPresentation : ConSanDecodedSite {
 /// code-object identity is already carried by the owning program inventory.
 using ConSanBarrierMoveDestination = ConSanBarrierMoveDestinationPresentation;
 
-enum class ConSanSyncEventKind : uint8_t {
+/// Semantic category shared by a decoded synchronization event and every
+/// logical sequence derived from it.
+enum class ConSanSyncKind : uint8_t {
   Barrier,
   Fence,
   Atomic,
@@ -242,6 +244,7 @@ combine_consan_sync_confidence(ConSanSemanticConfidence lhs, ConSanSemanticConfi
 /// never maintains a second field vocabulary or projects its members one fact
 /// at a time.
 struct ConSanSyncSemantics {
+  ConSanSyncKind kind = ConSanSyncKind::Fence;
   ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
   ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
@@ -279,7 +282,6 @@ struct ConSanSyncEvent : ConSanSyncSemantics {
   /// event. Unlike container/name/offset joins, this remains unambiguous when
   /// several symbols alias one physical instruction.
   ConSanProgramSiteId source_site;
-  ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
   std::string identity;
   /// Every symbol-container name through which this physical event was
   /// decoded. Analysis canonicalizes equivalent aliases into one event while
@@ -291,18 +293,10 @@ struct ConSanSyncEvent : ConSanSyncSemantics {
   [[nodiscard]] uint64_t text_offset() const { return semantic_id.physical.original_text_offset; }
 };
 
-enum class ConSanSyncSequenceKind : uint8_t {
-  Barrier,
-  Fence,
-  Atomic,
-  OrdinaryMemory,
-};
-
 /// A logical synchronization operation associated from one or more decoded
 /// events. Member identities stay ordered and the sequence confidence cannot
 /// exceed its least-certain member.
 struct ConSanSyncSequence : ConSanSyncSemantics {
-  ConSanSyncSequenceKind kind = ConSanSyncSequenceKind::Fence;
   std::string identity;
   std::string container_name;
   bool in_kernel = true;

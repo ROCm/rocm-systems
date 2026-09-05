@@ -23,7 +23,7 @@ sequence_atomic_has_agent_or_system_scope(const SynchronizationInventoryView &ev
   const ConSanSyncEvent *atomic = nullptr;
   for (const ConSanSyncEventId identity : sequence.member_event_ids) {
     const ConSanSyncEvent *event = events.find_event(identity);
-    if (event == nullptr || event->kind != ConSanSyncEventKind::Atomic)
+    if (event == nullptr || event->kind != ConSanSyncKind::Atomic)
       continue;
     if (atomic != nullptr)
       return false;
@@ -56,7 +56,7 @@ perturbation_rejection_reason(const SynchronizationInventoryView &events,
     return Reason::AmbiguousOrUnsupportedSequence;
 
   if (kind == ConSanPerturbationKind::Barrier) {
-    if (sequence.kind != ConSanSyncSequenceKind::Barrier ||
+    if (sequence.kind != ConSanSyncKind::Barrier ||
         sequence.operation != ConSanSyncOperation::BarrierFull ||
         sequence.member_event_ids.size() != 2u)
       return Reason::NotQualifiedFullBarrier;
@@ -67,7 +67,7 @@ perturbation_rejection_reason(const SynchronizationInventoryView &events,
   }
 
   if (kind == ConSanPerturbationKind::Atomic) {
-    if (sequence.kind != ConSanSyncSequenceKind::Atomic)
+    if (sequence.kind != ConSanSyncKind::Atomic)
       return Reason::NotAtomicSequence;
     if (!consan_sync_confidence_meets(sequence.memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative) ||

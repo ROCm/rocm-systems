@@ -45,11 +45,11 @@ bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSi
   const bool allow_cache_pair_member =
       policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockCachePairMember ||
       policy == ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember;
-  return load.kind == ConSanSyncEventKind::OrdinaryMemory &&
+  return load.kind == ConSanSyncKind::OrdinaryMemory &&
          load.operation == ConSanSyncOperation::OrdinaryLoad && load_source->width_bits == 32u &&
          load.confidence == ConSanSemanticConfidence::Conservative && load.scope &&
          consan_memory_scope_is_supported(*load.scope) &&
-         *load.scope != ConSanMemoryScope::Wavefront && cache.kind == ConSanSyncEventKind::Fence &&
+         *load.scope != ConSanMemoryScope::Wavefront && cache.kind == ConSanSyncKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
          (cache_source->cache_operation == ConSanCacheOperation::Acquire ||
           (*load.scope == ConSanMemoryScope::Workgroup &&
@@ -60,9 +60,9 @@ bool consan_ordinary_acquire_metadata_compatible(std::span<const ConSanProgramSi
          cache.confidence == ConSanSemanticConfidence::Conservative &&
          load.semantic_id.physical.code_object == cache.semantic_id.physical.code_object &&
          load_decoded->container == cache_decoded->container &&
-         load_sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+         load_sequence.kind == ConSanSyncKind::OrdinaryMemory &&
          load_sequence.operation == ConSanSyncOperation::OrdinaryLoad &&
-         cache_sequence.kind == ConSanSyncSequenceKind::Fence &&
+         cache_sequence.kind == ConSanSyncKind::Fence &&
          cache_sequence.operation == ConSanSyncOperation::Fence &&
          load_sequence.basic_block_index && cache_sequence.basic_block_index &&
          (!require_same_block ||
@@ -96,20 +96,20 @@ bool consan_ordinary_release_metadata_compatible(std::span<const ConSanProgramSi
   const ConSanProgramSite *cache_decoded = consan_program_site(program_sites, cache);
   const ConSanProgramSite *store_decoded = consan_program_site(program_sites, store);
   return cache_source != nullptr && store_source != nullptr && cache_decoded != nullptr &&
-         store_decoded != nullptr && cache.kind == ConSanSyncEventKind::Fence &&
+         store_decoded != nullptr && cache.kind == ConSanSyncKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
          cache_source->cache_operation == ConSanCacheOperation::Release &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
-         store.kind == ConSanSyncEventKind::OrdinaryMemory &&
+         store.kind == ConSanSyncKind::OrdinaryMemory &&
          store.operation == ConSanSyncOperation::OrdinaryStore && store_source->width_bits != 0u &&
          store_source->width_bits <= 128u &&
          store.confidence == ConSanSemanticConfidence::Conservative && store.scope &&
          consan_memory_scope_is_agent_or_system(*store.scope) &&
          cache.semantic_id.physical.code_object == store.semantic_id.physical.code_object &&
          cache_decoded->container == store_decoded->container &&
-         cache_sequence.kind == ConSanSyncSequenceKind::Fence &&
+         cache_sequence.kind == ConSanSyncKind::Fence &&
          cache_sequence.operation == ConSanSyncOperation::Fence &&
-         store_sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+         store_sequence.kind == ConSanSyncKind::OrdinaryMemory &&
          store_sequence.operation == ConSanSyncOperation::OrdinaryStore &&
          cache_sequence.basic_block_index &&
          cache_sequence.basic_block_index == store_sequence.basic_block_index &&

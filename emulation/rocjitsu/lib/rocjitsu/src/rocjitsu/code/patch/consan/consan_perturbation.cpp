@@ -30,9 +30,9 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
   const SynchronizationInventoryView events = program_inventory.sync();
   for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
-        sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
-        : sequence.kind == ConSanSyncSequenceKind::Atomic ? ConSanPerturbationKind::Atomic
-                                                          : ConSanPerturbationKind::None;
+        sequence.kind == ConSanSyncKind::Barrier  ? ConSanPerturbationKind::Barrier
+        : sequence.kind == ConSanSyncKind::Atomic ? ConSanPerturbationKind::Atomic
+                                                  : ConSanPerturbationKind::None;
     if (kind == ConSanPerturbationKind::None)
       continue;
     if (sequence.member_event_ids.empty())

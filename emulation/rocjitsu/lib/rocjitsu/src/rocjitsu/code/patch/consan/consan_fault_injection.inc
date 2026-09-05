@@ -90,7 +90,7 @@ static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
     result.release_wait_text_offset = result.sequence->release_wait_text_offset;
   for (ConSanSyncEventId identity : result.sequence->member_event_ids) {
     const ConSanSyncEvent *event = sync.find_event(identity);
-    if (event != nullptr && event->kind == ConSanSyncEventKind::Fence &&
+    if (event != nullptr && event->kind == ConSanSyncKind::Fence &&
         (edge == ConSanAtomicOrderEdge::Any ||
          (edge == ConSanAtomicOrderEdge::Release &&
           is_release_cache_event(sync.program_sites, event)) ||
@@ -497,7 +497,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                                         : ConSanBarrierSite::Scope::Unknown;
     if (sequence == nullptr) {
       // The exact-identity diagnostic above is sufficient.
-    } else if (sequence->kind != ConSanSyncSequenceKind::Barrier ||
+    } else if (sequence->kind != ConSanSyncKind::Barrier ||
                sequence->operation != ConSanSyncOperation::BarrierFull ||
                !consan_sync_confidence_meets(sequence->confidence,
                                              ConSanSemanticConfidence::Conservative) ||

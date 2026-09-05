@@ -2613,7 +2613,7 @@ TEST(ConSanMoi, SampledAtomicWeakenedReleaseIsReinventoriedBeforeInstrumentation
   EXPECT_EQ(fault_sync.front()->anchor_offset, 32u);
   EXPECT_EQ(std::ranges::count_if(fault.program_inventory.sync().sync_sequences,
                                   [](const ConSanSyncSequence &sequence) {
-                                    return sequence.kind == ConSanSyncSequenceKind::Atomic &&
+                                    return sequence.kind == ConSanSyncKind::Atomic &&
                                            sequence.memory_role == ConSanSyncMemoryRole::Release;
                                   }),
             0u);
@@ -5982,7 +5982,7 @@ TEST(ConSanMoi, SampledSyncMetadataPublicationIsBoundedAndCollisionSafe) {
 
 TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.kind = ConSanSyncKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
   sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   sequence.confidence = ConSanSemanticConfidence::Conservative;
@@ -6028,7 +6028,7 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
 
 TEST(ConSanMoi, SampledBarrierQualificationAcceptsInKernelSequenceWithSeveralProvenOwners) {
   ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.kind = ConSanSyncKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
   sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   sequence.confidence = ConSanSemanticConfidence::Conservative;

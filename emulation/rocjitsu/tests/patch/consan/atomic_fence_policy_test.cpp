@@ -126,7 +126,7 @@ ConSanSyncEvent make_atomic_event(
           },
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
-  event.kind = ConSanSyncEventKind::Atomic;
+  event.kind = ConSanSyncKind::Atomic;
   event.operation = mnemonic.find("cmp") == std::string::npos
                         ? ConSanSyncOperation::AtomicRmw
                         : ConSanSyncOperation::AtomicCompareExchange;
@@ -146,7 +146,7 @@ ConSanSyncEvent make_ordinary_store_event(uint64_t offset = 32) {
   ConSanSyncEvent event =
       make_atomic_event(offset, ConSanSyncRmwOutcome::NotApplicable,
                         ConSanSyncAddressSource::GlobalScalarVector, "global_store_b32");
-  event.kind = ConSanSyncEventKind::OrdinaryMemory;
+  event.kind = ConSanSyncKind::OrdinaryMemory;
   event.operation = ConSanSyncOperation::OrdinaryStore;
   event.memory_role = ConSanSyncMemoryRole::Release;
   event.identity = "atomic_kernel|ordinary-store=" + std::to_string(offset);
@@ -156,7 +156,7 @@ ConSanSyncEvent make_ordinary_store_event(uint64_t offset = 32) {
 ConSanSyncEvent make_fence_event(uint64_t offset = 48) {
   ConSanSyncEvent event = make_atomic_event(offset, ConSanSyncRmwOutcome::NotApplicable,
                                             ConSanSyncAddressSource::NotApplicable, "global_wb");
-  event.kind = ConSanSyncEventKind::Fence;
+  event.kind = ConSanSyncKind::Fence;
   event.operation = ConSanSyncOperation::Fence;
   event.memory_role = ConSanSyncMemoryRole::Release;
   event.identity = "atomic_kernel|fence=" + std::to_string(offset);
@@ -167,9 +167,8 @@ ConSanSyncEvent make_fence_event(uint64_t offset = 48) {
 ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
                                         std::string identity = "atomic-sequence") {
   ConSanSyncSequence sequence;
-  sequence.kind = event.kind == ConSanSyncEventKind::OrdinaryMemory
-                      ? ConSanSyncSequenceKind::OrdinaryMemory
-                      : ConSanSyncSequenceKind::Atomic;
+  sequence.kind = event.kind == ConSanSyncKind::OrdinaryMemory ? ConSanSyncKind::OrdinaryMemory
+                                                               : ConSanSyncKind::Atomic;
   sequence.operation = event.operation;
   sequence.address_source = event.address_source;
   sequence.memory_role = event.memory_role;
@@ -221,7 +220,7 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
   for (ConSanOrdinaryMemorySite &site : ordinary_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   for (const ConSanSyncEvent &event : events) {
-    if (event.kind != ConSanSyncEventKind::Fence)
+    if (event.kind != ConSanSyncKind::Fence)
       continue;
     ConSanFenceSite site;
     site.text_offset = event.text_offset();
@@ -241,12 +240,11 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     std::optional<ConSanProgramSiteId> match;
     for (size_t index = 0; index < program_sites.size(); ++index) {
       const ConSanProgramSite &decoded = program_sites[index];
-      const bool kind_matches = (event.kind == ConSanSyncEventKind::Atomic &&
-                                 decoded.get_if<ConSanAtomicSite>() != nullptr) ||
-                                (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
-                                 decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr) ||
-                                (event.kind == ConSanSyncEventKind::Fence &&
-                                 decoded.get_if<ConSanFenceSite>() != nullptr);
+      const bool kind_matches =
+          (event.kind == ConSanSyncKind::Atomic && decoded.get_if<ConSanAtomicSite>() != nullptr) ||
+          (event.kind == ConSanSyncKind::OrdinaryMemory &&
+           decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr) ||
+          (event.kind == ConSanSyncKind::Fence && decoded.get_if<ConSanFenceSite>() != nullptr);
       if (!kind_matches || decoded.text_offset() != event.text_offset())
         continue;
       if (match) {

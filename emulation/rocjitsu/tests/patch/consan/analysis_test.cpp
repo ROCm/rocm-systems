@@ -1647,7 +1647,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
       }));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   const ConSanSyncEvent &atomic_event = result.program_inventory.sync().sync_events[0];
-  EXPECT_EQ(atomic_event.kind, ConSanSyncEventKind::Atomic);
+  EXPECT_EQ(atomic_event.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(atomic_event.operation, ConSanSyncOperation::AtomicRmw);
   EXPECT_EQ(atomic_event.address_source, ConSanSyncAddressSource::LdsVector);
   EXPECT_EQ(atomic_event.memory_role, ConSanSyncMemoryRole::Unknown);
@@ -1663,7 +1663,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic_event.scope);
 
   const ConSanSyncEvent &barrier_event = result.program_inventory.sync().sync_events[1];
-  EXPECT_EQ(barrier_event.kind, ConSanSyncEventKind::Barrier);
+  EXPECT_EQ(barrier_event.kind, ConSanSyncKind::Barrier);
   EXPECT_EQ(barrier_event.operation, ConSanSyncOperation::BarrierWait);
   EXPECT_EQ(barrier_event.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(barrier_event.confidence, ConSanSemanticConfidence::Unsupported);
@@ -1679,7 +1679,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(barrier_source->participant_mask);
 
   const ConSanSyncEvent &fence_event = result.program_inventory.sync().sync_events[2];
-  EXPECT_EQ(fence_event.kind, ConSanSyncEventKind::Fence);
+  EXPECT_EQ(fence_event.kind, ConSanSyncKind::Fence);
   EXPECT_EQ(fence_event.operation, ConSanSyncOperation::Fence);
   EXPECT_EQ(fence_event.memory_role, ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(fence_event.confidence, ConSanSemanticConfidence::Conservative);
@@ -1702,10 +1702,9 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
     EXPECT_EQ(sequence.end_text_offset,
               result.program_inventory.sync().sync_events[i].text_offset() + source->size());
   }
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Atomic);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind,
-            ConSanSyncSequenceKind::Barrier);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncSequenceKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Atomic);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, ConSanSyncKind::Barrier);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncKind::Fence);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
             ConSanSemanticConfidence::Conservative);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
@@ -3149,7 +3148,7 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
             "buffer_inv");
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
   EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
@@ -3216,7 +3215,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const ConSanSyncEvent &event = result.program_inventory.sync().sync_events.front();
-  EXPECT_EQ(event.kind, ConSanSyncEventKind::Atomic);
+  EXPECT_EQ(event.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(event.operation, ConSanSyncOperation::AtomicRmw);
   EXPECT_EQ(event.address_source, ConSanSyncAddressSource::GlobalScalarVector);
   EXPECT_EQ(event.memory_role, ConSanSyncMemoryRole::Unknown);
@@ -3277,7 +3276,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
   EXPECT_EQ(sequence.address_source, ConSanSyncAddressSource::GlobalScalarVector);
@@ -3351,7 +3350,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
     ASSERT_TRUE(consan_patch_succeeded(result));
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
-          return item.kind == ConSanSyncSequenceKind::Atomic &&
+          return item.kind == ConSanSyncKind::Atomic &&
                  item.memory_role == ConSanSyncMemoryRole::Acquire;
         });
     ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());
@@ -3371,7 +3370,7 @@ TEST(ConSan, SyncSequencesAssociateBoundedAtomicAcquireAtFallthroughJoin) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   const auto sequence =
       std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
-        return item.kind == ConSanSyncSequenceKind::Atomic &&
+        return item.kind == ConSanSyncKind::Atomic &&
                item.memory_role == ConSanSyncMemoryRole::Acquire;
       });
   ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());
@@ -3390,7 +3389,7 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const auto &item) {
-                                   return item.kind == ConSanSyncSequenceKind::Atomic &&
+                                   return item.kind == ConSanSyncKind::Atomic &&
                                           item.memory_role == ConSanSyncMemoryRole::Acquire;
                                  });
   };
@@ -3427,7 +3426,7 @@ TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
@@ -3468,7 +3467,7 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
   EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
   ASSERT_TRUE(sequence.release_wait_text_offset);
@@ -3498,7 +3497,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
   EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
   ASSERT_TRUE(sequence.release_wait_text_offset);
@@ -3533,8 +3532,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [&](const auto &item) {
-          return item.kind == ConSanSyncSequenceKind::Atomic &&
-                 item.member_event_ids.size() == 1u &&
+          return item.kind == ConSanSyncKind::Atomic && item.member_event_ids.size() == 1u &&
                  item.memory_role == ConSanSyncMemoryRole::Release &&
                  item.scalar_clause_text_offset == fixture.clause_text_offset;
         });
@@ -3552,7 +3550,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     ASSERT_TRUE(consan_patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
     const auto rejected_sequence = std::ranges::find_if(
         rejected.program_inventory.sync().sync_sequences, [&](const auto &item) {
-          return item.kind == ConSanSyncSequenceKind::Atomic &&
+          return item.kind == ConSanSyncKind::Atomic &&
                  item.scalar_clause_text_offset == interrupted.clause_text_offset;
         });
     ASSERT_NE(rejected_sequence, rejected.program_inventory.sync().sync_sequences.end());
@@ -3636,9 +3634,9 @@ TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
                         ConSanSyncMemoryRole::Acquire, &ConSanSyncSequence::memory_role);
   ASSERT_NE(release, result.program_inventory.sync().sync_sequences.end());
   ASSERT_NE(acquire, result.program_inventory.sync().sync_sequences.end());
-  EXPECT_EQ(release->kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(release->kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(release->operation, ConSanSyncOperation::AtomicCompareExchange);
-  EXPECT_EQ(acquire->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(acquire->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(acquire->operation, ConSanSyncOperation::OrdinaryLoad);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.program_inventory.sync().moi_fence_candidates,
@@ -3670,7 +3668,7 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const ConSanSyncSequence &release = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(release.kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(release.kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(release.operation, ConSanSyncOperation::OrdinaryStore);
   EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(release.begin_text_offset, 0u);
@@ -3717,7 +3715,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
                         ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
   ASSERT_NE(rdna3_release, rdna3.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(rdna3.program_inventory.sync().sync_sequences);
-  EXPECT_EQ(rdna3_release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(rdna3_release->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(rdna3_release->begin_text_offset, 0u);
   EXPECT_EQ(rdna3_release->end_text_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(rdna3_release->release_wait_text_offset, 0u);
@@ -3737,7 +3735,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
                         ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
   ASSERT_NE(rdna4_release, rdna4.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(rdna4.program_inventory.sync().sync_sequences);
-  EXPECT_EQ(rdna4_release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(rdna4_release->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(rdna4_release->begin_text_offset, 0u);
   EXPECT_EQ(rdna4_release->end_text_offset, 4u * sizeof(uint32_t));
   EXPECT_EQ(rdna4_release->release_wait_text_offset, 0u);
@@ -3786,7 +3784,7 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
   EXPECT_TRUE(*store_site.raw_scale_offset);
   const auto store_event = std::ranges::find_if(
       result.program_inventory.sync().sync_events, [](const ConSanSyncEvent &event) {
-        return event.kind == ConSanSyncEventKind::OrdinaryMemory &&
+        return event.kind == ConSanSyncKind::OrdinaryMemory &&
                event.operation == ConSanSyncOperation::OrdinaryStore;
       });
   ASSERT_NE(store_event, result.program_inventory.sync().sync_events.end())
@@ -3805,7 +3803,7 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
   ASSERT_NE(release, result.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(result.program_inventory.sync().sync_sequences)
       << testing::PrintToString(result.program_inventory.sync().sync_events);
-  EXPECT_EQ(release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(release->kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(release->begin_text_offset, sizeof(uint32_t));
   EXPECT_EQ(release->end_text_offset, 8u * sizeof(uint32_t));
   EXPECT_EQ(release->member_event_ids.size(), 2u);
@@ -3843,7 +3841,7 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence.operation, ConSanSyncOperation::OrdinaryLoad);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
@@ -3910,8 +3908,8 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Fence);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, ConSanSyncKind::Atomic);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
             ConSanSyncMemoryRole::Unknown);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
@@ -3970,7 +3968,7 @@ TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role,
             ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
@@ -4037,14 +4035,14 @@ TEST(ConSan, SyncSequencesKeepCacheOperationsSeparateAroundBarrier) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncSequenceKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role,
             ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
             ConSanSyncOperation::BarrierFull);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
             ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncSequenceKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncKind::Fence);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].memory_role,
             ConSanSyncMemoryRole::Unknown);
 }
@@ -4175,7 +4173,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   ASSERT_EQ(paired.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(paired.program_inventory.sync().sync_sequences.size(), 1u);
   const ConSanSyncSequence &barrier = paired.program_inventory.sync().sync_sequences.front();
-  EXPECT_EQ(barrier.kind, ConSanSyncSequenceKind::Barrier);
+  EXPECT_EQ(barrier.kind, ConSanSyncKind::Barrier);
   EXPECT_EQ(barrier.operation, ConSanSyncOperation::BarrierFull);
   EXPECT_EQ(barrier.memory_role, ConSanSyncMemoryRole::AcquireRelease);
   EXPECT_EQ(barrier.confidence, ConSanSemanticConfidence::Conservative);

@@ -365,7 +365,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
                    .original_text_offset = 16u},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
-  barrier.kind = ConSanSyncEventKind::Barrier;
+  barrier.kind = ConSanSyncKind::Barrier;
   barrier.operation = ConSanSyncOperation::BarrierFull;
   ConSanProgramSite barrier_source;
   barrier_source.physical_id = barrier.semantic_id.physical;

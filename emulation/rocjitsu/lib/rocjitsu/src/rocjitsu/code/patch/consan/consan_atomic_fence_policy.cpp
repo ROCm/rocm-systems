@@ -73,9 +73,9 @@ namespace {
 [[nodiscard]] std::optional<ConSanCapabilityForm>
 atomic_capability_form(const SynchronizationInventoryView &inventory,
                        const ConSanSyncEvent &event) {
-  if (event.kind == ConSanSyncEventKind::OrdinaryMemory)
+  if (event.kind == ConSanSyncKind::OrdinaryMemory)
     return ConSanCapabilityForm::AddressedOrdinaryFence;
-  if (event.kind != ConSanSyncEventKind::Atomic)
+  if (event.kind != ConSanSyncKind::Atomic)
     return std::nullopt;
   const ConSanProgramSite *source = inventory.source(event);
   if (event.address_source == ConSanSyncAddressSource::LdsVector ||
@@ -145,7 +145,7 @@ struct AtomicEncodingDecision {
                                                               const ConSanSyncEvent &event,
                                                               const ConSanSyncSequence &sequence,
                                                               ConSanCapabilityEngine engine) {
-  const bool ordinary = event.kind == ConSanSyncEventKind::OrdinaryMemory;
+  const bool ordinary = event.kind == ConSanSyncKind::OrdinaryMemory;
   const ConSanAtomicSite *native = ordinary ? nullptr : find_atomic_site(inventory, event);
   const ConSanOrdinaryMemorySite *ordinary_site =
       ordinary ? find_ordinary_site(inventory, event) : nullptr;
@@ -176,10 +176,10 @@ struct AtomicEncodingDecision {
 
 [[nodiscard]] bool sequence_is_atomic_contract(const ConSanSyncEvent &event,
                                                const ConSanSyncSequence &sequence) {
-  if (event.kind == ConSanSyncEventKind::Atomic)
-    return sequence.kind == ConSanSyncSequenceKind::Atomic;
-  return event.kind == ConSanSyncEventKind::OrdinaryMemory &&
-         sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory;
+  if (event.kind == ConSanSyncKind::Atomic)
+    return sequence.kind == ConSanSyncKind::Atomic;
+  return event.kind == ConSanSyncKind::OrdinaryMemory &&
+         sequence.kind == ConSanSyncKind::OrdinaryMemory;
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
@@ -209,7 +209,7 @@ classify_atomic_semantics(const ConSanSyncEvent &event, const SyncSequenceMember
   if (!consan_memory_scope_is_supported(*semantic_scope) ||
       *semantic_scope == ConSanMemoryScope::Wavefront)
     return ConSanAtomicPolicyReason::UnsupportedScope;
-  if (event.kind == ConSanSyncEventKind::Atomic &&
+  if (event.kind == ConSanSyncKind::Atomic &&
       dynamic_requirement(event) == ConSanDynamicResultRequirement::Count) {
     return ConSanAtomicPolicyReason::UnsupportedDynamicOutcome;
   }
@@ -266,11 +266,10 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   const SynchronizationInventoryView synchronization = inventory.sync();
   const SyncSequenceMembershipIndex memberships = build_sync_sequence_membership_index(
       synchronization.sync_sequences, synchronization.sync_events.size());
-  std::map<std::pair<ConSanSyncEventKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
+  std::map<std::pair<ConSanSyncKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
       aliases_by_site;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
-    if (event.kind == ConSanSyncEventKind::Atomic ||
-        event.kind == ConSanSyncEventKind::OrdinaryMemory) {
+    if (event.kind == ConSanSyncKind::Atomic || event.kind == ConSanSyncKind::OrdinaryMemory) {
       aliases_by_site[{event.kind, event.text_offset()}].push_back(&event);
     }
   }
@@ -284,9 +283,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         membership_entry == nullptr ? SyncSequenceMembership{} : *membership_entry;
     // Ordinary memory belongs to access policy unless synchronization
     // analysis associated an acquire/release sequence around it.
-    if (event.kind == ConSanSyncEventKind::OrdinaryMemory &&
+    if (event.kind == ConSanSyncKind::OrdinaryMemory &&
         (membership.sequence == nullptr ||
-         membership.sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+         membership.sequence->kind != ConSanSyncKind::OrdinaryMemory ||
          membership.sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
          membership.sequence->memory_role == ConSanSyncMemoryRole::None)) {
       continue;
@@ -348,8 +347,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     }
 
     ConSanDynamicResultRequirement required_dynamic_result =
-        event.kind == ConSanSyncEventKind::Atomic ? dynamic_requirement(event)
-                                                  : ConSanDynamicResultRequirement::None;
+        event.kind == ConSanSyncKind::Atomic ? dynamic_requirement(event)
+                                             : ConSanDynamicResultRequirement::None;
     if (required_dynamic_result == ConSanDynamicResultRequirement::Count)
       required_dynamic_result = ConSanDynamicResultRequirement::None;
     ConSanAtomicSiteDecision decision{
@@ -375,7 +374,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       decision.intent_ids.push_back(capture);
       const bool independent_fence_owns_ordinary =
           vocabulary->fence != ConSanProbeIntentKind::Count &&
-          event.kind == ConSanSyncEventKind::OrdinaryMemory &&
+          event.kind == ConSanSyncKind::OrdinaryMemory &&
           has_qualified_fence_for(synchronization, synchronization.event_id(event));
       if (!independent_fence_owns_ordinary) {
         decision.intent_ids.push_back(add_intent(result.plan, semantic_id.physical, {semantic_id},

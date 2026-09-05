@@ -1124,7 +1124,7 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
       make_rdna4_lds_code_object(wave_scope_words), options, &wave_scope_perturbation);
   ASSERT_EQ(wave_scope.program_inventory.sync().sync_events.size(), 2u);
   const auto atomic = std::ranges::find(wave_scope.program_inventory.sync().sync_events,
-                                        ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
+                                        ConSanSyncKind::Atomic, &ConSanSyncEvent::kind);
   ASSERT_NE(atomic, wave_scope.program_inventory.sync().sync_events.end());
   ASSERT_TRUE(atomic->scope);
   EXPECT_EQ(*atomic->scope, ConSanMemoryScope::Wavefront);

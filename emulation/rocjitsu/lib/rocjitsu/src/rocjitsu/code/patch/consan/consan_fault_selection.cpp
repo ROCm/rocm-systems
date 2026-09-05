@@ -138,7 +138,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
       return std::nullopt;
     if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->scope ||
         !consan_memory_scope_is_agent_or_system(*load->scope) ||
-        sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        sequence->kind != ConSanSyncKind::OrdinaryMemory ||
         sequence->operation != ConSanSyncOperation::OrdinaryLoad ||
         sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
@@ -151,7 +151,7 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
     const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_ids.back());
     const ConSanFenceSite *cache_source =
         cache == nullptr ? nullptr : sync.source_as<ConSanFenceSite>(*cache);
-    if (cache_source == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
+    if (cache_source == nullptr || cache->kind != ConSanSyncKind::Fence ||
         cache_source->cache_operation != ConSanCacheOperation::Acquire ||
         !cache_source->ordinary_acquire_mutation_supported || !sync.same_container(*cache, *load) ||
         !consan_nonempty_execution_owners_equal(sync.execution_owners(*cache),
@@ -188,7 +188,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
   if (sequence == sync.sync_sequences.end()) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotFound};
   }
-  if (sequence->kind != ConSanSyncSequenceKind::Barrier ||
+  if (sequence->kind != ConSanSyncKind::Barrier ||
       sequence->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       sequence->member_event_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||

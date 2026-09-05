@@ -28,7 +28,7 @@ ConSanSyncEvent make_barrier_event(
       .member_ordinal = 0,
       .range_ordinal = 0,
   };
-  event.kind = ConSanSyncEventKind::Barrier;
+  event.kind = ConSanSyncKind::Barrier;
   event.operation = operation;
   event.memory_role =
       operation == ConSanSyncOperation::BarrierSignal ? ConSanSyncMemoryRole::Release
@@ -45,7 +45,7 @@ ConSanSyncSequence
 make_barrier_sequence(std::span<const ConSanSyncEvent> events,
                       ConSanBarrierSite::Scope scope = ConSanBarrierSite::Scope::Workgroup) {
   ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.kind = ConSanSyncKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
   sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   sequence.confidence = ConSanSemanticConfidence::Exact;
@@ -300,7 +300,7 @@ TEST(ConSanBarrierPolicy, InvalidEncodingAndRedundantFullBarrierHaveTypedReasons
 TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) {
   using Mutation = std::function<void(ConSanSyncSequence &)>;
   const std::vector<std::pair<std::string_view, Mutation>> cases = {
-      {"kind", [](auto &s) { s.kind = ConSanSyncSequenceKind::Fence; }},
+      {"kind", [](auto &s) { s.kind = ConSanSyncKind::Fence; }},
       {"operation", [](auto &s) { s.operation = ConSanSyncOperation::BarrierWait; }},
       {"role", [](auto &s) { s.memory_role = ConSanSyncMemoryRole::Acquire; }},
       {"confidence", [](auto &s) { s.confidence = ConSanSemanticConfidence::Unsupported; }},

@@ -179,7 +179,7 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
   // every reachable descriptor is known; lowering validates that all owners
   // have compatible ABI inputs and a preceding selected causal window.
   const bool owner_proven = !sequence.execution_owners.empty();
-  return sequence.kind == ConSanSyncSequenceKind::Barrier &&
+  return sequence.kind == ConSanSyncKind::Barrier &&
          sequence.operation == ConSanSyncOperation::BarrierFull &&
          sequence.memory_role == ConSanSyncMemoryRole::AcquireRelease &&
          consan_sync_confidence_meets(sequence.confidence,

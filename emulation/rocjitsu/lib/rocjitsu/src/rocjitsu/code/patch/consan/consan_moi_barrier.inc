@@ -29,9 +29,8 @@
   for (ConSanProbeIntentId id : admitted_intents) {
     const ConSanProbeIntent *intent = observation.intent(id);
     const ConSanSyncEvent *event =
-        intent == nullptr
-            ? nullptr
-            : graph.find_unique_event(ConSanSyncEventKind::Barrier, intent->physical_site);
+        intent == nullptr ? nullptr
+                          : graph.find_unique_event(ConSanSyncKind::Barrier, intent->physical_site);
     const ConSanSyncSequence *sequence =
         event == nullptr ? nullptr : graph.find_unique_sequence_containing(event->semantic_id);
     if (intent == nullptr || event == nullptr || sequence == nullptr ||
@@ -44,7 +43,7 @@
       const ConSanSyncEvent *member = graph.find_event(covered);
       const ConSanSyncEventId member_id =
           member == nullptr ? ConSanSyncEventId{} : graph.event_id(*member);
-      coverage_is_exact &= member != nullptr && member->kind == ConSanSyncEventKind::Barrier &&
+      coverage_is_exact &= member != nullptr && member->kind == ConSanSyncKind::Barrier &&
                            std::ranges::find(sequence->member_event_ids, member_id) !=
                                sequence->member_event_ids.end();
     }

@@ -217,7 +217,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
       .physical = {.code_object = builder.view().code_object_id(), .original_text_offset = 8},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
-  event.kind = ConSanSyncEventKind::Barrier;
+  event.kind = ConSanSyncKind::Barrier;
   event.operation = ConSanSyncOperation::BarrierFull;
   event.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   event.confidence = ConSanSemanticConfidence::Exact;
@@ -238,7 +238,7 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
       std::move(source)));
   builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.kind = ConSanSyncKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
   sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
   sequence.confidence = ConSanSemanticConfidence::Exact;
