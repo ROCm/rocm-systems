@@ -15,6 +15,7 @@
 #include "comm.h"
 
 ncclResult_t g_recorderResult = ncclSuccess;
+std::vector<std::string> g_recorderLabels;
 
 int g_recorderIdCalls = 0;
 int g_recorderLastIdCall = -1;
@@ -24,6 +25,7 @@ int g_recorderLastNranks = -12345;
 
 void ResetRecorderFakes() {
   g_recorderResult = ncclSuccess;
+  g_recorderLabels.clear();
   g_recorderIdCalls = 0;
   g_recorderLastIdCall = -1;
   g_recorderLastId = nullptr;
@@ -41,7 +43,9 @@ Recorder& Recorder::instance() {
   return inst;
 }
 
-void Recorder::record(const char*) {}                                  // non-replayable
+void Recorder::record(const char* label) {                             // non-replayable
+  g_recorderLabels.emplace_back(label ? label : "");
+}
 void Recorder::record(ncclComm_t*, int, const int*) {}                 // CommInitAll
 void Recorder::record(int, ncclSimInfo_t*) {}                          // SimulatedGroupEnd
 void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclComm_t) {}

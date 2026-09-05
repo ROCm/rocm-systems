@@ -76,7 +76,9 @@ ncclResult_t ncclGetUniqueId(ncclUniqueId* id) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
+ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* job) { return g_ncclGroupJobAbort(job); }
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
 
 bool g_ginHasError = false;
@@ -185,7 +187,10 @@ void initEnv() {}
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 void initNvtxRegisteredEnums() {}
 ncclResult_t g_ncclEnvPluginInitResult = ncclSuccess;
-ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInitResult; }
+// Default reads the plain result seam so both styles work: set g_ncclEnvPluginInitResult, or ScopedHook the functor.
+static ncclResult_t DefaultNcclEnvPluginInit() { return g_ncclEnvPluginInitResult; }
+std::function<ncclResult_t()> g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInit(); }
 bool ncclIommuPassthroughOk(const char*) { return true; }
 // ncclInit() strtok_r()s the /proc version read, so it must have >= 3 whitespace tokens.
 ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
@@ -324,6 +329,8 @@ void ResetInitFakes() {
   ResetTuningFakes();
   ResetEnvFakes();
   g_ginHasError = false;
+  g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+  g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
   g_lastHsaScratchEnv = nullptr;

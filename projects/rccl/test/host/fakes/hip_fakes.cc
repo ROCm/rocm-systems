@@ -141,6 +141,13 @@ static hipError_t DefaultHipFree(void* ptr)
 }
 std::function<hipError_t(void*)> g_hipFree = DefaultHipFree;
 
+static hipError_t DefaultHipHostFree(void* ptr)
+{
+    std::free(ptr);
+    return hipSuccess;
+}
+std::function<hipError_t(void*)> g_hipHostFree = DefaultHipHostFree;
+
 // --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
 int g_currentDevice = 0;
@@ -197,6 +204,7 @@ void ResetHipFakes()
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipFree                       = DefaultHipFree;
+    g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
@@ -311,11 +319,7 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void* ptr)
-{
-    std::free(ptr);
-    return hipSuccess;
-}
+hipError_t hipHostFree(void* ptr) { return g_hipHostFree(ptr); }
 
 hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
 {
