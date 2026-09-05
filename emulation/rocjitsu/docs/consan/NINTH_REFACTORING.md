@@ -74,12 +74,68 @@ retried under a new name and makes an eventual negative result falsifiable.
   CMake source-glob assertion rejects unlisted implementations. There is no
   large unbuilt or obsolete implementation reservoir hidden by the physical
   file layout.
+- Exact and identifier-normalized clone searches, including repeated regions
+  within the same large source file, found no copied implementation on a
+  subsystem scale. The largest meaningful normalized region was 48 lines;
+  larger matches were include lists or structurally similar declarations.
+  Mode emitters also have very little common instruction-call sequence: no
+  ten-operation sequence occurs across two emitter files, and the few
+  eight-operation matches occur twice. The remaining emitter size is not a
+  conventional copy-and-factor opportunity.
+- The complete `build_*`/`append_*` probe-construction surface is 2,303 calls
+  occupying 5,083 source lines. Of those, 2,780 are continuation lines beyond
+  one line per operation. Even a perfect compact builder syntax could not
+  delete 5,083 lines because the operations themselves remain; its absolute
+  formatting-heavy upper bound is 2,780 lines. A probe IR may still improve
+  operand ownership and remove some operations, but syntax alone cannot
+  supply the requested macro reduction.
+- Expected-failure plumbing has 2,355 diagnostic or early-failure markers. A
+  deliberately generous seven-line neighborhood around every marker covers
+  12,932 lines, but most of those lines perform the guarded work and are not
+  removable. Exceptions could reduce local propagation syntax, but RocJitsu's
+  expected-failure contract deliberately uses no-throw result values; using
+  exceptions to manufacture a line-count result would reverse that design.
+  A typed result/error sink remains a credible low-thousands cleanup, not a
+  twenty-thousand-line replacement.
+- The shared HSA substrate already owns code-object reader capture, file
+  snapshots, tool lifetime, and API-slot interposition. The remaining large
+  ConSan load path composes ConSan-specific transform admission, exact fault
+  reservation, automatic report ownership, replacement image budgets,
+  coverage, fail-open retry, and executable lifetime. Sharing more of its HSA
+  shell with the generic DBT hook has a sub-thousand ConSan deletion envelope;
+  replacing it wholesale would merely relocate ConSan policy into callbacks.
+- Of the current 66,026 governing lines, approximately 25,117 end statements,
+  2,864 open control-flow constructs, 583 are labels/access specifiers, and
+  2,134 are preprocessing directives. Another 7,424 are brace-only lines and
+  15,943 are continuations. Reformatting or shortening names could therefore
+  make the physical line count fall dramatically without deleting any
+  implementation. Such a result is explicitly excluded: it is not the
+  architectural shrinkage signal sought by this campaign.
 
 These results do not end the aggressive search. They do rule out several
 routes that could only have appeared large by ignoring hard cases. The next
 macro candidate must delete a mechanism from the remaining analysis,
 emission, validation, or host lifecycle code; it may not count a facade over
 these rejected semantic differences as sharing.
+
+Taken together, they also bound the twelve-hour aspiration. A further 20,000
+lines is about 30 percent of the complete remaining implementation. No
+behavior-preserving replacement of that magnitude is evidenced in the
+current tree: the three largest plausible mechanical reservoirs together do
+not reach it even at their impossible upper bounds, while the large semantic
+subsystems have been shown to require distinct policies or algorithms. A
+20,000-line result in this window would now require at least one of: removing
+supported behavior, weakening independent proof and diagnostics, moving or
+generating code outside the governing count, cosmetic reformatting, or an
+unvalidated ground-up rewrite. None is authorized by this refactoring.
+
+This is the bounded campaign's negative signal, not an exhaustion claim for
+the ninth refactoring. Responsible low-thousands opportunities remain in
+typed failure propagation, declarative independent validation, the probe
+builder, host load-context plumbing, and smaller representation joins. They
+remain worthwhile under the governing continuation rule, but must not be
+reported as evidence that an additional behavior-preserving 20,000-line
+reservoir exists.
 
 ## Governing continuation rule
 
