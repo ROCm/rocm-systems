@@ -311,26 +311,20 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         });
       } else {
         ++failure->count;
-        failure->min_scratch_vgprs = std::min(failure->min_scratch_vgprs, plan.scratch_vgpr_count);
-        failure->max_scratch_vgprs = std::max(failure->max_scratch_vgprs, plan.scratch_vgpr_count);
-        failure->min_current_vgprs = std::min(failure->min_current_vgprs, plan.current_vgpr_count);
-        failure->max_current_vgprs = std::max(failure->max_current_vgprs, plan.current_vgpr_count);
-        failure->min_max_referenced_vgprs =
-            std::min(failure->min_max_referenced_vgprs, plan.max_referenced_vgpr_count);
-        failure->max_max_referenced_vgprs =
-            std::max(failure->max_max_referenced_vgprs, plan.max_referenced_vgpr_count);
-        failure->min_ordinary_vgpr_limit =
-            std::min(failure->min_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
-        failure->max_ordinary_vgpr_limit =
-            std::max(failure->max_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
-        failure->min_required_vgprs =
-            std::min(failure->min_required_vgprs, plan.required_vgpr_count);
-        failure->max_required_vgprs =
-            std::max(failure->max_required_vgprs, plan.required_vgpr_count);
-        failure->min_owners =
-            std::min(failure->min_owners, plan.owner_descriptor_file_offsets.size());
-        failure->max_owners =
-            std::max(failure->max_owners, plan.owner_descriptor_file_offsets.size());
+        const auto include = [](auto &minimum, auto &maximum, auto value) {
+          minimum = std::min(minimum, value);
+          maximum = std::max(maximum, value);
+        };
+        include(failure->min_scratch_vgprs, failure->max_scratch_vgprs, plan.scratch_vgpr_count);
+        include(failure->min_current_vgprs, failure->max_current_vgprs, plan.current_vgpr_count);
+        include(failure->min_max_referenced_vgprs, failure->max_max_referenced_vgprs,
+                plan.max_referenced_vgpr_count);
+        include(failure->min_ordinary_vgpr_limit, failure->max_ordinary_vgpr_limit,
+                plan.ordinary_vgpr_limit);
+        include(failure->min_required_vgprs, failure->max_required_vgprs,
+                plan.required_vgpr_count);
+        include(failure->min_owners, failure->max_owners,
+                plan.owner_descriptor_file_offsets.size());
         failure->has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
       }
     }
