@@ -73,24 +73,19 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return false;
   }
   InstructionSequence sequence(words);
+  MoiEmissionRequirement require_emission(sequence, errors);
   for (uint16_t index = 0; index < backup.sgpr_count; ++index) {
     const uint16_t sgpr = static_cast<uint16_t>(backup.sgpr_base + index);
     const auto encoded =
         restore ? instrumentation::build_v_readlane_b32(sgpr, backup.vgpr, index, arch)
                 : instrumentation::build_v_writelane_b32(backup.vgpr, sgpr, index, arch);
-    if (!sequence.emit(encoded)) {
-      errors.emplace_back("ConSan MOI entry scalar backup could not encode a lane transfer");
-      return false;
-    }
+    require_emission(sequence.emit(encoded),
+                     "ConSan MOI entry scalar backup could not encode a lane transfer");
   }
-  if (restore) {
-    if (!sequence.emit(instrumentation::build_valu_to_salu_dependency_wait(arch))) {
-      errors.emplace_back(
-          "ConSan MOI entry scalar backup could not encode its restore dependency wait");
-      return false;
-    }
-  }
-  return true;
+  if (restore)
+    require_emission(sequence.emit(instrumentation::build_valu_to_salu_dependency_wait(arch)),
+                     "ConSan MOI entry scalar backup could not encode its restore dependency wait");
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_dispatch_id_capture_and_restore(
@@ -98,6 +93,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     ConSanMoiDispatchIdCapture capture, bool restore_system_sgprs, rj_code_arch_t arch,
     std::vector<std::string> &errors) {
   InstructionSequence sequence(words);
+  MoiEmissionRequirement require_emission(sequence, errors);
   if (!plan.supported()) {
     errors.emplace_back("ConSan MOI dispatch-ID prologue received an unsupported preload plan");
     return false;
@@ -112,39 +108,36 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
 
   if (capture.sgpr()) {
-    if (!append_moi_entry_salu_write(
-            words, build_s_mov_b32(*capture.sgpr(), plan.dispatch_id_sgpr, arch), arch) ||
-        !append_moi_entry_salu_write(
-            words,
-            build_s_mov_b32(static_cast<uint16_t>(*capture.sgpr() + 1u),
-                            static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
-            arch) ||
-        // Hardware dispatch ID zero is valid (and common for the first packet),
-        // while ConSan reserves zero as the empty metadata sentinel. Store the
-        // injective modulo-2^64 successor used by every downstream comparison.
-        !append_moi_entry_salu_write(
-            words,
-            build_s_add_u32(*capture.sgpr(), *capture.sgpr(), scalar_positive_inline_u32(1), arch),
-            arch) ||
-        !append_moi_entry_salu_write(words,
-                                     build_s_addc_u32(static_cast<uint16_t>(*capture.sgpr() + 1u),
-                                                      static_cast<uint16_t>(*capture.sgpr() + 1u),
-                                                      scalar_positive_inline_u32(0), arch),
-                                     arch)) {
-      errors.emplace_back(
-          "ConSan MOI dispatch-ID prologue cannot encode its SALU dependency delay");
-      return false;
-    }
+    require_emission(
+        append_moi_entry_salu_write(
+            words, build_s_mov_b32(*capture.sgpr(), plan.dispatch_id_sgpr, arch), arch) &&
+            append_moi_entry_salu_write(
+                words,
+                build_s_mov_b32(static_cast<uint16_t>(*capture.sgpr() + 1u),
+                                static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
+                arch) &&
+            // Hardware dispatch ID zero is valid (and common for the first packet),
+            // while ConSan reserves zero as the empty metadata sentinel. Store the
+            // injective modulo-2^64 successor used by every downstream comparison.
+            append_moi_entry_salu_write(words,
+                                        build_s_add_u32(*capture.sgpr(), *capture.sgpr(),
+                                                        scalar_positive_inline_u32(1), arch),
+                                        arch) &&
+            append_moi_entry_salu_write(
+                words,
+                build_s_addc_u32(static_cast<uint16_t>(*capture.sgpr() + 1u),
+                                 static_cast<uint16_t>(*capture.sgpr() + 1u),
+                                 scalar_positive_inline_u32(0), arch),
+                arch),
+        "ConSan MOI dispatch-ID prologue cannot encode its SALU dependency delay");
   } else {
-    if (!sequence.emit_all(build_v_mov_b32_e32(*capture.vgpr(), plan.dispatch_id_sgpr, arch),
-                           build_v_mov_b32_e32(static_cast<uint16_t>(*capture.vgpr() + 1u),
-                                               static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u),
-                                               arch),
-                           instrumentation::build_v_add_u64_literal(*capture.vgpr(), 1u, arch))) {
-      errors.emplace_back(
-          "ConSan MOI dispatch-ID prologue cannot encode its persistent VGPR successor");
-      return false;
-    }
+    require_emission(
+        sequence.emit_all(build_v_mov_b32_e32(*capture.vgpr(), plan.dispatch_id_sgpr, arch),
+                          build_v_mov_b32_e32(static_cast<uint16_t>(*capture.vgpr() + 1u),
+                                              static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u),
+                                              arch),
+                          instrumentation::build_v_add_u64_literal(*capture.vgpr(), 1u, arch)),
+        "ConSan MOI dispatch-ID prologue cannot encode its persistent VGPR successor");
   }
   uint32_t shifted_guest_end =
       static_cast<uint32_t>(plan.first_shifted_guest_sgpr) + plan.shifted_guest_sgpr_count;
@@ -163,23 +156,20 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an invalid guest restore source");
       return false;
     }
-    if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, *source, arch), arch)) {
-      errors.emplace_back(
-          "ConSan MOI dispatch-ID prologue cannot encode a guest-restore dependency delay");
-      return false;
-    }
+    require_emission(
+        append_moi_entry_salu_write(words, build_s_mov_b32(destination, *source, arch), arch),
+        "ConSan MOI dispatch-ID prologue cannot encode a guest-restore dependency delay");
   }
   if (restore_system_sgprs) {
     for (uint16_t i = 0; i < plan.shifted_system_sgpr_count; ++i) {
       const uint16_t destination = static_cast<uint16_t>(plan.original_user_sgpr_count + i);
-      if (!append_moi_entry_salu_write(
+      require_emission(
+          append_moi_entry_salu_write(
               words,
               build_s_mov_b32(destination,
                               static_cast<uint16_t>(destination + plan.system_sgpr_shift), arch),
-              arch)) {
-        errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a system-SGPR restore");
-        return false;
-      }
+              arch),
+          "ConSan MOI dispatch-ID prologue cannot encode a system-SGPR restore");
     }
   }
   if (plan.requires_kernarg_reload()) {
@@ -189,20 +179,17 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       return false;
     }
     for (uint16_t i = 0; i < plan.kernarg_reload_count; ++i) {
-      if (!sequence.emit(instrumentation::build_s_load_dword(
+      require_emission(
+          sequence.emit(instrumentation::build_s_load_dword(
               static_cast<uint16_t>(plan.kernarg_reload_sgpr + i), plan.kernarg_reload_base_sgpr,
               static_cast<uint32_t>(plan.kernarg_reload_offset_dwords + i) * sizeof(uint32_t),
-              arch))) {
-        errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a kernarg reload");
-        return false;
-      }
+              arch)),
+          "ConSan MOI dispatch-ID prologue cannot encode a kernarg reload");
     }
-    if (!sequence.emit(instrumentation::build_s_wait_scalar_load0(arch))) {
-      errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode its kernarg wait");
-      return false;
-    }
+    require_emission(sequence.emit(instrumentation::build_s_wait_scalar_load0(arch)),
+                     "ConSan MOI dispatch-ID prologue cannot encode its kernarg wait");
   }
-  return true;
+  return sequence.finish();
 }
 
 [[nodiscard]] std::optional<std::vector<std::pair<uint16_t, uint16_t>>>
@@ -241,14 +228,15 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
     errors.emplace_back("ConSan MOI found an incomplete AMDHSA workgroup-ID payload repair");
     return false;
   }
+  InstructionSequence sequence(words);
+  MoiEmissionRequirement require_emission(sequence, errors);
   for (const auto &[destination, source] : *copies) {
-    if (destination != source &&
-        !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
-      errors.emplace_back("ConSan MOI could not restore a guest AMDHSA workgroup payload SGPR");
-      return false;
-    }
+    if (destination != source)
+      require_emission(
+          append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch),
+          "ConSan MOI could not restore a guest AMDHSA workgroup payload SGPR");
   }
-  return true;
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_cdna_semantic_entry_scalar_spill_overrides(
@@ -261,18 +249,17 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
     return false;
   }
   InstructionSequence sequence(words);
+  MoiEmissionRequirement require_emission(sequence, errors);
   for (const auto &[destination, source] : *copies) {
     if (destination == source || destination < spill.sgpr_base ||
         destination >= static_cast<uint32_t>(spill.sgpr_base) + spill.sgpr_count) {
       continue;
     }
-    if (!sequence.emit(build_sgpr_spill_slot_override_sequence(spill, destination, source, arch))) {
-      errors.emplace_back(
-          "ConSan MOI could not preserve a semantic AMDHSA entry-scalar backup slot");
-      return false;
-    }
+    require_emission(
+        sequence.emit(build_sgpr_spill_slot_override_sequence(spill, destination, source, arch)),
+        "ConSan MOI could not preserve a semantic AMDHSA entry-scalar backup slot");
   }
-  return true;
+  return sequence.finish();
 }
 
 [[nodiscard]] bool
@@ -294,6 +281,7 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
   const std::array<std::optional<uint16_t>, 4> scalar_tuple = scalar_destinations.values();
   const std::array<std::optional<uint16_t>, 4> vector_tuple = vector_destinations.values();
   InstructionSequence sequence(words);
+  MoiEmissionRequirement require_emission(sequence, errors);
   for (size_t index = 0; index < source_tuple.size(); ++index) {
     if (!scalar_tuple[index] && !vector_tuple[index])
       continue;
@@ -313,17 +301,15 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
       // any owning kernel consumes it. Ordinary kernels in the same object do
       // not receive that launch input; zero is their exact cluster identity.
       if (scalar_tuple[index]) {
-        if (!append_moi_entry_salu_write(
+        require_emission(
+            append_moi_entry_salu_write(
                 words, build_s_mov_b32(*scalar_tuple[index], scalar_positive_inline_u32(0), arch),
-                arch)) {
-          errors.emplace_back(
-              "ConSan MOI exact scalar workgroup-tuple prologue could not zero an absent "
-              "cluster coordinate");
-          return false;
-        }
+                arch),
+            "ConSan MOI exact scalar workgroup-tuple prologue could not zero an absent "
+            "cluster coordinate");
       } else {
-        (void)sequence.emit(
-            build_v_mov_b32_e32(*vector_tuple[index], scalar_positive_inline_u32(0), arch));
+        require_emission(sequence.emit(
+            build_v_mov_b32_e32(*vector_tuple[index], scalar_positive_inline_u32(0), arch)));
       }
       continue;
     }
@@ -335,36 +321,32 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
       }
       const uint16_t destination = *scalar_tuple[index];
       const uint16_t source_operand = *source.scalar_src;
-      if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
-                                       arch) ||
-          (source.mask_low_16 &&
-           (!append_moi_entry_salu_write(
-                words,
-                build_s_lshl_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                arch) ||
-            !append_moi_entry_salu_write(
-                words,
-                build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                arch))) ||
-          (source.shift_right_16 &&
-           !append_moi_entry_salu_write(
-               words,
-               build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-               arch))) {
-        errors.emplace_back(
-            "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
-        return false;
-      }
+      require_emission(
+          append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
+                                      arch) &&
+              (!source.mask_low_16 ||
+               (append_moi_entry_salu_write(words,
+                                            build_s_lshl_b32(destination, destination,
+                                                             scalar_positive_inline_u32(16), arch),
+                                            arch) &&
+                append_moi_entry_salu_write(words,
+                                            build_s_lshr_b32(destination, destination,
+                                                             scalar_positive_inline_u32(16), arch),
+                                            arch))) &&
+              (!source.shift_right_16 ||
+               append_moi_entry_salu_write(
+                   words,
+                   build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                   arch)),
+          "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
     } else if (vector_tuple[index]) {
       const uint16_t destination = *vector_tuple[index];
-      if (!consan_detail::append_workgroup_source_value(words, source, destination, arch)) {
-        errors.emplace_back(
-            "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
-        return false;
-      }
+      require_emission(
+          consan_detail::append_workgroup_source_value(words, source, destination, arch),
+          "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
     }
   }
-  return true;
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_moi_entry_workitem_coordinate(std::vector<uint32_t> &words,
@@ -432,113 +414,93 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
   const uint16_t store_shift = use_quad_store ? 4u : 3u;
   std::vector<uint32_t> initialization;
   InstructionSequence sequence(initialization);
-  if (!sequence.emit_all(instrumentation::build_s_cselect_b32(saved_scc,
-                                                              scalar_positive_inline_u32(1),
-                                                              scalar_positive_inline_u32(0), arch),
-                         instrumentation::build_s_mov_b64(vcc_save, kAmdGpuVccLo, arch),
-                         instrumentation::build_s_mov_b64(exec_save, kAmdGpuExecLo, arch)) ||
-      !append_moi_entry_workitem_coordinate(initialization, end_vgpr, /*dimension=*/0u, arch) ||
-      !sequence.emit_all(
-          instrumentation::build_v_cmp_gt_u32_vcc(
-              scalar_positive_inline_u32(layout.initialization_lanes), end_vgpr, arch),
-          instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back(
-        "ConSan MOI parallel workgroup-shadow initializer could not encode entry selection");
-    return false;
-  }
+  MoiEmissionRequirement require_emission(sequence, errors);
+  require_emission(
+      sequence.emit_all(instrumentation::build_s_cselect_b32(saved_scc,
+                                                             scalar_positive_inline_u32(1),
+                                                             scalar_positive_inline_u32(0), arch),
+                        instrumentation::build_s_mov_b64(vcc_save, kAmdGpuVccLo, arch),
+                        instrumentation::build_s_mov_b64(exec_save, kAmdGpuExecLo, arch)) &&
+          append_moi_entry_workitem_coordinate(initialization, end_vgpr, /*dimension=*/0u, arch) &&
+          sequence.emit_all(
+              instrumentation::build_v_cmp_gt_u32_vcc(
+                  scalar_positive_inline_u32(layout.initialization_lanes), end_vgpr, arch),
+              instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI parallel workgroup-shadow initializer could not encode entry selection");
   for (uint8_t dimension = 1u; dimension < layout.workitem_id_dimensions; ++dimension) {
-    if (!append_moi_entry_workitem_coordinate(initialization, address_vgpr, dimension, arch) ||
-        !sequence.emit_all(
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), address_vgpr,
-                                                    arch),
-            instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch))) {
-      errors.emplace_back(
-          "ConSan MOI parallel workgroup-shadow initializer could not encode outer selection");
-      return false;
-    }
+    require_emission(
+        append_moi_entry_workitem_coordinate(initialization, address_vgpr, dimension, arch) &&
+            sequence.emit_all(
+                instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u),
+                                                        address_vgpr, arch),
+                instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch)),
+        "ConSan MOI parallel workgroup-shadow initializer could not encode outer selection");
   }
   const InstructionSequence::Label restore_state = sequence.make_label();
-  if (!sequence.emit_branch(restore_state, InstructionSequence::BranchKind::ExecZero) ||
-      !sequence.emit_all(
-          instrumentation::build_s_mov_b64(selected_exec, kAmdGpuExecLo, arch),
-          instrumentation::build_s_bcnt1_i32_b64(stride, kAmdGpuExecLo, arch),
-          build_s_lshl_b32(stride, stride, scalar_positive_inline_u32(store_shift), arch),
-          instrumentation::build_v_lshlrev_b32(end_vgpr, scalar_positive_inline_u32(store_shift),
-                                               end_vgpr, arch),
-          instrumentation::build_v_add_u32_literal(address_vgpr, initialization_base, end_vgpr,
-                                                   arch)) ||
-      (!use_wide_store && !sequence.emit(instrumentation::build_v_mov_b32_literal(
-                              end_vgpr, initialization_base + initialization_size, arch))) ||
-      !sequence.emit(build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0), arch))) {
-    errors.emplace_back(
-        "ConSan MOI parallel workgroup-shadow initializer could not encode clear setup");
-    return false;
-  }
+  require_emission(
+      sequence.emit_branch(restore_state, InstructionSequence::BranchKind::ExecZero) &&
+          sequence.emit_all(
+              instrumentation::build_s_mov_b64(selected_exec, kAmdGpuExecLo, arch),
+              instrumentation::build_s_bcnt1_i32_b64(stride, kAmdGpuExecLo, arch),
+              build_s_lshl_b32(stride, stride, scalar_positive_inline_u32(store_shift), arch),
+              instrumentation::build_v_lshlrev_b32(
+                  end_vgpr, scalar_positive_inline_u32(store_shift), end_vgpr, arch),
+              instrumentation::build_v_add_u32_literal(address_vgpr, initialization_base, end_vgpr,
+                                                       arch)) &&
+          (use_wide_store || sequence.emit(instrumentation::build_v_mov_b32_literal(
+                                 end_vgpr, initialization_base + initialization_size, arch))) &&
+          sequence.emit(build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0), arch)),
+      "ConSan MOI parallel workgroup-shadow initializer could not encode clear setup");
   if (use_wide_store) {
-    for (uint16_t i = 1u; i < zero_tuple_size; ++i) {
-      if (!sequence.emit(build_v_mov_b32_e32(static_cast<uint16_t>(zero_vgpr + i),
-                                             scalar_positive_inline_u32(0), arch)))
-        return false;
-    }
-    if (!sequence.emit(instrumentation::build_v_cmp_gt_u32_literal_vcc(
-            initialization_base + initialization_size, address_vgpr, arch))) {
-      errors.emplace_back(
-          "ConSan MOI parallel workgroup-shadow initializer could not encode bounds compare");
-      return false;
-    }
+    for (uint16_t i = 1u; i < zero_tuple_size; ++i)
+      require_emission(sequence.emit(build_v_mov_b32_e32(static_cast<uint16_t>(zero_vgpr + i),
+                                                         scalar_positive_inline_u32(0), arch)));
+    require_emission(sequence.emit(instrumentation::build_v_cmp_gt_u32_literal_vcc(
+                         initialization_base + initialization_size, address_vgpr, arch)),
+                     "ConSan MOI parallel workgroup-shadow initializer could not encode bounds "
+                     "compare");
   } else {
-    if (!sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(end_vgpr),
-                                                               address_vgpr, arch))) {
-      errors.emplace_back(
-          "ConSan MOI parallel workgroup-shadow initializer could not encode bounds compare");
-      return false;
-    }
+    require_emission(sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
+                         vector_source_vgpr(end_vgpr), address_vgpr, arch)),
+                     "ConSan MOI parallel workgroup-shadow initializer could not encode bounds "
+                     "compare");
   }
-  if (!sequence.emit(
-          instrumentation::build_s_and_b64(kAmdGpuExecLo, selected_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back(
-        "ConSan MOI parallel workgroup-shadow initializer could not retain in-bounds lanes");
-    return false;
-  }
+  require_emission(
+      sequence.emit(
+          instrumentation::build_s_and_b64(kAmdGpuExecLo, selected_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI parallel workgroup-shadow initializer could not retain in-bounds lanes");
   const InstructionSequence::Label loop_begin = sequence.mark_label();
   if (use_wide_store) {
-    if (!(use_quad_store ? sequence.emit(instrumentation::build_ds_store_b128(address_vgpr,
-                                                                              zero_vgpr, 0u, arch))
-                         : sequence.emit(instrumentation::build_ds_store_b64(
-                               address_vgpr, zero_vgpr, 0u, arch)))) {
-      errors.emplace_back(
-          "ConSan MOI parallel workgroup-shadow initializer could not encode wide store");
-      return false;
-    }
+    require_emission(
+        use_quad_store
+            ? sequence.emit(instrumentation::build_ds_store_b128(address_vgpr, zero_vgpr, 0u, arch))
+            : sequence.emit(instrumentation::build_ds_store_b64(address_vgpr, zero_vgpr, 0u, arch)),
+        "ConSan MOI parallel workgroup-shadow initializer could not encode wide store");
   } else {
-    if (!sequence.emit_all(
-            instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 0u, arch),
-            instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 4u, arch))) {
-      errors.emplace_back(
-          "ConSan MOI parallel workgroup-shadow initializer could not encode split store");
-      return false;
-    }
+    require_emission(
+        sequence.emit_all(instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 0u, arch),
+                          instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 4u, arch)),
+        "ConSan MOI parallel workgroup-shadow initializer could not encode split store");
   }
-  if (!sequence.emit(instrumentation::build_v_add_u32(address_vgpr, stride, address_vgpr, arch)) ||
-      !(use_wide_store ? sequence.emit(instrumentation::build_v_cmp_gt_u32_literal_vcc(
-                             initialization_base + initialization_size, address_vgpr, arch))
-                       : sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
-                             vector_source_vgpr(end_vgpr), address_vgpr, arch))) ||
-      !sequence.emit(
-          instrumentation::build_s_and_b64(kAmdGpuExecLo, selected_exec, kAmdGpuVccLo, arch)) ||
-      !sequence.emit_branch(loop_begin, InstructionSequence::BranchKind::ExecNonzero) ||
-      !sequence.emit(instrumentation::build_s_wait_flat_load0(arch)) ||
-      !sequence.bind(restore_state) ||
-      !sequence.emit_all(
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save, arch),
-          instrumentation::build_workgroup_barrier_only(arch),
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)) ||
-      !sequence.resolve_branches(arch)) {
-    errors.emplace_back(
-        "ConSan MOI parallel workgroup-shadow initializer could not encode clear loop");
+  require_emission(
+      sequence.emit(instrumentation::build_v_add_u32(address_vgpr, stride, address_vgpr, arch)) &&
+          (use_wide_store ? sequence.emit(instrumentation::build_v_cmp_gt_u32_literal_vcc(
+                                initialization_base + initialization_size, address_vgpr, arch))
+                          : sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
+                                vector_source_vgpr(end_vgpr), address_vgpr, arch))) &&
+          sequence.emit(
+              instrumentation::build_s_and_b64(kAmdGpuExecLo, selected_exec, kAmdGpuVccLo, arch)) &&
+          sequence.emit_branch(loop_begin, InstructionSequence::BranchKind::ExecNonzero) &&
+          sequence.emit(instrumentation::build_s_wait_flat_load0(arch)) &&
+          sequence.bind(restore_state) &&
+          sequence.emit_all(
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save, arch),
+              instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save, arch),
+              instrumentation::build_workgroup_barrier_only(arch),
+              instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)),
+      "ConSan MOI parallel workgroup-shadow initializer could not encode clear loop");
+  if (!sequence.finish(arch))
     return false;
-  }
   return InstructionSequence(words).emit(initialization);
 }
 
@@ -610,65 +572,58 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   }
   std::vector<uint32_t> selection;
   InstructionSequence sequence(selection);
+  MoiEmissionRequirement require_emission(sequence, errors);
   uint16_t dispatch_id_source = 0u;
   if (dispatch_capture.sgpr()) {
     dispatch_id_source = *dispatch_capture.sgpr();
   } else if (dispatch_capture.vgpr()) {
-    if (!sequence.emit_all(
-            instrumentation::build_v_readfirstlane_b32(quotient, *dispatch_capture.vgpr(), arch),
-            instrumentation::build_valu_to_salu_dependency_wait(arch))) {
-      errors.emplace_back(
-          "ConSan MOI runtime-selection prologue could not read its dispatch identity");
-      return false;
-    }
+    require_emission(sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
+                                           quotient, *dispatch_capture.vgpr(), arch),
+                                       instrumentation::build_valu_to_salu_dependency_wait(arch)),
+                     "ConSan MOI runtime-selection prologue could not read its dispatch identity");
     dispatch_id_source = quotient;
   } else {
     dispatch_id_source =
         scalar_positive_inline_u32(static_cast<uint32_t>(report_dispatch_id) & 63u);
   }
-  if (!sequence.emit_all(instrumentation::build_s_cselect_b32(saved_scc,
-                                                              scalar_positive_inline_u32(1u),
-                                                              scalar_positive_inline_u32(0u), arch),
-                         instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0u),
-                                                          dispatch_id_source, arch))) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not initialize its hash");
-    return false;
-  }
-  if (!append_moi_runtime_workgroup_mix(selection, workgroup_sources.x, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(selection, workgroup_sources.y, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(selection, workgroup_sources.z, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(selection, workgroup_sources.cluster_workgroup_id, quotient,
-                                        residue, arch)) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not mix its workgroup tuple");
-    return false;
-  }
+  require_emission(
+      sequence.emit_all(instrumentation::build_s_cselect_b32(saved_scc,
+                                                             scalar_positive_inline_u32(1u),
+                                                             scalar_positive_inline_u32(0u), arch),
+                        instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0u),
+                                                         dispatch_id_source, arch)),
+      "ConSan MOI runtime-selection prologue could not initialize its hash");
+  require_emission(
+      append_moi_runtime_workgroup_mix(selection, workgroup_sources.x, quotient, residue, arch) &&
+          append_moi_runtime_workgroup_mix(selection, workgroup_sources.y, quotient, residue,
+                                           arch) &&
+          append_moi_runtime_workgroup_mix(selection, workgroup_sources.z, quotient, residue,
+                                           arch) &&
+          append_moi_runtime_workgroup_mix(selection, workgroup_sources.cluster_workgroup_id,
+                                           quotient, residue, arch),
+      "ConSan MOI runtime-selection prologue could not mix its workgroup tuple");
   const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(sample_stride));
-  if (!sequence.emit_all(build_s_lshr_b32(quotient, residue, shift, arch),
-                         build_s_lshl_b32(quotient, quotient, shift, arch),
-                         instrumentation::build_s_sub_u32(residue, residue, quotient, arch))) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not reduce its hash");
-    return false;
-  }
-  if (!append_moi_runtime_workgroup_residue_compare(selection, residue, quotient,
-                                                    sample_offset & (sample_stride - 1u), arch)) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not compare its hash");
-    return false;
-  }
+  require_emission(
+      sequence.emit_all(build_s_lshr_b32(quotient, residue, shift, arch),
+                        build_s_lshl_b32(quotient, quotient, shift, arch),
+                        instrumentation::build_s_sub_u32(residue, residue, quotient, arch)),
+      "ConSan MOI runtime-selection prologue could not reduce its hash");
+  require_emission(append_moi_runtime_workgroup_residue_compare(
+                       selection, residue, quotient, sample_offset & (sample_stride - 1u), arch),
+                   "ConSan MOI runtime-selection prologue could not compare its hash");
   const uint16_t scalar_destination = selection_destination.scalar_src.value_or(residue);
-  if (!sequence.emit(instrumentation::build_s_cselect_b32(scalar_destination,
-                                                          scalar_positive_inline_u32(1u),
-                                                          scalar_positive_inline_u32(0u), arch))) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not materialize its result");
+  require_emission(sequence.emit(instrumentation::build_s_cselect_b32(
+                       scalar_destination, scalar_positive_inline_u32(1u),
+                       scalar_positive_inline_u32(0u), arch)),
+                   "ConSan MOI runtime-selection prologue could not materialize its result");
+  require_emission((!selection_destination.vector_src ||
+                    sequence.emit(build_v_mov_b32_e32(*selection_destination.vector_src,
+                                                      scalar_destination, arch))) &&
+                       sequence.emit(instrumentation::build_s_cmp_lg_u32(
+                           saved_scc, scalar_positive_inline_u32(0u), arch)),
+                   "ConSan MOI runtime-selection prologue could not restore SCC");
+  if (!sequence.finish())
     return false;
-  }
-  if ((selection_destination.vector_src &&
-       !sequence.emit(
-           build_v_mov_b32_e32(*selection_destination.vector_src, scalar_destination, arch))) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0u), arch))) {
-    errors.emplace_back("ConSan MOI runtime-selection prologue could not restore SCC");
-    return false;
-  }
   return InstructionSequence(words).emit(selection);
 }
 
