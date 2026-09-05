@@ -5754,8 +5754,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
   result.resource_plans.push_back(atomic_plan);
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
-    builder.kernels().emplace_back();
-    builder.kernels().back().name = "auto_report_atomic";
+    builder.add_kernel().name = "auto_report_atomic";
     builder.decoded_sites().push_back(
         {.container = rocjitsu::consan_program_container_ref(builder.kernels().back()),
          .payload = rocjitsu::ConSanAtomicSite{}});
@@ -5953,7 +5952,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   constexpr uint64_t owner_descriptor_offset = 0x100u;
   rocjitsu::ProgramInventoryBuilder inventory(instruction_bytes);
   inventory.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
-  rocjitsu::ConSanKernelInfo kernel;
+  rocjitsu::ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = "auto_report_inline_shadow";
   kernel.descriptor_file_offset = owner_descriptor_offset;
   kernel.declared_group_segment_bytes = 256u;
@@ -5969,7 +5968,7 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   access.mnemonic = "ds_store_b32";
   access.container = rocjitsu::consan_program_container_ref(kernel);
   inventory.access_sites().push_back(std::move(access));
-  inventory.kernels().push_back(std::move(kernel));
+  inventory.add_kernel(std::move(kernel));
   inventory.publish_decoded_accesses(instruction_bytes);
   inventory.access_sites().front().execution_owner_descriptor_file_offsets = {
       owner_descriptor_offset};
@@ -9207,8 +9206,7 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
   install_consan_test_program_inventory(g_transform_override_result,
                                         [](rocjitsu::ProgramInventoryBuilder &builder) {
-                                          builder.kernels().emplace_back();
-                                          auto &kernel = builder.kernels().back();
+                                          auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
                                           kernel.uses_dynamic_stack = true;
@@ -9297,8 +9295,7 @@ TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInte
                                          ROCJITSU_CODE_TARGET_GFX942);
     install_consan_test_program_inventory(g_transform_override_result,
                                           [](rocjitsu::ProgramInventoryBuilder &builder) {
-                                            builder.kernels().emplace_back();
-                                            auto &kernel = builder.kernels().back();
+                                            auto &kernel = builder.add_kernel();
                                             kernel.name = "oversized_kernel";
                                             kernel.descriptor_file_offset = 64u;
                                             kernel.entry_text_offset = 0u;
@@ -9352,8 +9349,7 @@ void configure_consan_symbol_binding_case() {
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 's', 'y', 'm'};
   install_consan_test_program_inventory(g_transform_override_result,
                                         [](rocjitsu::ProgramInventoryBuilder &builder) {
-                                          builder.kernels().emplace_back();
-                                          auto &kernel = builder.kernels().back();
+                                          auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
                                           kernel.entry_text_offset = 0u;
@@ -9481,8 +9477,7 @@ void configure_consan_zero_record_case() {
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 's', 'a', 'm', 'p'};
   install_consan_test_program_inventory(g_transform_override_result,
                                         [](rocjitsu::ProgramInventoryBuilder &builder) {
-                                          builder.kernels().emplace_back();
-                                          auto &kernel = builder.kernels().back();
+                                          auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
                                           kernel.entry_text_offset = 0u;

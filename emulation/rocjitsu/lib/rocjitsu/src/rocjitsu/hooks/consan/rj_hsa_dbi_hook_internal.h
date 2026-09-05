@@ -254,15 +254,16 @@ struct OwnerLogFields {
 
 [[nodiscard]] inline OwnerLogFields
 owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
-                 std::span<const rocjitsu::ConSanKernelInfo> kernels) {
+                 std::span<const rocjitsu::ConSanProgramContainer> kernels) {
   OwnerLogFields fields;
   if (owners.empty())
     return fields;
   fields.names.clear();
   fields.proofs.clear();
   for (const rocjitsu::ConSanExecutionOwner &owner : owners) {
-    const auto kernel = std::ranges::find(kernels, owner.descriptor_file_offset,
-                                          &rocjitsu::ConSanKernelInfo::descriptor_file_offset);
+    const auto kernel =
+        std::ranges::find(kernels, owner.descriptor_file_offset,
+                          &rocjitsu::ConSanProgramContainer::descriptor_file_offset);
     if (kernel == kernels.end())
       return {};
     if (!fields.names.empty()) {

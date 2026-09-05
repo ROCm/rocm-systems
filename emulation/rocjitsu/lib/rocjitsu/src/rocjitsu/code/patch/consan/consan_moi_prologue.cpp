@@ -1207,13 +1207,13 @@ build_private_epoch_prologue_words(const MoiPrivateEpochPrologueEmissionPlan &pl
   return words;
 }
 
-[[nodiscard]] bool kernel_contains_patch_anchor(const ConSanKernelInfo &kernel,
+[[nodiscard]] bool kernel_contains_patch_anchor(const ConSanProgramContainer &kernel,
                                                 const ConSanCommittedPatchGeometry &patch) {
   return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
          patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
 }
 
-[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel,
+[[nodiscard]] bool kernel_owns_patch(const ConSanProgramContainer &kernel,
                                      const ConSanPatchLoweringProduct &patch) {
   if (!patch.owner_descriptor_file_offsets.empty()) {
     return std::ranges::find(patch.owner_descriptor_file_offsets, kernel.descriptor_file_offset) !=
@@ -1253,7 +1253,7 @@ template <typename Predicate>
                                                                  arch, patch))
       return;
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
-      const ConSanKernelInfo *owner =
+      const ConSanProgramContainer *owner =
           result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
       if (owner == nullptr) {
         result.errors.emplace_back(
@@ -1436,7 +1436,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     return;
   }
   struct PlannedPrivateEpochPrologue {
-    const ConSanKernelInfo *kernel = nullptr;
+    const ConSanProgramContainer *kernel = nullptr;
     uint64_t active_descriptor_file_offset = 0;
     MoiPrivateEpochPrologueEmissionPlan emission;
     ConSanMoiPrivateStateLayout private_state_layout;
@@ -1444,7 +1444,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
   };
   std::vector<PlannedPrivateEpochPrologue> planned;
   MoiDescriptorPrivateRequirements private_requirements;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
     const ConSanPatchInfo *access_patch = find_moi_patch(result, [&](const ConSanPatchInfo &patch) {
       return patch.private_state_layout && patch.scratch_vgpr && kernel_owns_patch(kernel, patch);
     });
@@ -1820,14 +1820,14 @@ void try_apply_owner_epoch_prologue_patch(
   /// patching loop may choose among entry routes, but cannot reinterpret the
   /// kernel ABI or change the initialization contract.
   struct PlannedOwnerEpochPrologue {
-    ConSanKernelInfo kernel;
+    ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
     MoiOwnerEpochPrologueEmissionPlan emission;
     uint32_t required_vgpr_count = 0;
     uint16_t required_sgpr_count = 0;
   };
   std::vector<PlannedOwnerEpochPrologue> target_kernels;
   target_kernels.reserve(result.program_inventory.kernels().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     const bool owns_emitted_patch = find_moi_patch(result, [&](const ConSanPatchInfo &patch) {
@@ -1863,7 +1863,7 @@ void try_apply_owner_epoch_prologue_patch(
           "ConSan MOI owner/epoch prologue could not resolve an active kernel descriptor");
       continue;
     }
-    ConSanKernelInfo active = kernel;
+    ConSanProgramContainer active = kernel;
     active.descriptor_file_offset = active_kernel->descriptor_file_offset;
     active.entry_text_offset = active_kernel->entry_text_offset;
     active.text_file_offset = active_kernel->text_file_offset;
@@ -2181,7 +2181,7 @@ void try_apply_owner_epoch_prologue_patch(
                                           item.emission.dispatch_capture, arch, result.errors)) {
       return;
     }
-    const ConSanKernelInfo *canonical =
+    const ConSanProgramContainer *canonical =
         result.program_inventory.find_kernel_by_name(item.kernel.name);
     if (canonical == nullptr) {
       result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its descriptor owner");
@@ -2201,7 +2201,7 @@ void try_apply_owner_epoch_prologue_patch(
   std::vector<ConSanTextFragment> fragments;
   fragments.reserve(target_kernels.size());
   for (const PlannedOwnerEpochPrologue &item : target_kernels) {
-    const ConSanKernelInfo *canonical_kernel =
+    const ConSanProgramContainer *canonical_kernel =
         result.program_inventory.find_kernel_by_name(item.kernel.name);
     if (canonical_kernel == nullptr) {
       result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its canonical kernel owner");

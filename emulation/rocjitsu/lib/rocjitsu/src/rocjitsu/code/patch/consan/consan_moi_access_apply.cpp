@@ -204,7 +204,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
     return false;
   }
   return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
-    const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(offset);
+    const ConSanProgramContainer *kernel = inventory.find_kernel_by_descriptor(offset);
     return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   });
 }

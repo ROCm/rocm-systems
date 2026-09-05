@@ -46,20 +46,18 @@ struct ConSanCfgBuildInputs {
 /// recovering subtly different graphs for the same image.
 [[nodiscard]] inline ConSanCfgBuildInputs
 build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
-                        std::span<const ConSanKernelInfo> kernels,
-                        std::span<const ConSanFunctionInfo> functions,
+                        std::span<const ConSanProgramContainer> containers,
                         std::span<const ConSanPreappliedCodeRange> preapplied_ranges = {}) {
   ConSanCfgBuildInputs result;
-  result.leaders.reserve(kernels.size() + functions.size() + 2u * preapplied_ranges.size());
-  result.kernel_entries.reserve(kernels.size());
-  for (const ConSanKernelInfo &kernel : kernels) {
-    if (!kernel.has_text_range)
+  result.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
+  result.kernel_entries.reserve(containers.size());
+  for (const ConSanProgramContainer &container : containers) {
+    if (container.is_kernel() && !container.has_text_range)
       continue;
-    result.leaders.push_back(kernel.entry_text_offset);
-    result.kernel_entries.push_back(kernel.entry_text_offset);
+    result.leaders.push_back(container.entry_text_offset);
+    if (container.is_kernel())
+      result.kernel_entries.push_back(container.entry_text_offset);
   }
-  for (const ConSanFunctionInfo &function : functions)
-    result.leaders.push_back(function.entry_text_offset);
   for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
     result.leaders.push_back(range.text_offset);
     if (range.continuation_text_offset)

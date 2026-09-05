@@ -4547,7 +4547,7 @@ analysis completed.
 
 ### Slice 5AR: delete function-owned access staging
 
-- **Single construction owner:** `ConSanFunctionInfo` no longer owns an access
+- **Single construction owner:** `ConSanProgramContainer` no longer owns an access
   vector. Function decode and bounded call-provenance relay write normalized
   records into builder-owned inventory staging, while the function value keeps
   only container metadata and statistics. Kernel and function attribution use
@@ -4570,7 +4570,7 @@ analysis completed.
 - **Temporary size cost and next deletion:** This slice adds 30 net production
   lines and nine net test lines. The cost is explicit attribution and strong
   exception safety around a seam that previously relied on a mutable field.
-  Deleting `ConSanKernelInfo::access_sites` next removes the final container
+  Deleting `ConSanProgramContainer::access_sites` next removes the final container
   staging vector and permits publication to become a single completion pass
   over builder-owned access facts.
 - **Completed checked-in gate:** The host gate passes all 1,512 runnable tests
@@ -4583,7 +4583,7 @@ analysis completed.
 
 ### Slice 5AS: delete kernel-owned access staging
 
-- **One access owner:** `ConSanKernelInfo` no longer owns an access vector.
+- **One access owner:** `ConSanProgramContainer` no longer owns an access vector.
   Kernel and function decode now construct `ConSanAccessInventorySite` records
   directly in the builder-owned program inventory. Container attribution is
   assigned when each record is created, so no later pass has to recover its

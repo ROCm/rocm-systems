@@ -152,7 +152,7 @@ bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
   };
   if (!owner_descriptor_file_offsets.empty()) {
     return std::ranges::all_of(owner_descriptor_file_offsets, [&](uint64_t descriptor) {
-      const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(descriptor);
+      const ConSanProgramContainer *kernel = inventory.find_kernel_by_descriptor(descriptor);
       return kernel != nullptr && selected_name(kernel->name);
     });
   }

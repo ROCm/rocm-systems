@@ -105,7 +105,7 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
     bool sequence_semantics_weakened = false;
     std::optional<uint64_t> source_owner_descriptor_file_offset;
     if (candidate->in_kernel) {
-      const ConSanKernelInfo *owner =
+      const ConSanProgramContainer *owner =
           pristine_inventory.find_kernel_by_name(candidate->container_name);
       if (owner == nullptr) {
         *error = "selected perturbation edge lost its pristine kernel owner";

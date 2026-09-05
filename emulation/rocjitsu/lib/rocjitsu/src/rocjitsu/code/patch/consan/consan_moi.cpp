@@ -175,7 +175,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;
         return std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
-          const ConSanKernelInfo *kernel =
+          const ConSanProgramContainer *kernel =
               result.program_inventory.find_kernel_by_descriptor(offset);
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
@@ -279,7 +279,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   if (mode_plan.reserve_dynamic_stack_prologue_entry &&
       effective_point.moi_initialize_owner_epoch) {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+    for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
       // Dynamic-stack owner/epoch setup must branch in place from the

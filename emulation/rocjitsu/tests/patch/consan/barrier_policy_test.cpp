@@ -78,11 +78,11 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
                                          std::span<const uint32_t> source_sizes = {}) {
   ProgramInventoryBuilder builder(barrier_policy_bytes());
   builder.set_code_object_facts(true, 0, arch, target);
-  ConSanKernelInfo kernel;
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = "barrier_kernel";
   kernel.descriptor_file_offset = 192;
   kernel.entry_text_offset = 0;
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   for (size_t index = 0; index < events.size(); ++index) {
     ConSanSyncEvent &event = events[index];
     ConSanBarrierSite site;

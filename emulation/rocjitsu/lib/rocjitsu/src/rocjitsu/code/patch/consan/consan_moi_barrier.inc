@@ -579,7 +579,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
       }
     } else if (!operating_point.automatic_moi_private_epoch) {
       const uint16_t required_vgprs = operating_point.moi_owner_epoch_vgprs->epoch + 1u;
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+      for (const ConSanProgramContainer &kernel : result.program_inventory.kernels())
         note_maximum_descriptor_extent(visible_evidence_vgpr_requirements,
                                        kernel.descriptor_file_offset, required_vgprs);
     }

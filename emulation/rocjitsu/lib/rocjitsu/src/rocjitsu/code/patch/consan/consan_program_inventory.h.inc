@@ -371,8 +371,11 @@ struct ConSanProgramInventoryStorage {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   bool semantic_arch_required = false;
   std::vector<ConSanTextSection> text_sections;
-  std::vector<ConSanKernelInfo> kernels;
-  std::vector<ConSanFunctionInfo> functions;
+  /// One stable arena, ordered as dispatchable kernels followed by helper
+  /// functions. `kernel_count` makes both typed semantic partitions contiguous
+  /// views without reviving parallel ownership.
+  std::vector<ConSanProgramContainer> containers;
+  size_t kernel_count = 0;
   std::vector<ConSanAccessInventorySite> access_sites;
   std::vector<ConSanDecodedProgramSite> decoded_sites;
   std::vector<ConSanSyncEvent> sync_events;
@@ -431,35 +434,37 @@ public:
     return storage_ ? std::span<const ConSanTextSection>(storage_->text_sections)
                     : std::span<const ConSanTextSection>{};
   }
-  [[nodiscard]] std::span<const ConSanKernelInfo> kernels() const {
-    return storage_ ? std::span<const ConSanKernelInfo>(storage_->kernels)
-                    : std::span<const ConSanKernelInfo>{};
+  [[nodiscard]] std::span<const ConSanProgramContainer> containers() const {
+    return storage_ ? std::span<const ConSanProgramContainer>(storage_->containers)
+                    : std::span<const ConSanProgramContainer>{};
+  }
+  [[nodiscard]] std::span<const ConSanProgramContainer> kernels() const {
+    return containers().first(storage_ ? storage_->kernel_count : 0);
   }
   /// Resolve a kernel descriptor's immutable inventory record. Descriptor
   /// offsets are unique physical identities within one code object.
-  [[nodiscard]] const ConSanKernelInfo *find_kernel_by_descriptor(uint64_t offset) const {
-    const std::span<const ConSanKernelInfo> records = kernels();
+  [[nodiscard]] const ConSanProgramContainer *find_kernel_by_descriptor(uint64_t offset) const {
+    const std::span<const ConSanProgramContainer> records = kernels();
     const auto kernel =
-        std::ranges::find(records, offset, &ConSanKernelInfo::descriptor_file_offset);
+        std::ranges::find(records, offset, &ConSanProgramContainer::descriptor_file_offset);
     return kernel == records.end() ? nullptr : &*kernel;
   }
   /// Resolve the first published kernel with an exact symbol name. This
   /// preserves object order for malformed inputs containing duplicate names;
   /// physical ownership should use the descriptor lookup whenever available.
-  [[nodiscard]] const ConSanKernelInfo *find_kernel_by_name(std::string_view name) const {
-    const std::span<const ConSanKernelInfo> records = kernels();
-    const auto kernel = std::ranges::find(records, name, &ConSanKernelInfo::name);
+  [[nodiscard]] const ConSanProgramContainer *find_kernel_by_name(std::string_view name) const {
+    const std::span<const ConSanProgramContainer> records = kernels();
+    const auto kernel = std::ranges::find(records, name, &ConSanProgramContainer::name);
     return kernel == records.end() ? nullptr : &*kernel;
   }
-  [[nodiscard]] std::span<const ConSanFunctionInfo> functions() const {
-    return storage_ ? std::span<const ConSanFunctionInfo>(storage_->functions)
-                    : std::span<const ConSanFunctionInfo>{};
+  [[nodiscard]] std::span<const ConSanProgramContainer> functions() const {
+    return containers().subspan(storage_ ? storage_->kernel_count : 0);
   }
   /// Resolve the first published non-dispatchable function with an exact
   /// symbol name, preserving code-object order for malformed duplicate names.
-  [[nodiscard]] const ConSanFunctionInfo *find_function_by_name(std::string_view name) const {
-    const std::span<const ConSanFunctionInfo> records = functions();
-    const auto function = std::ranges::find(records, name, &ConSanFunctionInfo::name);
+  [[nodiscard]] const ConSanProgramContainer *find_function_by_name(std::string_view name) const {
+    const std::span<const ConSanProgramContainer> records = functions();
+    const auto function = std::ranges::find(records, name, &ConSanProgramContainer::name);
     return function == records.end() ? nullptr : &*function;
   }
   [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
@@ -547,8 +552,26 @@ public:
   [[nodiscard]] ProgramInventory view() const { return ProgramInventory(storage_); }
 
   [[nodiscard]] std::vector<ConSanTextSection> &text_sections() { return storage_->text_sections; }
-  [[nodiscard]] std::vector<ConSanKernelInfo> &kernels() { return storage_->kernels; }
-  [[nodiscard]] std::vector<ConSanFunctionInfo> &functions() { return storage_->functions; }
+  [[nodiscard]] std::span<ConSanProgramContainer> containers() { return storage_->containers; }
+  [[nodiscard]] std::span<ConSanProgramContainer> kernels() {
+    return std::span(storage_->containers).first(storage_->kernel_count);
+  }
+  [[nodiscard]] std::span<ConSanProgramContainer> functions() {
+    return std::span(storage_->containers).subspan(storage_->kernel_count);
+  }
+  ConSanProgramContainer &add_kernel(ConSanProgramContainer container = {}) {
+    container.kind = ConSanProgramContainerKind::Kernel;
+    const auto inserted = storage_->containers.insert(
+        storage_->containers.begin() + static_cast<std::ptrdiff_t>(storage_->kernel_count),
+        std::move(container));
+    ++storage_->kernel_count;
+    return *inserted;
+  }
+  ConSanProgramContainer &add_function(ConSanProgramContainer container = {}) {
+    container.kind = ConSanProgramContainerKind::Function;
+    storage_->containers.push_back(std::move(container));
+    return storage_->containers.back();
+  }
   /// Return the normalized access facts while the inventory is being built.
   ///
   /// Access decoding creates these records before control-flow analysis.
@@ -607,7 +630,7 @@ public:
   /// an overlapping symbol, while instructions introduced by the trampoline
   /// do not occur in the pristine inventory at all. This operation resolves
   /// both cases without creating a second container-owned access collection.
-  void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanKernelInfo &owner,
+  void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanProgramContainer &owner,
                                 std::span<const ConSanAccessInventorySite> decoded_accesses,
                                 std::span<const uint8_t> code_object_bytes) {
     const uint64_t end = begin + size;

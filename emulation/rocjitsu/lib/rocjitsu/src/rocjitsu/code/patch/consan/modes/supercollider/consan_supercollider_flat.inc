@@ -200,7 +200,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         options.test_kernel_name_filter.empty() ||
         site.container.name.find(options.test_kernel_name_filter) != std::string::npos ||
         std::ranges::any_of(facts->descriptor_file_offsets, [&](uint64_t owner) {
-          const ConSanKernelInfo *kernel = owner_analysis.kernel(owner);
+          const ConSanProgramContainer *kernel = owner_analysis.kernel(owner);
           return kernel && kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
         });
     if (!selected_by_filter)
@@ -651,7 +651,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
                                            options.flat_provenance_mode))
       continue;
     if (access.container.kernel_descriptor_file_offset) {
-      const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(
+      const ConSanProgramContainer *kernel = result.program_inventory.find_kernel_by_descriptor(
           *access.container.kernel_descriptor_file_offset);
       if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
         continue;

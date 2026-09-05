@@ -21,14 +21,14 @@ public:
   ActiveDescriptorResolver(const ProgramInventory &inventory,
                            const AmdGpuCodeObject &active_code_object) {
     original_kernels_.reserve(inventory.kernels().size());
-    for (const ConSanKernelInfo &kernel : inventory.kernels())
+    for (const ConSanProgramContainer &kernel : inventory.kernels())
       original_kernels_.emplace(kernel.descriptor_file_offset, &kernel);
     active_kernels_.reserve(active_code_object.kernels().size());
     for (const AmdGpuKernelInfo &kernel : active_code_object.kernels())
       active_kernels_.emplace(kernel.name, &kernel);
   }
 
-  [[nodiscard]] std::pair<const ConSanKernelInfo *, const AmdGpuKernelInfo *>
+  [[nodiscard]] std::pair<const ConSanProgramContainer *, const AmdGpuKernelInfo *>
   resolve(uint64_t original_descriptor_offset) const {
     const auto original = original_kernels_.find(original_descriptor_offset);
     if (original == original_kernels_.end())
@@ -38,7 +38,7 @@ public:
   }
 
 private:
-  std::unordered_map<uint64_t, const ConSanKernelInfo *> original_kernels_;
+  std::unordered_map<uint64_t, const ConSanProgramContainer *> original_kernels_;
   std::unordered_map<std::string_view, const AmdGpuKernelInfo *> active_kernels_;
 };
 

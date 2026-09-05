@@ -23,14 +23,14 @@ namespace {
          });
 }
 
-[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ProgramInventory &inventory,
-                                                             std::string_view filter) {
+[[nodiscard]] const ConSanProgramContainer *
+requested_kernel_owner(const ProgramInventory &inventory, std::string_view filter) {
   if (filter.empty())
     return nullptr;
-  if (const ConSanKernelInfo *exact = inventory.find_kernel_by_name(filter))
+  if (const ConSanProgramContainer *exact = inventory.find_kernel_by_name(filter))
     return exact;
-  const ConSanKernelInfo *match = nullptr;
-  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
+  const ConSanProgramContainer *match = nullptr;
+  for (const ConSanProgramContainer &kernel : inventory.kernels()) {
     if (kernel.name.find(filter) == std::string::npos)
       continue;
     if (match != nullptr)
@@ -100,7 +100,7 @@ bool consan_execution_owners_include_requested_kernel(std::span<const ConSanExec
                                                       std::string_view kernel_name_filter) {
   if (kernel_name_filter.empty())
     return true;
-  const ConSanKernelInfo *kernel =
+  const ConSanProgramContainer *kernel =
       requested_kernel_owner(inventory.program_inventory, kernel_name_filter);
   return kernel != nullptr &&
          std::ranges::find(owners, kernel->descriptor_file_offset,

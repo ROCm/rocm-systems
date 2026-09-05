@@ -41,7 +41,7 @@ struct ValidationByteRange {
 }
 
 [[nodiscard]] bool has_blocked_kernel(const ProgramInventory &inventory) {
-  return std::ranges::any_of(inventory.kernels(), [](const ConSanKernelInfo &kernel) {
+  return std::ranges::any_of(inventory.kernels(), [](const ConSanProgramContainer &kernel) {
     return kernel.preflight_action == ConSanPreflightAction::Blocked;
   });
 }
@@ -1541,7 +1541,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       continue;
     }
     if (composite && candidate->in_kernel) {
-      const ConSanKernelInfo *source_owner =
+      const ConSanProgramContainer *source_owner =
           pristine.program_inventory.find_kernel_by_name(candidate->container_name);
       if (source_owner == nullptr || patch.perturbation_source_owner_descriptor_file_offset !=
                                          source_owner->descriptor_file_offset) {
@@ -1550,7 +1550,7 @@ void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
         continue;
       }
     } else if (candidate->in_kernel) {
-      const ConSanKernelInfo *owner =
+      const ConSanProgramContainer *owner =
           semantic_inventory.find_kernel_by_name(candidate->container_name);
       if (owner == nullptr || patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {

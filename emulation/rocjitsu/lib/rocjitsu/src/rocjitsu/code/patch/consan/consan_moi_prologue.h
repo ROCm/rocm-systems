@@ -13,7 +13,7 @@ namespace rocjitsu::consan_moi_impl {
 [[nodiscard]] bool append_moi_entry_salu_write(std::vector<uint32_t> &words, uint32_t word,
                                                rj_code_arch_t arch);
 
-[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel,
+[[nodiscard]] bool kernel_owns_patch(const ConSanProgramContainer &kernel,
                                      const ConSanPatchLoweringProduct &patch);
 
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,

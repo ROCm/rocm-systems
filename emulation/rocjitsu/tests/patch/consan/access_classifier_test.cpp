@@ -97,12 +97,12 @@ ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_
   const std::array<uint8_t, 64> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   builder.set_code_object_facts(true, 0, arch, target);
-  ConSanKernelInfo kernel;
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = "classifier_kernel";
   kernel.descriptor_file_offset = 48;
   kernel.entry_text_offset = 0;
   site.container = consan_program_container_ref(kernel);
-  builder.kernels().push_back(kernel);
+  builder.add_kernel(kernel);
   builder.access_sites().push_back(std::move(site));
   builder.publish_decoded_accesses(bytes);
   return builder.view().access_sites().front();

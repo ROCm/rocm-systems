@@ -214,11 +214,11 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
                                         const AtomicPolicyTarget &target = {}) {
   ProgramInventoryBuilder builder(atomic_policy_bytes());
   builder.set_code_object_facts(true, 0, target.arch, target.target);
-  ConSanKernelInfo kernel;
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = "atomic_kernel";
   kernel.descriptor_file_offset = 384;
   kernel.entry_text_offset = 0;
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   for (ConSanAtomicSite &site : atomic_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   for (ConSanOrdinaryMemorySite &site : ordinary_sites)

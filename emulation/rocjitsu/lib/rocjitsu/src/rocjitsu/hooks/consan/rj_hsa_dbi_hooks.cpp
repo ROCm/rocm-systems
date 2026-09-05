@@ -4579,7 +4579,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     size_t function_flat_maybe_private_hint_count = 0;
     size_t function_flat_global_hint_count = 0;
     size_t function_flat_unknown_hint_count = 0;
-    for (const rocjitsu::ConSanKernelInfo &kernel : transform_result.program_inventory.kernels()) {
+    for (const rocjitsu::ConSanProgramContainer &kernel :
+         transform_result.program_inventory.kernels()) {
       switch (kernel.preflight_action) {
       case rocjitsu::ConSanPreflightAction::Candidate:
         ++candidate_kernel_count;
@@ -4600,7 +4601,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       flat_global_hint_count += kernel.stats.flat_global_hint_count;
       flat_unknown_hint_count += kernel.stats.flat_unknown_hint_count;
     }
-    for (const rocjitsu::ConSanFunctionInfo &function :
+    for (const rocjitsu::ConSanProgramContainer &function :
          transform_result.program_inventory.functions()) {
       function_flat_group_hint_count += function.stats.flat_group_hint_count;
       function_flat_private_hint_count += function.stats.flat_private_hint_count;

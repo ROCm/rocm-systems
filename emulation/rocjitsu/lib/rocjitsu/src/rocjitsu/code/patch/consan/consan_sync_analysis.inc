@@ -212,13 +212,13 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                                 ConSanProgramAnalysisResult &result) {
   const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       append_fault_sites_for_container(bytes, fingerprint, kernel, true, arch,
                                        result.program_inventory.decoded_sites(),
                                        result.fault_sites);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+  for (const ConSanProgramContainer &function : result.program_inventory.functions())
     append_fault_sites_for_container(bytes, fingerprint, function, false, arch,
                                      result.program_inventory.decoded_sites(), result.fault_sites);
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory.access_sites(),
@@ -453,10 +453,8 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   build_sync_events(code_object_id, arch, program_inventory.decoded_sites(), inventory.sync_events);
 
   std::map<std::pair<bool, std::string_view>, size_t> container_order;
-  for (const ConSanKernelInfo &kernel : program_inventory.kernels())
-    container_order.emplace(std::pair{true, std::string_view{kernel.name}}, container_order.size());
-  for (const ConSanFunctionInfo &function : program_inventory.functions())
-    container_order.emplace(std::pair{false, std::string_view{function.name}},
+  for (const ConSanProgramContainer &container : program_inventory.containers())
+    container_order.emplace(std::pair{container.is_kernel(), std::string_view{container.name}},
                             container_order.size());
   std::ranges::stable_sort(inventory.sync_events, [&](const ConSanSyncEvent &lhs,
                                                       const ConSanSyncEvent &rhs) {
@@ -491,18 +489,10 @@ source_site(std::span<const ConSanDecodedProgramSite> sites, const ConSanSyncEve
 canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inventory,
                                           ConSanProgramAnalysisResult &result) {
   const std::span<const ConSanDecodedProgramSite> decoded_sites = inventory.decoded_sites;
-  std::unordered_map<std::string_view, uint64_t> kernel_entries;
-  std::unordered_map<std::string_view, uint64_t> function_entries;
-  kernel_entries.reserve(result.program_inventory.kernels().size());
-  function_entries.reserve(result.program_inventory.functions().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    kernel_entries.emplace(kernel.name, kernel.entry_text_offset);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    function_entries.emplace(function.name, function.entry_text_offset);
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
-    const auto &entries = event.in_kernel ? kernel_entries : function_entries;
-    const auto entry = entries.find(event.container_name);
-    return entry == entries.end() ? std::nullopt : std::optional<uint64_t>(entry->second);
+    const ConSanDecodedProgramSite *source = source_site(decoded_sites, event);
+    return source == nullptr ? std::nullopt
+                             : std::optional<uint64_t>(source->container.entry_text_offset);
   };
 
   return consan_detail::canonicalize_physical_site_aliases(
@@ -543,8 +533,8 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
 [[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>
 build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
                         const ProgramInventory &program_inventory) {
-  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      code_object, program_inventory.kernels(), program_inventory.functions());
+  const consan_detail::ConSanCfgBuildInputs cfg =
+      consan_detail::build_consan_cfg_inputs(code_object, program_inventory.containers());
   return BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
 }
 
@@ -1075,7 +1065,7 @@ void build_barrier_move_destination_inventory(
     uint64_t text_file_offset = 0;
     bool found_container = false;
     if (sequence.in_kernel) {
-      const ConSanKernelInfo *container =
+      const ConSanProgramContainer *container =
           result.program_inventory.find_kernel_by_name(sequence.container_name);
       if (container != nullptr && container->has_text_range) {
         container_begin = container->entry_text_offset;
@@ -1084,7 +1074,7 @@ void build_barrier_move_destination_inventory(
         found_container = true;
       }
     } else {
-      const ConSanFunctionInfo *container =
+      const ConSanProgramContainer *container =
           result.program_inventory.find_function_by_name(sequence.container_name);
       if (container != nullptr) {
         container_begin = container->entry_text_offset;
@@ -2503,8 +2493,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
       result.program_inventory.preapplied_mutation().code_ranges;
   const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      code_object, result.program_inventory.kernels(), result.program_inventory.functions(),
-      preapplied_ranges);
+      code_object, result.program_inventory.containers(), preapplied_ranges);
   std::vector<std::unique_ptr<BasicBlock>> rebuilt_blocks;
   if (reusable_blocks == nullptr || !preapplied_ranges.empty()) {
     rebuilt_blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
@@ -2516,7 +2505,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_map<const BasicBlock *, std::vector<ConSanExecutionOwner>> owners_by_block;
   owners_by_block.reserve(blocks.size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entry_offsets;

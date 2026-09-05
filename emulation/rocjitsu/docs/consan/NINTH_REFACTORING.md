@@ -117,8 +117,8 @@ overlapping representations:
 
 1. Container-owned arrays of `ConSanOrdinaryMemorySite`, `ConSanBarrierSite`,
    `ConSanFenceSite`, and `ConSanAtomicSite`.
-2. Structurally repeated arrays in both `ConSanKernelInfo` and
-   `ConSanFunctionInfo`.
+2. Structurally repeated arrays in both `ConSanProgramContainer` and
+   `ConSanProgramContainer`.
 3. A normalized `ConSanAccessInventorySite` projection for access-oriented
    consumers.
 4. `ConSanSyncEvent`, which copies a broad union of instruction, ownership,
@@ -343,7 +343,7 @@ a representation scheduled for deletion.
 
 | Opportunity | Credible net | Direction |
 | --- | ---: | --- |
-| Lift `ConSanKernelInfo` and `ConSanFunctionInfo` into a common container plus kernel payload | 400–1,000 | First slice of the site arena, not a parallel abstraction. |
+| Lift `ConSanProgramContainer` and `ConSanProgramContainer` into a common container plus kernel payload | 400–1,000 | First slice of the site arena, not a parallel abstraction. |
 | Factor synchronization event/sequence payload through stable IDs | 400–1,000 alone | Part of the 2k–4k arena payoff when performed end to end. |
 | Make patch proof payload a tagged variant instead of a universal optional bag | 300–800 | Common geometry plus family-specific proof payload; synergizes with the edit transaction. |
 | Add sticky failure and transactional checkpoints to `InstructionSequence` | 400–900 | Preserve rollback and label-resolution semantics. |

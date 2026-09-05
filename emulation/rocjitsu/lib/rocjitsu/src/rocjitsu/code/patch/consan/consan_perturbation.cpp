@@ -438,7 +438,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     info.perturbation_composite_atomic_overlap = patch.plan->overlaps_atomic_mutation;
     info.perturbation_composite_removed_boundary = patch.plan->removed_cache_boundary;
     if (patch.candidate->in_kernel) {
-      const ConSanKernelInfo *owner =
+      const ConSanProgramContainer *owner =
           result.program_inventory.find_kernel_by_name(patch.candidate->container_name);
       if (owner == nullptr) {
         result.errors.emplace_back("ConSan carried perturbation lost its exact kernel owner");

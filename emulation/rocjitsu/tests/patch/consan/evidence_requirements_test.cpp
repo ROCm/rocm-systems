@@ -150,7 +150,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
                                         0};
   ProgramInventoryBuilder builder(bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
-  ConSanKernelInfo kernel;
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = "inline_owner";
   kernel.descriptor_file_offset = 512;
   kernel.declared_group_segment_bytes = declared_lds_bytes;
@@ -184,7 +184,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.container = consan_program_container_ref(kernel);
     builder.access_sites().push_back(std::move(site));
   }
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(bytes);
   builder.access_sites().front().execution_owner_descriptor_file_offsets = {512};
 

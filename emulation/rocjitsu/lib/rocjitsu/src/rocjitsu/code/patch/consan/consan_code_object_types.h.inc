@@ -407,17 +407,21 @@ struct ConSanAccessOperandFacts {
 /// contract are declared by the program-inventory layer later in `consan.h`.
 struct ConSanAccessInventorySite;
 
-/// Immutable original-program facts and decoded semantic inventory for one
-/// dispatchable kernel.
+/// Immutable original-program facts for one executable symbol container.
 ///
-/// The record belongs to `ProgramInventory`: descriptor and metadata fields
-/// describe the pristine code object, while the site vectors describe decoded
-/// guest instructions before any ConSan policy or lowering decision. It owns
-/// no report address, register assignment, patch, or transformed bytes. Later
-/// stages may therefore use it to derive policy and capacity without reopening
-/// the ELF or depending on mutable lowering telemetry.
-struct ConSanKernelInfo {
+/// Kernels and non-dispatchable functions deliberately share this bounded
+/// superset record in `ProgramInventory`. Kernel-only descriptor and launch
+/// metadata remain unused for function records; that small representational
+/// slack avoids parallel container storage and lets common analysis traverse
+/// one stable arena. The `kind` tag is authoritative.
+struct ConSanProgramContainer {
+  ConSanProgramContainer() = default;
+  explicit ConSanProgramContainer(ConSanProgramContainerKind container_kind)
+      : kind(container_kind) {}
+
+  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
   std::string name;
+  /// Kernel-only descriptor identity. Zero for a function.
   uint64_t descriptor_file_offset = 0;
   /// Fixed group-segment bytes declared by the pristine kernel descriptor.
   /// Absence means the descriptor bytes were not safely readable; zero is a
@@ -439,48 +443,24 @@ struct ConSanKernelInfo {
   ConSanKernelStats stats;
   ConSanPreflightAction preflight_action = ConSanPreflightAction::NotRun;
   std::vector<std::string> preflight_reasons;
-};
 
-struct ConSanFunctionInfo {
-  std::string name;
-  uint64_t entry_text_offset = 0;
-  uint64_t text_file_offset = 0;
-  uint64_t code_size = 0;
-  bool code_size_inferred_from_zero = false;
-  bool decoded = false;
-  bool uses_cluster_workgroup_id = false;
-  ConSanKernelStats stats;
+  [[nodiscard]] bool is_kernel() const { return kind == ConSanProgramContainerKind::Kernel; }
 };
 
 /// Build the stable symbol attribution shared by every access decoded through
 /// a dispatchable kernel. Code-object identity and execution ownership are
 /// deliberately absent: the inventory publication stage owns those facts.
 [[nodiscard]] inline ConSanProgramContainerRef
-consan_program_container_ref(const ConSanKernelInfo &kernel) {
+consan_program_container_ref(const ConSanProgramContainer &container) {
   return {
-      .kind = ConSanProgramContainerKind::Kernel,
-      .name = kernel.name,
-      .entry_text_offset = kernel.entry_text_offset,
-      .text_file_offset = kernel.text_file_offset,
-      .code_size_inferred_from_zero = kernel.code_size_inferred_from_zero,
-      .kernel_descriptor_file_offset = kernel.descriptor_file_offset,
-      .uses_cluster_workgroup_id = kernel.uses_cluster_workgroup_id,
-  };
-}
-
-/// Build the stable symbol attribution shared by every access decoded through
-/// a non-dispatchable function. A function never invents a kernel descriptor;
-/// execution-owner analysis associates its completed accesses separately.
-[[nodiscard]] inline ConSanProgramContainerRef
-consan_program_container_ref(const ConSanFunctionInfo &function) {
-  return {
-      .kind = ConSanProgramContainerKind::Function,
-      .name = function.name,
-      .entry_text_offset = function.entry_text_offset,
-      .text_file_offset = function.text_file_offset,
-      .code_size_inferred_from_zero = function.code_size_inferred_from_zero,
-      .kernel_descriptor_file_offset = std::nullopt,
-      .uses_cluster_workgroup_id = function.uses_cluster_workgroup_id,
+      .kind = container.kind,
+      .name = container.name,
+      .entry_text_offset = container.entry_text_offset,
+      .text_file_offset = container.text_file_offset,
+      .code_size_inferred_from_zero = container.code_size_inferred_from_zero,
+      .kernel_descriptor_file_offset =
+          container.is_kernel() ? std::optional{container.descriptor_file_offset} : std::nullopt,
+      .uses_cluster_workgroup_id = container.uses_cluster_workgroup_id,
   };
 }
 

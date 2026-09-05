@@ -108,7 +108,8 @@ find_instruction_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t te
 [[nodiscard]] bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks,
                                                   uint64_t text_offset);
 [[nodiscard]] KernelMaxRegisterRefs
-max_register_refs_in_kernel(const ConSanKernelInfo &kernel, std::span<BasicBlock *const> blocks);
+max_register_refs_in_kernel(const ConSanProgramContainer &kernel,
+                            std::span<BasicBlock *const> blocks);
 
 [[nodiscard]] bool read_words_at(std::span<const uint8_t> bytes, uint64_t offset,
                                  std::span<uint32_t> words);

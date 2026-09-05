@@ -178,7 +178,8 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
     return std::nullopt;
   }
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel = program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanProgramContainer *kernel =
+        program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI private epoch references an unknown kernel descriptor");
       return std::nullopt;
@@ -211,7 +212,7 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
         consan_arch_has_cluster_facilities(arch) &&
         std::ranges::any_of(resources.owner_descriptor_file_offsets,
                             [&](uint64_t descriptor_offset) {
-                              const ConSanKernelInfo *kernel =
+                              const ConSanProgramContainer *kernel =
                                   program_inventory.find_kernel_by_descriptor(descriptor_offset);
                               return kernel != nullptr && kernel->uses_cluster_workgroup_id;
                             });
@@ -301,7 +302,8 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
   bool has_dynamic_owner = false;
   bool has_fixed_owner = false;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel = program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanProgramContainer *kernel =
+        program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
       return std::nullopt;

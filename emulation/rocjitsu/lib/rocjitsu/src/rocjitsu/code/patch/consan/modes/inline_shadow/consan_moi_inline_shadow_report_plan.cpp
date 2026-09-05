@@ -190,7 +190,7 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
         return requirements;
       }
       for (uint64_t owner_offset : owners) {
-        const ConSanKernelInfo *owner =
+        const ConSanProgramContainer *owner =
             context.program_inventory.find_kernel_by_descriptor(owner_offset);
         if (owner == nullptr || !owner->declared_group_segment_bytes) {
           requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;

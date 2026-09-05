@@ -46,12 +46,13 @@ enum class FragmentMarkerRole : uint64_t {
                                              uint64_t owner_source_entry) {
   if (fragment.patch.owner_descriptor_file_offsets.empty())
     return true;
-  return std::ranges::any_of(
-      fragment.patch.owner_descriptor_file_offsets, [&](uint64_t descriptor_file_offset) {
-        const ConSanKernelInfo *owner = inventory.find_kernel_by_descriptor(descriptor_file_offset);
-        return owner != nullptr && owner->has_text_range &&
-               owner->entry_text_offset == owner_source_entry;
-      });
+  return std::ranges::any_of(fragment.patch.owner_descriptor_file_offsets,
+                             [&](uint64_t descriptor_file_offset) {
+                               const ConSanProgramContainer *owner =
+                                   inventory.find_kernel_by_descriptor(descriptor_file_offset);
+                               return owner != nullptr && owner->has_text_range &&
+                                      owner->entry_text_offset == owner_source_entry;
+                             });
 }
 
 [[nodiscard]] std::optional<InstructionRewrite> compose_consan_text_fragments(
@@ -503,7 +504,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
                                                  &AmdGpuKernelInfo::descriptor_file_offset);
     if (active_kernel == source.kernels().end())
       return active_descriptor_offset;
-    const ConSanKernelInfo *canonical =
+    const ConSanProgramContainer *canonical =
         result.program_inventory.find_kernel_by_name(active_kernel->name);
     return canonical != nullptr ? canonical->descriptor_file_offset : active_descriptor_offset;
   };

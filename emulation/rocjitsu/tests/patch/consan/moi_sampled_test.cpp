@@ -2863,8 +2863,8 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   EXPECT_EQ(*test_moi_dispatch_id_sgpr(result), 96u);
-  const auto high_kernel =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto high_kernel = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                             &ConSanProgramContainer::name);
   ASSERT_NE(high_kernel, result.program_inventory.kernels().end());
   const auto assignment =
       test_moi_transient_sgpr_assignment(result, high_kernel->descriptor_file_offset);

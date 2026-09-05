@@ -24,13 +24,13 @@ resolve_moi_evidence_container(const ProgramInventory &inventory, bool in_kernel
     };
   };
   if (!in_kernel) {
-    const ConSanFunctionInfo *function = inventory.find_function_by_name(container_name);
+    const ConSanProgramContainer *function = inventory.find_function_by_name(container_name);
     if (function == nullptr)
       return std::nullopt;
     return make_view(*function, std::nullopt, function->code_size);
   }
 
-  const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(container_name);
+  const ConSanProgramContainer *kernel = inventory.find_kernel_by_name(container_name);
   if (kernel == nullptr && execution_owners.size() == 1u) {
     kernel = inventory.find_kernel_by_descriptor(execution_owners.front().descriptor_file_offset);
   }

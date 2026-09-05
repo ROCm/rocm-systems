@@ -1249,7 +1249,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   })) << testing::PrintToString(result.warnings);
   const auto full_kernel =
       std::ranges::find(result.program_inventory.kernels(), "full_pressure_private_dispatch",
-                        &ConSanKernelInfo::name);
+                        &ConSanProgramContainer::name);
   ASSERT_NE(full_kernel, result.program_inventory.kernels().end());
   const auto full_assignment =
       test_moi_transient_sgpr_assignment(result, full_kernel->descriptor_file_offset);
@@ -4522,8 +4522,8 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
-  const auto analyzed_dynamic =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto analyzed_dynamic = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                                  &ConSanProgramContainer::name);
   ASSERT_NE(analyzed_dynamic, result.program_inventory.kernels().end());
   ASSERT_TRUE(analyzed_dynamic->uses_dynamic_stack.has_value());
   EXPECT_TRUE(*analyzed_dynamic->uses_dynamic_stack);
@@ -8663,7 +8663,7 @@ TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
                                &ConSanPatchInfo::kind),
             1);
   const auto unrelated = std::ranges::find(result.program_inventory.kernels(), "unrelated_kernel",
-                                           &ConSanKernelInfo::name);
+                                           &ConSanProgramContainer::name);
   ASSERT_NE(unrelated, result.program_inventory.kernels().end());
   const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&

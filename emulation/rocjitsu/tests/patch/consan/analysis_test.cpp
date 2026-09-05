@@ -314,7 +314,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_write_count, 4u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 4u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 4u);
@@ -372,7 +372,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_read_count, 4u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 4u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 4u);
@@ -421,7 +421,7 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_write_count, 2u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
@@ -550,7 +550,7 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.fence_like_count, 2u);
@@ -572,7 +572,7 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.ds_other_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
@@ -631,7 +631,7 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 52u);
   EXPECT_EQ(kernel.stats.instruction_count, 5u);
@@ -719,7 +719,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 36u);
   EXPECT_EQ(kernel.stats.instruction_count, 5u);
@@ -760,7 +760,7 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.flat_read_count, 1u);
   EXPECT_EQ(kernel.stats.flat_group_hint_count, 1u);
   EXPECT_EQ(kernel.stats.flat_maybe_group_hint_count, 0u);
@@ -791,7 +791,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.flat_read_count, 1u);
   EXPECT_EQ(kernel.stats.flat_group_hint_count, 0u);
@@ -881,7 +881,7 @@ TEST(ConSan, PropagatesSharedPointerThroughExactScratchSlot) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
@@ -1011,7 +1011,7 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128ScratchSequence) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
@@ -1168,7 +1168,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
 
-  const ConSanFunctionInfo &function = result.program_inventory.functions().front();
+  const ConSanProgramContainer &function = result.program_inventory.functions().front();
   EXPECT_EQ(function.name, "lds_helper");
   EXPECT_TRUE(function.decoded);
   EXPECT_EQ(function.entry_text_offset, 4u);
@@ -1518,7 +1518,7 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  const ConSanFunctionInfo &function = result.program_inventory.functions().front();
+  const ConSanProgramContainer &function = result.program_inventory.functions().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 3u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Private);
@@ -1546,7 +1546,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.name, "lds_probe");
   EXPECT_TRUE(kernel.has_text_range);
   EXPECT_TRUE(kernel.decoded);
@@ -1641,7 +1641,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
-  const ConSanKernelInfo &preflight_kernel = preflight.program_inventory.kernels().front();
+  const ConSanProgramContainer &preflight_kernel = preflight.program_inventory.kernels().front();
   EXPECT_EQ(preflight_kernel.preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_TRUE(
       std::ranges::any_of(preflight_kernel.preflight_reasons, [](const std::string &reason) {
@@ -1792,7 +1792,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
   ASSERT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.instruction_count, 3u);
   EXPECT_EQ(kernel.stats.lds_write_count, 1u);
@@ -1853,7 +1853,7 @@ TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_atomic_count, 5u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 5u);
   const std::array<std::string_view, 5> expected_mnemonics = {
@@ -3079,7 +3079,7 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.instruction_count, 2u);
@@ -3173,7 +3173,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
   const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
@@ -4553,7 +4553,7 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   const auto barrier_sites =
       test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
   ASSERT_EQ(barrier_sites.size(), 7u);
@@ -4681,7 +4681,7 @@ TEST(ConSan, DecodedSitesUseFinalContainerFactsDiscoveredLaterInTheRange) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_TRUE(kernel.uses_cluster_workgroup_id);
   const auto sites = test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
   ASSERT_EQ(sites.size(), 1u);
@@ -5028,10 +5028,10 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   ProgramInventoryBuilder stale_builder(bytes);
   stale_builder.text_sections().assign(valid.program_inventory.text_sections().begin(),
                                        valid.program_inventory.text_sections().end());
-  stale_builder.kernels().assign(valid.program_inventory.kernels().begin(),
-                                 valid.program_inventory.kernels().end());
-  stale_builder.functions().assign(valid.program_inventory.functions().begin(),
-                                   valid.program_inventory.functions().end());
+  for (const ConSanProgramContainer &kernel : valid.program_inventory.kernels())
+    stale_builder.add_kernel(kernel);
+  for (const ConSanProgramContainer &function : valid.program_inventory.functions())
+    stale_builder.add_function(function);
   stale_builder.kernels().front().entry_text_offset += sizeof(uint32_t);
   stale_builder.publish_decoded_accesses(bytes);
   stale_inventory.program_inventory = stale_builder.view();
@@ -5111,7 +5111,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 24u);
   EXPECT_EQ(kernel.stats.instruction_count, 4u);
@@ -5150,7 +5150,7 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(result.errors.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Blocked);
   EXPECT_EQ(kernel.stats.ds_other_count, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -5168,7 +5168,7 @@ TEST(ConSan, PreflightAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   EXPECT_TRUE(result.errors.empty());
   EXPECT_NE(result.outcome, ConSanTransformOutcome::Unsupported);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
     return reason == "atomic LDS accesses excluded: 1";

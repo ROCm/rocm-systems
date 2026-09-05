@@ -103,7 +103,7 @@ TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched
   ASSERT_EQ(test_admitted_accesses(selected).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(selected).front().container.name, "unrelated_kernel");
   const auto unrelated = std::ranges::find(selected.program_inventory.kernels(), "unrelated_kernel",
-                                           &ConSanKernelInfo::name);
+                                           &ConSanProgramContainer::name);
   ASSERT_NE(unrelated, selected.program_inventory.kernels().end());
   const auto access_patch = std::ranges::find(
       selected.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
@@ -228,7 +228,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.observation_plan().engine, ConSanCapabilityEngine::RecordReplay);
   EXPECT_TRUE(result.replacement.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_TRUE(kernel.uses_dynamic_stack.has_value());
   EXPECT_FALSE(*kernel.uses_dynamic_stack);
   EXPECT_TRUE(kernel.decoded);
@@ -2174,8 +2174,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
-  const auto first_kernel =
-      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  const auto first_kernel = std::ranges::find(result.program_inventory.kernels(), "lds_probe",
+                                              &ConSanProgramContainer::name);
   ASSERT_NE(first_kernel, result.program_inventory.kernels().end());
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
@@ -3797,10 +3797,10 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
-  const auto unrelated =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
-  const auto owner =
-      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  const auto unrelated = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                           &ConSanProgramContainer::name);
+  const auto owner = std::ranges::find(result.program_inventory.kernels(), "lds_probe",
+                                       &ConSanProgramContainer::name);
   ASSERT_NE(unrelated, result.program_inventory.kernels().end());
   ASSERT_NE(owner, result.program_inventory.kernels().end());
   ASSERT_TRUE(unrelated->uses_dynamic_stack);
@@ -5782,8 +5782,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
     return plan.site_kind != ConSanResourceSiteKind::Access ||
            plan.source != ConSanRegisterAllocationSource::Unsupported;
   }));
-  const auto full_pressure_kernel =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto full_pressure_kernel = std::ranges::find(result.program_inventory.kernels(),
+                                                      "lds_helper", &ConSanProgramContainer::name);
   ASSERT_NE(full_pressure_kernel, result.program_inventory.kernels().end());
   const auto full_pressure_assignment =
       test_moi_transient_sgpr_assignment(result, full_pressure_kernel->descriptor_file_offset);
@@ -8650,10 +8650,10 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  const auto fixed =
-      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
-  const auto dynamic =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto fixed = std::ranges::find(result.program_inventory.kernels(), "lds_probe",
+                                       &ConSanProgramContainer::name);
+  const auto dynamic = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                         &ConSanProgramContainer::name);
   ASSERT_NE(fixed, result.program_inventory.kernels().end());
   ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   ASSERT_TRUE(fixed->uses_dynamic_stack);
@@ -8722,8 +8722,8 @@ TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFail
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  const auto dynamic =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto dynamic = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                         &ConSanProgramContainer::name);
   ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
   ASSERT_EQ(persistent_assignments.size(), 1u);
@@ -8775,10 +8775,10 @@ TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFence
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  const auto fixed =
-      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
-  const auto dynamic =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto fixed = std::ranges::find(result.program_inventory.kernels(), "lds_probe",
+                                       &ConSanProgramContainer::name);
+  const auto dynamic = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                         &ConSanProgramContainer::name);
   ASSERT_NE(fixed, result.program_inventory.kernels().end());
   ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);

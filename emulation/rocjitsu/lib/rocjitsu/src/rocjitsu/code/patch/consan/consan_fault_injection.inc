@@ -745,7 +745,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
 }
 
 [[nodiscard]] bool has_proof_nop_candidate(const ProgramInventory &inventory) {
-  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Candidate)
       return true;
   }
@@ -1815,7 +1815,7 @@ find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
         site.origin != ConSanAccessOrigin::NativeLds || site.kind != ConSanLdsAccessKind::Read ||
         !site.lowering.replay_guest_access.available() || site.decoded_width_bits != 32)
       continue;
-    const ConSanKernelInfo *kernel =
+    const ConSanProgramContainer *kernel =
         inventory.find_kernel_by_descriptor(*site.container.kernel_descriptor_file_offset);
     if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;

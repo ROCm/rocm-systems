@@ -4131,8 +4131,8 @@ TEST(ConSanMoi, CfgBuildInputsCanonicalizeInventoryAndComposedCodeRanges) {
   };
 
   const consan_detail::ConSanCfgBuildInputs cfg =
-      consan_detail::build_consan_cfg_inputs(code_object, inventory.program_inventory.kernels(),
-                                             inventory.program_inventory.functions(), preapplied);
+      consan_detail::build_consan_cfg_inputs(code_object, inventory.program_inventory.containers(),
+                                             preapplied);
 
   EXPECT_TRUE(std::ranges::is_sorted(cfg.leaders));
   EXPECT_TRUE(std::ranges::is_sorted(cfg.kernel_entries));
@@ -4140,7 +4140,7 @@ TEST(ConSanMoi, CfgBuildInputsCanonicalizeInventoryAndComposedCodeRanges) {
   EXPECT_EQ(std::ranges::count(cfg.leaders, duplicate_function_entry), 1u);
   EXPECT_NE(std::ranges::find(cfg.leaders, kComposedEntry), cfg.leaders.end());
   EXPECT_NE(std::ranges::find(cfg.leaders, kComposedContinuation), cfg.leaders.end());
-  for (const ConSanKernelInfo &kernel : inventory.program_inventory.kernels()) {
+  for (const ConSanProgramContainer &kernel : inventory.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     EXPECT_NE(std::ranges::find(cfg.kernel_entries, kernel.entry_text_offset),

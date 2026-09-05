@@ -21,7 +21,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         const std::vector<uint64_t> owners =
             entry.second->execution_and_container_owner_descriptor_file_offsets();
         return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
-          const ConSanKernelInfo *kernel =
+          const ConSanProgramContainer *kernel =
               result.program_inventory.find_kernel_by_descriptor(owner);
           return kernel != nullptr && kernel->preflight_action != ConSanPreflightAction::Blocked;
         });
@@ -129,14 +129,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           (options.kernel_name_allowlist.empty()
                ? std::ranges::any_of(site_context.owners.descriptor_file_offsets,
                                      [&](uint64_t owner) {
-                                       const ConSanKernelInfo *kernel =
+                                       const ConSanProgramContainer *kernel =
                                            owner_analysis.kernel(owner);
                                        return kernel &&
                                               consan_container_selected(options, kernel->name);
                                      })
                : std::ranges::all_of(
                      site_context.owners.descriptor_file_offsets, [&](uint64_t owner) {
-                       const ConSanKernelInfo *kernel = owner_analysis.kernel(owner);
+                       const ConSanProgramContainer *kernel = owner_analysis.kernel(owner);
                        return kernel && consan_container_selected(options, kernel->name);
                      }));
       if (!container_matches && !owner_matches)

@@ -128,7 +128,7 @@ template <typename PatchRange>
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
                             const PatchRange &patches) {
   std::map<std::string, ConSanKernelDispatchRequirement> requirements_by_name;
-  const auto note_kernel = [&](const ConSanKernelInfo &kernel, const auto &apply) {
+  const auto note_kernel = [&](const ConSanProgramContainer &kernel, const auto &apply) {
     if (kernel.name.empty())
       return false;
     ConSanKernelDispatchRequirement &requirement = requirements_by_name[kernel.name];
@@ -137,7 +137,7 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
     return true;
   };
   const auto note_descriptor = [&](uint64_t descriptor_offset, const auto &apply) {
-    const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanProgramContainer *kernel = inventory.find_kernel_by_descriptor(descriptor_offset);
     return kernel != nullptr && note_kernel(*kernel, apply);
   };
   const auto note_physical_site = [&](const PhysicalSiteId &physical, const auto &apply) {
@@ -161,7 +161,7 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
     // Keep this bounded fallback at the publication boundary; runtime code must
     // not repeat symbol-range ownership inference.
     const auto kernel =
-        std::ranges::find_if(inventory.kernels(), [&](const ConSanKernelInfo &item) {
+        std::ranges::find_if(inventory.kernels(), [&](const ConSanProgramContainer &item) {
           return item.has_text_range && physical.original_text_offset >= item.entry_text_offset &&
                  physical.original_text_offset - item.entry_text_offset < item.code_size;
         });

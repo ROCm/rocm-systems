@@ -47,7 +47,7 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
 }
 
 struct ScOwnerContext {
-  const ConSanKernelInfo *kernel = nullptr;
+  const ConSanProgramContainer *kernel = nullptr;
   KernelCfgScope scope;
   std::unique_ptr<LivenessAnalysis> liveness;
 };
@@ -75,18 +75,18 @@ public:
       : arch_(arch), original_bytes_(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                                      code_object.image_size()),
         decoder_(Decoder::create(arch)) {
-    for (const ConSanKernelInfo &kernel : inventory.kernels())
+    for (const ConSanProgramContainer &kernel : inventory.kernels())
       kernels_.emplace(kernel.descriptor_file_offset, &kernel);
     if (!decoder_)
       return;
 
-    consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-        code_object, inventory.kernels(), inventory.functions());
+    consan_detail::ConSanCfgBuildInputs cfg =
+        consan_detail::build_consan_cfg_inputs(code_object, inventory.containers());
     if (restrict_to_preflight_candidates) {
       cfg.leaders.clear();
       cfg.kernel_entries.clear();
       cfg.code_ranges.clear();
-      for (const ConSanKernelInfo &kernel : inventory.kernels()) {
+      for (const ConSanProgramContainer &kernel : inventory.kernels()) {
         if (!kernel.has_text_range || kernel.preflight_action != ConSanPreflightAction::Candidate)
           continue;
         cfg.leaders.push_back(kernel.entry_text_offset);
@@ -115,7 +115,7 @@ public:
     max_refs_.reserve(inventory.kernels().size());
   }
 
-  [[nodiscard]] const ConSanKernelInfo *kernel(uint64_t descriptor_file_offset) const {
+  [[nodiscard]] const ConSanProgramContainer *kernel(uint64_t descriptor_file_offset) const {
     const auto found = kernels_.find(descriptor_file_offset);
     return found == kernels_.end() ? nullptr : found->second;
   }
@@ -123,7 +123,7 @@ public:
   [[nodiscard]] const ScOwnerContext *context(uint64_t descriptor_file_offset) {
     if (const auto found = contexts_.find(descriptor_file_offset); found != contexts_.end())
       return &found->second;
-    const ConSanKernelInfo *owner = kernel(descriptor_file_offset);
+    const ConSanProgramContainer *owner = kernel(descriptor_file_offset);
     if (!decoder_ || owner == nullptr || !owner->has_text_range ||
         failed_contexts_.contains(descriptor_file_offset))
       return nullptr;
@@ -206,7 +206,7 @@ private:
   BlockOffsetIndex block_index_;
   std::vector<uint64_t> kernel_entries_;
   std::span<const uint8_t> pristine_text_;
-  std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_;
+  std::unordered_map<uint64_t, const ConSanProgramContainer *> kernels_;
   std::unordered_map<uint64_t, ScOwnerContext> contexts_;
   std::unordered_set<uint64_t> failed_contexts_;
   std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_;

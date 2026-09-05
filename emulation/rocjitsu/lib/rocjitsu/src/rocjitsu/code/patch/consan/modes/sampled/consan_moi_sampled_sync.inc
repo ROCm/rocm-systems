@@ -599,7 +599,7 @@ void try_apply_sampled_barrier_sync_patch(
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
     std::optional<uint16_t> common_owner_shift;
     for (const ConSanExecutionOwner &owner : sequence.execution_owners) {
-      const ConSanKernelInfo *owner_kernel =
+      const ConSanProgramContainer *owner_kernel =
           result.program_inventory.find_kernel_by_descriptor(owner.descriptor_file_offset);
       if (owner_kernel == nullptr ||
           !moi_resource_has_owner_context(resource_state, owner.descriptor_file_offset)) {
@@ -991,7 +991,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // owner evidence canonical in the original inventory coordinate system.
   std::unordered_map<uint64_t, uint64_t> active_to_canonical_owner;
   for (const AmdGpuKernelInfo &active_kernel : code_object.kernels()) {
-    const ConSanKernelInfo *canonical =
+    const ConSanProgramContainer *canonical =
         result.program_inventory.find_kernel_by_name(active_kernel.name);
     if (canonical != nullptr)
       active_to_canonical_owner.emplace(active_kernel.descriptor_file_offset,
@@ -1035,7 +1035,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           mapping.access_kind != ConSanLdsAccessKind::Atomic)
         continue;
       has_multi_range_window |= mapping.range_count > 1u;
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+      for (const ConSanProgramContainer &kernel : result.program_inventory.kernels()) {
         if (!moi_resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
           continue;
         const auto &owners = mapping.access.execution_owner_descriptor_file_offsets;

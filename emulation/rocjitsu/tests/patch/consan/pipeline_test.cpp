@@ -323,7 +323,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ProgramInventoryBuilder inventory_builder(bytes);
   inventory_builder.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_CDNA4,
                                           ROCJITSU_CODE_TARGET_GFX950);
-  ConSanKernelInfo kernel_a;
+  ConSanProgramContainer kernel_a{ConSanProgramContainerKind::Kernel};
   kernel_a.name = "kernel_a";
   kernel_a.descriptor_file_offset = 64u;
   kernel_a.entry_text_offset = 0u;
@@ -340,21 +340,21 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_access.operands.address_vgpr = 0u;
   shared_access.container = consan_program_container_ref(kernel_a);
   inventory_builder.access_sites().push_back(shared_access);
-  inventory_builder.kernels().push_back(kernel_a);
-  ConSanKernelInfo kernel_b;
+  inventory_builder.add_kernel(kernel_a);
+  ConSanProgramContainer kernel_b{ConSanProgramContainerKind::Kernel};
   kernel_b.name = "kernel_b";
   kernel_b.descriptor_file_offset = 128u;
   kernel_b.entry_text_offset = 8u;
   kernel_b.code_size = 8u;
   kernel_b.has_text_range = true;
-  inventory_builder.kernels().push_back(kernel_b);
-  ConSanKernelInfo kernel_c;
+  inventory_builder.add_kernel(kernel_b);
+  ConSanProgramContainer kernel_c{ConSanProgramContainerKind::Kernel};
   kernel_c.name = "kernel_c";
   kernel_c.descriptor_file_offset = 192u;
   kernel_c.entry_text_offset = 16u;
   kernel_c.code_size = 8u;
   kernel_c.has_text_range = true;
-  inventory_builder.kernels().push_back(kernel_c);
+  inventory_builder.add_kernel(kernel_c);
   inventory_builder.publish_decoded_accesses(bytes);
   inventory_builder.access_sites().front().execution_owner_descriptor_file_offsets = {64u, 128u};
   ConSanSyncEvent barrier;

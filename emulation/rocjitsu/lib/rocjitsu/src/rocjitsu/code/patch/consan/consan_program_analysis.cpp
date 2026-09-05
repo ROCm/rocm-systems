@@ -62,12 +62,12 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
                                         Decoder &decoder, rj_code_arch_t arch,
                                         ProgramInventoryBuilder &inventory,
                                         ConSanProgramAnalysisResult &result) {
-  std::span<ConSanKernelInfo> kernels = inventory.kernels();
-  std::span<ConSanFunctionInfo> functions = inventory.functions();
+  std::span<ConSanProgramContainer> kernels = inventory.kernels();
   for (const ConSanPreappliedCodeRange &range :
        result.program_inventory.preapplied_mutation().code_ranges) {
-    const auto kernel = std::ranges::find_if(
-        kernels, [&](const ConSanKernelInfo &item) { return item.name == range.kernel_name; });
+    const auto kernel = std::ranges::find_if(kernels, [&](const ConSanProgramContainer &item) {
+      return item.name == range.kernel_name;
+    });
     if (kernel == kernels.end()) {
       result.errors.emplace_back("ConSan could not recover the owner of a preapplied fault cave");
       continue;
@@ -76,7 +76,8 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     reattribute_decoded_sites_in_range(inventory.decoded_sites(), range.text_offset, range.size,
                                        owner);
 
-    ConSanKernelInfo decoded_range;
+    ConSanProgramContainer decoded_range;
+    decoded_range.kind = ConSanProgramContainerKind::Kernel;
     decoded_range.name = kernel->name;
     decoded_range.entry_text_offset = range.text_offset;
     decoded_range.text_file_offset = kernel->text_file_offset;
@@ -106,26 +107,28 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 } // namespace
 
 void decode_consan_kernel_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                                    rj_code_arch_t arch, ConSanKernelInfo &kernel,
+                                    rj_code_arch_t arch, ConSanProgramContainer &kernel,
                                     std::vector<ConSanAccessInventorySite> &accesses,
                                     std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                     std::vector<std::string> &warnings) {
+  kernel.kind = ConSanProgramContainerKind::Kernel;
   decode_kernel_stats(code_object_bytes, decoder, arch, kernel, accesses, decoded_sites, warnings);
 }
 
 void decode_consan_function_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
-                                      rj_code_arch_t arch, ConSanFunctionInfo &function,
+                                      rj_code_arch_t arch, ConSanProgramContainer &function,
                                       std::vector<ConSanAccessInventorySite> &accesses,
                                       std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                       std::vector<std::string> &warnings) {
+  function.kind = ConSanProgramContainerKind::Function;
   decode_function_stats(code_object_bytes, decoder, arch, function, accesses, decoded_sites,
                         warnings);
 }
 
 void refine_consan_flat_pointer_provenance(std::span<const uint8_t> code_object_bytes,
                                            const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                           std::vector<ConSanKernelInfo> &kernels,
-                                           std::vector<ConSanFunctionInfo> &functions,
+                                           std::span<ConSanProgramContainer> kernels,
+                                           std::span<ConSanProgramContainer> functions,
                                            std::vector<ConSanAccessInventorySite> &accesses,
                                            std::vector<ConSanDecodedProgramSite> &decoded_sites,
                                            std::vector<std::string> &warnings) {
@@ -136,14 +139,13 @@ void refine_consan_flat_pointer_provenance(std::span<const uint8_t> code_object_
 void prune_consan_unreachable_inferred_ranges(
     const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
     std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
-    std::span<ConSanKernelInfo> kernels, std::span<ConSanFunctionInfo> functions,
-    std::vector<ConSanAccessInventorySite> &accesses,
+    std::span<ConSanProgramContainer> containers, std::vector<ConSanAccessInventorySite> &accesses,
     std::vector<ConSanDecodedProgramSite> &decoded_sites) {
-  prune_unreachable_inferred_ranges(code_object, decoder, arch, preapplied_ranges, kernels,
-                                    functions, accesses, decoded_sites);
+  prune_unreachable_inferred_ranges(code_object, decoder, arch, preapplied_ranges, containers,
+                                    accesses, decoded_sites);
 }
 
-void preflight_consan_kernel(ConSanKernelInfo &kernel, std::vector<std::string> &warnings) {
+void preflight_consan_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &warnings) {
   preflight_kernel(kernel, warnings);
 }
 
@@ -189,7 +191,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
   }
 
   for (const AmdGpuKernelInfo &kernel : code_object->kernels()) {
-    ConSanKernelInfo info;
+    ConSanProgramContainer info;
     info.name = kernel.name;
     info.descriptor_file_offset = kernel.descriptor_file_offset;
     if (const auto descriptor =
@@ -208,7 +210,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     }
     info.sgpr_count = kernel.sgpr_count;
     info.required_workgroup_size = kernel.required_workgroup_size;
-    inventory_builder.kernels().push_back(std::move(info));
+    inventory_builder.add_kernel(std::move(info));
   }
 
   std::unordered_set<std::string> kernel_names;
@@ -219,13 +221,13 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
   for (const AmdGpuFunctionInfo &function : code_object->functions()) {
     if (kernel_names.contains(function.name))
       continue;
-    ConSanFunctionInfo info;
+    ConSanProgramContainer info;
     info.name = function.name;
     info.entry_text_offset = function.entry_text_offset;
     info.text_file_offset = function.text_file_offset;
     info.code_size = function.code_size;
     info.code_size_inferred_from_zero = function.code_size_inferred_from_zero;
-    inventory_builder.functions().push_back(std::move(info));
+    inventory_builder.add_function(std::move(info));
   }
 
   result.program_inventory = inventory_builder.view();
@@ -257,14 +259,14 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     return false;
   }
 
-  for (ConSanKernelInfo &kernel : inventory_builder.kernels()) {
+  for (ConSanProgramContainer &kernel : inventory_builder.kernels()) {
     decode_consan_kernel_inventory(code_object_bytes, *decoder, arch, kernel,
                                    inventory_builder.access_sites(),
                                    inventory_builder.decoded_sites(), result.warnings);
   }
   std::vector<ConSanAccessInventorySite> function_accesses;
   std::vector<ConSanDecodedProgramSite> function_decoded_sites;
-  for (ConSanFunctionInfo &function : inventory_builder.functions())
+  for (ConSanProgramContainer &function : inventory_builder.functions())
     decode_consan_function_inventory(code_object_bytes, *decoder, arch, function, function_accesses,
                                      function_decoded_sites, result.warnings);
   const auto append_function_accesses = [&] {
@@ -279,11 +281,12 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     function_decoded_sites.clear();
   };
   const bool has_decode_error =
-      std::ranges::any_of(
-          result.program_inventory.kernels(),
-          [](const ConSanKernelInfo &kernel) { return kernel.stats.decode_error_count != 0u; }) ||
+      std::ranges::any_of(result.program_inventory.kernels(),
+                          [](const ConSanProgramContainer &kernel) {
+                            return kernel.stats.decode_error_count != 0u;
+                          }) ||
       std::ranges::any_of(result.program_inventory.functions(),
-                          [](const ConSanFunctionInfo &function) {
+                          [](const ConSanProgramContainer &function) {
                             return function.stats.decode_error_count != 0u;
                           });
   if (has_decode_error) {
@@ -301,7 +304,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
   publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {
-    for (ConSanKernelInfo &kernel : inventory_builder.kernels())
+    for (ConSanProgramContainer &kernel : inventory_builder.kernels())
       preflight_consan_kernel(kernel, result.warnings);
   }
   reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, inventory_builder, result);
@@ -309,7 +312,7 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
     return false;
   prune_consan_unreachable_inferred_ranges(
       *code_object, *decoder, arch, result.program_inventory.preapplied_mutation().code_ranges,
-      inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites(),
+      inventory_builder.containers(), inventory_builder.access_sites(),
       inventory_builder.decoded_sites());
   return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, options,
                                            inventory_builder, perturbation, result);

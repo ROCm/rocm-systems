@@ -1014,8 +1014,8 @@ TEST(ConSan, ProgramInventoryOwnsSemanticArchitectureResolutionGate) {
   parse_only.outcome = ConSanTransformOutcome::Unsupported;
   ProgramInventoryBuilder inventory;
   inventory.text_sections().push_back({});
-  inventory.kernels().push_back({});
-  inventory.functions().push_back({});
+  inventory.add_kernel({});
+  inventory.add_function({});
   parse_only.program_inventory = inventory.view();
   EXPECT_TRUE(parse_only.program_inventory.has_resolved_semantic_arch());
 
@@ -1361,8 +1361,8 @@ TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
-  const auto empty =
-      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto empty = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
+                                       &ConSanProgramContainer::name);
   ASSERT_NE(empty, result.program_inventory.kernels().end());
   EXPECT_TRUE(empty->has_text_range);
   EXPECT_EQ(empty->code_size, 0u);

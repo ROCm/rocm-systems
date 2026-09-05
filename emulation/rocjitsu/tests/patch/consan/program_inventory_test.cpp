@@ -57,8 +57,8 @@ ConSanAccessInventorySite make_inventory_flat_site(ConSanFlatAddressSpaceHint hi
   return site;
 }
 
-ConSanKernelInfo make_inventory_kernel(std::string name = "inventory_kernel") {
-  ConSanKernelInfo kernel;
+ConSanProgramContainer make_inventory_kernel(std::string name = "inventory_kernel") {
+  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
   kernel.name = std::move(name);
   kernel.descriptor_file_offset = 512;
   kernel.declared_group_segment_bytes = 4096;
@@ -193,7 +193,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().access_sites()),
                              std::span<const ConSanAccessInventorySite>>);
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().kernels()),
-                             std::span<const ConSanKernelInfo>>);
+                             std::span<const ConSanProgramContainer>>);
   static_assert(std::is_const_v<std::remove_reference_t<
                     decltype(std::declval<const ProgramInventory &>().kernels().front())>>);
 
@@ -225,12 +225,12 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
     ConSanTextSection section;
     section.name = ".text";
     builder.text_sections().push_back(section);
-    ConSanKernelInfo kernel = make_inventory_kernel();
+    ConSanProgramContainer kernel = make_inventory_kernel();
     stage_inventory_access(builder, kernel, make_inventory_lds_site("ds_store_b32"));
-    builder.kernels().push_back(std::move(kernel));
-    ConSanFunctionInfo function;
+    builder.add_kernel(std::move(kernel));
+    ConSanProgramContainer function{ConSanProgramContainerKind::Function};
     function.name = "helper";
-    builder.functions().push_back(std::move(function));
+    builder.add_function(std::move(function));
     builder.publish_decoded_accesses(bytes);
 
     ConSanTransformArtifacts result;
@@ -264,17 +264,24 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(empty.find_function_by_name("helper"), nullptr);
 
   ProgramInventoryBuilder builder;
-  ConSanKernelInfo first = make_inventory_kernel("kernel");
-  builder.kernels().push_back(first);
-  ConSanKernelInfo duplicate = first;
-  duplicate.descriptor_file_offset = 768;
-  builder.kernels().push_back(duplicate);
-  ConSanFunctionInfo helper;
+  ConSanProgramContainer first = make_inventory_kernel("kernel");
+  builder.add_kernel(first);
+  ConSanProgramContainer helper{ConSanProgramContainerKind::Function};
   helper.name = "helper";
-  builder.functions().push_back(helper);
-  builder.functions().push_back(helper);
+  builder.add_function(helper);
+  ConSanProgramContainer duplicate = first;
+  duplicate.descriptor_file_offset = 768;
+  builder.add_kernel(duplicate);
+  builder.add_function(helper);
 
   const ProgramInventory inventory = builder.view();
+  ASSERT_EQ(inventory.containers().size(), 4u);
+  ASSERT_EQ(inventory.kernels().size(), 2u);
+  ASSERT_EQ(inventory.functions().size(), 2u);
+  EXPECT_EQ(inventory.kernels().data(), inventory.containers().data());
+  EXPECT_EQ(inventory.functions().data(), inventory.containers().data() + 2);
+  EXPECT_TRUE(std::ranges::all_of(inventory.kernels(), &ConSanProgramContainer::is_kernel));
+  EXPECT_TRUE(std::ranges::none_of(inventory.functions(), &ConSanProgramContainer::is_kernel));
   EXPECT_EQ(inventory.find_kernel_by_descriptor(512), &inventory.kernels()[0]);
   EXPECT_EQ(inventory.find_kernel_by_descriptor(768), &inventory.kernels()[1]);
   EXPECT_EQ(inventory.find_kernel_by_descriptor(1024), nullptr);
@@ -466,9 +473,9 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
   const std::array<uint8_t, 128> bytes = {};
   ProgramInventoryBuilder original(bytes);
-  ConSanKernelInfo original_kernel = make_inventory_kernel("original");
+  ConSanProgramContainer original_kernel = make_inventory_kernel("original");
   stage_inventory_access(original, original_kernel, make_inventory_lds_site("ds_store_b32", 16));
-  original.kernels().push_back(std::move(original_kernel));
+  original.add_kernel(std::move(original_kernel));
   ASSERT_EQ(original.view().access_sites().size(), 1u);
   EXPECT_FALSE(original.view().access_sites().front().physical_id.code_object.valid());
   EXPECT_EQ(original.view().access_sites().front().container.name, "original");
@@ -492,10 +499,10 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
 
   ProgramInventoryBuilder revision(published);
   revision.kernels().front().name = "revision";
-  ConSanFunctionInfo added_function;
+  ConSanProgramContainer added_function;
   added_function.name = "added-function";
   added_function.entry_text_offset = 24;
-  revision.functions().push_back(std::move(added_function));
+  revision.add_function(std::move(added_function));
   ConSanAccessInventorySite added_access = make_inventory_lds_site("ds_load_b32", 24);
   added_access.container = consan_program_container_ref(revision.functions().back());
   revision.access_sites().push_back(std::move(added_access));
@@ -626,7 +633,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
-  ConSanKernelInfo kernel = make_inventory_kernel();
+  ConSanProgramContainer kernel = make_inventory_kernel();
   ConSanAccessInventorySite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
   byte_site.operands.destination_vgpr = 2;
   byte_site.operands.destination_accvgpr = 4;
@@ -638,7 +645,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   direct_to_lds.origin = ConSanAccessOrigin::DirectToLds;
   direct_to_lds.operands.address_vgpr.reset();
   stage_inventory_access(builder, kernel, std::move(direct_to_lds));
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(bytes);
   ASSERT_EQ(builder.view().access_sites().size(), 3u);
   builder.publish_decoded_accesses(bytes);
@@ -682,16 +689,16 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
 TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses) {
   const std::array<uint8_t, 128> bytes = {};
   ProgramInventoryBuilder builder(bytes);
-  ConSanKernelInfo owner = make_inventory_kernel("owner");
+  ConSanProgramContainer owner = make_inventory_kernel("owner");
   owner.descriptor_file_offset = 512;
-  builder.kernels().push_back(std::move(owner));
-  ConSanKernelInfo overlapping = make_inventory_kernel("overlapping");
+  builder.add_kernel(std::move(owner));
+  ConSanProgramContainer overlapping = make_inventory_kernel("overlapping");
   overlapping.descriptor_file_offset = 768;
   stage_inventory_access(builder, overlapping, make_inventory_lds_site("ds_store_b32", 80));
   stage_inventory_access(builder, overlapping,
                          make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
   stage_inventory_access(builder, overlapping, make_inventory_lds_site("ds_store_b32", 120));
-  builder.kernels().push_back(std::move(overlapping));
+  builder.add_kernel(std::move(overlapping));
   builder.publish_decoded_accesses(bytes);
 
   const std::array decoded_accesses = {
@@ -736,11 +743,11 @@ TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecifi
        }) {
     ProgramInventoryBuilder builder(bytes);
     builder.set_code_object_facts(true, 0, arch, ROCJITSU_CODE_TARGET_INVALID);
-    ConSanKernelInfo kernel = make_inventory_kernel();
+    ConSanProgramContainer kernel = make_inventory_kernel();
     ConSanAccessInventorySite site = make_inventory_lds_site("ds_single", 16, 0, 32);
     site.kind = kind;
     stage_inventory_access(builder, kernel, std::move(site));
-    builder.kernels().push_back(std::move(kernel));
+    builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
     ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
     EXPECT_EQ(builder.view().access_sites().front().ranges.front().static_byte_offset, expected);
@@ -751,10 +758,10 @@ TEST(ConSanProgramInventory, UnreadableSingleRangeNativeOffsetRemainsAnExplicitM
   const std::array<uint8_t, 3> truncated_bytes = {0x34, 0x12, 0};
   ProgramInventoryBuilder builder(truncated_bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
-  ConSanKernelInfo kernel = make_inventory_kernel();
+  ConSanProgramContainer kernel = make_inventory_kernel();
   ConSanAccessInventorySite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
   stage_inventory_access(builder, kernel, std::move(site));
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(truncated_bytes);
 
   ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
@@ -790,11 +797,11 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
     SCOPED_TRACE(test.mnemonic);
     const std::array<uint8_t, 8> bytes = {3, 5, 0, 0, 0, 0, 0, 0};
     ProgramInventoryBuilder builder(bytes);
-    ConSanKernelInfo kernel = make_inventory_kernel();
+    ConSanProgramContainer kernel = make_inventory_kernel();
     stage_inventory_access(
         builder, kernel,
         make_inventory_lds_site(std::string(test.mnemonic), 40, 0, 2 * test.width_bits));
-    builder.kernels().push_back(std::move(kernel));
+    builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
 
     const ConSanAccessInventorySite &site = builder.view().access_sites().front();
@@ -837,7 +844,7 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
   };
 
   ProgramInventoryBuilder builder;
-  ConSanKernelInfo kernel = make_inventory_kernel();
+  ConSanProgramContainer kernel = make_inventory_kernel();
   for (size_t index = 0; index < cases.size(); ++index)
     stage_inventory_access(builder, kernel,
                            make_inventory_flat_site(cases[index].hint, 64 + index * 8));
@@ -850,7 +857,7 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
   builder.access_sites().front().operands.raw_segment = 6;
   builder.access_sites().front().operands.raw_scope = 7;
   builder.access_sites().front().operands.raw_th = 8;
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses({});
 
   const auto sites = builder.view().access_sites();
@@ -880,7 +887,7 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
 
 TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFailure) {
   ProgramInventoryBuilder builder;
-  ConSanKernelInfo kernel = make_inventory_kernel();
+  ConSanProgramContainer kernel = make_inventory_kernel();
 
   ConSanAccessInventorySite malformed;
   malformed.origin = ConSanAccessOrigin::NativeLds;
@@ -896,7 +903,7 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
   ConSanAccessInventorySite unavailable_range =
       make_inventory_lds_site("ds_store_2addr_b32", 24, 128, 64);
   stage_inventory_access(builder, kernel, unavailable_range);
-  builder.kernels().push_back(std::move(kernel));
+  builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses({});
 
   const auto sites = builder.view().access_sites();
@@ -922,13 +929,13 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
 TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAttribution) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
-  ConSanKernelInfo kernel = make_inventory_kernel("kernel_alias");
+  ConSanProgramContainer kernel = make_inventory_kernel("kernel_alias");
   stage_inventory_access(builder, kernel, make_inventory_lds_site("ds_store_b32", 80));
-  builder.kernels().push_back(std::move(kernel));
-  ConSanFunctionInfo function;
+  builder.add_kernel(std::move(kernel));
+  ConSanProgramContainer function{ConSanProgramContainerKind::Function};
   function.name = "function_alias";
   function.entry_text_offset = 72;
-  builder.functions().push_back(std::move(function));
+  builder.add_function(std::move(function));
   ConSanAccessInventorySite function_access = make_inventory_lds_site("ds_store_b32", 80);
   function_access.container = consan_program_container_ref(builder.functions().back());
   builder.access_sites().push_back(std::move(function_access));
