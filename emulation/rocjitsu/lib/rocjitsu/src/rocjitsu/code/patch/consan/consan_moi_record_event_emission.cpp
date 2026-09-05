@@ -31,6 +31,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_atomic_candidate_scratch_overlap;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
+using consan_moi_detail::append_select_first_active_lane;
 using consan_moi_detail::DynamicRecordEmitter;
 using consan_moi_detail::kAtomicRecordLayout;
 using consan_moi_detail::kBarrierRecordLayout;
@@ -311,18 +312,8 @@ using consan_moi_detail::kFenceRecordLayout;
       return std::nullopt;
     }
     const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
-    if (!sequence.emit_all(
-            instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_salu_to_valu_dependency_wait(arch),
-            instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, *options.moi_exec_save_sgpr,
-                                                      scalar_positive_inline_u32(0), arch),
-            instrumentation::build_v_mbcnt_hi_u32_b32(
-                lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
-                vector_source_vgpr(lane_rank_vgpr), arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr,
-                                                    arch),
-            instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo,
-                                                      arch))) {
+    if (!append_select_first_active_lane(words, lane_rank_vgpr, *options.moi_exec_save_sgpr,
+                                         *options.moi_exec_save_sgpr, arch)) {
       errors.emplace_back("ConSan MOI release CAS could not select its event publisher");
       return std::nullopt;
     }
@@ -401,18 +392,8 @@ using consan_moi_detail::kFenceRecordLayout;
       return std::nullopt;
     }
   }
-  if (!sequence.emit_all(
-          instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch),
-          instrumentation::build_salu_to_valu_dependency_wait(arch),
-          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, *options.moi_exec_save_sgpr,
-                                                    scalar_positive_inline_u32(0), arch),
-          instrumentation::build_v_mbcnt_hi_u32_b32(
-              lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
-              vector_source_vgpr(lane_rank_vgpr), arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr,
-                                                  arch),
-          instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo,
-                                                    arch))) {
+  if (!append_select_first_active_lane(words, lane_rank_vgpr, *options.moi_exec_save_sgpr,
+                                       *options.moi_exec_save_sgpr, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not select a wave publisher");
     return std::nullopt;
   }
@@ -681,18 +662,8 @@ using consan_moi_detail::kFenceRecordLayout;
     const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
     const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    if (!sequence.emit_all(
-            instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch),
-            instrumentation::build_salu_to_valu_dependency_wait(arch),
-            instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, *options.moi_exec_save_sgpr,
-                                                      scalar_positive_inline_u32(0), arch),
-            instrumentation::build_v_mbcnt_hi_u32_b32(
-                lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
-                vector_source_vgpr(lane_rank_vgpr), arch),
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr,
-                                                    arch),
-            instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo,
-                                                      arch))) {
+    if (!append_select_first_active_lane(words, lane_rank_vgpr, *options.moi_exec_save_sgpr,
+                                         *options.moi_exec_save_sgpr, arch)) {
       errors.emplace_back("ConSan MOI dynamic fence record could not select a wave publisher");
       return std::nullopt;
     }

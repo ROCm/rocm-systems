@@ -46,6 +46,7 @@ using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
+using consan_moi_detail::append_select_first_active_lane;
 using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
@@ -450,19 +451,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
   const uint16_t slot_vgpr =
       consan_arch_is_cdna3_or_cdna4(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
-  sequence.append(
-      instrumentation::build_s_mov_b64(
-          static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch),
-      instrumentation::build_salu_to_valu_dependency_wait(arch),
-      instrumentation::build_v_mbcnt_lo_u32_b32(
-          tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
-          scalar_positive_inline_u32(0), arch),
-      instrumentation::build_v_mbcnt_hi_u32_b32(
-          tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
-          vector_source_vgpr(tmp_vgpr), arch),
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch),
-      instrumentation::build_s_and_saveexec_b64(
-          static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch));
+  sequence.require(append_select_first_active_lane(
+      words, tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
+      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), arch));
 
   if (capture_first_diagnostic_only) {
     // A concurrency fault can make the same static conflict execute in every

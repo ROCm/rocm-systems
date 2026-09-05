@@ -78,6 +78,13 @@ enum class MoiVisibleEvidencePublicationResult : uint8_t {
                                                 rj_code_arch_t arch);
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch);
+/// Select the first currently active lane and retain the incoming EXEC mask.
+/// `active_exec_sgpr` feeds the lane-rank calculation; `saved_exec_sgpr` may
+/// alias it when the caller does not need a second copy after narrowing.
+[[nodiscard]] bool append_select_first_active_lane(std::vector<uint32_t> &words,
+                                                   uint16_t lane_rank_vgpr,
+                                                   uint16_t active_exec_sgpr,
+                                                   uint16_t saved_exec_sgpr, rj_code_arch_t arch);
 [[nodiscard]] MoiVisibleEvidencePublicationResult
 append_publish_first_active_lane_visible_evidence_if_zero(
     std::vector<uint32_t> &words, uint64_t counter_address, uint16_t result_vgpr,
