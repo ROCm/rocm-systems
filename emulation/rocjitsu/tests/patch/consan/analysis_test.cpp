@@ -3585,10 +3585,8 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   EXPECT_TRUE(acquire.eligible());
   EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(acquire.memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(release.sequence_identity,
-            result.program_inventory.sync().sync_sequences.front().identity);
-  EXPECT_EQ(acquire.sequence_identity,
-            result.program_inventory.sync().sync_sequences.front().identity);
+  EXPECT_EQ(release.sequence, ConSanSyncSequenceId{0});
+  EXPECT_EQ(acquire.sequence, ConSanSyncSequenceId{0});
   EXPECT_EQ(release.communication_event, ConSanSyncEventId{1});
   EXPECT_EQ(acquire.communication_event, ConSanSyncEventId{1});
   EXPECT_EQ(communication.address_source, ConSanSyncAddressSource::GlobalScalarVector);

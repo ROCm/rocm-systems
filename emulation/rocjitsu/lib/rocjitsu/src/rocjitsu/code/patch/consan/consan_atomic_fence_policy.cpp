@@ -38,7 +38,7 @@ namespace {
 
 [[nodiscard]] bool fence_policy_semantics_equal(const ConSanMoiFenceCandidate &lhs,
                                                 const ConSanMoiFenceCandidate &rhs) {
-  return lhs.fence_event == rhs.fence_event && lhs.sequence_identity == rhs.sequence_identity &&
+  return lhs.fence_event == rhs.fence_event && lhs.sequence == rhs.sequence &&
          lhs.communication_event == rhs.communication_event && lhs.memory_role == rhs.memory_role &&
          lhs.association == rhs.association;
 }
@@ -424,8 +424,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .intent_ids = {},
         .source_containers = names,
     };
-    if (!fence.sequence_identity.empty())
-      decision.association = ConSanSynchronizationAssociationId{fence.sequence_identity};
+    if (const ConSanSyncSequence *sequence = synchronization.find_sequence(fence.sequence))
+      decision.association = ConSanSynchronizationAssociationId{sequence->identity};
     const std::vector<uint64_t> owner_descriptors =
         synchronization.execution_owner_descriptors(fence_events);
 

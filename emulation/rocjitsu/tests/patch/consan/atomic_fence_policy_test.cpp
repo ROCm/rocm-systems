@@ -190,11 +190,11 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
 ConSanMoiFenceCandidate
 make_fence_candidate([[maybe_unused]] const ConSanSyncEvent &communication,
                      [[maybe_unused]] const ConSanSyncEvent &fence,
-                     const ConSanSyncSequence &sequence,
+                     [[maybe_unused]] const ConSanSyncSequence &sequence,
                      ConSanFenceAssociation association = ConSanFenceAssociation::Qualified) {
   return {
       .fence_event = {1},
-      .sequence_identity = sequence.identity,
+      .sequence = {0},
       .communication_event = ConSanSyncEventId{0},
       .memory_role = fence.memory_role,
       .association = association,

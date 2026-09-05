@@ -396,7 +396,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   build.barrier_lifecycle_groups.push_back(lifecycle);
   ConSanMoiFenceCandidate fence;
   fence.fence_event = {0};
-  fence.sequence_identity = sequence.identity;
+  fence.sequence = {0};
   fence.communication_event = ConSanSyncEventId{0};
   fence.association = ConSanFenceAssociation::Qualified;
   build.moi_fence_candidates.push_back(fence);

@@ -3649,11 +3649,9 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const ConSanSyncEvent *fence_event =
         result.program_inventory.sync().find_event(semantic_fence.fence_event);
     ASSERT_NE(fence_event, nullptr);
-    const auto candidate_sequence = std::ranges::find(
-        result.program_inventory.sync().sync_sequences,
-        result.program_inventory.sync().moi_fence_candidates.front().sequence_identity,
-        &ConSanSyncSequence::identity);
-    ASSERT_NE(candidate_sequence, result.program_inventory.sync().sync_sequences.end());
+    const ConSanSyncSequence *candidate_sequence =
+        result.program_inventory.sync().find_sequence(semantic_fence.sequence);
+    ASSERT_NE(candidate_sequence, nullptr);
     EXPECT_EQ(candidate_sequence->kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
     EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset());

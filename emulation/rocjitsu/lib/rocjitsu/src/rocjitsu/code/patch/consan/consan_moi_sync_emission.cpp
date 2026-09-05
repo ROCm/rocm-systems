@@ -235,8 +235,10 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     const ConSanMoiFenceCandidate *association = nullptr;
     for (const ConSanMoiFenceCandidate &candidate : graph.moi_fence_candidates) {
       const ConSanSyncEvent *candidate_event = graph.find_event(candidate.fence_event);
+      const ConSanSyncSequence *candidate_sequence = graph.find_sequence(candidate.sequence);
       if (candidate_event == nullptr || candidate_event->semantic_id != decision.semantic_site ||
-          !candidate.eligible() || candidate.sequence_identity != decision.association->value)
+          candidate_sequence == nullptr || !candidate.eligible() ||
+          candidate_sequence->identity != decision.association->value)
         continue;
       if (association != nullptr) {
         errors.emplace_back("ConSan MOI admitted fence record has ambiguous graph associations");
@@ -244,7 +246,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       }
       association = &candidate;
     }
-    const ConSanSyncSequence *sequence = graph.find_unique_sequence(decision.association->value);
+    const ConSanSyncSequence *sequence =
+        association == nullptr ? nullptr : graph.find_sequence(association->sequence);
     const ConSanSyncEvent *communication =
         association != nullptr && association->communication_event
             ? graph.find_event(*association->communication_event)

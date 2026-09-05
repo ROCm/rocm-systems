@@ -393,6 +393,17 @@ struct SynchronizationInventoryView {
     return {static_cast<uint32_t>(&event - sync_events.data())};
   }
 
+  /// Resolve one inventory-local synchronization-sequence handle in constant
+  /// time. The arena is immutable for the lifetime of this view.
+  [[nodiscard]] const ConSanSyncSequence *find_sequence(ConSanSyncSequenceId id) const {
+    return id.valid() && id.ordinal < sync_sequences.size() ? &sync_sequences[id.ordinal] : nullptr;
+  }
+
+  /// Return the compact handle of a sequence owned by this arena.
+  [[nodiscard]] ConSanSyncSequenceId sequence_id(const ConSanSyncSequence &sequence) const {
+    return {static_cast<uint32_t>(&sequence - sync_sequences.data())};
+  }
+
   /// Resolve the synchronization event derived from one exact decoded site.
   /// Physical aliases intentionally converge on the canonical event; callers
   /// retain the source handle when symbol attribution must also be checked.

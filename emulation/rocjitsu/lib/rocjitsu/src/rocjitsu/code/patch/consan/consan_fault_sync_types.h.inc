@@ -272,6 +272,16 @@ struct ConSanSyncEventId {
   auto operator<=>(const ConSanSyncEventId &) const = default;
 };
 
+/// Stable handle into one immutable synchronization-sequence arena.
+struct ConSanSyncSequenceId {
+  static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
+  uint32_t ordinal = kInvalidOrdinal;
+
+  [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
+
+  auto operator<=>(const ConSanSyncSequenceId &) const = default;
+};
+
 /// Flavor-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
 struct ConSanSyncEvent : ConSanSyncSemantics {
@@ -375,8 +385,10 @@ enum class ConSanFenceAssociation : uint8_t {
 struct ConSanMoiFenceCandidate {
   /// Original cache/fence event being associated.
   ConSanSyncEventId fence_event;
-  /// Stable identity of the unique synchronization sequence, when one exists.
-  std::string sequence_identity;
+  /// Inventory-local handle of the unique synchronization sequence, when one
+  /// exists. Stable text identity is materialized only at external plan and
+  /// diagnostic boundaries.
+  ConSanSyncSequenceId sequence;
   /// Unique address-bearing event selected from the sequence when qualified.
   std::optional<ConSanSyncEventId> communication_event;
   /// Release/acquire role contributed by this fence within the sequence.

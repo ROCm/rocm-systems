@@ -1640,7 +1640,9 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       continue;
     }
     const ConSanSyncSequence *sequence = membership->sequence;
-    candidate.sequence_identity = sequence->identity;
+    candidate.sequence = {
+        static_cast<uint32_t>(sequence - sync_sequences.data()),
+    };
 
     const bool addressed_atomic =
         sequence->kind == ConSanSyncKind::Atomic &&
