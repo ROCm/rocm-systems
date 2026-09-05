@@ -37,6 +37,50 @@ numeric aspiration does not redefine correctness or the ninth refactoring's
 ultimate exhaustion criterion; it changes prioritization, risk tolerance, and
 the time allowed before an explicit evidence-based reassessment.
 
+### Evidence ledger for the bounded campaign
+
+The campaign records rejected macro hypotheses as carefully as accepted
+replacements. This prevents the same attractive-looking merger from being
+retried under a new name and makes an eventual negative result falsifiable.
+
+- Direct report planning from the authoritative observation plan deleted
+  `ConSanEvidenceIntentPlan` and its copied intent vector. The replacement is
+  structurally cleaner and fully tested, but removed only about 65 governing
+  lines. The remaining candidate/resource/coverage projection chain has an
+  estimated removable envelope of only a few hundred lines and is therefore
+  deferred during the macro search.
+- One common runtime evidence protocol for Record/Replay, Sampled, and Inline
+  Shadow fails the hard semantic comparison. Record/Replay retains bounded raw
+  history for host replay, Sampled retains sparse causal windows, and Inline
+  Shadow performs immediate exact device-side transitions. A common protocol
+  would be a union facade containing all three algorithms rather than a
+  replacement for them.
+- RocJitsu's emulator race detector is not a reusable implementation of the
+  Record/Replay host model. It tracks outstanding asynchronous register and
+  LDS operations up to waits and barriers; it does not implement ConSan's
+  cross-owner happens-before epochs, atomic/fence causal import, exact-byte
+  history, or WAW behavior. Adapting it would add those mechanisms rather than
+  delete the ConSan model.
+- A universal spill-backed MOI resource strategy was exercised against the
+  complete 1,568-test ConSan matrix. It produced 27 failures, including real
+  missing instrumentation and overlapping relocated programs, not merely
+  assertions about which strategy was selected. A descriptor-growth-first
+  strategy still produced 16 failures, including overlapping Sampled access
+  and synchronization programs and incorrect private-segment requirements.
+  Liveness-dead, descriptor-growth, and spill-backed placement are therefore
+  all behaviorally necessary; replacing their orchestration with a single
+  conservative allocation form is not a valid deletion route.
+- Every counted production translation unit is owned by the build, and the
+  CMake source-glob assertion rejects unlisted implementations. There is no
+  large unbuilt or obsolete implementation reservoir hidden by the physical
+  file layout.
+
+These results do not end the aggressive search. They do rule out several
+routes that could only have appeared large by ignoring hard cases. The next
+macro candidate must delete a mechanism from the remaining analysis,
+emission, validation, or host lifecycle code; it may not count a facade over
+these rejected semantic differences as sharing.
+
 ## Governing continuation rule
 
 The ninth refactoring has two independent objectives: improve ConSan's actual
