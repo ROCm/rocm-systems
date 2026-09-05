@@ -74,7 +74,8 @@ append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_
     return false;
   std::vector<uint32_t> emitted;
   InstructionSequence sequence(emitted);
-  if (!sequence.emit_all(
+  sequence
+      .append(
           instrumentation::build_v_lshrrev_b32(hash_vgpr, scalar_positive_inline_u32(2),
                                                atomic_address_vgpr, arch),
           instrumentation::build_v_xor_b32(
@@ -94,18 +95,17 @@ append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_
                                            arch),
           instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr, 0x85ebca6bu,
                                                       hash_vgpr, arch),
-          instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr,
-                                                   arch)) ||
-      !consan_detail::append_moi_indexed_address(emitted,
-                                                 {
-                                                     .table_address = table_base,
-                                                     .stride_bytes = sizeof(Entry),
-                                                     .address_vgpr = entry_address_vgpr,
-                                                     .index_vgpr = hash_vgpr,
-                                                 },
-                                                 *target)) {
+          instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch))
+      .require(consan_detail::append_moi_indexed_address(emitted,
+                                                         {
+                                                             .table_address = table_base,
+                                                             .stride_bytes = sizeof(Entry),
+                                                             .address_vgpr = entry_address_vgpr,
+                                                             .index_vgpr = hash_vgpr,
+                                                         },
+                                                         *target));
+  if (!sequence.finish())
     return false;
-  }
   words.insert(words.end(), emitted.begin(), emitted.end());
   return true;
 }
@@ -152,61 +152,56 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
   const uint16_t exec_base = *registers.exec_save_sgpr;
   InstructionSequence sequence(words);
-  if (!sequence.emit(instrumentation::build_s_mov_b64(
-          static_cast<uint16_t>(exec_base + original_exec_save_offset), kAmdGpuExecLo, arch)))
-    return false;
+  sequence.append(instrumentation::build_s_mov_b64(
+      static_cast<uint16_t>(exec_base + original_exec_save_offset), kAmdGpuExecLo, arch));
 
   if (registers.cached_key_vgpr) {
     words.push_back(
         build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(*registers.cached_key_vgpr), arch));
-    return sequence.emit_all(
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
-        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch));
+    return sequence
+        .append(
+            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch))
+        .finish();
   }
   if (registers.cached_key_sgpr) {
     words.push_back(build_v_mov_b32_e32(key_vgpr, *registers.cached_key_sgpr, arch));
-    return sequence.emit_all(
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
-        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch));
+    return sequence
+        .append(
+            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch))
+        .finish();
   }
 
   const auto append_coordinate = [&](const ConSanMoiWorkgroupSource &source, uint32_t bits,
-                                     uint32_t shift, uint16_t exec_save_offset,
-                                     bool initialize) -> bool {
-    if (!append_inline_workgroup_source_vgpr(words, coordinate_vgpr, source, arch))
-      return false;
+                                     uint32_t shift, uint16_t exec_save_offset, bool initialize) {
+    sequence.require(append_inline_workgroup_source_vgpr(words, coordinate_vgpr, source, arch));
     if (source.scalar_src) {
       const uint32_t high_mask = ~((uint32_t{1} << bits) - 1u);
-      if (!sequence.emit_all(
-              instrumentation::build_v_and_b32_literal(value_vgpr, high_mask, coordinate_vgpr,
-                                                       arch),
-              instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value_vgpr,
-                                                      arch),
-              instrumentation::build_s_and_saveexec_b64(
-                  static_cast<uint16_t>(exec_base + exec_save_offset), kAmdGpuVccLo, arch)))
-        return false;
+      sequence.append(
+          instrumentation::build_v_and_b32_literal(value_vgpr, high_mask, coordinate_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(
+              static_cast<uint16_t>(exec_base + exec_save_offset), kAmdGpuVccLo, arch));
     }
-    if (shift != 0u) {
-      if (!sequence.emit(instrumentation::build_v_lshlrev_b32(
-              coordinate_vgpr, scalar_positive_inline_u32(shift), coordinate_vgpr, arch)))
-        return false;
-    }
+    if (shift != 0u)
+      sequence.append(instrumentation::build_v_lshlrev_b32(
+          coordinate_vgpr, scalar_positive_inline_u32(shift), coordinate_vgpr, arch));
     if (initialize) {
       words.push_back(build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(coordinate_vgpr), arch));
-      return true;
+      return;
     }
-    return sequence.emit(instrumentation::build_v_add_u32(
-        key_vgpr, vector_source_vgpr(coordinate_vgpr), key_vgpr, arch));
+    sequence.append(instrumentation::build_v_add_u32(key_vgpr, vector_source_vgpr(coordinate_vgpr),
+                                                     key_vgpr, arch));
   };
 
   const bool has_z = sources.z.scalar_src.has_value();
   const bool has_y = sources.y.scalar_src.has_value();
   const uint32_t x_bits = has_z ? 8u : has_y ? 10u : 20u;
   const uint32_t y_bits = has_z ? 6u : 10u;
-  if (!append_coordinate(sources.x, x_bits, 0u, 0u, /*initialize=*/true) ||
-      !append_coordinate(sources.y, y_bits, x_bits, 2u, /*initialize=*/false) ||
-      !append_coordinate(sources.z, 6u, x_bits + y_bits, 4u, /*initialize=*/false))
-    return false;
+  append_coordinate(sources.x, x_bits, 0u, 0u, /*initialize=*/true);
+  append_coordinate(sources.y, y_bits, x_bits, 2u, /*initialize=*/false);
+  append_coordinate(sources.z, 6u, x_bits + y_bits, 4u, /*initialize=*/false);
 
   // The Y-coordinate predicate journal at +2 is dead after the packed key has
   // been formed. Reuse it here instead of +8, which the surrounding inline
@@ -215,19 +210,21 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // Keep zero as the persistent invalid sentinel for lanes excluded by a
   // coordinate-width or reserved-key predicate. The caller still receives
   // EXEC narrowed to valid lanes, exactly as before.
-  return sequence.emit_all(
-      instrumentation::build_v_mov_b32_literal(value_vgpr, consan_moi_exact_shadow::max_generation,
-                                               arch),
-      instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(key_vgpr), value_vgpr, arch),
-      instrumentation::build_s_and_saveexec_b64(static_cast<uint16_t>(exec_base + 6u), kAmdGpuVccLo,
-                                                arch),
-      instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch),
-      instrumentation::build_s_mov_b64(valid_exec, kAmdGpuExecLo, arch),
-      instrumentation::build_s_andn2_b64(
-          kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec,
-          arch),
-      instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch),
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_exec, arch));
+  return sequence
+      .append(
+          instrumentation::build_v_mov_b32_literal(value_vgpr,
+                                                   consan_moi_exact_shadow::max_generation, arch),
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(key_vgpr), value_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(static_cast<uint16_t>(exec_base + 6u),
+                                                    kAmdGpuVccLo, arch),
+          instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch),
+          instrumentation::build_s_mov_b64(valid_exec, kAmdGpuExecLo, arch),
+          instrumentation::build_s_andn2_b64(
+              kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset),
+              valid_exec, arch),
+          instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_exec, arch))
+      .finish();
 }
 
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
@@ -247,56 +244,52 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                      : 0u);
   std::vector<uint32_t> emitted;
   InstructionSequence sequence(emitted);
-  if (!sequence.emit_all(
-          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
-                                                      kConSanMoiInlineTokenWorkgroupMultiplier,
-                                                      workgroup_key_vgpr, arch),
-          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
-                                                      kConSanMoiInlineTokenConsumerMultiplier,
-                                                      consumer_owner_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch),
-          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
-                                                      kConSanMoiInlineTokenProducerMultiplier,
-                                                      producer_owner_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch),
-          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
-                                                      kConSanMoiInlineTokenConsumerEpochMultiplier,
-                                                      consumer_epoch_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch)))
-    return false;
-  if (release_sequence) {
-    if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                               temporary_vgpr, kConSanMoiInlineTokenReleaseSequenceSalt, arch),
-                           instrumentation::build_v_xor_b32(
-                               hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch)))
-      return false;
-  }
-  if (!sequence.emit_all(
-          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+  sequence.append(
+      instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                  kConSanMoiInlineTokenWorkgroupMultiplier,
+                                                  workgroup_key_vgpr, arch),
+      instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                  kConSanMoiInlineTokenConsumerMultiplier,
+                                                  consumer_owner_vgpr, arch),
+      instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                       arch),
+      instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                  kConSanMoiInlineTokenProducerMultiplier,
+                                                  producer_owner_vgpr, arch),
+      instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                       arch),
+      instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                  kConSanMoiInlineTokenConsumerEpochMultiplier,
+                                                  consumer_epoch_vgpr, arch),
+      instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                       arch));
+  if (release_sequence)
+    sequence.append(instrumentation::build_v_mov_b32_literal(
+                        temporary_vgpr, kConSanMoiInlineTokenReleaseSequenceSalt, arch),
+                    instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                     hash_vgpr, arch));
+  sequence
+      .append(instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                                   hash_vgpr, arch),
+              instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr),
                                                hash_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch),
-          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
-                                                      kConSanMoiInlineTokenAvalancheMultiplier0,
-                                                      hash_vgpr, arch),
-          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(15),
+              instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                          kConSanMoiInlineTokenAvalancheMultiplier0,
+                                                          hash_vgpr, arch),
+              instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(15),
+                                                   hash_vgpr, arch),
+              instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr),
                                                hash_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch),
-          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
-                                                      kConSanMoiInlineTokenAvalancheMultiplier1,
-                                                      hash_vgpr, arch),
-          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+              instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                          kConSanMoiInlineTokenAvalancheMultiplier1,
+                                                          hash_vgpr, arch),
+              instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                                   hash_vgpr, arch),
+              instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr),
                                                hash_vgpr, arch),
-          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
-                                           arch),
-          instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u, hash_vgpr,
-                                                   arch)))
-    return false;
-  if (!consan_detail::append_moi_indexed_address(
+              instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u,
+                                                       hash_vgpr, arch))
+      .require(consan_detail::append_moi_indexed_address(
           emitted,
           {
               .table_address = namespace_base,
@@ -304,9 +297,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
               .address_vgpr = slot_address_vgpr,
               .index_vgpr = hash_vgpr,
           },
-          *target)) {
+          *target));
+  if (!sequence.finish())
     return false;
-  }
   words.insert(words.end(), emitted.begin(), emitted.end());
   return true;
 }
