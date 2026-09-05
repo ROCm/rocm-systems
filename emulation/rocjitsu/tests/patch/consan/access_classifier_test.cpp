@@ -103,7 +103,7 @@ ConSanProgramSite complete_site(ConSanProgramSite site, rj_code_arch_t arch,
   kernel.name = "classifier_kernel";
   kernel.descriptor_file_offset = 48;
   kernel.entry_text_offset = 0;
-  site.container = consan_program_container_ref(kernel);
+  site.container = kernel.id;
   builder.add_kernel(kernel);
   builder.add_access_site(std::move(site));
   builder.publish_decoded_accesses(bytes);

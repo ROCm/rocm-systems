@@ -236,7 +236,7 @@ resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
           const ConSanProgramSite *candidate_source = inventory.source(candidate);
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
                  sync.find_event(candidate.source_site) == member && candidate_source != nullptr &&
-                 candidate_source->container.id == sequence_container->id &&
+                 candidate_source->container == sequence_container->id &&
                  consan_execution_owners_include_requested_kernel(
                      inventory.execution_owners(candidate), inventory,
                      selection.kernel_name_filter);

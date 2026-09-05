@@ -103,7 +103,7 @@ struct ConSanProgramSite {
                                ConSanFenceSite, ConSanAtomicSite>;
 
   PhysicalSiteId physical_id;
-  ConSanProgramContainerRef container;
+  ConSanProgramContainerId container;
   ConSanAccessOrigin origin = ConSanAccessOrigin::Count;
   ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
   ConSanAccessAddressSpace address_space = ConSanAccessAddressSpace::Unresolved;
@@ -161,7 +161,7 @@ struct ConSanProgramSite {
 /// Access decoding may later merge its independent facet into this same
 /// physical record.
 template <typename Site>
-[[nodiscard]] ConSanProgramSite make_consan_program_site(ConSanProgramContainerRef container,
+[[nodiscard]] ConSanProgramSite make_consan_program_site(ConSanProgramContainerId container,
                                                          Site site) {
   ConSanProgramSite result;
   result.physical_id.original_text_offset = site.text_offset;
@@ -230,7 +230,7 @@ public:
   /// the same semantic instruction more than once: retain one facet, but
   /// retain every independently normalized access record.
   void reattribute_semantic_range(uint64_t begin, uint32_t size,
-                                  const ConSanProgramContainerRef &owner) {
+                                  const ConSanProgramContainerId &owner) {
     const uint64_t end = begin + size;
     std::vector<std::pair<size_t, uint64_t>> seen;
     const auto in_range = [&](const ConSanProgramSite &site) {
@@ -304,10 +304,10 @@ consan_source_container_names(std::span<const ConSanProgramSite> sites,
     // The arena belongs to exactly one code object, so the original text
     // offset is the complete lookup key inside this inventory. This also
     // keeps builder views useful before publication binds the code-object ID.
-    if (site.text_offset() != physical_site.original_text_offset || !site.container.id.valid() ||
-        site.container.id.ordinal >= containers.size())
+    if (site.text_offset() != physical_site.original_text_offset || !site.container.valid() ||
+        site.container.ordinal >= containers.size())
       continue;
-    const std::string &name = containers[site.container.id.ordinal].name;
+    const std::string &name = containers[site.container.ordinal].name;
     if (std::ranges::find(names, name) == names.end())
       names.push_back(name);
   }
@@ -386,7 +386,7 @@ struct SynchronizationInventoryView {
 
   [[nodiscard]] const ConSanProgramContainer *container(const ConSanSyncEvent &event) const {
     const ConSanProgramSite *decoded = source(event);
-    return decoded == nullptr ? nullptr : container(decoded->container.id);
+    return decoded == nullptr ? nullptr : container(decoded->container);
   }
 
   [[nodiscard]] std::string_view container_name(const ConSanSyncEvent &event) const {
@@ -856,7 +856,7 @@ public:
       if (const ConSanProgramContainer *record = kernel(owner))
         owners.push_back(record->descriptor_file_offset);
     }
-    if (const ConSanProgramContainer *record = container(site.container.id);
+    if (const ConSanProgramContainer *record = container(site.container);
         record != nullptr && record->is_kernel())
       owners.push_back(record->descriptor_file_offset);
     std::ranges::sort(owners);
@@ -1023,8 +1023,7 @@ public:
   /// retain every independently normalized access record.
   void reattribute_semantic_range(uint64_t begin, uint32_t size,
                                   const ConSanProgramContainer &owner) {
-    storage_->program_sites.reattribute_semantic_range(begin, size,
-                                                       consan_program_container_ref(owner));
+    storage_->program_sites.reattribute_semantic_range(begin, size, owner.id);
   }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
@@ -1083,7 +1082,7 @@ public:
                                 std::span<const ConSanProgramSite> decoded_accesses,
                                 std::span<const uint8_t> code_object_bytes) {
     const uint64_t end = begin + size;
-    const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
+    const ConSanProgramContainerId reference = owner.id;
     for (ConSanProgramSite &access : access_sites()) {
       if (access.physical_id.original_text_offset >= begin &&
           access.physical_id.original_text_offset < end)
@@ -1152,7 +1151,7 @@ private:
     };
   }
 
-  [[nodiscard]] ConSanProgramSite complete_access_site(const ConSanProgramContainerRef &container,
+  [[nodiscard]] ConSanProgramSite complete_access_site(const ConSanProgramContainerId &container,
                                                        const ConSanProgramSite &site,
                                                        std::span<const uint8_t> bytes) const {
     ConSanProgramSite result = site;

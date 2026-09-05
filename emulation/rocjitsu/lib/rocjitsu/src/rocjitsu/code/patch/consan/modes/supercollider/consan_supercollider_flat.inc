@@ -175,13 +175,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     (void)file_offset;
     const ConSanProgramSite &site = *access;
     const ConSanProgramContainer *site_container =
-        result.program_inventory.container(site.container.id);
+        result.program_inventory.container(site.container);
     if (site_container == nullptr)
       continue;
     std::vector<uint64_t> owners = result.program_inventory.execution_owner_descriptors(site);
     for (const ConSanFaultSite &fault : result.fault_sites) {
       const ConSanProgramSite *fault_source = result.program_inventory.program_site(fault);
-      if (fault_source == nullptr || fault_source->container.id != site.container.id ||
+      if (fault_source == nullptr || fault_source->container != site.container ||
           site_container->is_kernel())
         continue;
       const std::vector<uint64_t> fault_owners =
@@ -639,8 +639,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
         !is_instrumentable_group_flat_hint(access.flat_address_space_hint,
                                            options.flat_provenance_mode))
       continue;
-    if (const ConSanProgramContainer *kernel =
-            result.program_inventory.container(access.container.id);
+    if (const ConSanProgramContainer *kernel = result.program_inventory.container(access.container);
         kernel != nullptr && kernel->is_kernel()) {
       if (kernel->preflight_action == ConSanPreflightAction::Blocked)
         continue;

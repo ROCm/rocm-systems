@@ -82,7 +82,7 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
 template <typename Site, typename Container>
 [[nodiscard]] std::vector<Site> test_decoded_sites(const ProgramInventory &inventory,
                                                    const Container &container) {
-  const ConSanProgramContainerRef reference = consan_program_container_ref(container);
+  const ConSanProgramContainerId reference = container.id;
   std::vector<Site> result;
   for (const ConSanProgramSite &decoded : inventory.program_sites()) {
     if (decoded.container == reference) {
@@ -96,8 +96,7 @@ template <typename Site, typename Container>
 /// Seed one decoded source site in a builder-owned test inventory.
 template <typename Container, typename Site>
 void stage_decoded_site(ProgramInventoryBuilder &builder, const Container &container, Site site) {
-  builder.program_sites().push_back(
-      make_consan_program_site(consan_program_container_ref(container), std::move(site)));
+  builder.program_sites().push_back(make_consan_program_site(container.id, std::move(site)));
 }
 
 /// Focused classifier/planner tests start from decoded sites so they can
@@ -502,7 +501,7 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
 
 [[nodiscard]] const ConSanProgramContainer *
 test_program_container(const ConSanTransformArtifacts &result, const ConSanProgramSite &site) {
-  return result.program_inventory.container(site.container.id);
+  return result.program_inventory.container(site.container);
 }
 
 [[nodiscard]] std::string_view test_program_container_name(const ConSanTransformArtifacts &result,
@@ -517,7 +516,7 @@ test_program_container(const ConSanTransformArtifacts &result, const ConSanProgr
 test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
                                const ConSanProgramSite &access) {
   const uint64_t anchor = access.physical_id.original_text_offset;
-  const ConSanProgramContainer *container = inventory.container(access.container.id);
+  const ConSanProgramContainer *container = inventory.container(access.container);
   if (container == nullptr || anchor < container->entry_text_offset ||
       access.decoded_file_offset() < anchor)
     return std::nullopt;

@@ -339,7 +339,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_access.decoded_width_bits = 32u;
   shared_access.decoded_site().mnemonic = "ds_read_b32";
   shared_access.operands.address_vgpr = 0u;
-  shared_access.container = consan_program_container_ref(kernel_a);
+  shared_access.container = kernel_a.id;
   inventory_builder.add_access_site(shared_access);
   inventory_builder.add_kernel(kernel_a);
   ConSanProgramContainer kernel_b{ConSanProgramContainerKind::Kernel};
@@ -370,7 +370,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   barrier.identity = "event:24";
   ConSanProgramSite fault_source;
   fault_source.physical_id = barrier.semantic_id.physical;
-  fault_source.container = consan_program_container_ref(inventory_builder.kernels().back());
+  fault_source.container = inventory_builder.kernels().back().id;
   fault_source.execution_owners.push_back({.kernel = inventory_builder.kernels()[2].id});
   ConSanAtomicSite atomic_source;
   atomic_source.text_offset = 16u;

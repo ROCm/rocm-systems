@@ -26,7 +26,7 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
                                    const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
   const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
-  const ConSanProgramContainer *container = inventory.container(decoded.container.id);
+  const ConSanProgramContainer *container = inventory.container(decoded.container);
   if (site == nullptr || container == nullptr ||
       !consan_container_selected(request, debug, container->name))
     return;

@@ -56,8 +56,8 @@ ordered_program_site_indices(std::span<const ConSanProgramSite> sites) {
   std::vector<size_t> order(sites.size());
   std::iota(order.begin(), order.end(), 0u);
   std::ranges::stable_sort(order, [&](size_t lhs, size_t rhs) {
-    return std::pair{sites[lhs].container.id, sites[lhs].text_offset()} <
-           std::pair{sites[rhs].container.id, sites[rhs].text_offset()};
+    return std::pair{sites[lhs].container, sites[lhs].text_offset()} <
+           std::pair{sites[rhs].container, sites[rhs].text_offset()};
   });
   return order;
 }
@@ -86,7 +86,7 @@ void append_decoded_fault_sites(std::string_view fingerprint, rj_code_arch_t arc
   std::map<std::pair<ConSanProgramContainerId, ConSanFaultSiteKind>, uint32_t> occurrences;
   for (size_t decoded_index : ordered_program_site_indices(program_sites)) {
     const ConSanProgramSite &decoded = program_sites[decoded_index];
-    const ConSanProgramContainer *container = inventory.container(decoded.container.id);
+    const ConSanProgramContainer *container = inventory.container(decoded.container);
     if (container == nullptr ||
         (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name)))
       continue;
@@ -112,7 +112,7 @@ void append_decoded_fault_sites(std::string_view fingerprint, rj_code_arch_t arc
     }
 
     site.source_site = {static_cast<uint32_t>(decoded_index)};
-    site.occurrence = occurrences[{decoded.container.id, site.kind}]++;
+    site.occurrence = occurrences[{decoded.container, site.kind}]++;
     site.identity = std::string(fingerprint) +
                     (container->is_kernel() ? "|kernel=" : "|function=") + container->name +
                     "|kind=" + std::string(site_kind) + "|pc=0x" +
@@ -127,11 +127,11 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
                                     rj_code_arch_t arch, const ProgramInventory &inventory,
                                     std::span<const ConSanProgramSite> program_sites,
                                     std::vector<ConSanFaultSite> &sites) {
-  std::optional<ConSanProgramContainerRef> previous_container;
+  std::optional<ConSanProgramContainerId> previous_container;
   uint32_t occurrence = 0;
   for (size_t source_index = 0; source_index < program_sites.size(); ++source_index) {
     const ConSanProgramSite &access = program_sites[source_index];
-    const ConSanProgramContainer *container = inventory.container(access.container.id);
+    const ConSanProgramContainer *container = inventory.container(access.container);
     if (container == nullptr || !lds_address_fault_site_supported(access, arch) ||
         (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name)))
       continue;
@@ -172,8 +172,8 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
     };
     const ConSanProgramSite *lhs_source = result.program_inventory.program_site(lhs.source_site);
     const ConSanProgramSite *rhs_source = result.program_inventory.program_site(rhs.source_site);
-    return std::tuple{lhs_source->container.id, kind_order(lhs.kind), lhs_source->text_offset()} <
-           std::tuple{rhs_source->container.id, kind_order(rhs.kind), rhs_source->text_offset()};
+    return std::tuple{lhs_source->container, kind_order(lhs.kind), lhs_source->text_offset()} <
+           std::tuple{rhs_source->container, kind_order(rhs.kind), rhs_source->text_offset()};
   });
   append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory,
                                  result.program_inventory.program_sites(), result.fault_sites);
@@ -240,7 +240,7 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
   const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind, uint32_t occurrence,
                                 ConSanProgramSiteId source_site) {
     const ConSanProgramSite &source = program_sites[source_site.ordinal];
-    const ConSanProgramContainer *container = inventory.container(source.container.id);
+    const ConSanProgramContainer *container = inventory.container(source.container);
     if (container == nullptr)
       return;
     const bool in_kernel = container->is_kernel();
@@ -260,7 +260,7 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
   std::map<std::pair<ConSanProgramContainerId, size_t>, uint32_t> occurrences;
   for (size_t decoded_index : ordered_program_site_indices(program_sites)) {
     const ConSanProgramSite &decoded = program_sites[decoded_index];
-    const ConSanProgramContainer *container = inventory.container(decoded.container.id);
+    const ConSanProgramContainer *container = inventory.container(decoded.container);
     if (container == nullptr ||
         (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name)))
       continue;
@@ -395,7 +395,7 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     } else {
       continue;
     }
-    auto &occurrence = occurrences[{decoded.container.id, occurrence_kind}];
+    auto &occurrence = occurrences[{decoded.container, occurrence_kind}];
     finish_event(event, event_kind, occurrence++, {static_cast<uint32_t>(decoded_index)});
   }
 }
@@ -410,9 +410,9 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   std::ranges::stable_sort(
       inventory.sync_events, [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
         const ConSanProgramContainerId lhs_container =
-            program_inventory.program_sites()[lhs.source_site.ordinal].container.id;
+            program_inventory.program_sites()[lhs.source_site.ordinal].container;
         const ConSanProgramContainerId rhs_container =
-            program_inventory.program_sites()[rhs.source_site.ordinal].container.id;
+            program_inventory.program_sites()[rhs.source_site.ordinal].container;
         return std::pair{lhs_container, lhs.text_offset()} <
                std::pair{rhs_container, rhs.text_offset()};
       });
@@ -424,9 +424,9 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   const ConSanProgramSite *lhs_source = inventory.program_site(lhs.source_site);
   const ConSanProgramSite *rhs_source = inventory.program_site(rhs.source_site);
   const ConSanProgramContainer *lhs_container =
-      lhs_source == nullptr ? nullptr : inventory.container(lhs_source->container.id);
+      lhs_source == nullptr ? nullptr : inventory.container(lhs_source->container);
   const ConSanProgramContainer *rhs_container =
-      rhs_source == nullptr ? nullptr : inventory.container(rhs_source->container.id);
+      rhs_source == nullptr ? nullptr : inventory.container(rhs_source->container);
   if (lhs_source == nullptr || rhs_source == nullptr || lhs_container == nullptr ||
       rhs_container == nullptr || lhs_container->kind != rhs_container->kind ||
       !lhs_source->same_payload(*rhs_source))
@@ -441,7 +441,7 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
     const ConSanProgramSite *source = consan_program_site(program_sites, event);
     const ConSanProgramContainer *container =
-        source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
+        source == nullptr ? nullptr : result.program_inventory.container(source->container);
     return container == nullptr ? std::nullopt
                                 : std::optional<uint64_t>(container->entry_text_offset);
   };
@@ -455,7 +455,7 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
       [&](const ConSanSyncEvent &event) -> std::string_view {
         const ConSanProgramSite *source = consan_program_site(program_sites, event);
         const ConSanProgramContainer *container =
-            source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
+            source == nullptr ? nullptr : result.program_inventory.container(source->container);
         return container == nullptr ? std::string_view{} : std::string_view(container->name);
       },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
@@ -975,7 +975,7 @@ void build_barrier_move_destination_inventory(
 
     const ConSanProgramSite *source = result.program_inventory.program_site(event->source_site);
     const ConSanProgramContainer *container =
-        source == nullptr ? nullptr : result.program_inventory.container(source->container.id);
+        source == nullptr ? nullptr : result.program_inventory.container(source->container);
     if (container == nullptr || (container->is_kernel() && !container->has_text_range))
       continue;
     const uint64_t container_begin = container->entry_text_offset;
@@ -2218,7 +2218,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
     if (std::ranges::any_of(result.program_inventory.access_sites(),
                             [&](const ConSanProgramSite &site) {
                               const ConSanProgramContainer *container =
-                                  result.program_inventory.container(site.container.id);
+                                  result.program_inventory.container(site.container);
                               return container != nullptr && !container->is_kernel();
                             })) {
       // SuperCollider's ordinary clean transform does not consume

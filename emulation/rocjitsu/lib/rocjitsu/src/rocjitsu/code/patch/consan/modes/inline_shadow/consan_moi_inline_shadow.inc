@@ -85,7 +85,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
     const ConSanProgramContainer *container =
-        result.program_inventory.container(candidate.site().container.id);
+        result.program_inventory.container(candidate.site().container);
     if (container == nullptr)
       continue;
     const ConSanCandidateResourcePlan *resource_plan =

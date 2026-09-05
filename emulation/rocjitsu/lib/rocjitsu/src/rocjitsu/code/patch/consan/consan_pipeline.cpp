@@ -279,7 +279,7 @@ std::optional<ConSanFaultSiteDiagnostic>
 consan_fault_site_diagnostic(const ProgramInventory &inventory, const ConSanFaultSite &site) {
   const ConSanProgramSite *source = inventory.program_site(site);
   const ConSanProgramContainer *container =
-      source == nullptr ? nullptr : inventory.container(source->container.id);
+      source == nullptr ? nullptr : inventory.container(source->container);
   if (source == nullptr || container == nullptr)
     return std::nullopt;
   ConSanFaultSiteDiagnostic diagnostic;

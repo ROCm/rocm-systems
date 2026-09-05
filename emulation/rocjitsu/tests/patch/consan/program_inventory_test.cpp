@@ -78,9 +78,9 @@ void stage_inventory_access(ProgramInventoryBuilder &builder, const Container &c
   // never infers this edge from presentation metadata.
   site.container =
       container.id.valid()
-          ? consan_program_container_ref(container)
-          : ConSanProgramContainerRef{.id = {static_cast<uint32_t>(builder.kernels().size() +
-                                                                   builder.functions().size())}};
+          ? container.id
+          : ConSanProgramContainerId{.ordinal = static_cast<uint32_t>(builder.kernels().size() +
+                                                                      builder.functions().size())};
   builder.add_access_site(std::move(site));
 }
 
@@ -147,12 +147,12 @@ TEST(ConSanProgramInventory, PhysicalAndSemanticIdentitiesHaveExplicitValidityAn
 }
 
 TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
-  ConSanProgramContainerRef container;
-  container.id = {1};
-  EXPECT_TRUE(container.id.valid());
+  ConSanProgramContainerId container;
+  container.ordinal = 1;
+  EXPECT_TRUE(container.valid());
   EXPECT_EQ(container, container);
-  ConSanProgramContainerRef other = container;
-  other.id = {2};
+  ConSanProgramContainerId other = container;
+  other.ordinal = 2;
   EXPECT_NE(container, other);
 
   ConSanAccessOperandFacts operands;
@@ -255,10 +255,10 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   ASSERT_EQ(moved.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(moved.program_inventory.kernels().front().name, "inventory_kernel");
   EXPECT_EQ(moved.program_inventory.kernels().front().declared_group_segment_bytes, 4096u);
-  EXPECT_EQ(moved.program_inventory.container(
-                moved.program_inventory.access_sites().front().container.id),
-            &moved.program_inventory.kernels().front());
-  EXPECT_EQ(moved.program_inventory.access_sites().front().container.id,
+  EXPECT_EQ(
+      moved.program_inventory.container(moved.program_inventory.access_sites().front().container),
+      &moved.program_inventory.kernels().front());
+  EXPECT_EQ(moved.program_inventory.access_sites().front().container,
             moved.program_inventory.kernels().front().id);
 }
 
@@ -309,7 +309,7 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.kernel({}), nullptr);
 
   ConSanProgramSite owned;
-  owned.container = consan_program_container_ref(inventory.kernels()[0]);
+  owned.container = inventory.kernels()[0].id;
   owned.execution_owners = {{.kernel = inventory.kernels()[1].id},
                             {.kernel = inventory.kernels()[0].id},
                             {.kernel = inventory.kernels()[1].id}};
@@ -328,7 +328,7 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   builder.add_access_site(std::move(ambiguous));
   const std::array<uint8_t, 4> bytes = {};
   builder.publish_decoded_accesses(bytes);
-  EXPECT_FALSE(builder.view().access_sites().back().container.id.valid());
+  EXPECT_FALSE(builder.view().access_sites().back().container.valid());
 }
 
 TEST(ConSanProgramInventory, PreappliedMutationGeometryBelongsToExactInputRevision) {
@@ -473,9 +473,9 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   first.source_site = {0};
   alias.source_site = {1};
   ConSanProgramSite first_source;
-  first_source.container = consan_program_container_ref(builder.kernels()[0]);
+  first_source.container = builder.kernels()[0].id;
   ConSanProgramSite alias_source;
-  alias_source.container = consan_program_container_ref(builder.kernels()[1]);
+  alias_source.container = builder.kernels()[1].id;
   builder.add_semantic_site(std::move(first_source));
   builder.add_semantic_site(std::move(alias_source));
   build.sync_events = {first, alias};
@@ -512,7 +512,7 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   builder.add_kernel(make_inventory_kernel("different-owner"));
   builder.add_kernel(make_inventory_kernel("third-owner"));
   ConSanProgramSite first_source;
-  first_source.container = consan_program_container_ref(builder.kernels()[0]);
+  first_source.container = builder.kernels()[0].id;
   first_source.execution_owners = {
       {.kernel = {0}, .proof = ConSanOwnerProofKind::KernelLocal},
       {.kernel = {1}, .proof = ConSanOwnerProofKind::DirectCall},
@@ -551,8 +551,7 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   EXPECT_TRUE(malformed_graph.execution_owners(malformed_graph.sync_sequences.front()).empty());
 
   ProgramInventoryBuilder cross_container(builder.view());
-  cross_container.program_sites()[1].container =
-      consan_program_container_ref(cross_container.kernels()[1]);
+  cross_container.program_sites()[1].container = cross_container.kernels()[1].id;
   const ProgramInventory cross_container_inventory = cross_container.view();
   EXPECT_EQ(cross_container_inventory.sync().container(
                 cross_container_inventory.sync().sync_sequences.front()),
@@ -567,7 +566,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   original.add_kernel(std::move(original_kernel));
   ASSERT_EQ(original.view().access_sites().size(), 1u);
   EXPECT_FALSE(original.view().access_sites().front().physical_id.code_object.valid());
-  EXPECT_EQ(original.view().container(original.view().access_sites().front().container.id)->name,
+  EXPECT_EQ(original.view().container(original.view().access_sites().front().container)->name,
             "original");
   ConSanSyncEvent event;
   event.identity = "original-event";
@@ -584,7 +583,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   const ProgramInventory published = original.view();
   ASSERT_EQ(published.access_sites().size(), 1u);
   EXPECT_TRUE(published.access_sites().front().physical_id.code_object.valid());
-  EXPECT_EQ(published.container(published.access_sites().front().container.id)->name, "original");
+  EXPECT_EQ(published.container(published.access_sites().front().container)->name, "original");
 
   ProgramInventoryBuilder revision(published);
   revision.kernels().front().name = "revision";
@@ -593,7 +592,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   added_function.entry_text_offset = 24;
   revision.add_function(std::move(added_function));
   ConSanProgramSite added_access = make_inventory_lds_site("ds_load_b32", 24);
-  added_access.container = consan_program_container_ref(revision.functions().back());
+  added_access.container = revision.functions().back().id;
   revision.add_access_site(std::move(added_access));
   SynchronizationInventoryBuildView revised = revision.synchronization();
   revised.sync_events.front().identity = "revision-event";
@@ -615,9 +614,9 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_EQ(revised_inventory.kernels().front().name, "revision");
   ASSERT_EQ(revised_inventory.functions().size(), 1u);
   ASSERT_EQ(revised_inventory.access_sites().size(), 2u);
-  EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[0].container.id)->kind,
+  EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[0].container)->kind,
             ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[1].container.id)->kind,
+  EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[1].container)->kind,
             ConSanProgramContainerKind::Function);
   EXPECT_EQ(revised_inventory.sync().sync_events.front().identity, "revision-event");
   EXPECT_TRUE(revised_inventory.sync().sync_sequences.empty());
@@ -739,7 +738,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.provenance, ConSanAccessProvenance::NativeLdsOpcode);
   EXPECT_EQ(byte.confidence, ConSanSemanticConfidence::Exact);
   EXPECT_TRUE(byte.lowering.replay_guest_access.available());
-  const ConSanProgramContainer *byte_container = inventory.container(byte.container.id);
+  const ConSanProgramContainer *byte_container = inventory.container(byte.container);
   ASSERT_NE(byte_container, nullptr);
   EXPECT_EQ(byte_container->kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(byte_container->descriptor_file_offset, 512u);
@@ -800,7 +799,7 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
       return candidate.physical_id.original_text_offset;
     });
     ASSERT_NE(access, accesses.end());
-    const ConSanProgramContainer *container = inventory.container(access->container.id);
+    const ConSanProgramContainer *container = inventory.container(access->container);
     ASSERT_NE(container, nullptr);
     EXPECT_EQ(container->name, "owner");
     EXPECT_EQ(container->descriptor_file_offset, 512u);
@@ -809,7 +808,7 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
     return candidate.physical_id.original_text_offset;
   });
   ASSERT_NE(outside, accesses.end());
-  const ConSanProgramContainer *outside_container = inventory.container(outside->container.id);
+  const ConSanProgramContainer *outside_container = inventory.container(outside->container);
   ASSERT_NE(outside_container, nullptr);
   EXPECT_EQ(outside_container->name, "overlapping");
   EXPECT_EQ(outside_container->descriptor_file_offset, 768u);
@@ -819,7 +818,7 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
   ProgramInventoryBuilder builder;
   builder.add_kernel(make_inventory_kernel("owner"));
   builder.add_kernel(make_inventory_kernel("overlapping"));
-  const ConSanProgramContainerRef overlapping = consan_program_container_ref(builder.kernels()[1]);
+  const ConSanProgramContainerId overlapping = builder.kernels()[1].id;
 
   ConSanOrdinaryMemorySite ordinary;
   ordinary.text_offset = 80;
@@ -859,11 +858,11 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
   EXPECT_EQ(inventory.access_sites()[1].size(), 8u);
   EXPECT_EQ(inventory.access_sites()[1].mnemonic_view(), "flat_load_dword");
   EXPECT_NE(inventory.access_sites()[2].get_if<ConSanBarrierSite>(), nullptr);
-  EXPECT_EQ(inventory.container(inventory.access_sites()[2].container.id)->name, "overlapping");
+  EXPECT_EQ(inventory.container(inventory.access_sites()[2].container)->name, "overlapping");
   EXPECT_NE(inventory.program_sites().back().get_if<ConSanFenceSite>(), nullptr);
-  EXPECT_EQ(inventory.container(inventory.program_sites().back().container.id)->name, "owner");
+  EXPECT_EQ(inventory.container(inventory.program_sites().back().container)->name, "owner");
   EXPECT_TRUE(std::ranges::all_of(inventory.program_sites().first(2), [&](const auto &site) {
-    const ConSanProgramContainer *container = inventory.container(site.container.id);
+    const ConSanProgramContainer *container = inventory.container(site.container);
     return container != nullptr && container->name == "owner";
   }));
 }
@@ -1108,7 +1107,7 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   function.entry_text_offset = 72;
   builder.add_function(std::move(function));
   ConSanProgramSite function_access = make_inventory_lds_site("ds_store_b32", 80);
-  function_access.container = consan_program_container_ref(builder.functions().back());
+  function_access.container = builder.functions().back().id;
   builder.add_access_site(std::move(function_access));
   builder.publish_decoded_accesses(bytes);
 
@@ -1120,8 +1119,8 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   ASSERT_EQ(sites[1].ranges.size(), 1u);
   EXPECT_EQ(sites[0].ranges[0].id, sites[1].ranges[0].id);
   EXPECT_NE(sites[0].container, sites[1].container);
-  EXPECT_EQ(inventory.container(sites[0].container.id)->kind, ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(inventory.container(sites[1].container.id)->kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(inventory.container(sites[0].container)->kind, ConSanProgramContainerKind::Kernel);
+  EXPECT_EQ(inventory.container(sites[1].container)->kind, ConSanProgramContainerKind::Function);
 }
 
 TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormalizedAccesses) {
@@ -1150,7 +1149,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
   for (const ConSanProgramSite &site : result.program_inventory.access_sites()) {
     EXPECT_TRUE(site.complete());
     EXPECT_EQ(site.physical_id.code_object, result.program_inventory.code_object_id());
-    EXPECT_EQ(result.program_inventory.container(site.container.id),
+    EXPECT_EQ(result.program_inventory.container(site.container),
               &result.program_inventory.kernels().front());
     EXPECT_NE(site.decoded_file_offset(), 0u);
     EXPECT_NE(site.size(), 0u);

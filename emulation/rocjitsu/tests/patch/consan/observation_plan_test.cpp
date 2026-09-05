@@ -108,7 +108,7 @@ ProgramInventory build_policy_inventory(AccessInventoryInput input) {
         std::ranges::find(containers, selector.name, &ConSanProgramContainer::name);
     EXPECT_NE(container, containers.end());
     if (container != containers.end())
-      access.container = consan_program_container_ref(*container);
+      access.container = container->id;
     builder.add_access_site(std::move(access));
   }
   builder.publish_decoded_accesses(input.bytes);
@@ -250,8 +250,8 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   source.operand_source = ConSanBarrierSite::OperandSource::Immediate;
   source.scope = ConSanBarrierSite::Scope::Workgroup;
   source.mnemonic = "s_barrier";
-  builder.program_sites().push_back(make_consan_program_site(
-      consan_program_container_ref(builder.kernels().front()), std::move(source)));
+  builder.program_sites().push_back(
+      make_consan_program_site(builder.kernels().front().id, std::move(source)));
   builder.program_sites().back().execution_owners.push_back({});
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncKind::Barrier;

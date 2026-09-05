@@ -384,13 +384,12 @@ _consan_assert_no_match(
     "consan_arch_is_"
     "the unified program-site inventory must consume target-normalized semantic facets"
 )
-file(READ "${_consan_dir}/consan_code_object_types.h.inc" _program_site_contracts)
+file(READ "${_consan_dir}/consan_program_inventory.h.inc" _program_site_contracts)
 if(NOT _program_site_contracts MATCHES
-       "struct ConSanProgramContainerRef[^{]*[{][^}]*ConSanProgramContainerId[ \t]+id" OR
-   _program_site_contracts MATCHES
-       "struct ConSanProgramContainerRef[^{]*[{][^}]*(ConSanProgramContainerKind|std::string|is_kernel)")
+       "struct ConSanProgramSite[^{]*[{][^}]*ConSanProgramContainerId[ \t]+container" OR
+   _program_site_contracts MATCHES "ConSanProgramContainerRef|consan_program_container_ref")
     message(FATAL_ERROR
-        "ConSan program sites must retain only authoritative container identity, not copied presentation metadata"
+        "ConSan program sites must retain the authoritative container handle directly, not an attribution wrapper"
     )
 endif()
 _consan_assert_no_match(

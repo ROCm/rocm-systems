@@ -3233,7 +3233,7 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
           result.program_inventory.access_sites(), [&](const ConSanProgramSite &access) {
             return access.physical_id.original_text_offset ==
                        candidate.physical_id.original_text_offset &&
-                   access.container.id == candidate.container.id;
+                   access.container == candidate.container;
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
       EXPECT_EQ(static_cast<const ConSanProgramSite &>(candidate), *site);

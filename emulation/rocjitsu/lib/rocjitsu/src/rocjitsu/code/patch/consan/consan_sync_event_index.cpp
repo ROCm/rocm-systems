@@ -13,7 +13,7 @@ bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
   for (const ConSanSyncEventId member : sequence.member_event_ids) {
     const ConSanSyncEvent *event = inventory.find_event(member);
     const ConSanProgramSite *source = event == nullptr ? nullptr : inventory.source(*event);
-    if (event == nullptr || source == nullptr || source->container.id != sequence_container->id ||
+    if (event == nullptr || source == nullptr || source->container != sequence_container->id ||
         event->text_offset() < prior_end || event->text_offset() < sequence.begin_text_offset ||
         event->text_offset() + source->size() > sequence.end_text_offset) {
       return false;

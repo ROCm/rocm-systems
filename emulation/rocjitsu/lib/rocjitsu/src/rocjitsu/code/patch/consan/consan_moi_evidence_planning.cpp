@@ -11,7 +11,7 @@ const ConSanProgramContainer *resolve_moi_evidence_container(const ProgramInvent
                                                              ConSanProgramSiteId source_site) {
   const ConSanProgramSite *site = inventory.program_site(source_site);
   const ConSanProgramContainer *container =
-      site == nullptr ? nullptr : inventory.container(site->container.id);
+      site == nullptr ? nullptr : inventory.container(site->container);
   if (site == nullptr || container == nullptr ||
       (container->is_kernel() && is_rocclr_runtime_kernel_name(container->name))) {
     return nullptr;

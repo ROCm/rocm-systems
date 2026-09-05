@@ -409,7 +409,7 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   cache.operation = ConSanSyncOperation::Fence;
   cache.source_site = {1};
   std::vector<ConSanProgramSite> program_sites(2);
-  program_sites[0].container = {.id = {0}};
+  program_sites[0].container = {0};
   program_sites[1].container = program_sites[0].container;
   ConSanOrdinaryMemorySite load_source;
   load_source.width_bits = 32u;
@@ -613,7 +613,7 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   store.source_site = {1};
   store.scope = ConSanMemoryScope::Agent;
   std::vector<ConSanProgramSite> program_sites(2);
-  program_sites[0].container = {.id = {0}};
+  program_sites[0].container = {0};
   program_sites[1].container = program_sites[0].container;
   ConSanFenceSite cache_source;
   cache_source.cache_operation = ConSanCacheOperation::Release;

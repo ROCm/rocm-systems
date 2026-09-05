@@ -1944,7 +1944,7 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
   const ConSanProgramSite *best = nullptr;
   for (const ConSanProgramSite &site : inventory.access_sites()) {
-    const ConSanProgramContainer *kernel = inventory.container(site.container.id);
+    const ConSanProgramContainer *kernel = inventory.container(site.container);
     if (kernel == nullptr || !kernel->is_kernel() || site.origin != ConSanAccessOrigin::NativeLds ||
         site.kind != ConSanLdsAccessKind::Read || !site.lowering.replay_guest_access.available() ||
         site.decoded_width_bits != 32)
@@ -1981,7 +1981,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
                                                       const ConSanFaultSite &site) {
   const ConSanProgramSite *source = inventory.program_site(site);
   const ConSanProgramContainer *container =
-      source == nullptr ? nullptr : inventory.container(source->container.id);
+      source == nullptr ? nullptr : inventory.container(source->container);
   if (source == nullptr || container == nullptr)
     return {};
   return {.text_offset = source->text_offset(),

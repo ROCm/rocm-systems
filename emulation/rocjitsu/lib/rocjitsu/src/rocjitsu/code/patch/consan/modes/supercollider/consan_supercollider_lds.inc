@@ -124,7 +124,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::unordered_map<const ConSanProgramSite *, ScBracketLocalPrivateSpillPlan> private_spill_plans;
   for (const LdsSitePlanningContext &site_context : site_contexts) {
     const ConSanProgramContainer *site_container =
-        result.program_inventory.container(site_context.site->container.id);
+        result.program_inventory.container(site_context.site->container);
     if (site_container == nullptr)
       continue;
     if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
@@ -162,7 +162,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             ? std::optional<uint16_t>(*site_context.owners.max_sgpr_ref + 1u)
             : std::nullopt;
     const ConSanProgramSite &site = *site_context.site;
-    const ConSanProgramContainer *container = result.program_inventory.container(site.container.id);
+    const ConSanProgramContainer *container = result.program_inventory.container(site.container);
     ++supported_candidate_count;
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
         container != nullptr && target.has_selectable_vgpr_bank &&

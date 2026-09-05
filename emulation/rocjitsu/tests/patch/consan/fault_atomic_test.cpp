@@ -182,9 +182,9 @@ TEST(ConSan, FaultInventoryIncludesAtomicOperandsAndRoles) {
   const ConSanProgramSite *source =
       result.program_inventory.program_site(result.fault_sites[0].source_site);
   ASSERT_NE(source, nullptr);
-  ASSERT_TRUE(source->container.id.valid());
-  ASSERT_NE(result.program_inventory.container(source->container.id), nullptr);
-  EXPECT_EQ(result.program_inventory.container(source->container.id)->name,
+  ASSERT_TRUE(source->container.valid());
+  ASSERT_NE(result.program_inventory.container(source->container), nullptr);
+  EXPECT_EQ(result.program_inventory.container(source->container)->name,
             test_fault_diagnostic(result, result.fault_sites[0]).container_name);
   EXPECT_EQ(result.fault_sites[0].kind, ConSanFaultSiteKind::Atomic);
   EXPECT_EQ(result.fault_sites[0].occurrence, 0u);

@@ -1569,7 +1569,7 @@ void validate_sc_perturbation_semantics(const FinalValidationEnvironment &enviro
             : pristine->program_inventory.program_site(anchor_event->source_site);
     if (candidate->anchor_event != sequence->member_event_ids[outer_member_index] ||
         anchor_event == nullptr || anchor_source == nullptr ||
-        anchor_source->container.id != sequence_container->id ||
+        anchor_source->container != sequence_container->id ||
         anchor_event->text_offset() > original_text.size() ||
         anchor_source->size() > original_text.size() - anchor_event->text_offset() ||
         patch.original_size != anchor_source->size()) {

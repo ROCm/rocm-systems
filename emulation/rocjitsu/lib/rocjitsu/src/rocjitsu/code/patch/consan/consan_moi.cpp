@@ -109,7 +109,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (consan_arch_has_selectable_vgpr_bank(arch)) {
     for (ConSanMoiCandidate &candidate : moi_candidates) {
       const ConSanProgramContainer *container =
-          result.program_inventory.container(candidate.site().container.id);
+          result.program_inventory.container(candidate.site().container);
       if (container == nullptr || candidate.anchor() < container->entry_text_offset ||
           candidate.site().decoded_file_offset() < candidate.anchor())
         continue;

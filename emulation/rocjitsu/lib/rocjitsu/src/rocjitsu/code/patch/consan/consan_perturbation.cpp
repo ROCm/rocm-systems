@@ -49,7 +49,7 @@ perturbation_candidate_facts(const ProgramInventory &inventory,
       .anchor = anchor,
       .anchor_source = anchor_source,
       .anchor_container =
-          anchor_source == nullptr ? nullptr : inventory.container(anchor_source->container.id),
+          anchor_source == nullptr ? nullptr : inventory.container(anchor_source->container),
   };
 }
 

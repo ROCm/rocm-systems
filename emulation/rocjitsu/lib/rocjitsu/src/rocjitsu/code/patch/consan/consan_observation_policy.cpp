@@ -120,11 +120,11 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
         communication == nullptr ? nullptr : sync.source(*communication);
     const ConSanProgramContainer *sequence_container = sync.container(sequence);
     if (communication_source == nullptr || sequence_container == nullptr ||
-        communication_source->container.id != sequence_container->id) {
+        communication_source->container != sequence_container->id) {
       continue;
     }
     for (const ConSanProgramSite &access : inventory.access_sites()) {
-      if (access.container.id != communication_source->container.id ||
+      if (access.container != communication_source->container ||
           access.physical_id.original_text_offset != communication->text_offset() ||
           std::ranges::find(reservations, access.physical_id) != reservations.end()) {
         continue;

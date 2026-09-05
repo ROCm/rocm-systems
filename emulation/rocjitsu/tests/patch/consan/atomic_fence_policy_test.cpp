@@ -276,8 +276,7 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     const auto container =
         std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name);
     if (container != builder.kernels().end())
-      builder.program_sites()[event.source_site.ordinal].container =
-          consan_program_container_ref(*container);
+      builder.program_sites()[event.source_site.ordinal].container = container->id;
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);

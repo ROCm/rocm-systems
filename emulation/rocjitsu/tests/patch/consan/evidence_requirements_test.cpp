@@ -169,7 +169,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.operands.raw_ioffset = 0;
     site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Group;
     site.decoded_site().mnemonic = "flat_store_b32";
-    site.container = consan_program_container_ref(kernel);
+    site.container = kernel.id;
     builder.add_access_site(std::move(site));
   } else {
     ConSanProgramSite site;
@@ -183,7 +183,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.operands.address_vgpr = 2;
     site.operands.data_vgpr = 3;
     site.decoded_site().mnemonic = "ds_store_b32";
-    site.container = consan_program_container_ref(kernel);
+    site.container = kernel.id;
     builder.add_access_site(std::move(site));
   }
   builder.add_kernel(std::move(kernel));

@@ -92,7 +92,7 @@ namespace {
                                       std::span<const ConSanProgramSite *const> aliases,
                                       std::string_view filter) {
   return filter.empty() || std::ranges::any_of(aliases, [&](const auto *access) {
-           const ConSanProgramContainer *container = inventory.container(access->container.id);
+           const ConSanProgramContainer *container = inventory.container(access->container);
            return container != nullptr && container->name.find(filter) != std::string::npos;
          });
 }
@@ -101,12 +101,12 @@ namespace {
                                                 const ConSanProgramSite &lhs,
                                                 const ConSanProgramSite &rhs) {
   const auto container_entry = [&](const ConSanProgramSite &site) {
-    const ConSanProgramContainer *container = inventory.container(site.container.id);
+    const ConSanProgramContainer *container = inventory.container(site.container);
     return container == nullptr ? std::optional<uint64_t>{}
                                 : std::optional{container->entry_text_offset};
   };
   const auto container_kind = [&](const ConSanProgramSite &site) {
-    const ConSanProgramContainer *container = inventory.container(site.container.id);
+    const ConSanProgramContainer *container = inventory.container(site.container);
     return container == nullptr ? ConSanProgramContainerKind::Count : container->kind;
   };
   return std::tuple(container_kind(lhs), container_entry(lhs), lhs.origin, lhs.kind,

@@ -58,7 +58,7 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
       result.errors.emplace_back("ConSan could not recover the owner of a preapplied fault cave");
       continue;
     }
-    const ConSanProgramContainerRef owner = consan_program_container_ref(*kernel);
+    const ConSanProgramContainerId owner = kernel->id;
     inventory.reattribute_semantic_range(range.text_offset, range.size, *kernel);
 
     ConSanProgramContainer decoded_range;
@@ -91,14 +91,11 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 
 } // namespace
 
-bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes,
-                                      const ConSanRequest &request,
-                                      const ConSanDebugOverrides &debug,
-                                      const MutationRequest &mutation,
-                                      std::unique_ptr<AmdGpuCodeObject> &code_object,
-                                      ProgramInventoryBuilder &inventory_builder,
-                                      ConSanPerturbationPlanningState &perturbation,
-                                      ConSanProgramAnalysisResult &result) {
+bool analyze_consan_program_inventory(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    std::unique_ptr<AmdGpuCodeObject> &code_object, ProgramInventoryBuilder &inventory_builder,
+    ConSanPerturbationPlanningState &perturbation, ConSanProgramAnalysisResult &result) {
   // Even a parse failure publishes the identity-bearing empty view. Pipeline
   // stage accounting distinguishes a completed, invalid inventory attempt
   // from an analysis stage that was never entered.
@@ -250,7 +247,8 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
                                     result.program_inventory.preapplied_mutation().code_ranges,
                                     inventory_builder);
   return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, request,
-                                           debug, mutation, inventory_builder, perturbation, result);
+                                           debug, mutation, inventory_builder, perturbation,
+                                           result);
 }
 
 } // namespace rocjitsu

@@ -1081,7 +1081,7 @@ void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
     site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
   }
   site.decoded_site().mnemonic = std::string(mnemonic);
-  site.container = consan_program_container_ref(kernel);
+  site.container = kernel.id;
   sites.add_access(std::move(site));
 }
 
@@ -1108,7 +1108,7 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
         vgpr_index(inst.src_operand(static_cast<int>(*encoding->address_source_operand)));
   }
   site.decoded_site().mnemonic = std::string(mnemonic);
-  site.container = consan_program_container_ref(kernel);
+  site.container = kernel.id;
   sites.add_access(std::move(site));
   return sites.access_sites().back().kind;
 }
@@ -1176,8 +1176,7 @@ void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel
       site.participant_setup_literal = setup_literal;
     }
   }
-  sites.add_semantic(
-      make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
 }
 
 void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
@@ -1194,8 +1193,7 @@ void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
   const ConSanCacheOperationEncoding cache = classify_consan_cache_operation(inst.mnemonic(), arch);
   site.cache_operation = cache.operation;
   site.ordinary_acquire_mutation_supported = cache.ordinary_acquire_mutation_supported;
-  sites.add_semantic(
-      make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
 }
 
 void apply_common_vector_memory_encoding(ConSanDecodedMemoryOperands &operands,
@@ -1258,7 +1256,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     apply_flat_memory_encoding(site, raw.encoding, tracker);
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
   site.decoded_site().mnemonic = std::string(mnemonic);
-  site.container = consan_program_container_ref(kernel);
+  site.container = kernel.id;
   sites.add_access(std::move(site));
 }
 
@@ -1385,8 +1383,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
     }
-    sites.add_semantic(
-        make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+    sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
     return;
   }
 
@@ -1405,14 +1402,12 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
 
   if (mnemonic.starts_with("flat_")) {
     apply_vector_memory_decode(site, decode_consan_flat_memory_encoding(instruction_bytes, arch));
-    sites.add_semantic(
-        make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+    sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
     return;
   }
 
   apply_vector_memory_decode(site, decode_consan_global_memory_encoding(instruction_bytes, arch));
-  sites.add_semantic(
-      make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
 }
 
 void record_atomic_site(const Instruction &inst, const FlatPointerTracker &tracker,
@@ -1452,8 +1447,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
 
   site.mnemonic = std::string(mnemonic);
-  sites.add_semantic(
-      make_consan_program_site(consan_program_container_ref(kernel), std::move(site)));
+  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
 }
 
 void decode_container_stats(
@@ -1621,7 +1615,7 @@ void decode_container_stats(
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
         sites.access_sites().rbegin(), sites.access_sites().rend(), [&](const auto &site) {
-          return site.container.id == kernel.id && site.origin == ConSanAccessOrigin::Flat &&
+          return site.container == kernel.id && site.origin == ConSanAccessOrigin::Flat &&
                  site.kind == expected_kind;
         });
     const auto first = sites.access_sites().begin() + first_access_site;
@@ -1695,9 +1689,9 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   // decoded site is dead. Preserve the previous conservative inventory.
   if (owned_blocks.empty())
     return;
-  const auto inferred_container_range = [&](const ConSanProgramContainerRef &reference) {
-    return reference.id.valid() && reference.id.ordinal < containers.size() &&
-           containers[reference.id.ordinal].code_size_inferred_from_zero;
+  const auto inferred_container_range = [&](const ConSanProgramContainerId &reference) {
+    return reference.valid() && reference.ordinal < containers.size() &&
+           containers[reference.ordinal].code_size_inferred_from_zero;
   };
   inventory.erase_sites_if([&](const ConSanProgramSite &site) {
     if (!inferred_container_range(site.container))

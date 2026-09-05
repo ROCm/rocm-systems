@@ -339,20 +339,6 @@ struct ConSanProgramContainerId {
   auto operator<=>(const ConSanProgramContainerId &) const = default;
 };
 
-/// Attribution reference from a semantic site to the symbol range through
-/// which it was decoded.
-///
-/// The stable arena handle is the sole container identity. Kind, name,
-/// geometry, and descriptor facts remain in `ProgramInventory`; repeating
-/// them on every site created a second presentation record that could drift.
-/// Execution owners remain separate because a shared function can execute for
-/// several kernels.
-struct ConSanProgramContainerRef {
-  ConSanProgramContainerId id;
-
-  bool operator==(const ConSanProgramContainerRef &) const = default;
-};
-
 /// Instruction family from which one normalized access fact originated.
 ///
 /// This is decoder provenance, not engine applicability. `DirectToLds` names
@@ -440,16 +426,6 @@ struct ConSanProgramContainer {
 
   [[nodiscard]] bool is_kernel() const { return kind == ConSanProgramContainerKind::Kernel; }
 };
-
-/// Build the stable symbol attribution shared by every access decoded through
-/// a dispatchable kernel. Code-object identity and execution ownership are
-/// deliberately absent: the inventory publication stage owns those facts.
-[[nodiscard]] inline ConSanProgramContainerRef
-consan_program_container_ref(const ConSanProgramContainer &container) {
-  return {
-      .id = container.id,
-  };
-}
 
 /// Byte ranges and stable identity of one committed patch. This is the only
 /// slice needed to publish an intent-bound lowering location.
