@@ -32,6 +32,7 @@ using consan_detail::reject_atomic_candidate_scratch_overlap;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_guarded_dynamic_record;
+using consan_moi_detail::append_reserve_bounded_dynamic_record_slot;
 using consan_moi_detail::append_select_first_active_lane;
 using consan_moi_detail::DynamicRecordEmitter;
 using consan_moi_detail::kAtomicRecordLayout;
@@ -125,19 +126,11 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
 
-  if (!append_atomic_fetch_add_one_u32(words,
-                                       base + offsetof(ConSanMoiReportHeader, barrier_record_count),
-                                       slot_vgpr, *options.scratch_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI barrier record patch could not encode dynamic slot reserve");
-    return std::nullopt;
-  }
-
   const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-  if (!sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(value_vgpr, barrier_record_capacity, arch),
-          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr,
-                                                  arch))) {
-    errors.emplace_back("ConSan MOI barrier record patch could not encode capacity guard");
+  if (!append_reserve_bounded_dynamic_record_slot(
+          words, base + offsetof(ConSanMoiReportHeader, barrier_record_count),
+          barrier_record_capacity, slot_vgpr, value_vgpr, *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI barrier record patch could not reserve a bounded record slot");
     return std::nullopt;
   }
 
@@ -389,17 +382,10 @@ using consan_moi_detail::kFenceRecordLayout;
     return std::nullopt;
   }
   if (!options.moi_exec_save_sgpr ||
-      !append_atomic_fetch_add_one_u32(words,
-                                       base + offsetof(ConSanMoiReportHeader, atomic_record_count),
-                                       slot_vgpr, *options.scratch_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI atomic record patch could not reserve a dynamic record slot");
-    return std::nullopt;
-  }
-  if (!sequence.emit_all(
-          instrumentation::build_v_mov_b32_literal(lane_rank_vgpr, atomic_record_capacity, arch),
-          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(lane_rank_vgpr), slot_vgpr,
-                                                  arch))) {
-    errors.emplace_back("ConSan MOI atomic record patch could not guard dynamic record capacity");
+      !append_reserve_bounded_dynamic_record_slot(
+          words, base + offsetof(ConSanMoiReportHeader, atomic_record_count),
+          atomic_record_capacity, slot_vgpr, lane_rank_vgpr, *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI atomic record patch could not reserve a bounded record slot");
     return std::nullopt;
   }
   const ConSanMoiAtomicOperation atomic_operation = is_compare_exchange
@@ -643,17 +629,11 @@ using consan_moi_detail::kFenceRecordLayout;
       errors.emplace_back("ConSan MOI dynamic fence record could not select a wave publisher");
       return std::nullopt;
     }
-    if (!append_atomic_fetch_add_one_u32(words,
-                                         base + offsetof(ConSanMoiReportHeader, fence_record_count),
-                                         slot_vgpr, *options.scratch_vgpr, arch)) {
-      errors.emplace_back("ConSan MOI dynamic fence record could not reserve a wave slot");
-      return std::nullopt;
-    }
-    if (!sequence.emit_all(
-            instrumentation::build_v_mov_b32_literal(value_vgpr, record_capacity_or_count, arch),
-            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr,
-                                                    arch))) {
-      errors.emplace_back("ConSan MOI dynamic fence record could not guard capacity");
+    if (!append_reserve_bounded_dynamic_record_slot(
+            words, base + offsetof(ConSanMoiReportHeader, fence_record_count),
+            record_capacity_or_count, slot_vgpr, value_vgpr, *options.scratch_vgpr, arch)) {
+      errors.emplace_back(
+          "ConSan MOI dynamic fence record could not reserve a bounded record slot");
       return std::nullopt;
     }
     std::vector<uint32_t> record_words;

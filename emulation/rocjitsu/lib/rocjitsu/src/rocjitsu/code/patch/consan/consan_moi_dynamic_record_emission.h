@@ -73,6 +73,11 @@ enum class MoiVisibleEvidencePublicationResult : uint8_t {
 [[nodiscard]] bool append_atomic_fetch_add_one_u32(std::vector<uint32_t> &words,
                                                    uint64_t counter_address, uint16_t result_vgpr,
                                                    uint16_t scratch_vgpr, rj_code_arch_t arch);
+/// Reserve one monotonically numbered record slot and leave VCC set for lanes
+/// whose slot is within the table capacity.
+[[nodiscard]] bool append_reserve_bounded_dynamic_record_slot(
+    std::vector<uint32_t> &words, uint64_t counter_address, uint32_t record_capacity,
+    uint16_t slot_vgpr, uint16_t capacity_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
 [[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
                                                 uint32_t value, uint16_t scratch_vgpr,
                                                 rj_code_arch_t arch);

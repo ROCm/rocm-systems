@@ -36,6 +36,20 @@ namespace {
                                                             *target);
 }
 
+bool append_reserve_bounded_dynamic_record_slot(std::vector<uint32_t> &words,
+                                                uint64_t counter_address, uint32_t record_capacity,
+                                                uint16_t slot_vgpr, uint16_t capacity_vgpr,
+                                                uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  InstructionSequence sequence(words);
+  sequence
+      .require(
+          append_atomic_fetch_add_one_u32(words, counter_address, slot_vgpr, scratch_vgpr, arch))
+      .append(instrumentation::build_v_mov_b32_literal(capacity_vgpr, record_capacity, arch),
+              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(capacity_vgpr), slot_vgpr,
+                                                      arch));
+  return sequence.finish();
+}
+
 [[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
                                                 uint32_t value, uint16_t scratch_vgpr,
                                                 rj_code_arch_t arch) {
