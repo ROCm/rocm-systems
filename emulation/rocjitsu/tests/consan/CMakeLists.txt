@@ -28,6 +28,10 @@ target_include_directories(
     consan_capability_manifest
     PRIVATE "${CMAKE_SOURCE_DIR}/lib/rocjitsu/src"
 )
+target_link_libraries(
+    consan_capability_manifest
+    PRIVATE rocjitsu_dbt_internal
+)
 rj_configure_target(consan_capability_manifest TEST)
 add_custom_target(
     consan_capability_manifest_update
