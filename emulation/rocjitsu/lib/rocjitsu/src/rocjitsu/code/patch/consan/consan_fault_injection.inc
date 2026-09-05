@@ -9,8 +9,9 @@ struct FaultApplicationState {
       : program_inventory(result.program_inventory), fault_sites(result.fault_sites),
         barrier_move_destinations(result.barrier_move_destinations),
         replacement(result.replacement), patches(result.patches), mutation(result.mutation),
-        outcome(result.outcome), transform_failure_cause(result.transform_failure_cause),
-        warnings(result.warnings), errors(result.errors) {}
+        staged_text_fragments(result.staged_text_fragments), outcome(result.outcome),
+        transform_failure_cause(result.transform_failure_cause), warnings(result.warnings),
+        errors(result.errors) {}
 
   const ProgramInventory &program_inventory;
   std::span<const ConSanFaultSite> fault_sites;
@@ -19,6 +20,7 @@ struct FaultApplicationState {
   std::vector<ConSanPatchInfo> patches;
   ConSanMutationOutcome mutation;
   ConSanSynchronizationMutation synchronization_mutation;
+  std::vector<ConSanTextFragment> staged_text_fragments;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   std::optional<ConSanTransformFailureCause> transform_failure_cause;
   std::vector<std::string> warnings;
@@ -115,10 +117,12 @@ struct ResolvedFaultTargets {
   std::optional<OrdinaryAcquireMutationTarget> ordinary;
 };
 
-static bool apply_resolved_consan_fault_mutations(
-    const AmdGpuCodeObject &code_object, rj_code_arch_t arch, const MutationRequest &mutation,
-    const TransformPolicy &transform_policy, const ResolvedFaultTargets &targets,
-    bool require_exactly_one, FaultApplicationState &transaction);
+static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+                                                  rj_code_arch_t arch,
+                                                  const MutationRequest &mutation,
+                                                  const ResolvedFaultTargets &targets,
+                                                  bool require_exactly_one,
+                                                  FaultApplicationState &transaction);
 
 [[nodiscard]] AtomicOrderBoundary resolve_atomic_order_boundary(const ProgramInventory &inventory,
                                                                 const ConSanFaultSite &site,
@@ -235,7 +239,9 @@ void mark_participant_mutation_unsupported(State &result, std::string_view reaso
                                std::string(reason));
 }
 
-[[nodiscard]] size_t applied_fault_mutation_count(std::span<const ConSanPatchInfo> patches) {
+[[nodiscard]] size_t
+applied_fault_mutation_count(std::span<const ConSanPatchInfo> patches,
+                             std::span<const ConSanTextFragment> fragments = {}) {
   size_t count = 0;
   size_t move_targets = 0;
   size_t barrier_id_scope_members = 0;
@@ -284,7 +290,10 @@ void mark_participant_mutation_unsupported(State &result, std::string_view reaso
   };
   for (const auto &patch : patches)
     note_patch(patch, patch);
-  // One whole-barrier movement currently has two target records.
+  for (const ConSanTextFragment &fragment : fragments)
+    note_patch(fragment.patch, fragment.patch);
+  // Legacy movement has two target records; markerless movement has one
+  // fragment enclosing the adjacent logical pair.
   count += (move_targets + 1u) / 2u;
   // ID/scope rewriting is transactional: all member patch records represent
   // one selected logical pair or lifecycle mutation.
@@ -816,9 +825,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
   artifacts.mutation.fault.planned = artifacts.fault_plans.size();
   if (apply && artifacts.errors.empty()) {
     FaultApplicationState transaction(artifacts);
-    const bool mechanisms_succeeded =
-        apply_resolved_consan_fault_mutations(code_object, arch, mutation, transform_policy,
-                                              targets, require_exactly_one_applied, transaction);
+    const bool mechanisms_succeeded = apply_resolved_consan_fault_mutations(
+        code_object, arch, mutation, targets, require_exactly_one_applied, transaction);
     const bool accepted = transaction.successful();
     artifacts.errors = std::move(transaction.errors);
     artifacts.transform_failure_cause = transaction.transform_failure_cause;
@@ -834,6 +842,23 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     artifacts.patches = std::move(transaction.patches);
     artifacts.mutation = std::move(transaction.mutation);
     artifacts.synchronization_mutation = std::move(transaction.synchronization_mutation);
+    artifacts.staged_text_fragments = std::move(transaction.staged_text_fragments);
+    if (!artifacts.staged_text_fragments.empty()) {
+      const std::span<const uint8_t> descriptor_image =
+          artifacts.replacement.empty()
+              ? std::span<const uint8_t>(
+                    reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                    code_object.image_size())
+              : std::span<const uint8_t>(artifacts.replacement);
+      if (!finalize_consan_text_rewrites(descriptor_image, arch,
+                                         transform_policy.patched_image_growth_limit,
+                                         "fault mutation", artifacts)) {
+        artifacts.discard_candidate_modification();
+        artifacts.mutation.fault.applied = 0u;
+        return;
+      }
+      artifacts.mutation.fault.applied = applied_fault_mutation_count(artifacts.patches);
+    }
   }
 }
 
@@ -1207,7 +1232,6 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
                                                rj_code_arch_t arch,
                                                const ResolvedFaultTargets &targets,
                                                ConSanBarrierMoveDirection direction,
-                                               const ConSanPatchedImageGrowthLimit &growth_limit,
                                                FaultApplicationState &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back(
@@ -1243,8 +1267,15 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
       return;
     }
 
-    CodeObjectPatcher patcher(code_object);
-    const std::span<const uint8_t> text = patcher.text_bytes();
+    if (code_object.text_sections().size() != 1u) {
+      result.outcome = ConSanTransformOutcome::Unsupported;
+      result.warnings.emplace_back(
+          "ConSan markerless barrier move requires exactly one executable text section");
+      return;
+    }
+    const Section &text_section = *code_object.text_sections().front();
+    const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(text_section.data()),
+                                        text_section.size());
     if (destination->text_offset > text.size() ||
         destination->size > text.size() - destination->text_offset) {
       result.errors.emplace_back("ConSan markerless barrier move destination exceeds .text");
@@ -1255,87 +1286,9 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
       std::memcpy(&barrier_words[i], text.data() + ordered_sources[i].text_offset,
                   sizeof(uint32_t));
     }
-    std::vector<uint32_t> destination_words(destination->size / sizeof(uint32_t));
-    std::memcpy(destination_words.data(), text.data() + destination->text_offset,
-                destination->size);
-
-    const uint64_t trampoline_size = 2u * sizeof(uint32_t) + destination->size + sizeof(uint32_t);
-    std::optional<DbiPatchLocalCave> local_cave;
-    for (const LocalNopCave &candidate :
-         find_uncovered_nop_caves(code_object, result.program_inventory, arch)) {
-      if (static_cast<uint64_t>(candidate.word_count) * sizeof(uint32_t) < trampoline_size)
-        continue;
-      const uint64_t return_pc = candidate.text_offset + trampoline_size - sizeof(uint32_t);
-      if (compute_sopp_branch_simm16(destination->text_offset, candidate.text_offset) &&
-          compute_sopp_branch_simm16(return_pc, destination->text_offset + destination->size)) {
-        local_cave = DbiPatchLocalCave{
-            candidate.text_offset, static_cast<uint64_t>(candidate.word_count) * sizeof(uint32_t)};
-        break;
-      }
-    }
-    DbiPatchPlacementPlanner placement_planner(arch, text.size());
-    DbiPatchPlacementRequest placement_request;
-    placement_request.anchor_offset = destination->text_offset;
-    placement_request.original_size = destination->size;
-    placement_request.body_size = 2u * sizeof(uint32_t) + destination->size;
-    placement_request.local_cave = local_cave;
-    placement_request.allow_appended_cave = true;
-    std::string placement_error;
-    const auto placement = placement_planner.plan(placement_request, &placement_error);
-    if (!placement) {
-      result.outcome = ConSanTransformOutcome::Unsupported;
-      result.warnings.emplace_back(
-          "ConSan markerless barrier move has no reachable local or appended cave: " +
-          placement_error);
-      return;
-    }
-    const auto forward =
-        compute_sopp_branch_simm16(placement->anchor_offset, placement->body_offset);
-    const auto ret =
-        compute_sopp_branch_simm16(placement->return_branch_offset, placement->return_target);
-    if (!forward || !ret) {
-      result.errors.emplace_back(
-          "ConSan markerless barrier move trampoline branch exceeds s_branch simm16");
-      return;
-    }
-
-    std::vector<uint32_t> cave_words;
-    cave_words.reserve(2u + destination_words.size() + 1u);
-    if (direction == ConSanBarrierMoveDirection::Earlier) {
-      cave_words.insert(cave_words.end(), barrier_words.begin(), barrier_words.end());
-      cave_words.insert(cave_words.end(), destination_words.begin(), destination_words.end());
-    } else {
-      cave_words.insert(cave_words.end(), destination_words.begin(), destination_words.end());
-      cave_words.insert(cave_words.end(), barrier_words.begin(), barrier_words.end());
-    }
-    cave_words.push_back(build_s_branch(*ret, arch));
-
-    std::vector<uint8_t> new_text(text.begin(), text.end());
     const uint32_t nop = build_s_nop(0, arch);
-    for (const BarrierSite &source : ordered_sources)
-      std::memcpy(new_text.data() + source.text_offset, &nop, sizeof(nop));
-    const uint32_t branch = build_s_branch(*forward, arch);
-    std::memcpy(new_text.data() + destination->text_offset, &branch, sizeof(branch));
-    for (uint32_t offset = sizeof(uint32_t); offset < destination->size; offset += sizeof(uint32_t))
-      std::memcpy(new_text.data() + destination->text_offset + offset, &nop, sizeof(nop));
-    if (placement->kind == DbiPatchPlacementKind::AppendedCave) {
-      if (new_text.size() != placement->body_offset) {
-        result.errors.emplace_back(
-            "ConSan markerless barrier move emitted a stale appended-cave mapping");
-        return;
-      }
-      append_consan_patch_words(new_text, cave_words);
-    } else {
-      std::memcpy(new_text.data() + placement->body_offset, cave_words.data(),
-                  cave_words.size() * sizeof(uint32_t));
-    }
-    if (!replace_consan_text(patcher, new_text, growth_limit, "markerless barrier move",
-                             result.program_inventory.code_object_id(), result.errors,
-                             &result.transform_failure_cause)) {
-      return;
-    }
-    result.replacement = std::move(patcher).emit();
-
+    std::vector<ConSanTextFragment> fragments;
+    fragments.reserve(ordered_sources.size() + 1u);
     for (const BarrierSite &source : ordered_sources) {
       ConSanPatchInfo source_info;
       source_info.phase = ConSanPatchPhase::Mutation;
@@ -1344,15 +1297,13 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
       source_info.trampoline_offset = source.text_offset;
       source_info.original_size = source.size;
       source_info.barrier_move_direction = direction;
-      result.patches.push_back(source_info);
+      fragments.push_back(ConSanTextFragment::replacement({nop}, std::move(source_info)));
     }
     ConSanPatchInfo target_info;
     target_info.phase = ConSanPatchPhase::Mutation;
     target_info.kind = ConSanPatchKind::InlineBarrierMoveTargetRewrite;
     target_info.anchor_offset = destination->text_offset;
-    target_info.trampoline_offset = placement->body_offset;
     target_info.original_size = destination->size;
-    target_info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
     target_info.barrier_move_direction = direction;
     if (cross_block) {
       target_info.barrier_move_cfg_contract = destination->cfg_contract;
@@ -1363,21 +1314,36 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
       target_info.structured_destination_offset = destination->text_offset;
       target_info.structured_source_offset = destination->structured_source_offset;
     }
-    result.patches.push_back(target_info);
-    const uint64_t relocated_pair_offset =
-        placement->body_offset +
-        (direction == ConSanBarrierMoveDirection::Later ? destination->size : 0u);
+    ConSanTextFragment target_fragment;
+    target_fragment.kind = ConSanTextFragmentKind::Around;
+    if (direction == ConSanBarrierMoveDirection::Earlier)
+      target_fragment.before_words.assign(barrier_words.begin(), barrier_words.end());
+    else
+      target_fragment.after_words.assign(barrier_words.begin(), barrier_words.end());
+    target_fragment.patch = std::move(target_info);
+    const uint32_t relocated_pair_offset =
+        direction == ConSanBarrierMoveDirection::Later ? destination->size : 0u;
+    const SynchronizationInventoryView synchronization = result.program_inventory.sync();
     for (const ConSanFaultSite *member : {targets.move_primary, targets.move_companion}) {
       const ConSanProgramSite *source = result.source(*member);
+      const ConSanSyncEvent *event = synchronization.find_event(member->source_site);
       if (source == nullptr || source->text_offset() < ordered_sources[0].text_offset) {
         result.errors.emplace_back(
             "ConSan markerless barrier move lost its semantic source coordinate");
         return;
       }
-      result.note_event_mutation(member->source_site, ConSanSyncEventMutationKind::Relocated,
-                                 relocated_pair_offset + source->text_offset() -
-                                     ordered_sources[0].text_offset);
+      if (event == nullptr) {
+        result.errors.emplace_back(
+            "ConSan markerless barrier move lost its synchronization-event identity");
+        return;
+      }
+      target_fragment.sync_relocations.push_back(
+          {.source_event = synchronization.event_id(*event),
+           .fragment_relative_offset = static_cast<uint32_t>(
+               relocated_pair_offset + source->text_offset() - ordered_sources[0].text_offset)});
     }
+    fragments.push_back(std::move(target_fragment));
+    append_consan_text_fragments(std::move(fragments), result.staged_text_fragments);
     result.mark_modified();
     result.warnings.emplace_back(
         "ConSan barrier move fault relocated an adjacent logical pair " +
@@ -1899,17 +1865,18 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   }
 }
 
-static bool apply_resolved_consan_fault_mutations(
-    const AmdGpuCodeObject &code_object, rj_code_arch_t arch, const MutationRequest &mutation,
-    const TransformPolicy &transform_policy, const ResolvedFaultTargets &targets,
-    bool require_exactly_one, FaultApplicationState &transaction) {
+static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+                                                  rj_code_arch_t arch,
+                                                  const MutationRequest &mutation,
+                                                  const ResolvedFaultTargets &targets,
+                                                  bool require_exactly_one,
+                                                  FaultApplicationState &transaction) {
   if (targets.drop_primary != nullptr || targets.drop_group || targets.drop_pair) {
     try_apply_barrier_drop_fault_patch(code_object, arch, targets, transaction);
   }
   if (targets.move_primary != nullptr && transaction.errors.empty()) {
     try_apply_barrier_move_fault_patch(code_object, arch, targets,
-                                       mutation.fault_barrier_move_direction,
-                                       transform_policy.patched_image_growth_limit, transaction);
+                                       mutation.fault_barrier_move_direction, transaction);
   }
   if (targets.retarget_sequence != nullptr && transaction.errors.empty()) {
     try_apply_barrier_id_scope_fault_patch(
@@ -1941,7 +1908,8 @@ static bool apply_resolved_consan_fault_mutations(
         mutation.fault_ordinary_wrong_address, mutation.fault_ordinary_weaken_order,
         mutation.fault_ordinary_weaken_scope, mutation.fault_ordinary_address_delta, transaction);
   }
-  transaction.mutation.fault.applied = applied_fault_mutation_count(transaction.patches);
+  transaction.mutation.fault.applied =
+      applied_fault_mutation_count(transaction.patches, transaction.staged_text_fragments);
   const bool mechanisms_succeeded = transaction.successful();
   if (require_exactly_one && transaction.outcome != ConSanTransformOutcome::Unsupported &&
       transaction.mutation.fault.applied != 1u) {

@@ -37,6 +37,11 @@ stage_consan_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t a
 [[nodiscard]] bool stage_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
                                                ConSanTransformArtifacts &result);
 
+/// Append fragments to a private candidate transaction.  Final placement and
+/// publication remain deferred until that candidate has been accepted.
+void append_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
+                                  std::vector<ConSanTextFragment> &transaction);
+
 /// Commit all staged access programs through one object-wide relocation.
 [[nodiscard]] bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image,
                                                  rj_code_arch_t arch,

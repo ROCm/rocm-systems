@@ -3990,6 +3990,18 @@ if(_fault_composition_body MATCHES
     )
 endif()
 
+# Perturbation owns synchronization policy and semantic validation, but stages
+# its edit through the shared text transaction.  Local cave discovery, branch
+# placement, ELF rewriting, and patch publication belong to that transaction.
+file(READ "${_consan_dir}/consan_perturbation.cpp" _perturbation_body)
+if(NOT _perturbation_body MATCHES "stage_consan_text_fragments" OR
+   _perturbation_body MATCHES
+       "DbiPatchPlacementPlanner|CodeObjectPatcher|find_uncovered_nop_caves|replace_consan_text")
+    message(FATAL_ERROR
+        "ConSan perturbation must stage semantic fragments and must not regain a private placement/publication backend"
+    )
+endif()
+
 file(READ "${_consan_dir}/consan_growth_policy.h" _growth_policy_contract)
 if(_growth_policy_contract MATCHES "ConSanOptions" OR
    _growth_policy_contract MATCHES "ConSanTransformArtifacts" OR
@@ -4003,6 +4015,13 @@ if(NOT _fault_application_body MATCHES "struct FaultApplicationState" OR
    NOT _fault_application_body MATCHES "FaultApplicationState transaction")
     message(FATAL_ERROR
         "ConSan fault mechanisms lost their private complete-plan candidate transaction"
+    )
+endif()
+if(NOT _fault_application_body MATCHES "append_consan_text_fragments" OR
+   _fault_application_body MATCHES
+       "DbiPatchPlacementPlanner|find_uncovered_nop_caves|replace_consan_text|append_consan_patch_words")
+    message(FATAL_ERROR
+        "ConSan fault mutation must stage barrier movement through the shared text transaction"
     )
 endif()
 foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)

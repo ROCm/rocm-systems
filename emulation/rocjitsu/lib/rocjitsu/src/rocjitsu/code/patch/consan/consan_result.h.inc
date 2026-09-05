@@ -270,6 +270,14 @@ struct ConSanTextFragmentBranchFixup {
   ConSanTextFragmentBranchTarget target = ConSanTextFragmentBranchTarget::Guest;
 };
 
+/// A synchronization event carried by a fragment to its final text location.
+/// The producer retains semantic identity and a fragment-relative coordinate;
+/// the text transaction supplies destination geometry after placement.
+struct ConSanTextFragmentSyncRelocation {
+  ConSanSyncEventId source_event;
+  uint32_t fragment_relative_offset = 0;
+};
+
 /// One lowering fragment awaiting the object-wide text relocation transaction.
 ///
 /// Fragments retain semantic source coordinates and owner scope but no destination geometry.
@@ -306,6 +314,7 @@ struct ConSanTextFragment {
   std::vector<uint32_t> replacement_words;
   std::vector<uint32_t> after_words;
   std::vector<ConSanTextFragmentBranchFixup> branch_fixups;
+  std::vector<ConSanTextFragmentSyncRelocation> sync_relocations;
   ConSanPatchInfo patch;
 };
 

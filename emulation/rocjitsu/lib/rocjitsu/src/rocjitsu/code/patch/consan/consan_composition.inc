@@ -459,22 +459,37 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   redundant_options.max_patches =
       overall_patch_budget - static_cast<uint32_t>(perturbation.plans.size());
 
-  // LDS and FLAT stage site-local programs without choosing physical caves.
-  // Perturbation composes against the still-source-coordinate image, and one
-  // final relocation then carries every selected operation into active text.
-  if (options.probe_lds_check_trap)
-    try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
-
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(
-        *code_object, arch, static_cast<const TransformPolicy &>(options), perturbation, result);
-    if (result.mutation.perturbation.applied != perturbation.plans.size()) {
+    const bool staged = stage_perturbation_patches(*code_object, arch, perturbation, result);
+    const size_t staged_count = static_cast<size_t>(
+        std::ranges::count_if(result.staged_text_fragments, [](const ConSanTextFragment &fragment) {
+          return fragment.patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+        }));
+    if (!staged || staged_count != perturbation.plans.size()) {
       if (result.outcome == ConSanTransformOutcome::ModifiedValid)
         result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
                                                : ConSanTransformOutcome::Invalid;
       result.discard_candidate_modification();
     }
   }
+
+  // Perturbation retains an independently validated exact trampoline. Commit
+  // that small fragment transaction before access fragments can nest a larger
+  // probe program around the same guest boundary.
+  if (has_perturbation && has_redundant_access && !result.staged_text_fragments.empty() &&
+      result.errors.empty()) {
+    const std::span<const uint8_t> descriptor_image =
+        result.replacement.empty() ? code_object_bytes
+                                   : std::span<const uint8_t>(result.replacement);
+    if (!finalize_consan_text_rewrites(descriptor_image, arch, options.patched_image_growth_limit,
+                                       "SC perturbation", result))
+      result.discard_candidate_modification();
+  }
+
+  // LDS and FLAT access proofs then share one object-wide relocation over the
+  // already committed perturbation image.
+  if (options.probe_lds_check_trap && result.errors.empty())
+    try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
 
   if (has_redundant_access) {
     if (options.probe_flat_check_trap && result.errors.empty()) {
@@ -530,11 +545,19 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
   if (!result.staged_text_fragments.empty() && result.errors.empty()) {
     const std::string_view subject = options.probe_lds_check_trap && options.probe_flat_check_trap
                                          ? "SuperCollider access proof"
-                                     : options.probe_lds_check_trap ? "LDS check/trap proof"
-                                                                    : "flat check/trap proof";
-    if (!finalize_consan_text_rewrites(result.replacement, arch, options.patched_image_growth_limit,
+                                     : options.probe_lds_check_trap  ? "LDS check/trap proof"
+                                     : options.probe_flat_check_trap ? "flat check/trap proof"
+                                                                     : "SC perturbation";
+    const std::span<const uint8_t> descriptor_image =
+        result.replacement.empty() ? code_object_bytes
+                                   : std::span<const uint8_t>(result.replacement);
+    if (!finalize_consan_text_rewrites(descriptor_image, arch, options.patched_image_growth_limit,
                                        subject, result))
       result.discard_candidate_modification();
+  }
+  if (has_perturbation) {
+    result.mutation.perturbation.applied = static_cast<size_t>(std::ranges::count(
+        result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
   }
 
   publish_unplaced_sc_access_rejections(result.coverage_ledger, result.errors);

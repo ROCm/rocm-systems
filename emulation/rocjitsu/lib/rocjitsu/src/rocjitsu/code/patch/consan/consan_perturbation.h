@@ -32,9 +32,9 @@ void build_perturbation_plan(const ProgramInventory &program_inventory,
                              std::vector<std::string> &errors,
                              std::span<const ConSanPerturbationPlan> carried_plans = {});
 
-void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    const TransformPolicy &transform_policy,
-                                    const ConSanPerturbationPlanningState &planning,
-                                    ConSanTransformArtifacts &result);
+[[nodiscard]] bool stage_perturbation_patches(const AmdGpuCodeObject &code_object,
+                                              rj_code_arch_t arch,
+                                              const ConSanPerturbationPlanningState &planning,
+                                              ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu
