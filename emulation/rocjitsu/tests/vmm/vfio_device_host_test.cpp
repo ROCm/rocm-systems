@@ -609,25 +609,33 @@ TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
 // a 64-deep queue and discarded silently past that, which gave a caller no way to
 // tell that its request had been thrown away.
 TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
+  // Declared before the fixture so destruction order is the reverse of what
+  // it would be otherwise: everything the callbacks touch outlives the join
+  // in the fixture destructor, on every return path.
+  std::promise<void> running;
+  std::future<void> is_running = running.get_future();
+  std::promise<void> release;
+  std::future<void> may_finish = release.get_future();
+  bool second_ran = false;
+
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   // Block the first request inside the serving thread so it stays outstanding
   // while the second is offered.
-  std::promise<void> running;
-  std::future<void> is_running = running.get_future();
-  std::promise<void> release;
-  std::future<void> may_finish = release.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread([&running, &may_finish] {
     running.set_value();
     (void)may_finish.wait_for(std::chrono::seconds(10));
   }));
   ASSERT_EQ(is_running.wait_for(std::chrono::seconds(10)), std::future_status::ready);
 
-  bool second_ran = false;
   EXPECT_FALSE(served.host().ask_serving_thread([&second_ran] { second_ran = true; }))
       << "a second request must be refused while one is outstanding";
   release.set_value();
+
+  // Join before reading anything the callbacks wrote, so the write above is
+  // visible here and the bounded wait in the first callback has ended.
+  served.stop_serving();
   EXPECT_FALSE(second_ran) << "a refused request must not run";
 }
 
