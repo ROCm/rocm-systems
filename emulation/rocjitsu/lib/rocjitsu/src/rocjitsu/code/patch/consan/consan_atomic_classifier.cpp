@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 
 namespace rocjitsu {
 namespace {
@@ -148,7 +149,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (!target->atomic_address_materialization.buffer_resource)
+    if (!target->program_analysis || !target->program_analysis->decode_buffer_memory)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(Reason::InvalidAccessWidth);
@@ -197,8 +198,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   const uint32_t expected_size = memory.instruction_word_count * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(Reason::UnsupportedEncoding);
-  if ((memory.scale_offset == ConSanScaleOffsetCapability::Supported &&
-       !site.raw_scale_offset) ||
+  if ((memory.scale_offset == ConSanScaleOffsetCapability::Supported && !site.raw_scale_offset) ||
       (memory.scale_offset != ConSanScaleOffsetCapability::Supported &&
        site.raw_scale_offset.value_or(false)))
     return reject(Reason::UnsupportedEncoding);

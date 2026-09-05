@@ -186,6 +186,8 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   EXPECT_EQ(buffer_form.form->kind, ConSanAtomicLoweringFormKind::BufferResourceVectorOffset);
   EXPECT_EQ(buffer_form.form->scalar_base_sgpr, 24u);
   EXPECT_EQ(buffer_form.form->scalar_offset_sgpr, 10u);
+  EXPECT_EQ(classify_consan_atomic_lowering(buffer, ROCJITSU_CODE_ARCH_RDNA4).normalization_reason,
+            ConSanAtomicClassifierReason::UnsupportedAddressSource);
 
   AtomicTargetCase cdna4{ROCJITSU_CODE_ARCH_CDNA4, 8u, 8u};
   ConSanAtomicSite global = exact_flat_atomic(cdna4);
