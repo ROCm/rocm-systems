@@ -13,16 +13,16 @@
 #include <string>
 #include <vector>
 
-#include "bootstrap_stubs.h"  // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
-#include "env_fakes.h"    // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
+#include "bootstrap_stubs.h"   // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
+#include "env_fakes.h"         // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
-#include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
-#include "nccl_stubs.h"  // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
-#include "rccl_wrap_fakes.h"  // src/rccl_wrap.cc seams (shared)
-#include "recorder_fakes.h"  // rccl::Recorder no-ops (shared)
-#include "transport_stubs.h"  // g_rcclUseAinic (shared)
-#include "tuning_fakes.h"  // g_tuningIndexValue / g_tuningIndexLastArch (shared)
+#include "nccl_stubs.h"        // g_ncclAsyncLaunch / g_collTraceDestroy / g_ncclTunerPluginUnload (shared)
+#include "os.h"                // ncclAffinity, for the initTransportsRank affinity seams below
+#include "rccl_wrap_fakes.h"   // src/rccl_wrap.cc seams (shared)
+#include "recorder_fakes.h"    // rccl::Recorder no-ops (shared)
+#include "transport_stubs.h"   // g_rcclUseAinic (shared)
+#include "tuning_fakes.h"      // g_tuningIndexValue / g_tuningIndexLastArch (shared)
 
 struct ncclTopoSystem;
 // Forward-declared, not #include "bootstrap.h": including it here would pull src/include/recorder.h in alongside the
@@ -198,7 +198,6 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 // -------------------------------------------------------------------------
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
-extern ncclResult_t g_ncclTunerPluginUnloadResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 // AllGather3 seams (:1786-2213), rung 4; ncclTopoPostset ends it with ncclInvalidUsage, not rung 3's ncclTimeout.
 extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
