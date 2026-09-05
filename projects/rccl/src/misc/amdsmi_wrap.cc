@@ -627,17 +627,26 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     return fabricInitResult;
   }
 
-  // amd_smi 26.x shipped both fabric payload sizes under the same SONAME, so
-  // the library version cannot identify a mixed header/runtime installation.
-  // Probe through an oversized canary buffer before using the typed structure.
-  // If the layouts differ (or cannot be identified), use the sysfs backend.
+  // amd_smi shipped three fabric payload sizes under the same SONAME, so the library version
+  // cannot identify a mixed header/runtime installation. Probe through a canary buffer before
+  // using the typed structure. If the layouts differ, or the probe cannot conclude anything, use
+  // the sysfs backend: three outcomes now hang off this classifier, so every path that leaves it
+  // uninformed has to fall back rather than proceed unverified.
   if (!useSysfs && amd_smi_FabricFunctionsLoaded()) {
     amdsmi_processor_handle probeHandle;
-    if (getProcessorHandle(0, &probeHandle) == ncclSuccess) {
+    if (getProcessorHandle(0, &probeHandle) != ncclSuccess) {
+      WARN("AMD SMI fabric: no processor handle to probe the library's fabric ABI with; falling back to sysfs");
+      useSysfs = true;
+    } else {
       amdSmiFabricInfoBuffer probeBuffer;
       amdSmiPrepareFabricInfoBuffer(probeBuffer);
-      pfn_amdsmi_get_gpu_fabric_info(probeHandle, amdSmiFabricInfoBufferAsInfo(probeBuffer));
-      const amdSmiFabricRuntimeLayout runtimeLayout = amdSmiDetectFabricRuntimeLayout(probeBuffer);
+      // A failed call returns before writing anything, leaving a buffer indistinguishable from one
+      // a runtime chose not to fill, so the status has to gate the classification.
+      const amdsmi_status_t probeStatus =
+        pfn_amdsmi_get_gpu_fabric_info(probeHandle, amdSmiFabricInfoBufferAsInfo(probeBuffer));
+      const amdSmiFabricRuntimeLayout runtimeLayout =
+        probeStatus == AMDSMI_STATUS_SUCCESS ? amdSmiDetectFabricRuntimeLayout(probeBuffer)
+                                             : amdSmiFabricRuntimeLayout::Unknown;
       const bool runtimeLayoutIs8Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::EightGpu;
       if (runtimeLayout == amdSmiFabricRuntimeLayout::Unknown) {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
@@ -650,9 +659,12 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
              "falling back to sysfs");
         useSysfs = true;
       } else if (runtimeLayoutIs8Gpu != amdSmiFabricLayoutIs8Gpu) {
-        WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %u-GPU layout, but the loaded library uses the "
-             "%u-GPU layout; falling back to sysfs",
-             amdSmiFabricLayoutIs8Gpu ? 8 : 16, runtimeLayoutIs8Gpu ? 8 : 16);
+        // Name all three on both sides. Reporting an extended-union build as "16-GPU" sends
+        // whoever debugs this next after the wrong mismatch.
+        WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %s layout, but the loaded library uses the %s "
+             "layout; falling back to sysfs",
+             amdSmiFabricLayoutIs8Gpu ? "8-GPU" : (amdSmiFabricLayoutIs16Gpu ? "16-GPU" : "extended-union"),
+             runtimeLayoutIs8Gpu ? "8-GPU" : "16-GPU");
         useSysfs = true;
       }
     }
