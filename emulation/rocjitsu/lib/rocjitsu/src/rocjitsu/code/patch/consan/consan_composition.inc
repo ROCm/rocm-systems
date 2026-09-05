@@ -488,13 +488,19 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
         static_cast<const ConSanDebugOverrides &>(options),
         static_cast<const TransformPolicy &>(options), apply_fault_plan, apply_fault_plan,
         require_exactly_one_applied_fault, result);
-    build_perturbation_plan(result.program_inventory, options, perturbation,
-                            result.mutation.perturbation, result.errors, carried_plans);
+    build_perturbation_plan(
+        result.program_inventory, static_cast<const ConSanRequest &>(options),
+        static_cast<const MutationRequest &>(options),
+        static_cast<const ConSanDebugOverrides &>(options), perturbation,
+        result.mutation.perturbation, result.errors, carried_plans);
     return result;
   }
   if (has_perturbation) {
-    build_perturbation_plan(result.program_inventory, options, perturbation,
-                            result.mutation.perturbation, result.errors, carried_plans);
+    build_perturbation_plan(
+        result.program_inventory, static_cast<const ConSanRequest &>(options),
+        static_cast<const MutationRequest &>(options),
+        static_cast<const ConSanDebugOverrides &>(options), perturbation,
+        result.mutation.perturbation, result.errors, carried_plans);
     if (!result.errors.empty())
       return result;
   }
@@ -534,7 +540,9 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
     try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
 
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(*code_object, arch, options, perturbation, result);
+    try_apply_perturbation_patches(*code_object, arch,
+                                   static_cast<const TransformPolicy &>(options), perturbation,
+                                   result);
     if (result.mutation.perturbation.applied != perturbation.plans.size()) {
       if (result.outcome == ConSanTransformOutcome::ModifiedValid)
         result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged

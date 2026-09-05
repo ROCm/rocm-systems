@@ -364,11 +364,13 @@ foreach(_source IN ITEMS
     consan_fault_selection.cpp
     consan_fault_injection.h
     consan_fault_injection.inc
+    consan_perturbation.h
+    consan_perturbation.cpp
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"
         "ConSanOptions"
-        "fault planning and application must consume mutation, debug, and transform-policy contracts directly"
+        "fault and perturbation transforms must consume semantic input contracts directly"
     )
 endforeach()
 

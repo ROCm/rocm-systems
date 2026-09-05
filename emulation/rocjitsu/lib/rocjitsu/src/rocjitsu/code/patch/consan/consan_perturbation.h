@@ -25,13 +25,15 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
 consan_perturbation_candidate_identity(const ProgramInventory &program_inventory,
                                        const ConSanPerturbationCandidate &candidate);
 
-void build_perturbation_plan(const ProgramInventory &program_inventory, const ConSanOptions &options,
+void build_perturbation_plan(const ProgramInventory &program_inventory,
+                             const ConSanRequest &request, const MutationRequest &mutation,
+                             const ConSanDebugOverrides &debug,
                              ConSanPerturbationPlanningState &planning, ConSanMutationTally &tally,
                              std::vector<std::string> &errors,
                              std::span<const ConSanPerturbationPlan> carried_plans = {});
 
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    const ConSanOptions &options,
+                                    const TransformPolicy &transform_policy,
                                     const ConSanPerturbationPlanningState &planning,
                                     ConSanTransformArtifacts &result);
 

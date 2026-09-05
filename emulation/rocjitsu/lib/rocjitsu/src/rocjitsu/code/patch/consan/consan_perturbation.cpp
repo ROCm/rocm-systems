@@ -123,33 +123,35 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
   }
 }
 
-void build_perturbation_plan(const ProgramInventory &program_inventory, const ConSanOptions &options,
+void build_perturbation_plan(const ProgramInventory &program_inventory,
+                             const ConSanRequest &request, const MutationRequest &mutation,
+                             const ConSanDebugOverrides &debug,
                              ConSanPerturbationPlanningState &planning, ConSanMutationTally &tally,
                              std::vector<std::string> &errors,
                              std::span<const ConSanPerturbationPlan> carried_plans) {
   tally.requested =
-      options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
-  if (options.sc_perturb_kind == ConSanPerturbationKind::None)
+      mutation.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : mutation.sc_perturb_max;
+  if (mutation.sc_perturb_kind == ConSanPerturbationKind::None)
     return;
-  if (options.flavor != ConSanFlavor::SuperCollider) {
+  if (request.flavor != ConSanFlavor::SuperCollider) {
     errors.emplace_back("ConSan SC perturbation requires the SuperCollider flavor");
     return;
   }
-  if (options.sc_perturb_max == 0u || options.sc_perturb_max > 2u) {
+  if (mutation.sc_perturb_max == 0u || mutation.sc_perturb_max > 2u) {
     errors.emplace_back("ConSan SC perturb maximum must be from 1 through 2");
     return;
   }
-  if (options.sc_perturb_sleep == 0u || options.sc_perturb_sleep > 15u) {
+  if (mutation.sc_perturb_sleep == 0u || mutation.sc_perturb_sleep > 15u) {
     errors.emplace_back("ConSan SC perturb sleep immediate must be from 1 through 15");
     return;
   }
-  if (options.sc_perturb_required_count > options.sc_perturb_max) {
+  if (mutation.sc_perturb_required_count > mutation.sc_perturb_max) {
     errors.emplace_back("ConSan SC perturb required count exceeds the selected maximum");
     return;
   }
 
   if (!carried_plans.empty()) {
-    if (carried_plans.size() > options.sc_perturb_max) {
+    if (carried_plans.size() > mutation.sc_perturb_max) {
       errors.emplace_back("ConSan carried SC perturbation plans exceed the selected maximum");
       return;
     }
@@ -204,10 +206,10 @@ void build_perturbation_plan(const ProgramInventory &program_inventory, const Co
       planning.plans.push_back(std::move(plan));
     }
     tally.planned = planning.plans.size();
-    if (options.sc_perturb_required_count != 0u &&
-        tally.planned != options.sc_perturb_required_count) {
+    if (mutation.sc_perturb_required_count != 0u &&
+        tally.planned != mutation.sc_perturb_required_count) {
       errors.emplace_back("ConSan SC perturb required " +
-                          std::to_string(options.sc_perturb_required_count) + " plans, got " +
+                          std::to_string(mutation.sc_perturb_required_count) + " plans, got " +
                           std::to_string(tally.planned));
     }
     return;
@@ -217,38 +219,38 @@ void build_perturbation_plan(const ProgramInventory &program_inventory, const Co
   for (const ConSanPerturbationCandidate &candidate : planning.candidates) {
     const PerturbationCandidateFacts facts =
         perturbation_candidate_facts(program_inventory, candidate);
-    if (!candidate.eligible || candidate.kind != options.sc_perturb_kind ||
-        candidate.edge != options.sc_perturb_edge || !facts.complete() ||
-        (!options.test_kernel_name_filter.empty() &&
-         facts.anchor_source->container.name.find(options.test_kernel_name_filter) ==
+    if (!candidate.eligible || candidate.kind != mutation.sc_perturb_kind ||
+        candidate.edge != mutation.sc_perturb_edge || !facts.complete() ||
+        (!debug.test_kernel_name_filter.empty() &&
+         facts.anchor_source->container.name.find(debug.test_kernel_name_filter) ==
              std::string::npos))
       continue;
-    if (!options.sc_perturb_identity.empty() &&
+    if (!mutation.sc_perturb_identity.empty() &&
         consan_perturbation_candidate_identity(program_inventory, candidate) !=
-            options.sc_perturb_identity)
+            mutation.sc_perturb_identity)
       continue;
     matching.push_back(&candidate);
   }
 
-  const size_t begin = options.sc_perturb_identity.empty() ? options.sc_perturb_index : 0u;
-  for (size_t i = begin; i < matching.size() && planning.plans.size() < options.sc_perturb_max;
+  const size_t begin = mutation.sc_perturb_identity.empty() ? mutation.sc_perturb_index : 0u;
+  for (size_t i = begin; i < matching.size() && planning.plans.size() < mutation.sc_perturb_max;
        ++i) {
     const ConSanPerturbationCandidate &candidate = *matching[i];
     if (auto plan =
-            materialize_perturbation_plan(program_inventory, candidate, options.sc_perturb_sleep))
+            materialize_perturbation_plan(program_inventory, candidate, mutation.sc_perturb_sleep))
       planning.plans.push_back(std::move(*plan));
   }
   tally.planned = planning.plans.size();
-  if (options.sc_perturb_required_count != 0u &&
-      tally.planned != options.sc_perturb_required_count) {
+  if (mutation.sc_perturb_required_count != 0u &&
+      tally.planned != mutation.sc_perturb_required_count) {
     errors.emplace_back("ConSan SC perturb required " +
-                        std::to_string(options.sc_perturb_required_count) + " plans, got " +
+                        std::to_string(mutation.sc_perturb_required_count) + " plans, got " +
                         std::to_string(tally.planned));
   }
 }
 
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    const ConSanOptions &options,
+                                    const TransformPolicy &transform_policy,
                                     const ConSanPerturbationPlanningState &planning,
                                     ConSanTransformArtifacts &result) {
   if (planning.plans.empty())
@@ -429,9 +431,9 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
                   trampoline_size);
     }
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit, "SC perturbation",
-                           result.program_inventory.code_object_id(), result.errors,
-                           &result.transform_failure_cause)) {
+  if (!replace_consan_text(patcher, new_text, transform_policy.patched_image_growth_limit,
+                           "SC perturbation", result.program_inventory.code_object_id(),
+                           result.errors, &result.transform_failure_cause)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
