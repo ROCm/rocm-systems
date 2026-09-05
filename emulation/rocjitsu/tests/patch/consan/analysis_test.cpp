@@ -1680,7 +1680,8 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(fence_event.memory_role, ConSanSyncMemoryRole::Unknown);
   EXPECT_EQ(fence_event.confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_EQ(fence_event.text_offset, 32u);
-  EXPECT_EQ(fence_event.code_object_fingerprint, atomic_event.code_object_fingerprint);
+  EXPECT_EQ(fence_event.semantic_id.physical.code_object,
+            atomic_event.semantic_id.physical.code_object);
   EXPECT_NE(fence_event.identity.find("|kernel=lds_probe|event=fence|"), std::string::npos);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(),
             result.program_inventory.sync().sync_events.size());

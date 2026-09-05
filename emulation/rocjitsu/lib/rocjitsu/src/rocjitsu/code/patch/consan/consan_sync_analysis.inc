@@ -289,20 +289,19 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
   const std::string_view fingerprint = code_object_id.fingerprint;
   const std::string container_kind = in_kernel ? "kernel" : "function";
   const ConSanProgramContainerRef container_ref = consan_program_container_ref(container);
-  const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind,
+  const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind, uint32_t occurrence,
                                 ConSanProgramSiteId source_site) {
     event.semantic_id.physical.code_object = code_object_id;
     event.semantic_id.physical.original_text_offset = event.text_offset;
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.source_site = source_site;
-    event.code_object_fingerprint = fingerprint;
     event.source_containers = {container.name};
     event.container_name = container.name;
     event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
                      "|event=" + std::string(kind) + "|pc=0x" +
                      consan_fixed_hex(event.text_offset, 16) + "|mnemonic=" + event.mnemonic +
-                     "|occurrence=" + std::to_string(event.occurrence);
+                     "|occurrence=" + std::to_string(occurrence);
     events.push_back(std::move(event));
   };
 
@@ -348,7 +347,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.confidence = ConSanSemanticConfidence::Unsupported;
       event.confidence_reason = "barrier ID or scope is not a supported decoded form";
     }
-    event.occurrence = barrier_occurrence++;
     event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
@@ -392,7 +390,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.memory_role = ConSanSyncMemoryRole::Unknown;
       event.memory_role_confidence = ConSanSemanticConfidence::Unsupported;
     }
-    finish_event(event, "barrier", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
+    finish_event(event, "barrier", barrier_occurrence++,
+                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   uint32_t fence_occurrence = 0;
@@ -411,14 +410,14 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.confidence = ConSanSemanticConfidence::Conservative;
     event.confidence_reason =
         "cache operation is decoded but its high-level memory role requires sequence association";
-    event.occurrence = fence_occurrence++;
     event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
     event.cache_operation = site.cache_operation;
     event.ordinary_acquire_mutation_supported = site.ordinary_acquire_mutation_supported;
     event.mnemonic = site.mnemonic;
-    finish_event(event, "fence", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
+    finish_event(event, "fence", fence_occurrence++,
+                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   uint32_t ordinary_memory_occurrence = 0;
@@ -448,7 +447,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.confidence = ConSanSemanticConfidence::Conservative;
     event.confidence_reason = "bounded ordinary-memory encoding is decoded; ordering requires "
                               "same-block cache-sequence association";
-    event.occurrence = ordinary_memory_occurrence++;
     event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
@@ -458,7 +456,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.static_byte_offset = *site.raw_ioffset;
     event.raw_scope = site.raw_scope;
     event.scope = site.scope;
-    finish_event(event, "ordinary-memory",
+    finish_event(event, "ordinary-memory", ordinary_memory_occurrence++,
                  ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
@@ -485,7 +483,6 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
       event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
     }
     classify_atomic_sync_confidence(site, event);
-    event.occurrence = atomic_occurrence++;
     event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
@@ -504,7 +501,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.raw_scope = site.raw_scope;
     event.scope =
         implicit_workgroup_scope ? std::optional{ConSanMemoryScope::Workgroup} : site.scope;
-    finish_event(event, "atomic", ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
+    finish_event(event, "atomic", atomic_occurrence++,
+                 ConSanProgramSiteId{static_cast<uint32_t>(decoded_index)});
   }
 
   std::stable_sort(events.begin() + static_cast<std::ptrdiff_t>(container_begin), events.end(),
@@ -531,18 +529,16 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
 [[nodiscard]] bool sync_event_semantics_equal(const ConSanSyncEvent &lhs,
                                               const ConSanSyncEvent &rhs) {
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
-                  lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason,
-                  lhs.code_object_fingerprint, lhs.in_kernel, lhs.occurrence, lhs.text_offset,
-                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
+                  lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason, lhs.in_kernel,
+                  lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
                   lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
                   lhs.raw_scope, lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
                   lhs.barrier_raw_operand_selector, lhs.barrier_literal_width_bits,
                   lhs.barrier_literal_value, lhs.barrier_raw_simm16, lhs.barrier_scope,
                   lhs.participant_count, lhs.participant_mask) ==
          std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
-                  rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason,
-                  rhs.code_object_fingerprint, rhs.in_kernel, rhs.occurrence, rhs.text_offset,
-                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
+                  rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason, rhs.in_kernel,
+                  rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
                   rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
                   rhs.raw_scope, rhs.scope, rhs.barrier_id, rhs.barrier_operand_source,
                   rhs.barrier_raw_operand_selector, rhs.barrier_literal_width_bits,
@@ -1167,7 +1163,7 @@ void build_barrier_move_destination_inventory(
           continue;
 
         ConSanBarrierMoveDestination destination;
-        destination.code_object_fingerprint = event->code_object_fingerprint;
+        destination.code_object_fingerprint = event->semantic_id.physical.code_object.fingerprint;
         destination.container_name = sequence.container_name;
         destination.in_kernel = sequence.in_kernel;
         destination.basic_block_index = static_cast<uint32_t>(block_index);
@@ -1177,7 +1173,7 @@ void build_barrier_move_destination_inventory(
         destination.mnemonic = std::string(instruction.mnemonic());
         destination.memory_operation = instruction.is_memory_op();
         destination.identity =
-            event->code_object_fingerprint + "|" +
+            event->semantic_id.physical.code_object.fingerprint + "|" +
             std::string(sequence.in_kernel ? "kernel=" : "function=") + sequence.container_name +
             "|destination=instruction|pc=0x" + consan_fixed_hex(destination.text_offset, 16) +
             "|mnemonic=" + destination.mnemonic + "|size=" + std::to_string(destination.size);

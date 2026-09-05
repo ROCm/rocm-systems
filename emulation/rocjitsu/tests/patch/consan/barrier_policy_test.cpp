@@ -38,7 +38,6 @@ make_barrier_event(uint64_t offset,
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = container + "|barrier=" + std::to_string(offset);
-  event.code_object_fingerprint = event.semantic_id.physical.code_object.fingerprint;
   event.container_name = std::move(container);
   event.in_kernel = true;
   event.text_offset = offset;

@@ -396,7 +396,7 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   load.kind = ConSanSyncEventKind::OrdinaryMemory;
   load.operation = ConSanSyncOperation::OrdinaryLoad;
   load.confidence = ConSanSemanticConfidence::Conservative;
-  load.code_object_fingerprint = "fingerprint";
+  load.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
   load.container_name = "kernel";
   load.width_bits = 32u;
   load.scope = ConSanMemoryScope::Agent;
@@ -420,10 +420,10 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
 
   EXPECT_TRUE(
       consan_ordinary_acquire_metadata_compatible(load, load_sequence, cache, cache_sequence));
-  cache.code_object_fingerprint = "corrupt";
+  ++cache.semantic_id.physical.code_object.collision_verifier;
   EXPECT_FALSE(
       consan_ordinary_acquire_metadata_compatible(load, load_sequence, cache, cache_sequence));
-  cache.code_object_fingerprint = load.code_object_fingerprint;
+  cache.semantic_id.physical.code_object = load.semantic_id.physical.code_object;
   cache.execution_owners.front().descriptor_file_offset = 128u;
   EXPECT_FALSE(
       consan_ordinary_acquire_metadata_compatible(load, load_sequence, cache, cache_sequence));
@@ -597,7 +597,7 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   cache.cache_operation = ConSanCacheOperation::Release;
   cache.mnemonic = "global_wb";
   cache.confidence = ConSanSemanticConfidence::Conservative;
-  cache.code_object_fingerprint = "fingerprint";
+  cache.semantic_id.physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{1u});
   cache.container_name = "kernel";
   cache.execution_owners.push_back(
       {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
@@ -620,10 +620,10 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
 
   EXPECT_TRUE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  store.code_object_fingerprint = "corrupt";
+  ++store.semantic_id.physical.code_object.collision_verifier;
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  store.code_object_fingerprint = cache.code_object_fingerprint;
+  store.semantic_id.physical.code_object = cache.semantic_id.physical.code_object;
   store.scope = ConSanMemoryScope::Wavefront;
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));

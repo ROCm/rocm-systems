@@ -57,7 +57,7 @@ bool consan_ordinary_acquire_metadata_compatible(const ConSanSyncEvent &load,
            (cache.cache_operation == ConSanCacheOperation::AcquirePairPrefix ||
             cache.cache_operation == ConSanCacheOperation::AcquirePairCompletion))) &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
-         load.code_object_fingerprint == cache.code_object_fingerprint &&
+         load.semantic_id.physical.code_object == cache.semantic_id.physical.code_object &&
          load.container_name == cache.container_name && load.in_kernel == cache.in_kernel &&
          load_sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
          load_sequence.operation == ConSanSyncOperation::OrdinaryLoad &&
@@ -92,7 +92,7 @@ bool consan_ordinary_release_metadata_compatible(const ConSanSyncEvent &cache,
          store.operation == ConSanSyncOperation::OrdinaryStore && store.width_bits != 0u &&
          store.width_bits <= 128u && store.confidence == ConSanSemanticConfidence::Conservative &&
          store.scope && consan_memory_scope_is_agent_or_system(*store.scope) &&
-         cache.code_object_fingerprint == store.code_object_fingerprint &&
+         cache.semantic_id.physical.code_object == store.semantic_id.physical.code_object &&
          cache.container_name == store.container_name && cache.in_kernel == store.in_kernel &&
          cache_sequence.kind == ConSanSyncSequenceKind::Fence &&
          cache_sequence.operation == ConSanSyncOperation::Fence &&

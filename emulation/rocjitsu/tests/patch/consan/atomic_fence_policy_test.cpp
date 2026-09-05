@@ -136,7 +136,6 @@ ConSanSyncEvent make_atomic_event(
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = container + "|atomic=" + std::to_string(offset);
-  event.code_object_fingerprint = event.semantic_id.physical.code_object.fingerprint;
   event.container_name = std::move(container);
   event.in_kernel = true;
   event.text_offset = offset;
