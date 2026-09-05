@@ -124,16 +124,14 @@ struct ConSanPerturbationPlan {
   /// that relationship through copied strings and offsets.
   ConSanPerturbationCandidate candidate;
   uint32_t sleep_imm = 0;
-  std::string source_candidate_identity;
-  std::string source_sequence_identity;
-  std::string source_container_name;
-  std::string source_anchor_event_identity;
-  bool source_in_kernel = true;
-  uint64_t source_anchor_text_offset = 0;
-  uint32_t source_anchor_size = 0;
+  /// Pristine candidate retained only while a fault-mutated image is
+  /// reanalyzed. Ordinary plans have no second identity representation.
+  std::optional<ConSanPerturbationCandidate> source_candidate;
   std::optional<uint64_t> source_owner_descriptor_file_offset;
   bool overlaps_atomic_mutation = false;
   bool removed_cache_boundary = false;
+  /// Carry-only allowance for a boundary intentionally weakened by the fault.
+  bool source_sequence_semantics_weakened = false;
 };
 
 /// Temporary workspace shared only by perturbation analysis, selection, and

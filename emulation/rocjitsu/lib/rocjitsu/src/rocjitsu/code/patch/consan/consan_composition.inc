@@ -55,12 +55,12 @@ initialize_consan_lowering_observation(const ConSanOptions &options,
   return first_offset < second_offset + second_size && second_offset < first_offset + first_size;
 }
 
-[[nodiscard]] std::optional<std::vector<CarriedPerturbationPlan>>
+[[nodiscard]] std::optional<std::vector<ConSanPerturbationPlan>>
 carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_inventory,
                                          const ConSanPerturbationPlanningState &planning,
                                          const ConSanTransformArtifacts &mutation_stage,
                                          std::string *error) {
-  std::vector<CarriedPerturbationPlan> carried;
+  std::vector<ConSanPerturbationPlan> carried;
   carried.reserve(planning.plans.size());
   for (const ConSanPerturbationPlan &plan : planning.plans) {
     const ConSanPerturbationCandidate &candidate = plan.candidate;
@@ -160,23 +160,15 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
       removed_cache_boundary = patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
     }
 
-    carried.push_back({.source_candidate_identity = candidate.identity,
-                       .source_sequence_identity = candidate.sequence_identity,
-                       .container_name = candidate.container_name,
-                       .in_kernel = candidate.in_kernel,
-                       .basic_block_index = candidate.basic_block_index,
-                       .anchor_event_identity = candidate.anchor_event_identity,
-                       .ordered_member_identities = candidate.ordered_member_identities,
-                       .source_anchor_text_offset = candidate.anchor_text_offset,
-                       .translated_anchor_text_offset = translated_offset,
-                       .anchor_size = candidate.anchor_size,
-                       .source_owner_descriptor_file_offset = source_owner_descriptor_file_offset,
-                       .kind = candidate.kind,
-                       .edge = candidate.edge,
+    ConSanPerturbationCandidate translated_candidate = candidate;
+    translated_candidate.anchor_text_offset = translated_offset;
+    carried.push_back({.candidate = std::move(translated_candidate),
                        .sleep_imm = plan.sleep_imm,
+                       .source_candidate = candidate,
+                       .source_owner_descriptor_file_offset = source_owner_descriptor_file_offset,
                        .overlaps_atomic_mutation = overlaps_atomic_mutation,
                        .removed_cache_boundary = removed_cache_boundary,
-                       .sequence_semantics_weakened = sequence_semantics_weakened});
+                       .source_sequence_semantics_weakened = sequence_semantics_weakened});
   }
   return carried;
 }
@@ -212,7 +204,7 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
 [[nodiscard]] ConSanTransformArtifacts
 lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                    const ConSanMoiOperatingPoint &initial_operating_point,
-                   std::span<const CarriedPerturbationPlan> carried_plans,
+                   std::span<const ConSanPerturbationPlan> carried_plans,
                    ConSanPerturbationPlanningState *inspected_perturbation,
                    const ConSanPreappliedMutationLayout &preapplied_mutation, bool apply_fault_plan,
                    bool require_exactly_one_applied_fault, ConSanLoweringExtent extent,
@@ -308,7 +300,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
          .kernel_name = owner->name,
          .continuation_text_offset = patch.anchor_offset + patch.original_size});
   }
-  std::vector<CarriedPerturbationPlan> staged_carried;
+  std::vector<ConSanPerturbationPlan> staged_carried;
   if (has_perturbation) {
     std::string carry_error;
     auto carried =
@@ -320,7 +312,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     instrument_options.sc_perturb_index = 0;
     staged_carried = std::move(*carried);
   }
-  const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
+  const std::span<const ConSanPerturbationPlan> instrument_carried = staged_carried;
   ConSanTransformArtifacts instrument_result = lower_consan_stage(
       fault_result.replacement, instrument_options, initial_operating_point, instrument_carried,
       &perturbation, instrument_preapplied, false, false, ConSanLoweringExtent::Complete, nullptr);
@@ -455,7 +447,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 [[nodiscard]] ConSanTransformArtifacts
 lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                    const ConSanMoiOperatingPoint &initial_operating_point,
-                   std::span<const CarriedPerturbationPlan> carried_plans,
+                   std::span<const ConSanPerturbationPlan> carried_plans,
                    ConSanPerturbationPlanningState *inspected_perturbation,
                    const ConSanPreappliedMutationLayout &preapplied_mutation, bool apply_fault_plan,
                    bool require_exactly_one_applied_fault, ConSanLoweringExtent extent,
