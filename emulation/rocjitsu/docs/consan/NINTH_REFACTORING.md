@@ -1,5 +1,22 @@
 # ConSan ninth refactoring: unify program identity and delete representation boundaries
 
+## Governing continuation rule
+
+The ninth refactoring has two independent objectives: improve ConSan's actual
+architecture and reduce its production implementation. **Progress on either
+objective is sufficient reason to continue.** Architectural progress need not
+produce an immediate line-count reduction, and line-count reduction remains
+valuable after the major architectural boundaries are sound, provided it does
+not damage them.
+
+Accordingly, this refactoring uses an **OR condition for continuation and an
+AND condition for completion**. It continues for as long as a deep read can
+identify worthwhile architectural progress **or** responsible implementation
+shrinkage. It is complete only after repeated audits find that **neither** axis
+offers another credible large, medium, or worthwhile accumulated-small
+opportunity. Exhausting or reaching diminishing returns on one axis redirects
+the work toward the other; it does not end the refactoring.
+
 ## 1. Status and baseline
 
 The eighth refactoring and its follow-on whole-text relocation work consumed
@@ -115,8 +132,8 @@ type names. The destination design remains part of the variable being solved
 for. It does prescribe one-way movement toward stable identity, fewer
 representations, narrower phase-owned facts, and deletion-backed results.
 
-The operational contract is an **OR for continuation and an AND for
-completion**:
+The operational contract stated at the start of this document governs every
+campaign and audit below: **OR for continuation and AND for completion**.
 
 - continue whenever architectural work can still materially improve the
   actual design, even if that work is line-neutral or temporarily grows the
