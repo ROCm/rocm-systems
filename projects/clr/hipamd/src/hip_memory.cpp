@@ -2898,7 +2898,12 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
 }
 
 // ================================================================================================
-static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+// The batch path embeds the CUDA-compatible attributes as the first member and never casts
+// between the two; lock the sizes so the embed assumption cannot drift.
+static_assert(sizeof(hipMemcpyAttributes) == 24, "hipMemcpyAttributes must stay 24 bytes");
+static_assert(sizeof(hipExtMemcpyAttributes) == 56, "hipExtMemcpyAttributes must stay 56 bytes");
+
+static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
                                                      size_t numAttrs, size_t copyIdx, bool isAsync) {
   amd::CopyMetadata metadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
 
@@ -2937,6 +2942,10 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   if (flags & hipMemcpyFlagExtPreferCE) {
     // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
+  } else if (flags & hipMemcpyFlagExtPreferCU) {
+    // CU means Compute engine here, so route these copies onto the shader blit path
+    // instead of SDMA. PreferCE and PreferCU are mutually exclusive (validated earlier).
+    metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::BLIT;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
@@ -3010,7 +3019,7 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
 
 // ================================================================================================
 // Returns the attribute flags that apply to copy `copyIdx`.
-static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+static inline unsigned int getBatchCopyFlags(hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
                                              size_t numAttrs, size_t copyIdx, size_t& attrIdx) {
   if (attrs == nullptr || numAttrs == 0) return 0;
   while (attrIdx + 1 < numAttrs && attrsIdxs[attrIdx + 1] <= copyIdx) ++attrIdx;
@@ -3018,10 +3027,10 @@ static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t*
 }
 
 // ================================================================================================
-hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* sizesB,
+hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst,
                            hipExtMemcpyWait* waits, hipExtMemcpySignal* signals,
-                           hipExtMemcpyOp* ops, size_t count,
-                           hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                           size_t count,
+                           hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                            size_t* failIdx, hip::Stream& stream, bool isAsync) {
   // Initialize up front so every error path leaves failIdx deterministic:
   // SIZE_MAX unless a specific offending entry is identified below.
@@ -3044,10 +3053,41 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         return hipErrorInvalidValue;
       }
     }
+    constexpr unsigned int kValidFlagMask =
+        hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+        hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
+        hipMemcpyFlagExtOpIndirectDst;
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
         return hipErrorInvalidValue;
+      }
+      // Unknown flag bits are a malformed request.
+      const unsigned int f = attrs[i].flags;
+      if (f & ~kValidFlagMask) {
+        return hipErrorInvalidValue;
+      }
+      // Swap and indirect are mutually exclusive within one attribute.
+      if ((f & hipMemcpyFlagExtOpSwap) &&
+          (f & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      // PreferCE (SDMA) and PreferCU (shader) select opposite engines.
+      if ((f & hipMemcpyFlagExtPreferCE) && (f & hipMemcpyFlagExtPreferCU)) {
+        return hipErrorInvalidValue;
+      }
+      // The shader copy path only handles linear copies, so PreferCU cannot be
+      // combined with a swap or indirect operation.
+      if ((f & hipMemcpyFlagExtPreferCU) &&
+          (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
+                hipMemcpyFlagExtOpIndirectDst))) {
+        return hipErrorInvalidValue;
+      }
+      // Reserved fields must be zero.
+      for (size_t r = 0; r < sizeof(attrs[i].reserved) / sizeof(attrs[i].reserved[0]); ++r) {
+        if (attrs[i].reserved[r] != 0) {
+          return hipErrorInvalidValue;
+        }
       }
     }
   }
@@ -3096,18 +3136,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     // the eventual data buffer.
     const unsigned int copyFlags =
         getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, validateAttrIdx);
-    // ops[] is authoritative for the op type when provided; otherwise the op
-    // comes from attrs[].flags. Use the same source here so bounds validation
-    // matches the copy that will actually run (an ops[i]=Default entry is a
-    // linear copy of sizes[i], even if attrs carries indirect bits).
-    const bool indirectSrc = (ops != nullptr)
-        ? (ops[i] & hipExtMemcpyOpIndirectSrc)
-        : (copyFlags & hipMemcpyFlagExtOpIndirectSrc);
-    const bool indirectDst = (ops != nullptr)
-        ? (ops[i] & hipExtMemcpyOpIndirectDst)
-        : (copyFlags & hipMemcpyFlagExtOpIndirectDst);
-    const size_t actualSrcSize = indirectSrc ? sizeof(void*) : sizes[i];
-    const size_t actualDstSize = indirectDst ? sizeof(void*) : sizes[i];
+    const size_t actualSrcSize =
+        (copyFlags & hipMemcpyFlagExtOpIndirectSrc) ? sizeof(void*) : sizes[i];
+    const size_t actualDstSize =
+        (copyFlags & hipMemcpyFlagExtOpIndirectDst) ? sizeof(void*) : sizes[i];
 
     // Host-to-host (both pointers have no associated memory object) is always
     // valid for hipMemcpyDefault.
@@ -3132,57 +3164,20 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
-  // Reject unknown/reserved bits in per-entry ops[] (see hipExtMemcpyOp).
-  if (ops != nullptr) {
-    constexpr uint32_t kValidExtOpMask =
-        hipExtMemcpyOpSwap | hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
-    for (size_t i = 0; i < count; ++i) {
-      if (static_cast<uint32_t>(ops[i]) & ~kValidExtOpMask) {
-        if (failIdx != nullptr) *failIdx = i;
-        return hipErrorInvalidValue;
+  if (attrs != nullptr && !stream.device().settings().sdma_swap_supported_) {
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].flags & hipMemcpyFlagExtOpSwap) {
+        return hipErrorNotSupported;
       }
     }
   }
 
-  // ops[] is authoritative when provided: only scan attrs[].flags for the op
-  // when ops == nullptr, so an ops[i]=Default entry is not rejected by a swap/
-  // indirect flag that attrs may also carry.
-  if (!stream.device().settings().sdma_swap_supported_) {
-    if (ops == nullptr && attrs != nullptr) {
-      for (size_t i = 0; i < numAttrs; ++i) {
-        if (attrs[i].flags & hipMemcpyFlagExtOpSwap) {
-          return hipErrorNotSupported;
-        }
-      }
-    }
-    if (ops != nullptr) {
-      for (size_t i = 0; i < count; ++i) {
-        if (ops[i] & hipExtMemcpyOpSwap) {
-          if (failIdx != nullptr) *failIdx = i;
-          return hipErrorNotSupported;
-        }
-      }
-    }
-  }
-
-  if (!stream.device().settings().sdma_indirect_supported_) {
-    const unsigned int kIndirectAttrMask =
+  if (attrs != nullptr && !stream.device().settings().sdma_indirect_supported_) {
+    const unsigned int kIndirectMask =
         hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
-    if (ops == nullptr && attrs != nullptr) {
-      for (size_t i = 0; i < numAttrs; ++i) {
-        if (attrs[i].flags & kIndirectAttrMask) {
-          return hipErrorNotSupported;
-        }
-      }
-    }
-    if (ops != nullptr) {
-      const unsigned int kIndirectOpsMask =
-          hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
-      for (size_t i = 0; i < count; ++i) {
-        if (ops[i] & kIndirectOpsMask) {
-          if (failIdx != nullptr) *failIdx = i;
-          return hipErrorNotSupported;
-        }
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].flags & kIndirectMask) {
+        return hipErrorNotSupported;
       }
     }
   }
@@ -3193,6 +3188,13 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
+  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
+  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
+  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
+  // device memory and pinned host memory, plus peer device-to-device copies.
+  // All other combinations are rejected up front.
+  const unsigned int kExtOpFlagMask =
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
 
   for (size_t i = 0; i < count; ++i) {
@@ -3208,88 +3210,34 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
 
     const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
-    // ops[] is authoritative for the per-entry op type when provided; otherwise
-    // the op comes from attrs[].flags. Deriving the validation flags from the
-    // same source keeps the checks below consistent with the copyOpType_ chosen
-    // further down (engine hints like PreferCE always come from attrs).
-    const bool isSwap = (ops != nullptr)
-        ? (ops[i] & hipExtMemcpyOpSwap)
-        : (copyFlags & hipMemcpyFlagExtOpSwap);
-    const bool isIndirect = (ops != nullptr)
-        ? (ops[i] & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst))
-        : (copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst));
-
-    // Swap and indirect are mutually exclusive.
-    if (isSwap && isIndirect) {
-      if (failIdx != nullptr) *failIdx = i;
-      return hipErrorInvalidValue;
-    }
-
-    if (isSwap) {
-      // Swap requires both operands to be SDMA-accessible allocations: device
-      // memory or pinned/registered host memory. These classify as hipCopyBuffer
-      // variants; pageable host (hipReadBuffer/hipWriteBuffer/hipHostToHost) has
-      // no amd::Memory to swap and is rejected.
+    if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P:
-          break;  // device<->device, device<->pinned-host, and P2P are valid
-        default:
-          if (failIdx != nullptr) *failIdx = i;
-          return hipErrorNotSupported;
-      }
-    }
-
-    if (isIndirect) {
-      // Indirect requires SDMA-accessible operands (device memory or pinned/
-      // registered host memory). Device<->device (same device or peer) is the
-      // primary use case; host<->device is also supported. Only pageable host
-      // (which has no amd::Memory) is rejected.
-      switch (type) {
-        case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
-          if (srcMemories[i] == nullptr || dstMemories[i] == nullptr) {
-            if (failIdx != nullptr) *failIdx = i;
+        case hipCopyBufferSDMA: {
+          // Narrow to H<->D for both swap and indirect.
+          amd::Memory* sMem = srcMemories[i];
+          amd::Memory* dMem = dstMemories[i];
+          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
             return hipErrorNotSupported;
           }
           break;
         }
-        default:
-          if (failIdx != nullptr) *failIdx = i;
+        case hipCopyBufferP2P:
+          break;
+        case hipHostToHost:
+        case hipWriteBuffer:
+        case hipReadBuffer:
           return hipErrorNotSupported;
       }
     }
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
 
-    // Override the copy op type from the per-entry ops[] array when provided.
-    // buildCopyMetadataFromAttrs only consults attrs[].flags, so ops-based
-    // requests must set copyOpType_ here. When ops[] is provided it is
-    // authoritative for the op type: hipExtMemcpyOpDefault forces a plain linear
-    // copy, overriding any op flag that attrs[].flags may also carry. (Engine
-    // hints such as PreferCE come from attrs and are left untouched.)
-    if (ops != nullptr) {
-      const uint32_t ef = ops[i];
-      if (ef & hipExtMemcpyOpSwap) {
-        metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
-      } else if ((ef & hipExtMemcpyOpIndirectSrc) && (ef & hipExtMemcpyOpIndirectDst)) {
-        metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrcDst;
-      } else if (ef & hipExtMemcpyOpIndirectSrc) {
-        metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrc;
-      } else if (ef & hipExtMemcpyOpIndirectDst) {
-        metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectDst;
-      } else {
-        metadata.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
-      }
-    }
-
-    // For an asymmetric swap, sizesB carries the B-side length; HW requires
-    // count_a >= count_b (sizes[i] >= sizeB).
+    // For an asymmetric swap, sizesDst carries the B-side (destination) length; HW
+    // requires count_a >= count_b (sizes[i] >= sizeB).
     size_t sizeB = 0;
-    if (sizesB != nullptr && metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-      sizeB = sizesB[i];
+    if (sizesDst != nullptr && metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
+      sizeB = sizesDst[i];
       if (sizeB == 0 || sizeB > sizes[i]) {
         if (failIdx != nullptr) *failIdx = i;
         return hipErrorInvalidValue;
@@ -3417,21 +3365,36 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   }
   CHECK_STREAM_DETACHED_API(stream);
 
-  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, nullptr,
-                             nullptr, nullptr, nullptr, count,
-                             attrs, attrsIdxs, numAttrs,
+  // The shared batch path takes hipExtMemcpyAttributes. Convert each CUDA-compatible
+  // hipMemcpyAttributes by value (never cast the 24-byte struct to the 56-byte one),
+  // leaving the reserved fields zeroed.
+  std::vector<hipExtMemcpyAttributes> extAttrs;
+  hipExtMemcpyAttributes* extAttrsPtr = nullptr;
+  if (attrs != nullptr && numAttrs > 0) {
+    extAttrs.resize(numAttrs);  // value-initializes reserved to 0
+    for (size_t i = 0; i < numAttrs; ++i) {
+      extAttrs[i].srcAccessOrder = attrs[i].srcAccessOrder;
+      extAttrs[i].srcLocHint = attrs[i].srcLocHint;
+      extAttrs[i].dstLocHint = attrs[i].dstLocHint;
+      extAttrs[i].flags = attrs[i].flags;
+    }
+    extAttrsPtr = extAttrs.data();
+  }
+
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, /*sizesDst=*/nullptr,
+                             /*waits=*/nullptr, /*signals=*/nullptr, count,
+                             extAttrsPtr, attrsIdxs, numAttrs,
                              failIdx, *hip::getStream(stream), true));
 }
 
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
-                                  size_t* sizesA, size_t* sizesB,
+                                  size_t* sizes, size_t* sizesDst,
                                   hipExtMemcpyWait* waits,
                                   hipExtMemcpySignal* signals,
-                                  hipExtMemcpyOp* ops,
                                   size_t count,
-                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                   hipStream_t stream) {
-  HIP_INIT_API(hipExtMemcpyBatchAsync, dsts, srcs, sizesA, sizesB, waits, signals, ops,
+  HIP_INIT_API(hipExtMemcpyBatchAsync, dsts, srcs, sizes, sizesDst, waits, signals,
                count, attrs, attrsIdxs, numAttrs, stream);
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
@@ -3440,8 +3403,8 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
 
   // The Ext API does not expose failIdx; the shared implementation still
   // supports it for the legacy hipMemcpyBatchAsync path, so pass nullptr here.
-  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizesA, sizesB,
-                             waits, signals, ops, count,
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, sizesDst,
+                             waits, signals, count,
                              attrs, attrsIdxs, numAttrs, /*failIdx=*/nullptr,
                              *hip::getStream(stream), true));
 }

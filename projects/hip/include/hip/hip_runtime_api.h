@@ -6193,26 +6193,23 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 /**
  * @brief Perform Batch of 1D copies with extended operation support.
  *
- * Extended version of hipMemcpyBatchAsync with per-entry operation flags
- * and asymmetric swap sizes. GPU-side wait/signal parameters are reserved
- * for future use and must be NULL.
+ * Extended version of hipMemcpyBatchAsync. The operation for each copy (linear,
+ * swap, indirect src/dst, PreferCE, PreferCU) is selected through attrs[i].flags,
+ * the same hipMemcpyFlags used by hipMemcpyBatchAsync, range-mapped by attrsIdxs.
+ * GPU-side wait/signal parameters are reserved for future use and must be NULL.
  *
  * @param [in] dsts        - Array of destination pointers.
  * @param [in] srcs        - Array of source pointers.
- * @param [in] sizesA      - Array of A-side copy sizes in bytes.
- * @param [in] sizesB      - Array of B-side sizes for swap (NULL = symmetric).
- *                            For each swap entry, sizesB[i] must be non-zero and
- *                            <= sizesA[i], otherwise hipErrorInvalidValue is
- *                            returned.
+ * @param [in] sizes       - Array of copy sizes in bytes (source / A side).
+ * @param [in] sizesDst    - Array of destination / B-side sizes for swap
+ *                            (NULL = symmetric). For each swap entry, sizesDst[i]
+ *                            must be non-zero and <= sizes[i], otherwise
+ *                            hipErrorInvalidValue is returned.
  * @param [in] waits       - Reserved for future use. Must be NULL.
  * @param [in] signals     - Reserved for future use. Must be NULL.
- * @param [in] ops         - Per-entry operation type. When non-NULL, ops[] is
- *                            authoritative per entry and overrides any op flag in
- *                            attrs[].flags (hipExtMemcpyOpDefault forces a linear
- *                            copy). When NULL, the op type comes from
- *                            attrs[].flags. See hipExtMemcpyOp for valid values.
  * @param [in] count       - Number of copy operations.
- * @param [in] attrs       - Array of hipMemcpyAttributes (CUDA-compatible fields).
+ * @param [in] attrs       - Array of hipExtMemcpyAttributes. Op selection is via
+ *                            attrs[i].flags; reserved fields must be 0.
  * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
  * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
  * @param [in] stream      - Stream to execute on.
@@ -6221,12 +6218,11 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  *          #hipErrorInvalidResourceHandle
  */
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
-                                  size_t* sizesA, size_t* sizesB,
+                                  size_t* sizes, size_t* sizesDst,
                                   hipExtMemcpyWait* waits,
                                   hipExtMemcpySignal* signals,
-                                  hipExtMemcpyOp* ops,
                                   size_t count,
-                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                   hipStream_t stream __dparm(0));
 
 /**

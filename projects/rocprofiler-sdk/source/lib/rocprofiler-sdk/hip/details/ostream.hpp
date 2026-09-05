@@ -5667,7 +5667,7 @@ operator<<(std::ostream& out, const hipArrayMapInfo& v)
     return out;
 }
 
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
 inline static std::ostream&
 operator<<(std::ostream& out, const hipExtMemcpyWait& v)
 {

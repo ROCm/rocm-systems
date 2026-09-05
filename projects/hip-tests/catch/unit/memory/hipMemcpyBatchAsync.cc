@@ -358,49 +358,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   }
 }
 
-#if HT_AMD
-/**
- * Test Description
- * ------------------------
- * - Verifies D2D batch copies with hipMemcpyFlagExtOpSwap.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Swap) {
-  constexpr size_t copy_count = 3;
-  constexpr size_t copy_size = kSmallCopySize;
-  constexpr int kSwapSrcValue = 23;
-  constexpr int kSwapDstValue = 47;
-  BatchConfig config{copy_count, copy_size};
-  StreamGuard stream_guard(Streams::created);
-  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<void*> src_ptrs = MakeBatchPtrs(src);
-  std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
-  std::vector<size_t> sizes(src_ptrs.size(), copy_size);
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
-  size_t attrs_idxs[1] = {0};
-
-  FillDeviceBuffers(src_ptrs, copy_size, kSwapSrcValue);
-  FillDeviceBuffers(dst_ptrs, copy_size, kSwapDstValue);
-
-  hipError_t status =
-      hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), src_ptrs.size(), &attr,
-                          attrs_idxs, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
-  }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-  VerifyDeviceBuffers(src_ptrs, copy_size, kSwapDstValue);
-  VerifyDeviceBuffers(dst_ptrs, copy_size, kSwapSrcValue);
-}
-#endif
-
 /**
  * Test Description
  * ------------------------
@@ -1546,16 +1503,16 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric) {
 
   void* dsts[] = {d_a};
   void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeA};
-  size_t sizesB[] = {kSizeB};
+  size_t sizes[] = {kSizeA};
+  size_t sizesDst[] = {kSizeB};
   size_t attrsIdxs[] = {0};
 
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.flags = hipMemcpyFlagExtOpSwap;
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB,
-                                          nullptr, nullptr, nullptr,
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst,
+                                          nullptr, nullptr,
                                           1, &attr, attrsIdxs, 1,
                                           stream);
   if (err == hipErrorNotSupported) {
@@ -1602,80 +1559,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric) {
 /**
  * Test Description
  * ------------------------
- * - Same asymmetric swap as Unit_hipMemcpyBatchAsync_swap_asymmetric, but the
- *   swap op is driven via ops[] (hipExtMemcpyOpSwap) instead of attrs[].flags.
- *   Confirms sizesB is honored when the swap comes from the ops[] path.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_swap_asymmetric_ops) {
-  constexpr size_t kSizeA = 8192;  // 8 KB
-  constexpr size_t kSizeB = 4096;  // 4 KB (smaller side)
-  constexpr int kValA = 42;
-  constexpr int kValB = 99;
-
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeA));
-  HIP_CHECK(hipMalloc(&d_b, kSizeA));
-
-  std::vector<int> hostA(kSizeA / sizeof(int), kValA);
-  std::vector<int> hostB(kSizeA / sizeof(int), kValB);
-  HIP_CHECK(hipMemcpy(d_a, hostA.data(), kSizeA, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeA, hipMemcpyHostToDevice));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeA};
-  size_t sizesB[] = {kSizeB};
-  size_t attrsIdxs[] = {0};
-
-  // Swap requested via ops[], NOT attrs.flags.
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpSwap};
-
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB,
-                                          nullptr, nullptr, ops,
-                                          1, &attr, attrsIdxs, 1,
-                                          stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_b));
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
-  }
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  std::vector<int> resultA(kSizeA / sizeof(int));
-  std::vector<int> resultB(kSizeA / sizeof(int));
-  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeA, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeA, hipMemcpyDeviceToHost));
-
-  const size_t swapElems = kSizeB / sizeof(int);
-  const size_t totalElems = kSizeA / sizeof(int);
-  for (size_t i = 0; i < swapElems; i++) {
-    REQUIRE(resultA[i] == kValB);  // head swapped
-    REQUIRE(resultB[i] == kValA);
-  }
-  for (size_t i = swapElems; i < totalElems; i++) {
-    REQUIRE(resultA[i] == kValA);  // A tail unchanged
-    REQUIRE(resultB[i] == kValA);  // B tail copied from A
-  }
-
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
  * - Verify asymmetric swap with multiple attribute ranges.
  *   Two swap pairs under separate attributes with different swapSizesA/B,
  *   testing that rangeIdx (idx - attrsIdxs[attrIdx]) indexes correctly.
@@ -1711,10 +1594,10 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr) {
 
   void* dsts[] = {dA0, dA1};
   void* srcs[] = {dB0, dB1};
-  size_t sizesA[] = {8192, 4096};
-  size_t sizesB[] = {4096, 2048};
+  size_t sizes[] = {8192, 4096};
+  size_t sizesDst[] = {4096, 2048};
 
-  hipMemcpyAttributes attrs[2] = {};
+  hipExtMemcpyAttributes attrs[2] = {};
   attrs[0].flags = hipMemcpyFlagExtOpSwap;
   attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
   attrs[1].flags = hipMemcpyFlagExtOpSwap;
@@ -1722,8 +1605,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr) {
 
   size_t attrsIdxs[] = {0, 1};
 
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB,
-                                          nullptr, nullptr, nullptr,
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst,
+                                          nullptr, nullptr,
                                           2, attrs, attrsIdxs, 2,
                                           stream);
   if (err == hipErrorNotSupported) {
@@ -1781,7 +1664,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr) {
 /**
  * Test Description
  * ------------------------
- * - Verify that hipExtMemcpyBatchAsync with sizesB = nullptr performs
+ * - Verify that hipExtMemcpyBatchAsync with sizesDst = nullptr performs
  *   a full symmetric swap (same as hipMemcpyBatchAsync).
  * Test source
  * ------------------------
@@ -1807,17 +1690,17 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback) {
 
   void* dsts[] = {d_a};
   void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeA};
+  size_t sizes[] = {kSizeA};
   size_t attrsIdxs[] = {0};
 
-  hipMemcpyAttributes attr{};
-  // Use hipExtMemcpyBatchAsync with sizesB = nullptr.
-  // Full symmetric swap expected even though sizesA > sizesB would apply.
+  hipExtMemcpyAttributes attr{};
+  // Use hipExtMemcpyBatchAsync with sizesDst = nullptr.
+  // Full symmetric swap expected even though sizes > sizesDst would apply.
   attr.flags = hipMemcpyFlagExtOpSwap;
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, nullptr,
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr,
+                                          nullptr, nullptr,
                                           1, &attr, attrsIdxs, 1,
                                           stream);
   if (err == hipErrorNotSupported) {
@@ -1850,296 +1733,141 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback) {
 /**
  * Test Description
  * ------------------------
- * - Verify that per-entry ops can specify swap operation instead
- *   of using hipMemcpyAttributes.flags. The attrs have no swap flag set;
- *   only ops specifies the swap.
+ * - Verifies hipExtMemcpyBatchAsync validates hipExtMemcpyAttributes:
+ *   1. Unknown flag bits in std.flags return hipErrorInvalidValue.
+ *   2. Swap combined with an indirect flag returns hipErrorInvalidValue.
+ *   3. A non-zero reserved field returns hipErrorInvalidValue.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_entryFlags_swap) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative) {
+  constexpr size_t kNumElements = 1024;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  void* d_a = nullptr;
+  void* d_b = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_a};
+  void* srcs[] = {d_b};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  SECTION("Unknown flag bit") {
+    // 0x8 is outside the valid hipMemcpyFlags bit set.
+    attr.flags = 0x8;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("Swap combined with indirect") {
+    attr.flags = hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("Non-zero reserved field") {
+    attr.reserved[0] = 1;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("PreferCE combined with PreferCU") {
+    attr.flags = hipMemcpyFlagExtPreferCE | hipMemcpyFlagExtPreferCU;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("PreferCU combined with swap") {
+    attr.flags = hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpSwap;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  SECTION("PreferCU combined with indirect") {
+    attr.flags = hipMemcpyFlagExtPreferCU | hipMemcpyFlagExtOpIndirectSrc;
+    hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                            1, &attr, attrsIdxs, 1, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+  }
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - hipMemcpyFlagExtPreferCU routes a linear device-to-device batch onto the shader
+ *   copy path (compute engine) instead of SDMA. The copied bytes must be correct.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferCU_D2D) {
   constexpr size_t kNumElements = 4096;
   constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-  constexpr int kValA = 42;
-  constexpr int kValB = 99;
+  constexpr int kValA = 21;
+  constexpr int kValB = 73;
 
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
-  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
+  void* d_src_a = nullptr;
+  void* d_src_b = nullptr;
+  void* d_dst_a = nullptr;
+  void* d_dst_b = nullptr;
+  HIP_CHECK(hipMalloc(&d_src_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_src_b, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_dst_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_dst_b, kSizeBytes));
 
-  std::vector<int> hostA(kNumElements, kValA);
-  std::vector<int> hostB(kNumElements, kValB);
-  HIP_CHECK(hipMemcpy(d_a, hostA.data(), kSizeBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
+  std::vector<int> host_a(kNumElements, kValA);
+  std::vector<int> host_b(kNumElements, kValB);
+  HIP_CHECK(hipMemcpy(d_src_a, host_a.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_src_b, host_b.data(), kSizeBytes, hipMemcpyHostToDevice));
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeBytes};
-
-  // Attrs have NO swap flag — swap is specified only via ops
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  void* dsts[] = {d_dst_a, d_dst_b};
+  void* srcs[] = {d_src_a, d_src_b};
+  size_t sizes[] = {kSizeBytes, kSizeBytes};
   size_t attrsIdxs[] = {0};
 
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpSwap};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = hipMemcpyFlagExtPreferCU;
 
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, ops,
-                                          1, &attr, attrsIdxs, 1,
-                                          stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_b));
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
-  }
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr,
+                                          2, &attr, attrsIdxs, 1, stream);
   HIP_CHECK(err);
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  std::vector<int> resultA(kNumElements);
-  std::vector<int> resultB(kNumElements);
-  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeBytes, hipMemcpyDeviceToHost));
-
-  for (size_t i = 0; i < kNumElements; i++) {
-    REQUIRE(resultA[i] == kValB);
-    REQUIRE(resultB[i] == kValA);
+  std::vector<int> out_a(kNumElements);
+  std::vector<int> out_b(kNumElements);
+  HIP_CHECK(hipMemcpy(out_a.data(), d_dst_a, kSizeBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_b.data(), d_dst_b, kSizeBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kNumElements; ++i) {
+    REQUIRE(out_a[i] == kValA);
+    REQUIRE(out_b[i] == kValB);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - Verifies hipExtMemcpyBatchAsync rejects unknown/reserved bits in ops[]
- *   with hipErrorInvalidValue.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_UnknownOpsBits_Negative) {
-  constexpr size_t kNumElements = 1024;
-  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
-  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeBytes};
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  size_t attrsIdxs[] = {0};
-
-  // 0x8 is outside the valid hipExtMemcpyOp bit set (Swap|IndirectSrc|IndirectDst).
-  hipExtMemcpyOp ops[] = {static_cast<hipExtMemcpyOp>(0x8)};
-
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, ops,
-                                          1, &attr, attrsIdxs, 1,
-                                          stream);
-  REQUIRE(err == hipErrorInvalidValue);
-
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - When ops[] is provided it is authoritative for the op type: an entry with
- *   hipExtMemcpyOpDefault performs a plain linear copy even if attrs[].flags
- *   also carries hipMemcpyFlagExtOpSwap. Verifies the copy runs (dst gets src)
- *   and no swap occurred (src is unchanged).
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_OpsDefault_OverridesAttrSwap) {
-  constexpr size_t kNumElements = 1024;
-  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-  constexpr int kValDst = 42;
-  constexpr int kValSrc = 99;
-
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
-  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
-
-  std::vector<int> hostDst(kNumElements, kValDst);
-  std::vector<int> hostSrc(kNumElements, kValSrc);
-  HIP_CHECK(hipMemcpy(d_a, hostDst.data(), kSizeBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, hostSrc.data(), kSizeBytes, hipMemcpyHostToDevice));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeBytes};
-  size_t attrsIdxs[] = {0};
-
-  // attrs asks for swap, but ops[] says Default -> ops[] wins: plain copy.
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  attr.flags = hipMemcpyFlagExtOpSwap;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpDefault};
-
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, ops,
-                                          1, &attr, attrsIdxs, 1,
-                                          stream);
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  std::vector<int> resultA(kNumElements);
-  std::vector<int> resultB(kNumElements);
-  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeBytes, hipMemcpyDeviceToHost));
-
-  for (size_t i = 0; i < kNumElements; i++) {
-    REQUIRE(resultA[i] == kValSrc);  // dst received src (copy happened)
-    REQUIRE(resultB[i] == kValSrc);  // src unchanged (no swap)
-  }
-
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-
-/**
- * Test Description
- * ------------------------
- * - Ops-only usage: attrs is NULL (numAttrs = 0) and the swap op is driven
- *   entirely via ops[]. Verifies the attrs-NULL path (default metadata, op type
- *   from ops[]) performs a correct D2D swap.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_OpsOnly_NullAttrs_Swap) {
-  constexpr size_t kNumElements = 4096;
-  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-  constexpr int kValA = 42;
-  constexpr int kValB = 99;
-
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
-  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
-
-  std::vector<int> hostA(kNumElements, kValA);
-  std::vector<int> hostB(kNumElements, kValB);
-  HIP_CHECK(hipMemcpy(d_a, hostA.data(), kSizeBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeBytes};
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpSwap};
-
-  // attrs / attrsIdxs NULL, numAttrs 0 -> op type comes solely from ops[].
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, ops, 1,
-                                          nullptr, nullptr, 0, stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_b));
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
-  }
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  std::vector<int> resultA(kNumElements);
-  std::vector<int> resultB(kNumElements);
-  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeBytes, hipMemcpyDeviceToHost));
-  for (size_t i = 0; i < kNumElements; i++) {
-    REQUIRE(resultA[i] == kValB);
-    REQUIRE(resultB[i] == kValA);
-  }
-
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - ops[] is authoritative: an ops[i]=hipExtMemcpyOpDefault entry must NOT be
- *   rejected by the swap/indirect support gates just because attrs[].flags
- *   carries an op bit. Uses an indirect flag in attrs with ops[i]=Default on a
- *   plain D2D copy; the call must succeed as a linear copy (not return
- *   hipErrorNotSupported), even on devices without indirect-copy support.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_OpsDefault_IgnoresAttrIndirectGate) {
-  constexpr size_t kNumElements = 1024;
-  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-  constexpr int kValDst = 7;
-  constexpr int kValSrc = 88;
-
-  void* d_a = nullptr;
-  void* d_b = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
-  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
-
-  std::vector<int> hostDst(kNumElements, kValDst);
-  std::vector<int> hostSrc(kNumElements, kValSrc);
-  HIP_CHECK(hipMemcpy(d_a, hostDst.data(), kSizeBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, hostSrc.data(), kSizeBytes, hipMemcpyHostToDevice));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
-  size_t sizesA[] = {kSizeBytes};
-  size_t attrsIdxs[] = {0};
-
-  // attrs requests IndirectSrc, but ops[] says Default -> ops wins: linear copy.
-  // The indirect-support gate must not reject this even where indirect is
-  // unsupported, because ops[] is authoritative.
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  attr.flags = hipMemcpyFlagExtOpIndirectSrc;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpDefault};
-
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                          nullptr, nullptr, ops, 1,
-                                          &attr, attrsIdxs, 1, stream);
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  std::vector<int> resultA(kNumElements);
-  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeBytes, hipMemcpyDeviceToHost));
-  for (size_t i = 0; i < kNumElements; i++) {
-    REQUIRE(resultA[i] == kValSrc);  // plain linear copy: dst received src
-  }
-
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_src_a));
+  HIP_CHECK(hipFree(d_src_b));
+  HIP_CHECK(hipFree(d_dst_a));
+  HIP_CHECK(hipFree(d_dst_b));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -2166,23 +1894,23 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
 
   void* dsts[] = {d_a};
   void* srcs[] = {d_b};
-  size_t sizesA[] = {kBytes};
+  size_t sizes[] = {kBytes};
   size_t attrsIdxs[] = {0};
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
   hipExtMemcpyWait waits[1] = {};
   hipExtMemcpySignal signals[1] = {};
 
   // Non-NULL waits -> reserved -> hipErrorNotSupported.
-  hipError_t errW = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                           waits, nullptr, nullptr, 1,
+  hipError_t errW = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr,
+                                           waits, nullptr, 1,
                                            &attr, attrsIdxs, 1, stream);
   REQUIRE(errW == hipErrorNotSupported);
 
   // Non-NULL signals -> reserved -> hipErrorNotSupported.
-  hipError_t errS = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, nullptr,
-                                           nullptr, signals, nullptr, 1,
+  hipError_t errS = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr,
+                                           nullptr, signals, 1,
                                            &attr, attrsIdxs, 1, stream);
   REQUIRE(errS == hipErrorNotSupported);
 
@@ -2194,14 +1922,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
 /**
  * Test Description
  * ------------------------
- * - For a swap entry, sizesB[i] must be non-zero and <= sizesA[i]. Both a zero
- *   and an over-large sizesB return hipErrorInvalidValue. Skipped where swap
+ * - For a swap entry, sizesDst[i] must be non-zero and <= sizes[i]. Both a zero
+ *   and an over-large sizesDst return hipErrorInvalidValue. Skipped where swap
  *   is unsupported.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesB_Constraint_Negative) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative) {
   constexpr size_t kBytes = 4096;
 
   void* d_a = nullptr;
@@ -2214,16 +1942,16 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesB_Constraint_Negative) {
 
   void* dsts[] = {d_a};
   void* srcs[] = {d_b};
-  size_t sizesA[] = {kBytes};
+  size_t sizes[] = {kBytes};
   size_t attrsIdxs[] = {0};
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpSwap};
+  attr.flags = hipMemcpyFlagExtOpSwap;
 
-  // Case 1: sizesB[0] == 0 (invalid for a swap entry).
-  size_t sizesB_zero[] = {0};
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB_zero,
-                                          nullptr, nullptr, ops, 1,
+  // Case 1: sizesDst[0] == 0 (invalid for a swap entry).
+  size_t sizesDst_zero[] = {0};
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst_zero,
+                                          nullptr, nullptr, 1,
                                           &attr, attrsIdxs, 1, stream);
   if (err == hipErrorNotSupported) {
     HIP_CHECK(hipStreamDestroy(stream));
@@ -2233,10 +1961,10 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesB_Constraint_Negative) {
   }
   REQUIRE(err == hipErrorInvalidValue);
 
-  // Case 2: sizesB[0] > sizesA[0] (invalid for a swap entry).
-  size_t sizesB_big[] = {kBytes * 2};
-  err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB_big,
-                               nullptr, nullptr, ops, 1,
+  // Case 2: sizesDst[0] > sizes[0] (invalid for a swap entry).
+  size_t sizesDst_big[] = {kBytes * 2};
+  err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst_big,
+                               nullptr, nullptr, 1,
                                &attr, attrsIdxs, 1, stream);
   REQUIRE(err == hipErrorInvalidValue);
 
@@ -2248,9 +1976,9 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesB_Constraint_Negative) {
 /**
  * Test Description
  * ------------------------
- * - Asymmetric swap (sizesA > sizesB) between device and pinned host memory.
- *   The first sizesB bytes are swapped between the two buffers; the A-side tail
- *   (sizesA - sizesB) is copied into B. Verifies the exchanged head and copied
+ * - Asymmetric swap (sizes > sizesDst) between device and pinned host memory.
+ *   The first sizesDst bytes are swapped between the two buffers; the A-side tail
+ *   (sizes - sizesDst) is copied into B. Verifies the exchanged head and copied
  *   tail on both operands.
  * Test source
  * ------------------------
@@ -2277,15 +2005,15 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric) {
 
   void* dsts[] = {h_a};   // A = pinned host
   void* srcs[] = {d_b};   // B = device
-  size_t sizesA[] = {kSizeA};
-  size_t sizesB[] = {kSizeB};
+  size_t sizes[] = {kSizeA};
+  size_t sizesDst[] = {kSizeB};
   size_t attrsIdxs[] = {0};
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
   attr.flags = hipMemcpyFlagExtOpSwap;
 
-  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizesA, sizesB,
-                                          nullptr, nullptr, nullptr, 1,
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst,
+                                          nullptr, nullptr, 1,
                                           &attr, attrsIdxs, 1, stream);
   if (err == hipErrorNotSupported) {
     HIP_CHECK(hipStreamDestroy(stream));
@@ -2317,14 +2045,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric) {
 /**
  * Test Description
  * ------------------------
- * - Indirect source specified via ops[] (hipExtMemcpyOpIndirectSrc): srcs[i]
+ * - Indirect source specified via attrs flags (hipMemcpyFlagExtOpIndirectSrc): srcs[i]
  *   holds a pointer to the real source buffer, read when the copy executes.
  *   Skipped where indirect copy is unsupported.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_IndirectSrc) {
   constexpr size_t copy_size = kSmallCopySize;
 
   StreamGuard stream_guard(Streams::created);
@@ -2340,14 +2068,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc) {
 
   std::vector<void*> dst_ptrs{dst.ptr()};
   std::vector<void*> src_ptrs{src_slot.ptr()};
-  std::vector<size_t> sizesA{copy_size};
+  std::vector<size_t> sizes{copy_size};
   size_t attrs_idx = 0;
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpIndirectSrc};
+  attr.flags = hipMemcpyFlagExtOpIndirectSrc;
 
-  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizesA.data(),
-                                             nullptr, nullptr, nullptr, ops, 1, &attr, &attrs_idx,
+  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                             nullptr, nullptr, nullptr, 1, &attr, &attrs_idx,
                                              1, stream_guard.stream());
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kSdmaIndirectUnsupported);
@@ -2360,61 +2088,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc) {
 /**
  * Test Description
  * ------------------------
- * - Indirect source for a device-to-device copy: srcs[i] holds (in device
- *   memory) a pointer to the real device source buffer, dereferenced when the
- *   copy runs. Exercises the device<->device indirect path (both operands are
- *   device memory), which must be accepted (not restricted to host<->device).
- *   Skipped where indirect copy is unsupported.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc_D2D) {
-  constexpr size_t copy_size = kSmallCopySize;
-
-  StreamGuard stream_guard(Streams::created);
-  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);            // device source
-  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);            // device destination
-  LinearAllocGuard<char> src_slot(LinearAllocs::hipMalloc, sizeof(void*));  // device pointer holder
-
-  const size_t copy_elements = copy_size / sizeof(int);
-  std::vector<int> host_src(copy_elements, kPatternValue);
-  HIP_CHECK(hipMemcpy(src.ptr(), host_src.data(), copy_size, hipMemcpyHostToDevice));
-
-  // Store the real source pointer in the device slot (dereferenced at execution).
-  void* src_ptr = src.ptr();
-  HIP_CHECK(hipMemcpy(src_slot.ptr(), &src_ptr, sizeof(void*), hipMemcpyHostToDevice));
-
-  std::vector<void*> dst_ptrs{dst.ptr()};
-  std::vector<void*> src_ptrs{src_slot.ptr()};
-  std::vector<size_t> sizesA{copy_size};
-  size_t attrs_idx = 0;
-  hipMemcpyAttributes attr{};
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpIndirectSrc};
-
-  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizesA.data(),
-                                             nullptr, nullptr, nullptr, ops, 1, &attr, &attrs_idx,
-                                             1, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaIndirectUnsupported);
-  }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-  VerifyDeviceBuffers(dst_ptrs, copy_size);
-}
-
-/**
- * Test Description
- * ------------------------
- * - Indirect destination specified via ops[] (hipExtMemcpyOpIndirectDst):
+ * - Indirect destination specified via attrs flags (hipMemcpyFlagExtOpIndirectDst):
  *   dsts[i] holds a pointer to the real destination buffer, read when the copy
  *   executes. Skipped where indirect copy is unsupported.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectDst) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_IndirectDst) {
   constexpr size_t copy_size = kSmallCopySize;
 
   StreamGuard stream_guard(Streams::created);
@@ -2432,14 +2113,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectDst) {
 
   std::vector<void*> src_ptrs{src.ptr()};
   std::vector<void*> dst_ptrs{dst_slot.ptr()};
-  std::vector<size_t> sizesA{copy_size};
+  std::vector<size_t> sizes{copy_size};
   size_t attrs_idx = 0;
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {hipExtMemcpyOpIndirectDst};
+  attr.flags = hipMemcpyFlagExtOpIndirectDst;
 
-  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizesA.data(),
-                                             nullptr, nullptr, nullptr, ops, 1, &attr, &attrs_idx,
+  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                             nullptr, nullptr, nullptr, 1, &attr, &attrs_idx,
                                              1, stream_guard.stream());
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kSdmaIndirectUnsupported);
@@ -2452,15 +2133,15 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectDst) {
 /**
  * Test Description
  * ------------------------
- * - Both source and destination indirect via ops[] (hipExtMemcpyOpIndirectSrc |
- *   hipExtMemcpyOpIndirectDst): srcs[i] and dsts[i] each hold a pointer to the
+ * - Both source and destination indirect via attrs flags (hipMemcpyFlagExtOpIndirectSrc |
+ *   hipMemcpyFlagExtOpIndirectDst): srcs[i] and dsts[i] each hold a pointer to the
  *   real buffer, read when the copy executes. Skipped where indirect copy is
  *   unsupported.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrcDst) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_IndirectSrcDst) {
   constexpr size_t copy_size = kSmallCopySize;
 
   StreamGuard stream_guard(Streams::created);
@@ -2479,15 +2160,14 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrcDst) {
 
   std::vector<void*> src_ptrs{src_slot.ptr()};
   std::vector<void*> dst_ptrs{dst_slot.ptr()};
-  std::vector<size_t> sizesA{copy_size};
+  std::vector<size_t> sizes{copy_size};
   size_t attrs_idx = 0;
-  hipMemcpyAttributes attr{};
+  hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-  hipExtMemcpyOp ops[] = {static_cast<hipExtMemcpyOp>(hipExtMemcpyOpIndirectSrc |
-                                                      hipExtMemcpyOpIndirectDst)};
+  attr.flags = hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
 
-  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizesA.data(),
-                                             nullptr, nullptr, nullptr, ops, 1, &attr, &attrs_idx,
+  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                             nullptr, nullptr, nullptr, 1, &attr, &attrs_idx,
                                              1, stream_guard.stream());
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kSdmaIndirectUnsupported);

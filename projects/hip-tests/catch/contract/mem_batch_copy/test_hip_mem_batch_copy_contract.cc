@@ -184,7 +184,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsReject
 }
 
 #if HT_AMD
-// @asserts: hipExtMemcpyBatchAsync - a two-op batch with all extended parameters null (no per-entry ops, asymmetric swap, or wait/signal) delivers each source to its destination after synchronize (or reports unsupported)
+// @asserts: hipExtMemcpyBatchAsync - a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported)
 HIP_TEST_CASE(Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src_a = MakePattern(0x11);
@@ -212,11 +212,11 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes
   HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice));
 
-  // hipExtMemcpyBatchAsync with all extended parameters null (no per-entry ops,
-  // no asymmetric swap sizes, no wait/signal) must behave like hipMemcpyBatchAsync:
-  // each source is delivered to its matching destination after the stream is
-  // synchronized.
-  hipMemcpyAttributes attribute{};
+  // hipExtMemcpyBatchAsync with all extended parameters null (no asymmetric swap
+  // sizes, no wait/signal) and default attributes must behave like
+  // hipMemcpyBatchAsync: each source is delivered to its matching destination
+  // after the stream is synchronized.
+  hipExtMemcpyAttributes attribute{};
   attribute.srcAccessOrder = hipMemcpySrcAccessOrderStream;
   attribute.srcLocHint = DeviceLocation();
   attribute.dstLocHint = DeviceLocation();
@@ -224,11 +224,11 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes
   void* dsts[2] = {dev_dst_a, dev_dst_b};
   void* srcs[2] = {dev_src_a, dev_src_b};
   size_t sizes[2] = {kBytes, kBytes};
-  hipMemcpyAttributes attrs[1] = {attribute};
+  hipExtMemcpyAttributes attrs[1] = {attribute};
   size_t attr_indices[1] = {0};
   const hipError_t status =
-      hipExtMemcpyBatchAsync(dsts, srcs, sizes, /*sizesB=*/nullptr, /*waits=*/nullptr,
-                             /*signals=*/nullptr, /*ops=*/nullptr, 2, attrs, attr_indices, 1,
+      hipExtMemcpyBatchAsync(dsts, srcs, sizes, /*sizesDst=*/nullptr, /*waits=*/nullptr,
+                             /*signals=*/nullptr, 2, attrs, attr_indices, 1,
                              stream);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Extended batch memcpy is not supported by this device/runtime path.");
