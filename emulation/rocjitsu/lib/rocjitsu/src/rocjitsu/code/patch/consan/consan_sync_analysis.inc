@@ -288,7 +288,6 @@ void build_sync_events(const ConSanCodeObjectId &code_object_id, rj_code_arch_t 
     event.semantic_id.physical.original_text_offset = source.text_offset();
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.source_site = source_site;
-    event.source_containers = {source.container.name};
     event.identity = std::string(fingerprint) + "|" + std::string(container_kind) + "=" +
                      source.container.name + "|event=" + std::string(kind) + "|pc=0x" +
                      consan_fixed_hex(event.text_offset(), 16) +
@@ -495,14 +494,7 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
         return container_entry(lhs) == container_entry(rhs) &&
                sync_event_semantics_equal(program_sites, lhs, rhs);
       },
-      [](ConSanSyncEvent &retained, const ConSanSyncEvent &alias) {
-        retained.source_containers.insert(retained.source_containers.end(),
-                                          alias.source_containers.begin(),
-                                          alias.source_containers.end());
-        std::ranges::sort(retained.source_containers);
-        retained.source_containers.erase(std::ranges::unique(retained.source_containers).begin(),
-                                         retained.source_containers.end());
-      });
+      [](ConSanSyncEvent &, const ConSanSyncEvent &) {});
 }
 
 [[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>

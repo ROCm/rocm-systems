@@ -840,7 +840,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   for (const ConSanAtomicSiteDecision &decision : result.observation_plan().atomic_site_decisions) {
     if (decision.reason != ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable)
       continue;
-    for (const std::string &container_name : decision.source_containers) {
+    for (const std::string &container_name :
+         result.program_inventory.source_container_names(decision.semantic_site.physical)) {
       result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + container_name +
                                    ": compare-exchange-dynamic-outcome-unavailable");
     }

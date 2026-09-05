@@ -140,7 +140,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   object_facts.has_report_buffer = effective_options.moi_report_buffer_address.has_value();
   MoiObjectModePlan mode_plan =
       plan_moi_object_mode(effective_options, effective_options, effective_options, effective_point,
-                           object_facts, result.observation_plan());
+                           object_facts, result.observation_plan(), result.program_inventory);
   effective_options.moi_owner_source = mode_plan.owner_source;
   effective_options.moi_track_atomics = mode_plan.track_atomics;
   effective_options.moi_track_barriers = mode_plan.track_barriers;

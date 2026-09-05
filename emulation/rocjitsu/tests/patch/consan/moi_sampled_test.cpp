@@ -7655,10 +7655,12 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             2u * kSiteCount);
-  EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
-                                  [](const ConSanBarrierSiteDecision &decision) {
-                                    return decision.source_containers.size() == 2u;
-                                  }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.observation_plan().barrier_site_decisions,
+      [&](const ConSanBarrierSiteDecision &decision) {
+        return result.program_inventory.source_container_names(decision.semantic_site.physical)
+                   .size() == 2u;
+      }));
   ASSERT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
             kSiteCount);
@@ -7674,11 +7676,12 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
                                ConSanProbeIntentKind::SampledBarrierEpoch,
                                &ConSanProbeIntent::kind),
             kSiteCount);
-  EXPECT_TRUE(std::ranges::all_of(result.observation_plan().site_decisions,
-                                  [](const ConSanSiteDecision &decision) {
-                                    return decision.kind != ConSanSiteDecisionKind::Admitted ||
-                                           decision.source_containers.size() == 2u;
-                                  }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.observation_plan().site_decisions, [&](const ConSanSiteDecision &decision) {
+        return decision.kind != ConSanSiteDecisionKind::Admitted ||
+               result.program_inventory.source_container_names(decision.semantic_site.physical)
+                       .size() == 2u;
+      }));
   EXPECT_TRUE(std::ranges::all_of(
       result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
         return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;

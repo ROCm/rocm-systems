@@ -131,7 +131,8 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   for (const auto &[offset, aliases] : events_by_offset) {
     const ConSanSyncEvent &event = *aliases.front();
     const ConSanBarrierSite *barrier = synchronization.source_as<ConSanBarrierSite>(event);
-    const std::vector<std::string> names = synchronization.source_container_names(aliases);
+    const std::vector<std::string> names =
+        synchronization.source_container_names(event.semantic_id.physical);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
     std::optional<ConSanProbeIntentId> intent_id;
@@ -274,7 +275,6 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
         .kind = decision_kind,
         .reason = reason,
         .intent_ids = {},
-        .source_containers = names,
     };
     if (intent_id)
       decision.intent_ids.push_back(*intent_id);

@@ -4628,9 +4628,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             lowering_reason = "none";
           }
         }
-        const std::string_view source = decision.source_containers.empty()
+        const std::vector<std::string> source_containers =
+            transform_result.program_inventory.source_container_names(
+                decision.semantic_site.physical);
+        const std::string_view source = source_containers.empty()
                                             ? std::string_view{"<none>"}
-                                            : decision.source_containers.front();
+                                            : source_containers.front();
         std::string reason(reason_name(decision.reason));
         std::ranges::replace(reason, '-', '_');
         log_message(

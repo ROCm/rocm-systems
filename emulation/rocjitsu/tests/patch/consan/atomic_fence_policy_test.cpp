@@ -136,7 +136,6 @@ ConSanSyncEvent make_atomic_event(
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = container + "|atomic=" + std::to_string(offset);
-  event.source_containers.push_back(std::move(container));
   event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
                                                                      : ConSanMemoryScope::Agent;
   return event;
@@ -176,7 +175,7 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = std::move(identity);
-  sequence.container_name = event.source_containers.front();
+  sequence.container_name = event.identity.substr(0, event.identity.find('|'));
   sequence.in_kernel = true;
   sequence.begin_text_offset = event.text_offset();
   sequence.end_text_offset = event.text_offset() + 12u;
@@ -261,10 +260,9 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
       site.execution_owners.push_back({});
   }
   for (const ConSanSyncEvent &event : events) {
-    if (event.source_site.valid() && event.source_site.ordinal < builder.program_sites().size() &&
-        !event.source_containers.empty())
+    if (event.source_site.valid() && event.source_site.ordinal < builder.program_sites().size())
       builder.program_sites()[event.source_site.ordinal].container.name =
-          event.source_containers.front();
+          event.identity.substr(0, event.identity.find('|'));
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
@@ -833,14 +831,19 @@ TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) 
 TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
   std::vector events{make_ordinary_store_event(), make_fence_event()};
   std::vector sequences{make_atomic_sequence(events.front())};
-  events[1].source_containers = {"atomic_kernel", "aliased_kernel"};
+  events[1].source_site = {1};
+  ConSanSyncEvent fence_alias = events[1];
+  fence_alias.source_site = {2};
+  fence_alias.identity = "aliased_kernel|fence=48";
+  events.push_back(std::move(fence_alias));
   ConSanMoiFenceCandidate first = make_fence_candidate(events[0], events[1], sequences[0]);
   ConSanMoiFenceCandidate conflict = first;
   conflict.memory_role = ConSanSyncMemoryRole::Acquire;
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+  const ProgramInventory inventory =
       build_atomic_inventory(std::move(events), std::move(sequences), {},
-                             {make_global_store_site({})}, {std::move(first), std::move(conflict)}),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+                             {make_global_store_site({})}, {first, conflict});
+  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
   EXPECT_FALSE(policy.valid());
   EXPECT_EQ(policy.fence_errors,
             (std::vector{ConSanFencePolicyReason::ConflictingPhysicalAliases}));
@@ -848,30 +851,33 @@ TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
   EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
   EXPECT_EQ(policy.plan.fence_site_decisions.front().reason,
             ConSanFencePolicyReason::ConflictingPhysicalAliases);
-  EXPECT_EQ(policy.plan.fence_site_decisions.front().source_containers,
+  EXPECT_EQ(inventory.source_container_names(
+                policy.plan.fence_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"aliased_kernel", "atomic_kernel"}));
 }
 
 TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) {
   std::vector events{make_atomic_event()};
   ConSanSyncEvent alias = events.front();
-  alias.source_containers = {"aliased_kernel"};
+  alias.identity = "aliased_kernel|atomic=32";
   events.front().source_site = {0};
   alias.source_site = {1};
   events.push_back(std::move(alias));
   std::vector sequences{make_atomic_sequence(events.front())};
   ConSanAtomicSite conflicting_site = make_global_atomic_site();
   conflicting_site.width_bits = 64;
+  const ProgramInventory inventory = build_atomic_inventory(
+      std::move(events), std::move(sequences),
+      {make_global_atomic_site(), std::move(conflicting_site)});
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      build_atomic_inventory(std::move(events), std::move(sequences),
-                             {make_global_atomic_site(), std::move(conflicting_site)}),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
   EXPECT_FALSE(policy.valid());
   EXPECT_EQ(policy.atomic_errors,
             (std::vector{ConSanAtomicPolicyReason::ConflictingPhysicalAliases}));
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().source_containers,
+  EXPECT_EQ(inventory.source_container_names(
+                policy.plan.atomic_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"aliased_kernel", "atomic_kernel"}));
   EXPECT_TRUE(policy.plan.probe_intents.empty());
 }

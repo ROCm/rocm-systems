@@ -299,10 +299,6 @@ struct ConSanSyncEvent : ConSanSyncSemantics {
   /// several symbols alias one physical instruction.
   ConSanProgramSiteId source_site;
   std::string identity;
-  /// Every symbol-container name through which this physical event was
-  /// decoded. Analysis canonicalizes equivalent aliases into one event while
-  /// preserving this attribution for policy diagnostics and filtering.
-  std::vector<std::string> source_containers;
   /// Original text position is part of the event's canonical physical
   /// identity. Keeping a second mutable copy allowed the two identities to
   /// disagree after an event was assembled or copied.

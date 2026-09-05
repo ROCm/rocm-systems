@@ -2003,7 +2003,6 @@ void install_test_access_coverage(
         .kind = decision_kind,
         .reason = reason,
         .intent_ids = std::move(intent_ids),
-        .source_containers = {"test_access"},
     });
   }
   ASSERT_TRUE(plan.valid());
@@ -5377,6 +5376,21 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
       semantic_site(0x40u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
   const rocjitsu::ConSanSynchronizationAssociationId atomic_association{"test-atomic"};
   const rocjitsu::ConSanSynchronizationAssociationId fence_association{"test-fence"};
+  install_consan_test_program_inventory(
+      result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+        const auto add_source = [&](uint64_t offset, std::string name) {
+          rocjitsu::ConSanProgramSite site;
+          site.physical_id.original_text_offset = offset;
+          site.container = {.id = {},
+                            .kind = rocjitsu::ConSanProgramContainerKind::Kernel,
+                            .name = std::move(name)};
+          builder.add_semantic_site(std::move(site));
+        };
+        add_source(0x10u, "unsupported_kernel");
+        add_source(0x20u, "barrier_helper");
+        add_source(0x30u, "atomic_kernel");
+        add_source(0x40u, "fence_kernel");
+      });
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
@@ -5385,7 +5399,6 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .kind = rocjitsu::ConSanSiteDecisionKind::Unsupported,
           .reason = rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic,
           .intent_ids = {},
-          .source_containers = {"unsupported_kernel"},
       }},
       .barrier_site_decisions = {{
           .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
@@ -5393,7 +5406,6 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .reason = rocjitsu::ConSanBarrierPolicyReason::None,
           .intent_ids = {{0u}},
-          .source_containers = {"barrier_helper"},
       }},
       .atomic_site_decisions = {{
           .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
@@ -5404,7 +5416,6 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .association = atomic_association,
           .lowering_form = diagnostic_atomic_lowering_form(),
           .intent_ids = {{1u}},
-          .source_containers = {"atomic_kernel"},
       }},
       .fence_site_decisions = {{
           .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
@@ -5416,7 +5427,6 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .association = fence_association,
           .communication_lowering_form = diagnostic_atomic_lowering_form(),
           .intent_ids = {{2u}},
-          .source_containers = {"fence_kernel"},
       }},
       .probe_intents =
           {
@@ -5472,6 +5482,15 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
       .member_ordinal = 0u,
       .range_ordinal = 0u,
   };
+  install_consan_test_program_inventory(
+      result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+        rocjitsu::ConSanProgramSite site;
+        site.physical_id.original_text_offset = 0x10u;
+        site.container = {.id = {},
+                          .kind = rocjitsu::ConSanProgramContainerKind::Kernel,
+                          .name = "typed_kernel"};
+        builder.add_semantic_site(std::move(site));
+      });
   rocjitsu::ConSanObservationPlan plan = {
       .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
       .site_decisions = {{
@@ -5480,7 +5499,6 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
           .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
           .reason = rocjitsu::ConSanAccessPolicyReason::None,
           .intent_ids = {{0u}},
-          .source_containers = {"typed_kernel"},
       }},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {},
@@ -5737,7 +5755,6 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
           .lowering_form = std::nullopt,
           .intent_ids = {},
-          .source_containers = {"isolated_release"},
       }},
       .fence_site_decisions = {},
       .probe_intents = {},
@@ -5840,7 +5857,6 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
         .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
         .reason = rocjitsu::ConSanAccessPolicyReason::None,
         .intent_ids = {intent_id},
-        .source_containers = {"auto_report_access"},
     });
     plan.probe_intents.push_back({
         .id = intent_id,

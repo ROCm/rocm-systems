@@ -37,7 +37,6 @@ ConSanSyncEvent make_barrier_event(
   event.confidence = ConSanSemanticConfidence::Exact;
   event.memory_role_confidence = ConSanSemanticConfidence::Exact;
   event.identity = container + "|barrier=" + std::to_string(offset);
-  event.source_containers.push_back(std::move(container));
   return event;
 }
 
@@ -51,7 +50,7 @@ make_barrier_sequence(std::span<const ConSanSyncEvent> events,
   sequence.confidence = ConSanSemanticConfidence::Exact;
   sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
   sequence.identity = "barrier-sequence";
-  sequence.container_name = events.front().source_containers.front();
+  sequence.container_name = events.front().identity.substr(0, events.front().identity.find('|'));
   sequence.in_kernel = true;
   sequence.begin_text_offset = events.front().text_offset();
   sequence.end_text_offset = events.back().text_offset() + sizeof(uint32_t);
@@ -100,8 +99,8 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     site.mnemonic = "s_barrier";
     event.source_site = {static_cast<uint32_t>(builder.program_sites().size())};
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
-    if (!event.source_containers.empty())
-      builder.program_sites().back().container.name = event.source_containers.front();
+    builder.program_sites().back().container.name =
+        event.identity.substr(0, event.identity.find('|'));
     builder.program_sites().back().execution_owners.push_back({});
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
@@ -359,14 +358,14 @@ TEST(ConSanBarrierPolicy, AmbiguousAndIncompleteSequencesFailClosedWithDistinctR
 TEST(ConSanBarrierPolicy, IdenticalAliasesCoalesceAndConflictingAliasesAreFatal) {
   ConSanSyncEvent first = make_barrier_event(32);
   ConSanSyncEvent second = first;
-  second.source_containers = {"shared_alias"};
   second.identity = "shared_alias|barrier=32";
-  const ConSanBarrierPolicyResult coalesced =
-      plan_consan_barrier_observation(build_barrier_inventory({first, second}, {}),
-                                      barrier_request(ConSanCapabilityEngine::RecordReplay));
+  const ProgramInventory coalesced_inventory = build_barrier_inventory({first, second}, {});
+  const ConSanBarrierPolicyResult coalesced = plan_consan_barrier_observation(
+      coalesced_inventory, barrier_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(coalesced.valid());
   ASSERT_EQ(coalesced.plan.barrier_site_decisions.size(), 1u);
-  EXPECT_EQ(coalesced.plan.barrier_site_decisions.front().source_containers,
+  EXPECT_EQ(coalesced_inventory.source_container_names(
+                coalesced.plan.barrier_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"barrier_kernel", "shared_alias"}));
   EXPECT_EQ(coalesced.plan.probe_intents.size(), 1u);
 

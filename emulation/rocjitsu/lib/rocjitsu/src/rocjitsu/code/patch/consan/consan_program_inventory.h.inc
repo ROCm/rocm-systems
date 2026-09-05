@@ -292,6 +292,26 @@ template <typename Site>
   return consan_program_site<Site>(sites, event.source_site);
 }
 
+/// Derive every symbol-container alias for one physical instruction from the
+/// authoritative program-site arena. Alias names are presentation data and
+/// must not be copied into semantic events or policy decisions.
+[[nodiscard]] inline std::vector<std::string>
+consan_source_container_names(std::span<const ConSanProgramSite> sites,
+                              const PhysicalSiteId &physical_site) {
+  std::vector<std::string> names;
+  for (const ConSanProgramSite &site : sites) {
+    // The arena belongs to exactly one code object, so the original text
+    // offset is the complete lookup key inside this inventory. This also
+    // keeps builder views useful before publication binds the code-object ID.
+    if (site.text_offset() != physical_site.original_text_offset ||
+        std::ranges::find(names, site.container.name) != names.end())
+      continue;
+    names.push_back(site.container.name);
+  }
+  std::ranges::sort(names);
+  return names;
+}
+
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
 ///
@@ -347,20 +367,8 @@ struct SynchronizationInventoryView {
   }
 
   [[nodiscard]] std::vector<std::string>
-  source_container_names(std::span<const ConSanSyncEvent *const> aliases) const {
-    std::vector<std::string> names;
-    for (const ConSanSyncEvent *event : aliases) {
-      const std::string fallback(container_name(*event));
-      const std::span<const std::string> sources = event->source_containers.empty()
-                                                       ? std::span(&fallback, 1u)
-                                                       : std::span(event->source_containers);
-      for (const std::string &source : sources) {
-        if (std::ranges::find(names, source) == names.end())
-          names.push_back(source);
-      }
-    }
-    std::ranges::sort(names);
-    return names;
+  source_container_names(const PhysicalSiteId &physical_site) const {
+    return consan_source_container_names(program_sites, physical_site);
   }
 
   [[nodiscard]] std::vector<uint64_t>
@@ -728,6 +736,11 @@ public:
   /// Resolve one exact source-site handle in this inventory revision.
   [[nodiscard]] const ConSanProgramSite *program_site(ConSanProgramSiteId id) const {
     return consan_program_site(program_sites(), id);
+  }
+
+  [[nodiscard]] std::vector<std::string>
+  source_container_names(const PhysicalSiteId &physical_site) const {
+    return consan_source_container_names(program_sites(), physical_site);
   }
 
   /// Resolve one exact source-site handle and require its typed payload.

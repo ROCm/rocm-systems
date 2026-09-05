@@ -51,10 +51,11 @@ const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
 MoiObjectModePlan
 plan_moi_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                      const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
-                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan) {
+                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan,
+                     const ProgramInventory &inventory) {
   const MoiModeOperations &operations = moi_mode_operations(request.moi_engine);
   MoiObjectModePlan plan =
-      operations.plan(request, resources, policy, point, facts, observation_plan);
+      operations.plan(request, resources, policy, point, facts, observation_plan, inventory);
   plan.prologue = operations.prologue;
   return plan;
 }

@@ -46,13 +46,13 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
           "ConSan SuperCollider " + std::string(access_kind) + " access at original text offset " +
           std::to_string(decision.semantic_site.physical.original_text_offset) +
           " was decoded inconsistently through aliases '" +
-          quoted_aliases(decision.source_containers) + "'");
+          quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
     } else {
       product.diagnostics.emplace_back(
           "ConSan MOI physical access at original text offset " +
           std::to_string(decision.semantic_site.physical.original_text_offset) +
           " was decoded inconsistently through aliases '" +
-          quoted_aliases(decision.source_containers) + "'");
+          quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
     }
   }
   for (const ConSanBarrierSiteDecision &decision : product.plan().barrier_site_decisions) {
@@ -65,7 +65,9 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
                std::to_string(decision.semantic_site.physical.original_text_offset) +
                " was decoded inconsistently through ";
     message += supercollider ? "physical aliases"
-                             : "aliases '" + quoted_aliases(decision.source_containers) + "'";
+                             : "aliases '" + quoted_aliases(inventory.source_container_names(
+                                                  decision.semantic_site.physical)) +
+                                   "'";
     product.diagnostics.push_back(std::move(message));
   }
   for (const ConSanAtomicSiteDecision &decision : product.plan().atomic_site_decisions) {
@@ -75,7 +77,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
         "ConSan MOI physical atomic at original text offset " +
         std::to_string(decision.semantic_site.physical.original_text_offset) +
         " was decoded inconsistently through aliases '" +
-        quoted_aliases(decision.source_containers) + "'");
+        quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
   }
   for (const ConSanFenceSiteDecision &decision : product.plan().fence_site_decisions) {
     if (decision.reason != ConSanFencePolicyReason::ConflictingPhysicalAliases)
@@ -84,7 +86,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
         "ConSan MOI physical fence at original text offset " +
         std::to_string(decision.semantic_site.physical.original_text_offset) +
         " was decoded inconsistently through aliases '" +
-        quoted_aliases(decision.source_containers) + "'");
+        quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
   }
 }
 

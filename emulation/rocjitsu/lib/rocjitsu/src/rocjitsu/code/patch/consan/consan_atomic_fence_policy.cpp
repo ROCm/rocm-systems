@@ -289,7 +289,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     }
 
     const SemanticSiteId semantic_id = event_semantic_id(inventory, event);
-    const std::vector<std::string> names = synchronization.source_container_names(aliases);
+    const std::vector<std::string> names =
+        synchronization.source_container_names(event.semantic_id.physical);
     const bool conflicting_alias = std::ranges::any_of(aliases, [&](const ConSanSyncEvent *alias) {
       return !event_policy_semantics_equal(synchronization, event, *alias);
     });
@@ -358,7 +359,6 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .dynamic_result = required_dynamic_result,
         .lowering_form = std::move(lowering_form),
         .intent_ids = {},
-        .source_containers = names,
     };
     if (sequence != nullptr)
       decision.association = ConSanSynchronizationAssociationId{sequence->identity};
@@ -402,7 +402,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     const SemanticSiteId fence_id =
         fence_event == nullptr ? SemanticSiteId{} : fence_event->semantic_id;
     const std::vector<std::string> names =
-        synchronization.source_container_names(fence_events);
+        fence_event == nullptr
+            ? std::vector<std::string>{}
+            : synchronization.source_container_names(fence_event->semantic_id.physical);
     const ConSanCapabilityDisposition capability = consan_capability_disposition(
         inventory.target(), request.engine, ConSanCapabilityForm::AddressedOrdinaryFence);
     const bool conflicting_alias =
@@ -419,7 +421,6 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .association = std::nullopt,
         .communication_lowering_form = std::nullopt,
         .intent_ids = {},
-        .source_containers = names,
     };
     if (const ConSanSyncSequence *sequence = synchronization.find_sequence(fence.sequence))
       decision.association = ConSanSynchronizationAssociationId{sequence->identity};
@@ -432,7 +433,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
     } else if (!filter_matches(names, request.container_filter) ||
                !consan_site_matches_kernel_allowlist(inventory, owner_descriptors,
-                                                     decision.source_containers,
+                                                     names,
                                                      request.kernel_name_allowlist)) {
       decision.reason = ConSanFencePolicyReason::ContainerFilterExcluded;
     } else if (conflicting_alias) {

@@ -27,7 +27,7 @@ consan_moi_impl::MoiObjectModePlan
 plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
                        const TransformPolicy &, const ConSanMoiOperatingPoint &,
                        const consan_moi_impl::MoiObjectFacts &facts,
-                       const ConSanObservationPlan &) {
+                       const ConSanObservationPlan &, const ProgramInventory &) {
   consan_moi_impl::MoiObjectModePlan plan;
   plan.track_atomics = facts.has_admitted_atomic;
   plan.semantics.inline_access_present = facts.has_access_candidate;
@@ -77,7 +77,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_EQ(selected->policy.default_runtime_sample_stride, 32u);
   EXPECT_TRUE(selected->policy.initialize_owner_epoch_by_default);
   EXPECT_TRUE(selected->policy.owner_source_applies_without_initialization);
-  const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {});
+  const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {}, {});
   EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
   EXPECT_EQ(selected->barrier_scratch_vgpr_count({.has_report_buffer = true}), 4u);

@@ -402,7 +402,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanAccessPolicyReason::None,
       .intent_ids = {{0u}},
-      .source_containers = {"shared_access"},
   });
   plan.probe_intents.push_back({
       .id = {1u},
@@ -420,7 +419,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanBarrierPolicyReason::None,
       .intent_ids = {{1u}},
-      .source_containers = {"kernel_c"},
   });
   ASSERT_TRUE(plan.valid());
   ConSanCoverageLedger coverage(plan);

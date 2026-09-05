@@ -133,7 +133,6 @@ ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site)
           .kind = ConSanSiteDecisionKind::Admitted,
           .reason = ConSanBarrierPolicyReason::None,
           .intent_ids = {{0}},
-          .source_containers = {"kernel"},
       }},
       .atomic_site_decisions = {},
       .fence_site_decisions = {},
@@ -204,9 +203,6 @@ TEST(ConSanObservationPlan, PlanValidationRejectsEveryBrokenTypedRelationship) {
   broken = policy.plan;
   broken.site_decisions.front().intent_ids = {{99}};
   EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.site_decisions.front().source_containers.clear();
-  EXPECT_FALSE(broken.valid());
 }
 
 TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRelationship) {
@@ -272,9 +268,6 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   broken = policy.plan;
   broken.barrier_site_decisions.front().intent_ids = {{99}};
   EXPECT_FALSE(broken.valid());
-  broken = policy.plan;
-  broken.barrier_site_decisions.front().source_containers.clear();
-  EXPECT_FALSE(broken.valid());
 }
 
 TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional) {
@@ -294,7 +287,6 @@ TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional)
       .kind = ConSanSiteDecisionKind::Admitted,
       .reason = ConSanBarrierPolicyReason::None,
       .intent_ids = {{0}},
-      .source_containers = {"kernel"},
   });
   ASSERT_TRUE(fragment.valid());
   ASSERT_TRUE(combined.append(fragment));
@@ -941,12 +933,14 @@ TEST(ConSanAccessPolicy, IdenticalAliasesCoalesceButConflictingAliasesFailClosed
   ConSanProgramSite second_access = make_policy_lds_site();
   stage_policy_access(input, second_function, std::move(second_access));
   input.functions.push_back(std::move(second_function));
+  const ProgramInventory coalesced_inventory = build_policy_inventory(input);
   const ConSanAccessPolicyResult coalesced = plan_consan_access_observation(
-      build_policy_inventory(input), policy_request(ConSanCapabilityEngine::RecordReplay));
+      coalesced_inventory, policy_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(coalesced.valid());
   ASSERT_EQ(coalesced.plan.site_decisions.size(), 1u);
   ASSERT_EQ(coalesced.plan.probe_intents.size(), 1u);
-  EXPECT_EQ(coalesced.plan.site_decisions.front().source_containers,
+  EXPECT_EQ(coalesced_inventory.source_container_names(
+                coalesced.plan.site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"function_alias", "second_function_alias"}));
 
   input.accesses.back().decoded_width_bits = 64;

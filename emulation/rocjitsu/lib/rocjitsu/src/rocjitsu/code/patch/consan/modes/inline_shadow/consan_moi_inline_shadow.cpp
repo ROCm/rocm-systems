@@ -180,7 +180,8 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
                                                  const TransformPolicy &,
                                                  const ConSanMoiOperatingPoint &point,
                                                  const MoiObjectFacts &facts,
-                                                 const ConSanObservationPlan &observation_plan) {
+                                                 const ConSanObservationPlan &observation_plan,
+                                                 const ProgramInventory &inventory) {
   MoiObjectModePlan plan = make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::HwId);
   plan.prologue_requires_consumer = true;
   if (plan.owner_source == ConSanMoiOwnerSource::WorkitemId) {
@@ -197,7 +198,8 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
     for (const ConSanAtomicSiteDecision &decision : observation_plan.atomic_site_decisions) {
       if (decision.kind != ConSanSiteDecisionKind::Unsupported)
         continue;
-      for (const std::string &container_name : decision.source_containers) {
+      for (const std::string &container_name :
+           inventory.source_container_names(decision.semantic_site.physical)) {
         plan.warnings.emplace_back("ConSan MOI inline atomic ordering skipped " +
                                    std::string(consan_atomic_policy_reason_name(decision.reason)) +
                                    " in " + container_name);

@@ -453,9 +453,6 @@ struct ConSanSiteDecision {
   ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
   /// Target-neutral intents requested for this semantic range.
   std::vector<ConSanProbeIntentId> intent_ids;
-  /// Every symbol-container name through which this physical site was decoded.
-  std::vector<std::string> source_containers;
-
   bool operator==(const ConSanSiteDecision &) const = default;
 };
 
@@ -464,8 +461,8 @@ struct ConSanSiteDecision {
 /// The decision is about original-program meaning, not a patch. A paired
 /// signal and wait may therefore both cite one completion intent, while a
 /// Record/Replay decision normally cites the per-event intent at its own
-/// instruction. `source_containers` preserves every symbol alias solely for
-/// diagnostics; `semantic_site` remains the authoritative identity.
+/// instruction. `semantic_site` remains the authoritative identity; source
+/// aliases are derived from the program inventory when diagnostics need them.
 struct ConSanBarrierSiteDecision {
   /// Engine whose barrier contract made this decision.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
@@ -477,9 +474,6 @@ struct ConSanBarrierSiteDecision {
   ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
   /// Target-neutral intents that collectively observe this event.
   std::vector<ConSanProbeIntentId> intent_ids;
-  /// Every symbol-container name through which this event was decoded.
-  std::vector<std::string> source_containers;
-
   bool operator==(const ConSanBarrierSiteDecision &) const = default;
 };
 
@@ -512,9 +506,6 @@ struct ConSanAtomicSiteDecision {
   std::optional<ConSanAtomicLoweringForm> lowering_form;
   /// Target-neutral intents that collectively observe this operation.
   std::vector<ConSanProbeIntentId> intent_ids;
-  /// Every symbol-container name through which this physical event was decoded.
-  std::vector<std::string> source_containers;
-
   bool operator==(const ConSanAtomicSiteDecision &) const = default;
 };
 
@@ -545,9 +536,6 @@ struct ConSanFenceSiteDecision {
   std::optional<ConSanAtomicLoweringForm> communication_lowering_form;
   /// Target-neutral intents that collectively represent this fence.
   std::vector<ConSanProbeIntentId> intent_ids;
-  /// Every symbol-container name through which this physical event was decoded.
-  std::vector<std::string> source_containers;
-
   bool operator==(const ConSanFenceSiteDecision &) const = default;
 };
 

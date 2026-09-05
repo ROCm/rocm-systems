@@ -177,18 +177,6 @@ classified_operation_reason(const ConSanProgramSite &access,
   return result;
 }
 
-[[nodiscard]] std::vector<std::string>
-container_names(std::span<const ConSanProgramSite *const> aliases) {
-  std::vector<std::string> result;
-  result.reserve(aliases.size());
-  for (const ConSanProgramSite *access : aliases) {
-    if (std::ranges::find(result, access->container.name) == result.end())
-      result.push_back(access->container.name);
-  }
-  std::ranges::sort(result);
-  return result;
-}
-
 } // namespace
 
 const ConSanProbeIntent *ConSanObservationPlan::intent(ConSanProbeIntentId id) const {
@@ -229,8 +217,7 @@ bool ConSanObservationPlan::valid() const {
   }
   for (const ConSanSiteDecision &decision : site_decisions) {
     if (decision.engine != engine || !decision.semantic_site.valid() ||
-        !valid_decision_kind(decision.kind) || !valid_access_reason(decision.reason) ||
-        decision.source_containers.empty()) {
+        !valid_decision_kind(decision.kind) || !valid_access_reason(decision.reason)) {
       return false;
     }
     const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
@@ -250,8 +237,7 @@ bool ConSanObservationPlan::valid() const {
   for (const ConSanBarrierSiteDecision &decision : barrier_site_decisions) {
     if (decision.engine != engine || !decision.semantic_site.valid() ||
         decision.semantic_site.domain != ConSanSemanticSiteDomain::SynchronizationEvent ||
-        !valid_decision_kind(decision.kind) || !valid_barrier_reason(decision.reason) ||
-        decision.source_containers.empty()) {
+        !valid_decision_kind(decision.kind) || !valid_barrier_reason(decision.reason)) {
       return false;
     }
     const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
@@ -273,7 +259,6 @@ bool ConSanObservationPlan::valid() const {
         decision.semantic_site.domain != ConSanSemanticSiteDomain::SynchronizationEvent ||
         !valid_decision_kind(decision.kind) || !valid_capability_disposition(decision.capability) ||
         !valid_atomic_reason(decision.reason) || !valid_dynamic_result(decision.dynamic_result) ||
-        decision.source_containers.empty() ||
         (decision.association && !decision.association->valid())) {
       return false;
     }
@@ -302,7 +287,6 @@ bool ConSanObservationPlan::valid() const {
         !valid_decision_kind(decision.kind) || !valid_capability_disposition(decision.capability) ||
         !valid_fence_reason(decision.reason) ||
         !valid_fence_association(decision.inventory_association) ||
-        decision.source_containers.empty() ||
         (decision.association && !decision.association->valid())) {
       return false;
     }
@@ -733,7 +717,8 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
     (void)offset;
     const ConSanProgramSite &access = *aliases.front();
     const std::vector<SemanticSiteId> ids = semantic_ids(access);
-    const std::vector<std::string> names = container_names(aliases);
+    const std::vector<std::string> names =
+        inventory.source_container_names(access.physical_id);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
 
@@ -811,7 +796,6 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
           .kind = decision_kind,
           .reason = reason,
           .intent_ids = {},
-          .source_containers = names,
       };
       if (intent_id)
         decision.intent_ids.push_back(*intent_id);

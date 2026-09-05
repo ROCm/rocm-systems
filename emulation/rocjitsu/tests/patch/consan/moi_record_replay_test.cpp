@@ -380,14 +380,15 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
             ConSanSiteDecisionKind::Admitted);
   EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().reason,
             ConSanBarrierPolicyReason::None);
-  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().source_containers,
+  EXPECT_EQ(result.program_inventory.source_container_names(
+                result.observation_plan().barrier_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
   ASSERT_EQ(result.observation_plan().probe_intents.size(), 2u);
   const auto access_decision =
       std::ranges::find(result.observation_plan().site_decisions, ConSanSiteDecisionKind::Admitted,
                         &ConSanSiteDecision::kind);
   ASSERT_NE(access_decision, result.observation_plan().site_decisions.end());
-  EXPECT_EQ(access_decision->source_containers,
+  EXPECT_EQ(result.program_inventory.source_container_names(access_decision->semantic_site.physical),
             (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(
@@ -549,10 +550,12 @@ TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             2u * kSiteCount);
-  EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
-                                  [](const ConSanBarrierSiteDecision &decision) {
-                                    return decision.source_containers.size() == 2u;
-                                  }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.observation_plan().barrier_site_decisions,
+      [&](const ConSanBarrierSiteDecision &decision) {
+        return result.program_inventory.source_container_names(decision.semantic_site.physical)
+                   .size() == 2u;
+      }));
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord ||
            patch.owner_descriptor_file_offsets.size() == 2u;

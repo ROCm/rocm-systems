@@ -225,7 +225,8 @@ make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperating
 [[nodiscard]] MoiObjectModePlan
 plan_moi_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                      const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
-                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan);
+                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan,
+                     const ProgramInventory &inventory = {});
 
 /// Run the selected engine's lowering sequence. Shared placement has already
 /// accepted an operating point; the engine owns which access and sync
@@ -266,7 +267,8 @@ plan_inline_shadow_evidence_requirements(const MoiEvidencePlanningContext &conte
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const BoundRuntimeResources &,
                             const TransformPolicy &, const ConSanMoiOperatingPoint &,
-                            const MoiObjectFacts &, const ConSanObservationPlan &);
+                            const MoiObjectFacts &, const ConSanObservationPlan &,
+                            const ProgramInventory &);
   void (*apply)(std::span<const uint8_t>, const ConSanOptions &, ConSanMoiOperatingPoint &,
                 rj_code_arch_t, MoiResourcePlanningState &, std::span<const ConSanMoiCandidate>,
                 const MoiObjectFacts &, const MoiObjectModeSemantics &, ConSanTransformArtifacts &);

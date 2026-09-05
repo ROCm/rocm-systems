@@ -59,7 +59,8 @@ make_record_replay_access_runtime_mapping(ConSanStaticAccessAttribution access) 
 MoiObjectModePlan
 plan_record_replay_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                                const TransformPolicy &, const ConSanMoiOperatingPoint &point,
-                               const MoiObjectFacts &facts, const ConSanObservationPlan &) {
+                               const MoiObjectFacts &facts, const ConSanObservationPlan &,
+                               const ProgramInventory &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   const bool atomic_or_fence_relevant =

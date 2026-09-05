@@ -185,7 +185,8 @@ moi_sampled_access_return_scc_sgpr(const MoiScalarPreservationState &preservatio
 MoiObjectModePlan
 plan_sampled_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                          const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
-                         const MoiObjectFacts &facts, const ConSanObservationPlan &) {
+                         const MoiObjectFacts &facts, const ConSanObservationPlan &,
+                         const ProgramInventory &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   plan.reserve_dynamic_stack_prologue_entry = true;
