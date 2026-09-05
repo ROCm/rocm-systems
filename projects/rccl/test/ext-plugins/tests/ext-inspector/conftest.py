@@ -28,6 +28,16 @@ INSPECTOR_COLL_PERF_FIELDS = {
     "coll_algobw_gbs": (int, float),
     "coll_busbw_gbs": (int, float),
 }
+INSPECTOR_P2P_PERF_FIELDS = {
+    "p2p": str,
+    "p2p_sn": int,
+    "p2p_peer": int,
+    "p2p_msg_size_bytes": int,
+    "p2p_exec_time_us": int,
+    "p2p_timing_source": str,
+    "p2p_algobw_gbs": (int, float),
+    "p2p_busbw_gbs": (int, float),
+}
 
 
 def validate_inspector_log_line(line):
@@ -91,7 +101,16 @@ def validate_inspector_log_file(filepath):
             line = line.strip()
             if not line:
                 continue
-            is_valid, _, error_msg = validate_inspector_log_line(line)
+            # A collective run also emits p2p records when its algorithm moves data with
+            # send/recv, so pick the validator by record type rather than assuming coll.
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as e:
+                errors.append(f"Line {lineno}: Invalid JSON: {e}")
+                continue
+            validate = (validate_inspector_p2p_line if "p2p_perf" in record
+                        else validate_inspector_log_line)
+            is_valid, _, error_msg = validate(line)
             if is_valid:
                 num_records += 1
             else:
@@ -118,6 +137,54 @@ def count_inspector_records(filepath, coll=None):
                 try:
                     record = json.loads(line)
                     if coll is None or record.get("coll_perf", {}).get("coll") == coll:
+                        count += 1
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+    return count
+
+
+def validate_inspector_p2p_line(line):
+    """Validate a single inspector JSONL line holding a p2p record. Returns (is_valid, record_dict_or_None, error_message)."""
+    try:
+        record = json.loads(line.strip())
+    except json.JSONDecodeError as e:
+        return False, None, f"Invalid JSON: {e}"
+
+    for section in ("header", "metadata", "p2p_perf"):
+        if section not in record:
+            return False, record, f"Missing top-level section: '{section}'"
+
+    for field, expected_type in INSPECTOR_HEADER_FIELDS.items():
+        if field not in record["header"]:
+            return False, record, f"Missing header field: '{field}'"
+        if not isinstance(record["header"][field], expected_type):
+            return False, record, f"header.{field} has wrong type"
+
+    for field, expected_type in INSPECTOR_P2P_PERF_FIELDS.items():
+        if field not in record["p2p_perf"]:
+            return False, record, f"Missing p2p_perf field: '{field}'"
+        if not isinstance(record["p2p_perf"][field], expected_type):
+            return False, record, f"p2p_perf.{field} has wrong type"
+
+    return True, record, "OK"
+
+
+def count_inspector_p2p_records(filepath):
+    """Count p2p records in an inspector log file."""
+    if not os.path.exists(filepath):
+        return 0
+
+    count = 0
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    if "p2p_perf" in json.loads(line):
                         count += 1
                 except json.JSONDecodeError:
                     continue
@@ -179,6 +246,8 @@ def inspector_helpers():
         validate_inspector_log_file=validate_inspector_log_file,
         count_inspector_records=count_inspector_records,
         validate_inspector_verbose_record=validate_inspector_verbose_record,
+        validate_inspector_p2p_line=validate_inspector_p2p_line,
+        count_inspector_p2p_records=count_inspector_p2p_records,
     )
 
 

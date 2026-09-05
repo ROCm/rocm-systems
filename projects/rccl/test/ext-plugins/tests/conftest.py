@@ -226,10 +226,11 @@ def pytest_runtest_setup(item):
     """Check plugin availability before running each test"""
     # Check for ext_tuner marker
     if item.get_closest_marker("ext_tuner"):
-        # The native thread-safety regression builds its own binary from source
-        # and does not use the prebuilt plugin .so, so don't skip it on its absence.
+        # Two tests do not read the example plugin: the native thread-safety regression
+        # builds its own binary from source, and the model_demo test loads that plugin's
+        # own library. Don't skip either on the example .so being absent.
         test_name = getattr(item, "originalname", item.name)
-        needs_plugin_so = test_name != "test_config_parser_thread_safety"
+        needs_plugin_so = test_name not in ("test_config_parser_thread_safety", "test_model_demo_tuner_runs")
         if needs_plugin_so and not os.path.exists(PLUGIN_SO):
             pytest.skip(f"Tuner plugin library not found at: {PLUGIN_SO}")
     

@@ -651,6 +651,17 @@ void inspectorDumpThread::stopThread() {
   INFO_INSPECTOR( "NCCL Inspector inspectorDumpThread: stopped");
 }
 
+// Writes whatever has been collected so far. Callers use this at communicator
+// teardown, which is the only output when no periodic interval is configured and
+// which also captures records completed since the last periodic dump.
+inspectorResult_t inspectorDumpNow() {
+  if (!dumper) return inspectorSuccess;
+  inspectorLockWr(&dumper->guard);
+  inspectorResult_t res = dumper->inspectorStateDump(dumper->outputRoot);
+  inspectorUnlockRWLock(&dumper->guard);
+  return res;
+}
+
 inspectorResult_t inspectorDumpThread::inspectorStateDump(const char* output_root) {
   if (!ncclInspectorInit) {
     return inspectorUninitializedError;
@@ -785,12 +796,6 @@ void* inspectorDumpThread::dumpMain(void* arg) {
  *   inspectorResult_t - success or error code.
  */
 static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
-  if (intervalUsecs < 0) {
-    INFO_INSPECTOR( "NCCL Inspector: dump thread disabled "
-                    "(interval is -1); not starting internal dump thread.");
-    return inspectorSuccess;
-  }
-
   char* dumpdir;
   genDumpDir(&dumpdir);
 
@@ -803,7 +808,13 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
     }
 
     dumper = new inspectorDumpThread(dumpdir, intervalUsecs);
-    if (intervalUsecs == 0) {
+    if (intervalUsecs < 0) {
+      INFO_INSPECTOR(
+        "NCCL Inspector enabled with no periodic dumping, "
+        "output written at finalization to %s, format %s",
+        dumpdir,
+        enableNcclInspectorPromDump ? "Prometheus" : "JSON");
+    } else if (intervalUsecs == 0) {
       INFO_INSPECTOR(
         "NCCL Inspector enabled with continuous dumping, "
         "output directory %s, format %s",
@@ -816,7 +827,11 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
         intervalUsecs, dumpdir,
         enableNcclInspectorPromDump ? "Prometheus" : "JSON");
     }
-    dumper->startThread();
+    // A negative interval means no periodic sampling; the dumper is still needed
+    // so finalization can write the collected state once.
+    if (intervalUsecs >= 0) {
+      dumper->startThread();
+    }
 
     free(dumpdir);
   } else {
@@ -1607,10 +1622,11 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
-  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
-  for (uint32_t i = 0; i < nCh; i++) {
+  // Indexed by channelId, so scan every slot rather than assuming the channels used are
+  // packed into [0, nChannels). Pool entries are zeroed on allocation.
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {
       if (gpuExecTimeUsecs > maxKernelExecTimeUsecs) {
@@ -1697,10 +1713,13 @@ static uint64_t calculateMaxKernelExecTimeUsecsP2p(struct inspectorP2pInfo *p2pI
   uint64_t maxExecTimeUsecs = 0;
   bool hasGpuTiming = false;
 
-  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  uint32_t nCh = (p2pInfo->nChannels < MAX_CHANNELS) ? p2pInfo->nChannels : MAX_CHANNELS;
-  for (uint32_t i = 0; i < nCh; i++) {
+  // Kernel-channel state is stored at kernelCh[channelId], and P2P channel ids are spread
+  // across the p2p channel space rather than packed into [0, nChannels), so scan every slot
+  // and skip the ones no event wrote. Pool entries are zeroed on allocation, so an untouched
+  // slot cannot hold stale timings.
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &p2pInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
 
     if (gpuExecTimeUsecs > 0) {
@@ -1717,8 +1736,9 @@ static uint64_t calculateMaxKernelExecTimeUsecsP2p(struct inspectorP2pInfo *p2pI
   }
 
   // Fall back to CPU timestamps
-  for (uint32_t i = 0; i < nCh; i++) {
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &p2pInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     if (kernelCh->tsCompletedUsec > kernelCh->tsStartUsec) {
       uint64_t cpuExecTimeUsecs = kernelCh->tsCompletedUsec - kernelCh->tsStartUsec;
       if (cpuExecTimeUsecs > maxExecTimeUsecs) {

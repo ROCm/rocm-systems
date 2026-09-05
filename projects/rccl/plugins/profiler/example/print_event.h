@@ -13,5 +13,6 @@ extern ncclDebugLogger_t logFn;
 
 void debugEvent(void* eHandle, const char* tag);
 void printEvent(FILE* fh, void* handle);
+void printGroupEventSpan(FILE* fh, void* handle);
 
 #endif
