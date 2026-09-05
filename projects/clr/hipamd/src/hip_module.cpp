@@ -351,7 +351,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   {
     // Decided at load (roc::Kernel::init); named here, before a command exists.
     const device::Kernel* devKernel = kernel->getDeviceKernel(*device);
-    if (devKernel != nullptr && devKernel->hostcallUnsatisfiable()) {
+    if (devKernel != nullptr && devKernel->hostcallUnsatisfiable() && !HIP_HOSTCALL_ALLOW_MISSING) {
       LogPrintfError("launch of %s refused: it declares a hostcall buffer and device %d has no PCIe atomics",
                      kernel->name().c_str(), deviceId);
       return hipErrorNotSupported;

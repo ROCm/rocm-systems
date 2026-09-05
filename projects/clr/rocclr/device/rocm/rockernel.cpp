@@ -24,9 +24,12 @@ bool Kernel::init() {
         !device().info().pcie_atomics_) {
       setHostcallUnsatisfiable(true);
       LogPrintfError("kernel %s declares hidden_hostcall_buffer (device printf/assert) but device %s "
-                     "has no PCIe AtomicOps to the host (hipDeviceAttributeHostNativeAtomicSupported=0); "
-                     "its launches will return hipErrorNotSupported",
-                     name().c_str(), device().info().name_);
+                     "has no PCIe AtomicOps to the host (hipDeviceAttributeHostNativeAtomicSupported=0); %s",
+                     name().c_str(), device().info().name_,
+                     HIP_HOSTCALL_ALLOW_MISSING
+                         ? "HIP_HOSTCALL_ALLOW_MISSING=1: its launches proceed with a null hostcall "
+                           "buffer, and a hostcall from it will fault"
+                         : "its launches will return hipErrorNotSupported");
       break;
     }
   }
