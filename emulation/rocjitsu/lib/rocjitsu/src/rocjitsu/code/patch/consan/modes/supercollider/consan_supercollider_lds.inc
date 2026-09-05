@@ -13,8 +13,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::map<uint64_t, const ConSanProgramSite *> admitted_sites;
   for (const ConSanProgramSite &access : result.program_inventory.access_sites())
     if (access.origin == ConSanAccessOrigin::NativeLds &&
-        admitted_lds_file_offsets.contains(access.file_offset))
-      admitted_sites.try_emplace(access.file_offset, &access);
+        admitted_lds_file_offsets.contains(access.decoded_file_offset()))
+      admitted_sites.try_emplace(access.decoded_file_offset(), &access);
 
   const bool has_plannable_supported_site =
       std::ranges::any_of(admitted_sites, [&](const auto &entry) {
@@ -118,8 +118,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   // Candidate discovery records immutable requirements only. Stable private
   // slots are assigned transactionally when a concrete placement is selected,
   // so rejected candidates cannot inflate any descriptor.
-  std::unordered_map<const ConSanProgramSite *, ScBracketLocalPrivateSpillPlan>
-      private_spill_plans;
+  std::unordered_map<const ConSanProgramSite *, ScBracketLocalPrivateSpillPlan> private_spill_plans;
   for (const LdsSitePlanningContext &site_context : site_contexts) {
     if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       const bool container_matches =
@@ -160,10 +159,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     ++supported_candidate_count;
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
         container != nullptr && target.has_selectable_vgpr_bank &&
-                site.file_offset >= site.physical_id.original_text_offset
+                site.decoded_file_offset() >= site.physical_id.original_text_offset
             ? consan_selectable_vgpr_bank_mode_at(
-                  arch, original_bytes, site.file_offset - site.physical_id.original_text_offset,
-                  container->entry_text_offset, site.file_offset)
+                  arch, original_bytes,
+                  site.decoded_file_offset() - site.physical_id.original_text_offset,
+                  container->entry_text_offset, site.decoded_file_offset())
             : std::nullopt;
     auto required_vgprs = access_dword_count(site);
     if (!required_vgprs) {
@@ -367,7 +367,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool rhs_grows_descriptor = rhs.required_vgpr_allocation_count.has_value();
     if (lhs_grows_descriptor != rhs_grows_descriptor)
       return !lhs_grows_descriptor;
-    return lhs.site->file_offset < rhs.site->file_offset;
+    return lhs.site->decoded_file_offset() < rhs.site->decoded_file_offset();
   };
   std::ranges::sort(candidates, candidate_order);
 
@@ -623,7 +623,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.kind = site.kind == ConSanLdsAccessKind::Write ? ConSanPatchKind::LdsStoreCheckTrap
                                                                 : ConSanPatchKind::LdsLoadCheckTrap;
     planned.info.anchor_offset = site.physical_id.original_text_offset;
-    planned.info.original_size = site.instruction_size;
+    planned.info.original_size = site.size();
     planned.info.trampoline_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
     planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;

@@ -182,9 +182,8 @@ find_static_participant_init(const ProgramInventory &program_inventory,
     const SemanticSiteId member =
         event.semantic_id.in_domain(ConSanSemanticSiteDomain::SynchronizationSequenceMember);
     const ConSanProgramContainerRef *container = sync.container(event);
-    return event.operation == ConSanSyncOperation::BarrierInit &&
-           container != nullptr && container->name == group.container_name &&
-           container->is_kernel() == group.in_kernel &&
+    return event.operation == ConSanSyncOperation::BarrierInit && container != nullptr &&
+           container->name == group.container_name && container->is_kernel() == group.in_kernel &&
            std::ranges::find(group.member_semantic_ids, member) != group.member_semantic_ids.end();
   });
   if (init_event == sync.sync_events.end())
@@ -1852,7 +1851,7 @@ find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
     const ConSanProgramContainer *kernel = inventory.container(site.container.id);
     if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;
-    if (best == nullptr || site.file_offset < best->file_offset)
+    if (best == nullptr || site.decoded_file_offset() < best->decoded_file_offset())
       best = &site;
   }
   return best;
@@ -1867,14 +1866,14 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   }
 
   const uint32_t replacement_endpgm = build_s_endpgm(arch);
-  if (!rewrite_word_in_place(code_object, site->file_offset, replacement_endpgm, result))
+  if (!rewrite_word_in_place(code_object, site->decoded_file_offset(), replacement_endpgm, result))
     return;
 
   ConSanPatchInfo info;
   info.kind = ConSanPatchKind::InlineLdsEndpgmRewrite;
   info.anchor_offset = site->physical_id.original_text_offset;
   info.trampoline_offset = site->physical_id.original_text_offset;
-  info.original_size = site->instruction_size;
+  info.original_size = site->size();
   result.patches.push_back(info);
 }
 

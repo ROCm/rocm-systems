@@ -15,7 +15,7 @@ struct ConSanMoiCandidate : ConSanProgramSite {
   [[nodiscard]] uint64_t anchor() const { return physical_id.original_text_offset; }
   /// Return the pristine guest instruction size in bytes. Lowering may reserve
   /// a larger replacement body, but that does not change this displaced span.
-  [[nodiscard]] uint32_t size() const { return instruction_size; }
+  [[nodiscard]] uint32_t size() const { return ConSanProgramSite::size(); }
   /// Return the normalized width in bits of each semantic access range.
   [[nodiscard]] uint32_t width_bits() const {
     return lowering.form ? lowering.form->element_width_bits : 0u;

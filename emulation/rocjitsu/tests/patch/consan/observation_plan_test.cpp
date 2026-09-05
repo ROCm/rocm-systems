@@ -46,12 +46,13 @@ ConSanProgramSite make_policy_lds_site(std::string mnemonic = "ds_store_b32",
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
   site.physical_id.original_text_offset = text_offset;
-  site.file_offset = file_offset;
-  site.instruction_size = 8;
+  site.decoded_site().text_offset = text_offset;
+  site.decoded_site().file_offset = file_offset;
+  site.decoded_site().size = 8;
   site.decoded_width_bits = 32;
   site.operands.address_vgpr = 3;
   site.operands.data_vgpr = 4;
-  site.mnemonic = std::move(mnemonic);
+  site.decoded_site().mnemonic = std::move(mnemonic);
   return site;
 }
 
@@ -61,8 +62,9 @@ ConSanProgramSite make_policy_flat_site(ConSanFlatAddressSpaceHint hint,
   site.origin = ConSanAccessOrigin::Flat;
   site.kind = ConSanLdsAccessKind::Write;
   site.physical_id.original_text_offset = text_offset;
-  site.file_offset = text_offset;
-  site.instruction_size = 12;
+  site.decoded_site().text_offset = text_offset;
+  site.decoded_site().file_offset = text_offset;
+  site.decoded_site().size = 12;
   site.decoded_width_bits = 32;
   site.operands.address_vgpr = 5;
   site.operands.data_vgpr = 6;
@@ -70,7 +72,7 @@ ConSanProgramSite make_policy_flat_site(ConSanFlatAddressSpaceHint hint,
   site.operands.raw_scale_offset = true;
   site.operands.raw_ioffset = 0;
   site.flat_address_space_hint = hint;
-  site.mnemonic = "flat_store_b32";
+  site.decoded_site().mnemonic = "flat_store_b32";
   return site;
 }
 
@@ -900,7 +902,7 @@ TEST(ConSanAccessPolicy, InventoryLimitationsBecomeTypedUnsupportedDecisions) {
   AccessInventoryInput input;
   ConSanProgramContainer kernel = make_policy_kernel();
   ConSanProgramSite invalid_size = make_policy_lds_site("ds_store_b32", 16, 16);
-  invalid_size.instruction_size = 0;
+  invalid_size.decoded_site().size = 0;
   stage_policy_access(input, kernel, invalid_size);
   ConSanProgramSite invalid_width = make_policy_lds_site("ds_store_b32", 32, 32);
   invalid_width.decoded_width_bits = 0;

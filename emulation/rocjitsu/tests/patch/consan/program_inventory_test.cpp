@@ -31,12 +31,13 @@ ConSanProgramSite make_inventory_lds_site(std::string mnemonic, uint64_t text_of
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
   site.physical_id.original_text_offset = text_offset;
-  site.file_offset = file_offset;
-  site.instruction_size = 8;
+  site.decoded_site().text_offset = text_offset;
+  site.decoded_site().file_offset = file_offset;
+  site.decoded_site().size = 8;
   site.decoded_width_bits = width_bits;
   site.operands.address_vgpr = 3;
   site.operands.data_vgpr = 7;
-  site.mnemonic = std::move(mnemonic);
+  site.decoded_site().mnemonic = std::move(mnemonic);
   return site;
 }
 
@@ -46,13 +47,14 @@ ConSanProgramSite make_inventory_flat_site(ConSanFlatAddressSpaceHint hint,
   site.origin = ConSanAccessOrigin::Flat;
   site.kind = ConSanLdsAccessKind::Read;
   site.physical_id.original_text_offset = text_offset;
-  site.instruction_size = 8;
+  site.decoded_site().text_offset = text_offset;
+  site.decoded_site().size = 8;
   site.decoded_width_bits = 32;
   site.operands.destination_vgpr = 4;
   site.operands.address_vgpr = 6;
   site.operands.raw_ioffset = -8;
   site.flat_address_space_hint = hint;
-  site.mnemonic = "flat_load_b32";
+  site.decoded_site().mnemonic = "flat_load_b32";
   return site;
 }
 
@@ -768,6 +770,7 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
 
   ConSanOrdinaryMemorySite ordinary;
   ordinary.text_offset = 80;
+  ordinary.file_offset = 0x450;
   ordinary.size = 8;
   ordinary.mnemonic = "flat_load_dword";
   for (unsigned alias = 0; alias < 2; ++alias) {
@@ -797,7 +800,11 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
   ASSERT_EQ(inventory.access_sites().size(), 3u);
   ASSERT_EQ(inventory.program_sites().size(), 4u);
   EXPECT_NE(inventory.access_sites()[0].get_if<ConSanOrdinaryMemorySite>(), nullptr);
-  EXPECT_TRUE(std::holds_alternative<std::monostate>(inventory.access_sites()[1].payload));
+  EXPECT_TRUE(std::holds_alternative<ConSanAccessSite>(inventory.access_sites()[1].payload));
+  EXPECT_EQ(inventory.access_sites()[1].text_offset(), 80u);
+  EXPECT_EQ(inventory.access_sites()[1].decoded_file_offset(), 0x450u);
+  EXPECT_EQ(inventory.access_sites()[1].size(), 8u);
+  EXPECT_EQ(inventory.access_sites()[1].mnemonic_view(), "flat_load_dword");
   EXPECT_NE(inventory.access_sites()[2].get_if<ConSanBarrierSite>(), nullptr);
   EXPECT_EQ(inventory.access_sites()[2].container.name, "overlapping");
   EXPECT_NE(inventory.program_sites().back().get_if<ConSanFenceSite>(), nullptr);
@@ -972,7 +979,8 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
   malformed.origin = ConSanAccessOrigin::NativeLds;
   malformed.kind = ConSanLdsAccessKind::Other;
   malformed.physical_id.original_text_offset = 8;
-  malformed.mnemonic = "ds_other";
+  malformed.decoded_site().text_offset = 8;
+  malformed.decoded_site().mnemonic = "ds_other";
   stage_inventory_access(builder, kernel, malformed);
 
   ConSanProgramSite missing_address = make_inventory_lds_site("ds_store_b32", 16);
@@ -1058,11 +1066,11 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
     EXPECT_EQ(site.physical_id.code_object, result.program_inventory.code_object_id());
     EXPECT_EQ(site.container.kind, ConSanProgramContainerKind::Kernel);
     EXPECT_EQ(site.container.name, result.program_inventory.kernels().front().name);
-    EXPECT_NE(site.file_offset, 0u);
-    EXPECT_NE(site.instruction_size, 0u);
+    EXPECT_NE(site.decoded_file_offset(), 0u);
+    EXPECT_NE(site.size(), 0u);
     EXPECT_NE(site.decoded_width_bits, 0u);
     EXPECT_NE(site.kind, ConSanLdsAccessKind::Other);
-    EXPECT_FALSE(site.mnemonic.empty());
+    EXPECT_FALSE(site.mnemonic_view().empty());
     EXPECT_TRUE(site.operands.address_vgpr);
     ASSERT_EQ(site.execution_owners.size(), 1u);
     EXPECT_EQ(site.execution_owners.front().descriptor_file_offset,

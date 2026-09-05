@@ -152,6 +152,16 @@ enum class ConSanOrdinaryMemorySupportReason : uint8_t {
   MissingValueVgpr,
 };
 
+/// Source location shared by every decoded program-site kind.
+struct ConSanDecodedSite {
+  uint64_t text_offset = 0;
+  uint64_t file_offset = 0;
+  uint32_t size = 0;
+  std::string mnemonic;
+
+  bool operator==(const ConSanDecodedSite &) const = default;
+};
+
 /// Register and raw-encoding vocabulary shared by access, ordinary-memory,
 /// and atomic decoding. Individual semantic records add only their
 /// irreducible operands and interpretation.
@@ -184,13 +194,9 @@ struct ConSanDecodedMemoryOperands {
 /// atomic decoding. Both kinds feed the same addressed-communication
 /// classifiers, so policy can transfer this base rather than rebuilding an
 /// atomic-shaped field bag.
-struct ConSanDecodedMemorySite : ConSanDecodedMemoryOperands {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
+struct ConSanDecodedMemorySite : ConSanDecodedSite, ConSanDecodedMemoryOperands {
   uint32_t width_bits = 0;
   std::optional<ConSanMemoryScope> scope;
-  std::string mnemonic;
 
   bool operator==(const ConSanDecodedMemorySite &) const = default;
 };
@@ -215,7 +221,7 @@ struct ConSanOrdinaryMemorySite : ConSanDecodedMemorySite {
   bool operator==(const ConSanOrdinaryMemorySite &) const = default;
 };
 
-struct ConSanBarrierSite {
+struct ConSanBarrierSite : ConSanDecodedSite {
   enum class Operation : uint8_t {
     Unknown,
     Signal,
@@ -227,9 +233,6 @@ struct ConSanBarrierSite {
     Wakeup,
     StateQuery,
   } operation = Operation::Unknown;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
   std::optional<int32_t> barrier_id;
   enum class OperandSource : uint8_t {
     Unknown,
@@ -257,18 +260,12 @@ struct ConSanBarrierSite {
   std::optional<uint64_t> participant_setup_text_offset;
   std::optional<uint64_t> participant_setup_file_offset;
   std::optional<uint32_t> participant_setup_literal;
-  std::string mnemonic;
-
   bool operator==(const ConSanBarrierSite &) const = default;
 };
 
-struct ConSanFenceSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
+struct ConSanFenceSite : ConSanDecodedSite {
   ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
   bool ordinary_acquire_mutation_supported = false;
-  std::string mnemonic;
 
   bool operator==(const ConSanFenceSite &) const = default;
 };
@@ -282,6 +279,13 @@ struct ConSanAtomicSite : ConSanDecodedMemorySite {
   std::optional<bool> returns_old_value;
 
   bool operator==(const ConSanAtomicSite &) const = default;
+};
+
+/// Access-only payload for a decoded site with no synchronization/fault
+/// facet. Keeping this concrete first variant alternative gives every arena
+/// record one location owner without a parallel outer fallback.
+struct ConSanAccessSite : ConSanDecodedSite {
+  bool operator==(const ConSanAccessSite &) const = default;
 };
 
 /// Present an ordinary load/store through the shared communication shape used

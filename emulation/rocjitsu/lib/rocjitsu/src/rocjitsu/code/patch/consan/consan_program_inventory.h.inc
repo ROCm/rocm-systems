@@ -93,13 +93,13 @@ struct ConSanAccessRange {
 /// facet at the same time: for example, a relaxed LDS atomic is both. The
 /// tagged payload therefore does not compete with the access fields. Records
 /// without an access facet retain `origin == Count`; records without a
-/// synchronization/fault facet retain the monostate payload. During
+/// synchronization/fault facet retain an access-only payload. During
 /// builder-owned decode, code-object identity, logical ranges, exclusions,
 /// and execution owners can remain incomplete. Publication completes those
 /// facts. Aliasing symbol ranges can still produce several records with the
 /// same physical identity; later policy canonicalizes them before placement.
 struct ConSanProgramSite {
-  using Payload = std::variant<std::monostate, ConSanOrdinaryMemorySite, ConSanBarrierSite,
+  using Payload = std::variant<ConSanAccessSite, ConSanOrdinaryMemorySite, ConSanBarrierSite,
                                ConSanFenceSite, ConSanAtomicSite>;
 
   PhysicalSiteId physical_id;
@@ -110,10 +110,7 @@ struct ConSanProgramSite {
   ConSanAccessProvenance provenance = ConSanAccessProvenance::Count;
   ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
   ConSanAccessLoweringClassification lowering;
-  uint64_t file_offset = 0;
-  uint32_t instruction_size = 0;
   uint32_t decoded_width_bits = 0;
-  std::string mnemonic;
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   ConSanAccessOperandFacts operands;
   /// CFG-derived kernels that can execute this physical instruction. This is
@@ -131,49 +128,21 @@ struct ConSanProgramSite {
   }
   template <typename Site> [[nodiscard]] Site *get_if() { return std::get_if<Site>(&payload); }
 
-  [[nodiscard]] uint64_t text_offset() const {
-    return std::visit(
-        [&](const auto &site) -> uint64_t {
-          using Site = std::remove_cvref_t<decltype(site)>;
-          if constexpr (std::is_same_v<Site, std::monostate>)
-            return physical_id.original_text_offset;
-          else
-            return site.text_offset;
-        },
-        payload);
+  [[nodiscard]] const ConSanDecodedSite &decoded_site() const {
+    return std::visit([](const auto &site) -> const ConSanDecodedSite & { return site; }, payload);
   }
-  [[nodiscard]] uint64_t decoded_file_offset() const {
-    return std::visit(
-        [&](const auto &site) -> uint64_t {
-          using Site = std::remove_cvref_t<decltype(site)>;
-          if constexpr (std::is_same_v<Site, std::monostate>)
-            return file_offset;
-          else
-            return site.file_offset;
-        },
-        payload);
+  [[nodiscard]] ConSanDecodedSite &decoded_site() {
+    return std::visit([](auto &site) -> ConSanDecodedSite & { return site; }, payload);
   }
-  [[nodiscard]] uint32_t size() const {
-    return std::visit(
-        [&](const auto &site) -> uint32_t {
-          using Site = std::remove_cvref_t<decltype(site)>;
-          if constexpr (std::is_same_v<Site, std::monostate>)
-            return instruction_size;
-          else
-            return site.size;
-        },
-        payload);
-  }
-  [[nodiscard]] std::string_view mnemonic_view() const {
-    return std::visit(
-        [&](const auto &site) -> std::string_view {
-          using Site = std::remove_cvref_t<decltype(site)>;
-          if constexpr (std::is_same_v<Site, std::monostate>)
-            return mnemonic;
-          else
-            return site.mnemonic;
-        },
-        payload);
+  [[nodiscard]] uint64_t text_offset() const { return physical_id.original_text_offset; }
+  [[nodiscard]] uint64_t decoded_file_offset() const { return decoded_site().file_offset; }
+  [[nodiscard]] uint32_t size() const { return decoded_site().size; }
+  [[nodiscard]] std::string_view mnemonic_view() const { return decoded_site().mnemonic; }
+
+  void retain_access_only_payload() {
+    const ConSanDecodedSite location = decoded_site();
+    payload = ConSanAccessSite{};
+    static_cast<ConSanDecodedSite &>(std::get<ConSanAccessSite>(payload)) = location;
   }
 
   [[nodiscard]] bool same_payload(const ConSanProgramSite &other) const {
@@ -197,9 +166,6 @@ template <typename Site>
   ConSanProgramSite result;
   result.physical_id.original_text_offset = site.text_offset;
   result.container = std::move(container);
-  result.file_offset = site.file_offset;
-  result.instruction_size = site.size;
-  result.mnemonic = site.mnemonic;
   result.payload = std::move(site);
   return result;
 }
@@ -233,7 +199,8 @@ public:
              candidate.physical_id.original_text_offset == site.physical_id.original_text_offset;
     };
     const auto access = std::ranges::find_if(access_sites(), same_source);
-    if (access != access_sites().end() && std::holds_alternative<std::monostate>(access->payload)) {
+    if (access != access_sites().end() &&
+        std::holds_alternative<ConSanAccessSite>(access->payload)) {
       access->payload = std::move(site.payload);
       return;
     }
@@ -281,8 +248,8 @@ public:
       if (!in_range(site))
         continue;
       site.container = owner;
-      if (!std::holds_alternative<std::monostate>(site.payload) && !first_semantic_facet(site))
-        site.payload = std::monostate{};
+      if (!std::holds_alternative<ConSanAccessSite>(site.payload) && !first_semantic_facet(site))
+        site.retain_access_only_payload();
     }
 
     auto semantic_begin = sites_.begin() + access_site_count_;
@@ -900,7 +867,7 @@ private:
                                          std::span<const uint8_t> bytes) const {
     if (site.origin == ConSanAccessOrigin::DirectToLds)
       return 0;
-    const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.file_offset);
+    const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.decoded_file_offset());
     if (!word0)
       return std::nullopt;
     const uint32_t mask =
@@ -951,8 +918,8 @@ private:
     result.provenance = ConSanAccessProvenance::NativeLdsOpcode;
     result.confidence = ConSanSemanticConfidence::Exact;
     append_common_exclusions(result, site.origin == ConSanAccessOrigin::DirectToLds);
-    if (const auto form = consan_detail::decode_native_lds_two_range_shape(site.mnemonic)) {
-      const auto word0 = read_little_endian_u32(bytes, site.file_offset);
+    if (const auto form = consan_detail::decode_native_lds_two_range_shape(site.mnemonic_view())) {
+      const auto word0 = read_little_endian_u32(bytes, site.decoded_file_offset());
       if (word0) {
         result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),
                                  .static_byte_offset = (*word0 & 0xffu) * form->offset_scale_bytes,
@@ -982,7 +949,7 @@ private:
           .reason = ConSanInventoryExclusionReason::NonAccessInstruction,
       });
     }
-    if (site.instruction_size == 0 || site.instruction_size % sizeof(uint32_t) != 0) {
+    if (site.size() == 0 || site.size() % sizeof(uint32_t) != 0) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::InvalidInstructionSize,
       });

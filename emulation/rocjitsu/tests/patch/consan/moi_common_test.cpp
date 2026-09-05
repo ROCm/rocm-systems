@@ -1743,7 +1743,7 @@ void expect_moi_engines_admit_native_b96_accesses(
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-      EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, mnemonic);
+      EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), mnemonic);
       EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, 96u);
       const ConSanPatchKind expected_patch_kind =
           engine == ConSanMoiEngine::RecordReplay ? ConSanPatchKind::TrampolineMoiAccessRecordStore
@@ -1849,7 +1849,7 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
                                  << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Atomic);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_cmpstore_rtn_b32");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_cmpstore_rtn_b32");
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_NE(result.program_inventory.access_sites().front().get_if<ConSanAtomicSite>(), nullptr);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
@@ -2055,10 +2055,10 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(candidate.container.kind, ConSanProgramContainerKind::Function);
   EXPECT_EQ(candidate.container.name, "lds_helper");
-  EXPECT_EQ(candidate.mnemonic, "flat_load_b32");
+  EXPECT_EQ(candidate.mnemonic_view(), "flat_load_b32");
   EXPECT_EQ(candidate.physical_id.original_text_offset, 24u);
-  EXPECT_EQ(candidate.file_offset, 0x118u);
-  EXPECT_EQ(candidate.instruction_size, 3u * sizeof(uint32_t));
+  EXPECT_EQ(candidate.decoded_file_offset(), 0x118u);
+  EXPECT_EQ(candidate.size(), 3u * sizeof(uint32_t));
   EXPECT_EQ(candidate.decoded_width_bits, 32u);
   ASSERT_TRUE(candidate.operands.destination_vgpr);
   EXPECT_EQ(*candidate.operands.destination_vgpr, 2u);
@@ -3184,8 +3184,8 @@ TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
-  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b32");
-  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic_view(), "ds_store_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic_view(), "ds_load_b32");
   EXPECT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanAccessPolicyReason::OperationKindExcluded,
                                &ConSanSiteDecision::reason),

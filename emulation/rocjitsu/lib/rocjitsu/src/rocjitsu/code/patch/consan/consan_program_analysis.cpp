@@ -74,7 +74,7 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     inventory.reattribute_access_range(range.text_offset, range.size, *kernel,
                                        decoded_sites.access_sites(), code_object_bytes);
     for (ConSanProgramSite &site : decoded_sites.sites()) {
-      if (std::holds_alternative<std::monostate>(site.payload))
+      if (std::holds_alternative<ConSanAccessSite>(site.payload))
         continue;
       site.container = owner;
       const bool duplicate =

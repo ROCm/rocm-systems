@@ -2933,7 +2933,7 @@ TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_load_2addr_b64");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_load_2addr_b64");
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4098,7 +4098,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_2addr_b64");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_store_2addr_b64");
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -5335,7 +5335,7 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
         ASSERT_TRUE(consan_patch_succeeded(result));
         ASSERT_TRUE(result.modified());
         ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-        EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+        EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), expected_mnemonic);
         EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
 
         AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -6292,7 +6292,7 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowNeedsNoRelocatedHostArm) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(test_admitted_accesses(result).size(), kAccessCount);
   for (const ConSanProgramSite &candidate : test_admitted_accesses(result))
-    EXPECT_GT(candidate.instruction_size, sizeof(uint32_t));
+    EXPECT_GT(candidate.size(), sizeof(uint32_t));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);

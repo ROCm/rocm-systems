@@ -8,7 +8,7 @@ sc_admitted_access_file_offsets(const ProgramInventory &inventory,
              .pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
                                  access.physical_id)
              .empty())
-      offsets.insert(access.file_offset);
+      offsets.insert(access.decoded_file_offset());
   return offsets;
 }
 
@@ -375,7 +375,7 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
       access.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange)
     return std::nullopt;
   std::array<uint32_t, 1> words{};
-  if (!read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
+  if (!read_words_at(original_bytes, access.decoded_file_offset(), std::span<uint32_t>(words)))
     return std::nullopt;
   const auto offsets = consan_sc_two_address_lds_byte_offsets(*access.lowering.form, words.front());
   if (!offsets)
@@ -484,7 +484,8 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   const ConSanAccessLoweringForm &form = *site.lowering.form;
 
   std::array<uint32_t, 2> original_access{};
-  if (!read_words_at(original_bytes, site.file_offset, std::span<uint32_t>(original_access))) {
+  if (!read_words_at(original_bytes, site.decoded_file_offset(),
+                     std::span<uint32_t>(original_access))) {
     errors.emplace_back("ConSan LDS check/trap proof could not read LDS access");
     return std::nullopt;
   }

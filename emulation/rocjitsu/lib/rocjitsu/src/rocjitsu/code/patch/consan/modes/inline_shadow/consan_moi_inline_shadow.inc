@@ -359,7 +359,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    spill ? &*spill : nullptr, candidate_errors,
                                    &guest_instruction_word_count)) {
       for (std::string &error : candidate_errors) {
-        error += " for " + candidate.mnemonic + " at text offset " +
+        error += " for " + std::string(candidate.mnemonic_view()) + " at text offset " +
                  std::to_string(candidate.anchor()) + " with scratch v" +
                  std::to_string(resources->base) + ":v" +
                  std::to_string(resources->base + resources->count - 1u);

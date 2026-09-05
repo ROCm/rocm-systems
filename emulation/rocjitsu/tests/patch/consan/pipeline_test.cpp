@@ -333,10 +333,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_access.origin = ConSanAccessOrigin::NativeLds;
   shared_access.kind = ConSanLdsAccessKind::Read;
   shared_access.physical_id.original_text_offset = 0u;
-  shared_access.file_offset = 0u;
-  shared_access.instruction_size = sizeof(uint32_t);
+  shared_access.decoded_site().text_offset = 0u;
+  shared_access.decoded_site().file_offset = 0u;
+  shared_access.decoded_site().size = sizeof(uint32_t);
   shared_access.decoded_width_bits = 32u;
-  shared_access.mnemonic = "ds_read_b32";
+  shared_access.decoded_site().mnemonic = "ds_read_b32";
   shared_access.operands.address_vgpr = 0u;
   shared_access.container = consan_program_container_ref(kernel_a);
   inventory_builder.add_access_site(shared_access);

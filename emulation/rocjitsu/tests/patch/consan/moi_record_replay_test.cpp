@@ -241,15 +241,15 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(test_admitted_accesses(result)[0].kind, ConSanLdsAccessKind::Write);
   EXPECT_EQ(test_admitted_accesses(result)[0].container.kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(test_admitted_accesses(result)[0].container.name, "lds_probe");
-  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic_view(), "ds_store_b32");
   EXPECT_EQ(test_admitted_accesses(result)[0].physical_id.original_text_offset, 0u);
-  EXPECT_EQ(test_admitted_accesses(result)[0].file_offset, 0x100u);
+  EXPECT_EQ(test_admitted_accesses(result)[0].decoded_file_offset(), 0x100u);
   ASSERT_TRUE(test_admitted_accesses(result)[0].operands.address_vgpr);
   EXPECT_EQ(*test_admitted_accesses(result)[0].operands.address_vgpr, 0u);
   ASSERT_TRUE(test_admitted_accesses(result)[0].operands.data_vgpr);
   EXPECT_EQ(*test_admitted_accesses(result)[0].operands.data_vgpr, 0u);
   EXPECT_EQ(test_admitted_accesses(result)[1].kind, ConSanLdsAccessKind::Read);
-  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic_view(), "ds_load_b32");
   ASSERT_TRUE(test_admitted_accesses(result)[1].operands.destination_vgpr);
   EXPECT_EQ(*test_admitted_accesses(result)[1].operands.destination_vgpr, 0u);
   ASSERT_EQ(result.resource_plans.size(), 2u);
@@ -2145,7 +2145,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_store_b16");
   EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
@@ -2179,7 +2179,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(result).front().container.name, "lds_probe");
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_store_b16");
   EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
@@ -2202,8 +2202,8 @@ TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_FALSE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
-  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b16");
-  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic_view(), "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic_view(), "ds_load_b32");
   ASSERT_EQ(result.resource_plans.size(), 2u);
   EXPECT_EQ(result.resource_plans[0].reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(result.resource_plans[1].reason, ConSanRegisterPlanReason::MissingOwner);
@@ -3238,7 +3238,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), expected_mnemonic);
     EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
@@ -3299,7 +3299,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), expected_mnemonic);
     EXPECT_EQ(test_admitted_accesses(result).front().kind, expected_kind);
     EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
     ASSERT_TRUE(test_admitted_accesses(result).front().operands.address_vgpr);
@@ -5116,7 +5116,7 @@ TEST(ConSanMoi, FirstLightProbeLowersTwoAddressNativeLdsSitesToTwoRecords) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_2addr_b32");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "ds_store_2addr_b32");
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
@@ -6833,7 +6833,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
   EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Read);
-  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "flat_load_b32");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "flat_load_b32");
   EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 28u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,

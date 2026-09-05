@@ -1,5 +1,4 @@
-[[nodiscard]] uint16_t
-flat_check_trap_comparison_scratch_vgprs(const ConSanProgramSite &access) {
+[[nodiscard]] uint16_t flat_check_trap_comparison_scratch_vgprs(const ConSanProgramSite &access) {
   if (!access.lowering.form)
     return 0u;
   const ConSanAccessLoweringForm &form = *access.lowering.form;
@@ -20,9 +19,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::map<uint64_t, const ConSanProgramSite *> admitted_sites;
   for (const ConSanProgramSite &access : result.program_inventory.access_sites()) {
     if (access.origin != ConSanAccessOrigin::Flat ||
-        !admitted_file_offsets.contains(access.file_offset))
+        !admitted_file_offsets.contains(access.decoded_file_offset()))
       continue;
-    admitted_sites.try_emplace(access.file_offset, &access);
+    admitted_sites.try_emplace(access.decoded_file_offset(), &access);
   }
   if (admitted_sites.empty()) {
     result.warnings.emplace_back(
@@ -173,8 +172,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const auto &[file_offset, access] : admitted_sites) {
     (void)file_offset;
     const ConSanProgramSite &site = *access;
-    std::vector<uint64_t> owners =
-        result.program_inventory.execution_owner_descriptors(site);
+    std::vector<uint64_t> owners = result.program_inventory.execution_owner_descriptors(site);
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (plan.site_kind == ConSanResourceSiteKind::Access &&
           plan.text_offset == site.physical_id.original_text_offset) {
@@ -229,7 +227,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   const size_t max_patches =
       options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
   std::ranges::sort(candidates, {}, [](const FlatCheckTrapCandidate &candidate) {
-    return candidate.site->file_offset;
+    return candidate.site->decoded_file_offset();
   });
   if (candidates.size() > max_patches)
     candidates.resize(max_patches);
@@ -290,13 +288,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
     }
 
-    const size_t access_words = site.instruction_size / sizeof(uint32_t);
+    const size_t access_words = site.size() / sizeof(uint32_t);
     if (access_words < 2u || access_words > 3u) {
       result.errors.emplace_back("ConSan flat check/trap proof selected invalid access size");
       return;
     }
     std::array<uint32_t, 3> original_access{};
-    if (!read_words_at(original_bytes, site.file_offset,
+    if (!read_words_at(original_bytes, site.decoded_file_offset(),
                        std::span<uint32_t>(original_access).first(access_words))) {
       result.errors.emplace_back("ConSan flat check/trap proof could not read access");
       return;
@@ -585,7 +583,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       planned.words = std::move(wrapped);
     }
 
-    planned.info.original_size = site.instruction_size;
+    planned.info.original_size = site.size();
     planned.info.trampoline_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
 
     planned_patches.push_back(std::move(planned));
@@ -647,7 +645,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
   for (const ConSanProgramSite &access : result.program_inventory.access_sites()) {
     if (access.origin != ConSanAccessOrigin::Flat ||
         (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write) ||
-        access.instruction_size != 3u * sizeof(uint32_t) ||
+        access.size() != 3u * sizeof(uint32_t) ||
         !is_instrumentable_group_flat_hint(access.flat_address_space_hint,
                                            options.flat_provenance_mode))
       continue;
@@ -666,33 +664,32 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  std::ranges::sort(
-      candidates, [](const ConSanProgramSite *lhs, const ConSanProgramSite *rhs) {
-        if (lhs->file_offset != rhs->file_offset)
-          return lhs->file_offset < rhs->file_offset;
-        return lhs->physical_id.original_text_offset < rhs->physical_id.original_text_offset;
-      });
+  std::ranges::sort(candidates, [](const ConSanProgramSite *lhs, const ConSanProgramSite *rhs) {
+    if (lhs->decoded_file_offset() != rhs->decoded_file_offset())
+      return lhs->decoded_file_offset() < rhs->decoded_file_offset();
+    return lhs->physical_id.original_text_offset < rhs->physical_id.original_text_offset;
+  });
 
   result.replacement.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                             reinterpret_cast<const uint8_t *>(code_object.image_data()) +
                                 code_object.image_size());
   const std::array<uint32_t, 3> replacement = {*trap, build_s_nop(0, arch), build_s_nop(0, arch)};
   for (const ConSanProgramSite *access : candidates) {
-    if (access->file_offset > result.replacement.size() ||
-        access->instruction_size > result.replacement.size() - access->file_offset) {
+    if (access->decoded_file_offset() > result.replacement.size() ||
+        access->size() > result.replacement.size() - access->decoded_file_offset()) {
       result.errors.emplace_back("ConSan flat trap proof exceeds ELF bytes");
       result.outcome = ConSanTransformOutcome::Invalid;
       result.discard_candidate_modification();
       return;
     }
-    std::memcpy(result.replacement.data() + access->file_offset, replacement.data(),
+    std::memcpy(result.replacement.data() + access->decoded_file_offset(), replacement.data(),
                 replacement.size() * sizeof(uint32_t));
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::InlineFlatTrapRewrite;
     info.anchor_offset = access->physical_id.original_text_offset;
-    info.trampoline_offset = access->physical_id.original_text_offset + access->instruction_size;
-    info.original_size = access->instruction_size;
+    info.trampoline_offset = access->physical_id.original_text_offset + access->size();
+    info.original_size = access->size();
     result.patches.push_back(info);
   }
   result.mark_modified();

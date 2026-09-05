@@ -1062,8 +1062,9 @@ void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = lds_access_kind(mnemonic);
   site.physical_id.original_text_offset = instruction_text_offset;
-  site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_site().text_offset = instruction_text_offset;
+  site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
+  site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
@@ -1079,7 +1080,7 @@ void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
     site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
   }
-  site.mnemonic = std::string(mnemonic);
+  site.decoded_site().mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
   sites.add_access(std::move(site));
 }
@@ -1098,14 +1099,15 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   site.kind = encoding->writes_lds ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
   site.origin = ConSanAccessOrigin::DirectToLds;
   site.physical_id.original_text_offset = instruction_text_offset;
-  site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_site().text_offset = instruction_text_offset;
+  site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
+  site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
   if (encoding->address_source_operand) {
     site.operands.address_vgpr =
         vgpr_index(inst.src_operand(static_cast<int>(*encoding->address_source_operand)));
   }
-  site.mnemonic = std::string(mnemonic);
+  site.decoded_site().mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
   sites.add_access(std::move(site));
   return sites.access_sites().back().kind;
@@ -1234,8 +1236,9 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.origin = ConSanAccessOrigin::Flat;
   site.kind = flat_access_kind(mnemonic);
   site.physical_id.original_text_offset = instruction_text_offset;
-  site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_site().text_offset = instruction_text_offset;
+  site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
+  site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
   if (!consan_arch_is_rdna4_or_cdna5(arch) && mnemonic.starts_with("flat_atomic") &&
       site.decoded_width_bits == 0u) {
@@ -1256,7 +1259,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   if (raw.status == ConSanTargetDecodeStatus::Decoded)
     apply_flat_memory_encoding(site, raw.encoding, tracker);
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
-  site.mnemonic = std::string(mnemonic);
+  site.decoded_site().mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
   sites.add_access(std::move(site));
 }

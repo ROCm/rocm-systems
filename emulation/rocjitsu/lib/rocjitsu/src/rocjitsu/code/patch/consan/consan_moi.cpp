@@ -111,12 +111,12 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
       const ConSanProgramContainer *container =
           result.program_inventory.container(candidate.container.id);
       if (container == nullptr || candidate.anchor() < container->entry_text_offset ||
-          candidate.file_offset < candidate.anchor())
+          candidate.decoded_file_offset() < candidate.anchor())
         continue;
-      const uint64_t text_file_offset = candidate.file_offset - candidate.anchor();
-      candidate.incoming_vgpr_bank_mode =
-          consan_selectable_vgpr_bank_mode_at(arch, code_object_bytes, text_file_offset,
-                                              container->entry_text_offset, candidate.file_offset);
+      const uint64_t text_file_offset = candidate.decoded_file_offset() - candidate.anchor();
+      candidate.incoming_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+          arch, code_object_bytes, text_file_offset, container->entry_text_offset,
+          candidate.decoded_file_offset());
     }
   }
   MoiObjectFacts object_facts;

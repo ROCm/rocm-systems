@@ -161,7 +161,7 @@ native_data_register_count(const ConSanProgramSite &access,
                                             const ConSanTargetProfile &target,
                                             const std::optional<TwoRangeShape> &two_address,
                                             uint16_t data_register_count) {
-  if (access.instruction_size != 2u * sizeof(uint32_t))
+  if (access.size() != 2u * sizeof(uint32_t))
     return Reason::UnsupportedEncoding;
   if (!access.operands.address_vgpr)
     return Reason::MissingAddressOperand;
@@ -230,7 +230,7 @@ native_data_register_count(const ConSanProgramSite &access,
   };
 
   if (access.kind == ConSanLdsAccessKind::Read) {
-    if (!named(access.mnemonic, reads))
+    if (!named(access.mnemonic_view(), reads))
       return Reason::UnsupportedMnemonic;
     if (access.operands.destination_accvgpr) {
       return target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
@@ -248,7 +248,7 @@ native_data_register_count(const ConSanProgramSite &access,
                : Reason::OperandRegisterRange;
   }
 
-  if (access.kind != ConSanLdsAccessKind::Write || !named(access.mnemonic, writes))
+  if (access.kind != ConSanLdsAccessKind::Write || !named(access.mnemonic_view(), writes))
     return Reason::UnsupportedMnemonic;
   if (two_address) {
     const uint32_t per_range = two_address->element_width_bits / 32u;
@@ -266,10 +266,10 @@ native_data_register_count(const ConSanProgramSite &access,
              : Reason::OperandRegisterRange;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-flat_data_register_count(const ConSanProgramSite &access) {
-  if (consan_flat_load_subword_semantics(access.mnemonic) ||
-      consan_flat_store_subword_semantics(access.mnemonic) || access.decoded_width_bits == 16u)
+[[nodiscard]] std::optional<uint16_t> flat_data_register_count(const ConSanProgramSite &access) {
+  if (consan_flat_load_subword_semantics(access.mnemonic_view()) ||
+      consan_flat_store_subword_semantics(access.mnemonic_view()) ||
+      access.decoded_width_bits == 16u)
     return 1u;
   if (access.decoded_width_bits == 32u || access.decoded_width_bits == 64u ||
       access.decoded_width_bits == 128u)
@@ -286,7 +286,8 @@ flat_data_register_count(const ConSanProgramSite &access) {
                                  "flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx4",
                                  "flat_store_short", "flat_store_b16"};
   if (access.kind == ConSanLdsAccessKind::Read) {
-    if (!consan_flat_load_subword_semantics(access.mnemonic) && !named(access.mnemonic, reads))
+    if (!consan_flat_load_subword_semantics(access.mnemonic_view()) &&
+        !named(access.mnemonic_view(), reads))
       return Reason::UnsupportedMnemonic;
     if (!access.operands.destination_vgpr)
       return Reason::MissingResultOperand;
@@ -295,7 +296,8 @@ flat_data_register_count(const ConSanProgramSite &access) {
                : Reason::OperandRegisterRange;
   }
   if (access.kind != ConSanLdsAccessKind::Write ||
-      (!consan_flat_store_subword_semantics(access.mnemonic) && !named(access.mnemonic, writes)))
+      (!consan_flat_store_subword_semantics(access.mnemonic_view()) &&
+       !named(access.mnemonic_view(), writes)))
     return Reason::UnsupportedMnemonic;
   if (!access.operands.data_vgpr)
     return Reason::MissingDataOperand;
@@ -306,12 +308,12 @@ flat_data_register_count(const ConSanProgramSite &access) {
 
 } // namespace
 
-ConSanAccessLoweringClassification
-classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t arch) {
+ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanProgramSite &access,
+                                                                   rj_code_arch_t arch) {
   if (const Reason reason = inventory_reason(access); reason != Reason::None)
     return reject(reason);
-  if (access.file_offset > access.physical_id.code_object.byte_size ||
-      access.instruction_size > access.physical_id.code_object.byte_size - access.file_offset)
+  if (access.decoded_file_offset() > access.physical_id.code_object.byte_size ||
+      access.size() > access.physical_id.code_object.byte_size - access.decoded_file_offset())
     return reject(Reason::InstructionOutOfBounds);
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
@@ -319,7 +321,7 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
 
   ConSanAccessLoweringForm form{
       .access_kind = access.kind,
-      .instruction_size = access.instruction_size,
+      .instruction_size = access.size(),
       .element_width_bits = access.decoded_width_bits,
       .range_count = static_cast<uint32_t>(access.ranges.size()),
       .address_vgpr = access.operands.address_vgpr,
@@ -342,7 +344,8 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
     form.data_register_count = static_cast<uint16_t>((access.decoded_width_bits + 31u) / 32u);
     replay = Reason::None;
   } else if (access.origin == ConSanAccessOrigin::NativeLds) {
-    const auto two_address = consan_detail::decode_native_lds_two_range_shape(access.mnemonic);
+    const auto two_address =
+        consan_detail::decode_native_lds_two_range_shape(access.mnemonic_view());
     form.kind = two_address ? ConSanAccessLoweringFormKind::NativeTwoRange
                             : ConSanAccessLoweringFormKind::NativeSingleRange;
     form.element_width_bits =
@@ -353,14 +356,13 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
       return reject(Reason::UnsupportedMnemonic);
     form.address_vgpr_count = 1u;
     form.data_register_count = *register_count;
-    replay = is_replayable_single_range_native_lds(access.mnemonic, *target) || two_address ||
-                     is_relaxed_lds_atomic(access.mnemonic)
+    replay = is_replayable_single_range_native_lds(access.mnemonic_view(), *target) ||
+                     two_address || is_relaxed_lds_atomic(access.mnemonic_view())
                  ? Reason::None
                  : Reason::UnsupportedMnemonic;
     compare = native_compare_support(access, *target, two_address, *register_count);
   } else if (access.origin == ConSanAccessOrigin::Flat) {
-    if ((access.instruction_size != 2u * sizeof(uint32_t) &&
-         access.instruction_size != 3u * sizeof(uint32_t)) ||
+    if ((access.size() != 2u * sizeof(uint32_t) && access.size() != 3u * sizeof(uint32_t)) ||
         !access.operands.address_vgpr)
       return reject(access.operands.address_vgpr ? Reason::UnsupportedEncoding
                                                  : Reason::MissingAddressOperand);
@@ -376,9 +378,9 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
     if (scalar_vector_address)
       form.scalar_address_sgpr = *access.operands.scalar_address_sgpr;
 
-    const bool exact_modern_encoding = access.instruction_size == 3u * sizeof(uint32_t);
+    const bool exact_modern_encoding = access.size() == 3u * sizeof(uint32_t);
     const bool cdna4_encoding =
-        access.instruction_size == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
+        access.size() == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
     if (!exact_modern_encoding && !cdna4_encoding) {
       replay = Reason::UnsupportedEncoding;
     } else if (!access.operands.raw_ioffset ||
@@ -393,8 +395,8 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
     } else if (*access.operands.address_vgpr >= 255u && !scalar_vector_address) {
       replay = Reason::ReservedAddressRegister;
     } else {
-      replay =
-          is_replayable_flat_access(access.mnemonic) ? Reason::None : Reason::UnsupportedMnemonic;
+      replay = is_replayable_flat_access(access.mnemonic_view()) ? Reason::None
+                                                                 : Reason::UnsupportedMnemonic;
     }
     compare = flat_compare_support(access, *register_count);
   } else {
@@ -405,14 +407,16 @@ classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t 
   form.destination_register_count = form.destination_vgpr ? form.data_register_count : 0u;
   form.data_register_alignment =
       target->requires_even_vgpr_tuples && form.data_register_count > 1u ? 2u : 1u;
-  form.destination_allocation_headroom = needs_destination_allocation_headroom(access.mnemonic);
-  if (uses_high_register_subword(access.mnemonic)) {
+  form.destination_allocation_headroom =
+      needs_destination_allocation_headroom(access.mnemonic_view());
+  if (uses_high_register_subword(access.mnemonic_view())) {
     form.register_value_placement = ConSanAccessRegisterValuePlacement::High16;
-  } else if (uses_low_register_subword(access.mnemonic)) {
+  } else if (uses_low_register_subword(access.mnemonic_view())) {
     form.register_value_placement = ConSanAccessRegisterValuePlacement::Low16;
   }
-  form.destination_preserves_unwritten_bits = access.kind == ConSanLdsAccessKind::Read &&
-                                              is_partial_destination_native_load(access.mnemonic);
+  form.destination_preserves_unwritten_bits =
+      access.kind == ConSanLdsAccessKind::Read &&
+      is_partial_destination_native_load(access.mnemonic_view());
 
   return {
       .form = form,

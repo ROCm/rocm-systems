@@ -67,7 +67,7 @@ ordered_program_site_indices(std::span<const ConSanProgramSite> sites) {
   if (site.origin != ConSanAccessOrigin::NativeLds ||
       !consan_lds_address_fault_arch_supported(arch) ||
       !site.lowering.replay_guest_access.available() || !site.operands.address_vgpr ||
-      site.instruction_size != 2u * sizeof(uint32_t) ||
+      site.size() != 2u * sizeof(uint32_t) ||
       (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
     return false;
   }
@@ -176,18 +176,18 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     site.in_kernel = access.container.is_kernel();
     site.occurrence = occurrence++;
     site.text_offset = access.physical_id.original_text_offset;
-    site.file_offset = access.file_offset;
-    site.size = access.instruction_size;
+    site.file_offset = access.decoded_file_offset();
+    site.size = access.size();
     site.width_bits = access.decoded_width_bits;
     site.address_vgpr = access.operands.address_vgpr;
     const ConSanProgramContainer *container = inventory.container(access.container.id);
     if (container != nullptr && consan_arch_has_selectable_vgpr_bank(arch) &&
-        access.file_offset >= site.text_offset) {
-      site.selectable_vgpr_bank_mode =
-          consan_selectable_vgpr_bank_mode_at(arch, bytes, container->text_file_offset,
-                                              container->entry_text_offset, access.file_offset);
+        access.decoded_file_offset() >= site.text_offset) {
+      site.selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+          arch, bytes, container->text_file_offset, container->entry_text_offset,
+          access.decoded_file_offset());
     }
-    site.mnemonic = access.mnemonic;
+    site.mnemonic = access.mnemonic_view();
     site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
     site.decoded_operands = consan_lds_decoded_operands(access.operands);
     site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +

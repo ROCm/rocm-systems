@@ -94,8 +94,8 @@ template <typename Site, typename Container>
 /// Seed one decoded source site in a builder-owned test inventory.
 template <typename Container, typename Site>
 void stage_decoded_site(ProgramInventoryBuilder &builder, const Container &container, Site site) {
-  builder.program_sites().push_back(make_consan_program_site(
-      consan_program_container_ref(container), std::move(site)));
+  builder.program_sites().push_back(
+      make_consan_program_site(consan_program_container_ref(container), std::move(site)));
 }
 
 /// Focused classifier/planner tests start from decoded sites so they can
@@ -505,11 +505,12 @@ test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes, const ProgramInve
                                const ConSanProgramSite &access) {
   const uint64_t anchor = access.physical_id.original_text_offset;
   const ConSanProgramContainer *container = inventory.container(access.container.id);
-  if (container == nullptr || anchor < container->entry_text_offset || access.file_offset < anchor)
+  if (container == nullptr || anchor < container->entry_text_offset ||
+      access.decoded_file_offset() < anchor)
     return std::nullopt;
-  return consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes,
-                                             access.file_offset - anchor,
-                                             container->entry_text_offset, access.file_offset);
+  return consan_selectable_vgpr_bank_mode_at(
+      ROCJITSU_CODE_ARCH_CDNA5, bytes, access.decoded_file_offset() - anchor,
+      container->entry_text_offset, access.decoded_file_offset());
 }
 
 [[nodiscard]] constexpr bool is_consan_access_intent(ConSanProbeIntentKind kind) {
@@ -545,8 +546,10 @@ consan_access_decision_at(const ConSanTransformArtifacts &result, uint64_t text_
 [[nodiscard]] const ConSanSiteDecision *
 consan_access_decision_at_file_offset(const ConSanTransformArtifacts &result,
                                       uint64_t file_offset) {
-  const auto access = std::ranges::find(result.program_inventory.access_sites(), file_offset,
-                                        &ConSanProgramSite::file_offset);
+  const auto access =
+      std::ranges::find_if(result.program_inventory.access_sites(), [&](const auto &candidate) {
+        return candidate.decoded_file_offset() == file_offset;
+      });
   if (access == result.program_inventory.access_sites().end())
     return nullptr;
   return consan_access_decision_at(result, access->physical_id.original_text_offset);

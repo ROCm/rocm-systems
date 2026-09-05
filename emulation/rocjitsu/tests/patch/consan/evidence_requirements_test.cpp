@@ -160,14 +160,15 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.origin = ConSanAccessOrigin::Flat;
     site.kind = ConSanLdsAccessKind::Write;
     site.physical_id.original_text_offset = 16;
-    site.file_offset = 0;
-    site.instruction_size = 8;
+    site.decoded_site().text_offset = 16;
+    site.decoded_site().file_offset = 0;
+    site.decoded_site().size = 8;
     site.decoded_width_bits = 32;
     site.operands.address_vgpr = 2;
     site.operands.data_vgpr = 3;
     site.operands.raw_ioffset = 0;
     site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Group;
-    site.mnemonic = "flat_store_b32";
+    site.decoded_site().mnemonic = "flat_store_b32";
     site.container = consan_program_container_ref(kernel);
     builder.add_access_site(std::move(site));
   } else {
@@ -175,12 +176,13 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.origin = ConSanAccessOrigin::NativeLds;
     site.kind = ConSanLdsAccessKind::Write;
     site.physical_id.original_text_offset = 16;
-    site.file_offset = 0;
-    site.instruction_size = 8;
+    site.decoded_site().text_offset = 16;
+    site.decoded_site().file_offset = 0;
+    site.decoded_site().size = 8;
     site.decoded_width_bits = 32;
     site.operands.address_vgpr = 2;
     site.operands.data_vgpr = 3;
-    site.mnemonic = "ds_store_b32";
+    site.decoded_site().mnemonic = "ds_store_b32";
     site.container = consan_program_container_ref(kernel);
     builder.add_access_site(std::move(site));
   }

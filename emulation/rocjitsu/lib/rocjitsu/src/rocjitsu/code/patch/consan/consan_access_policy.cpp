@@ -105,12 +105,14 @@ namespace {
   };
   return std::tuple(lhs.container.kind, container_entry(lhs), lhs.origin, lhs.kind,
                     lhs.address_space, lhs.provenance, lhs.confidence, lhs.lowering,
-                    lhs.file_offset, lhs.instruction_size, lhs.decoded_width_bits, lhs.mnemonic,
-                    lhs.flat_address_space_hint, lhs.operands, lhs.ranges, lhs.exclusions) ==
+                    lhs.decoded_file_offset(), lhs.size(), lhs.decoded_width_bits,
+                    lhs.mnemonic_view(), lhs.flat_address_space_hint, lhs.operands, lhs.ranges,
+                    lhs.exclusions) ==
          std::tuple(rhs.container.kind, container_entry(rhs), rhs.origin, rhs.kind,
                     rhs.address_space, rhs.provenance, rhs.confidence, rhs.lowering,
-                    rhs.file_offset, rhs.instruction_size, rhs.decoded_width_bits, rhs.mnemonic,
-                    rhs.flat_address_space_hint, rhs.operands, rhs.ranges, rhs.exclusions);
+                    rhs.decoded_file_offset(), rhs.size(), rhs.decoded_width_bits,
+                    rhs.mnemonic_view(), rhs.flat_address_space_hint, rhs.operands, rhs.ranges,
+                    rhs.exclusions);
 }
 
 [[nodiscard]] ConSanAccessPolicyReason access_classifier_reason(ConSanAccessClassifierReason reason,
