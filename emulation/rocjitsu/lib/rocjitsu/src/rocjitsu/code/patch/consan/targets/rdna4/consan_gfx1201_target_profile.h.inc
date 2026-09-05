@@ -6,6 +6,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   ConSanTargetProfile profile = consan_rdna_target_profile_defaults();
   profile.target = ROCJITSU_CODE_TARGET_GFX1201;
   profile.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  profile.scalar_placement_model = ConSanScalarPlacementModel::SpillBacked;
   profile.program_analysis = &kConSanRdna4ProgramAnalysisOperations;
   profile.command_processor_workgroup_identity = {
       .grid_x_ttmp = 9u,
@@ -21,7 +22,6 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   profile.vector_memory.scale_offset = ConSanScaleOffsetCapability::Disabled;
   profile.moi_access.dynamic_stack_uses_scalar_reservoir = true;
   profile.moi_access.lazy_workgroup_shadow = true;
-  profile.moi_placement.scalar_model = ConSanMoiScalarPlacementModel::SpillBacked;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral;
   profile.supports_sc_inline_flat_trap_rewrite = true;
   return profile;

@@ -317,16 +317,16 @@ struct ConSanMoiAccessCapability {
   bool operator==(const ConSanMoiAccessCapability &) const = default;
 };
 
-/// Heuristic scalar-placement strategy used by the shared MOI solver.
+/// Target-wide heuristic for placing temporary scalar instrumentation state.
 ///
 /// `DescriptorPartitioned` protects the compiler's physical-VCC and AccVGPR
 /// boundaries and permits owner-component recovery around those boundaries.
 /// `LivenessOnly` has neither a partitioned scalar ABI nor an entry-backed
 /// spill mechanism. `SpillBacked` may preserve borrowed scalar state at entry
 /// and use private storage across full-pressure probes. The model deliberately
-/// captures the solver-relevant behavior instead of reproducing architecture
-/// families inside placement.
-enum class ConSanMoiScalarPlacementModel : uint8_t {
+/// captures the solver-relevant behavior shared by ConSan engines instead of
+/// reproducing architecture families inside each mode's placement code.
+enum class ConSanScalarPlacementModel : uint8_t {
   Unsupported,
   DescriptorPartitioned,
   LivenessOnly,
@@ -334,7 +334,6 @@ enum class ConSanMoiScalarPlacementModel : uint8_t {
 };
 
 struct ConSanMoiPlacementCapability {
-  ConSanMoiScalarPlacementModel scalar_model = ConSanMoiScalarPlacementModel::Unsupported;
   uint8_t scratch_vgpr_alignment = 1;
   bool branch_only_spill_embeds_setup_state = false;
 
@@ -396,6 +395,7 @@ struct ConSanTargetProfile {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   ConSanArchitectureFamily architecture_family = ConSanArchitectureFamily::Cdna;
   ConSanAccumulatorModel accumulator_model = ConSanAccumulatorModel::None;
+  ConSanScalarPlacementModel scalar_placement_model = ConSanScalarPlacementModel::Unsupported;
   /// Target-owned decoder facet. Keeping this registration beside the target
   /// facts prevents every consumer domain from rebuilding the five-target map.
   const ConSanProgramAnalysisTargetOperations *program_analysis = nullptr;
@@ -614,9 +614,9 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          profile.native_lds.single_range_atomic_offset_bits != 16u) ||
         (profile.moi_access.clobbered_address_spill_reload &&
          !profile.moi_access.native_lds_spill_recovery) ||
-        profile.moi_placement.scalar_model == ConSanMoiScalarPlacementModel::Unsupported ||
-        static_cast<uint8_t>(profile.moi_placement.scalar_model) >
-            static_cast<uint8_t>(ConSanMoiScalarPlacementModel::SpillBacked) ||
+        profile.scalar_placement_model == ConSanScalarPlacementModel::Unsupported ||
+        static_cast<uint8_t>(profile.scalar_placement_model) >
+            static_cast<uint8_t>(ConSanScalarPlacementModel::SpillBacked) ||
         (profile.moi_placement.scratch_vgpr_alignment != 1u &&
          profile.moi_placement.scratch_vgpr_alignment != 2u) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&

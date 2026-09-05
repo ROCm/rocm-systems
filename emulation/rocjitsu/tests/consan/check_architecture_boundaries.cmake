@@ -76,6 +76,11 @@ foreach(_file IN LISTS _consan_layout_files)
         message(FATAL_ERROR
             "ConSan target operations escaped into mode ownership: ${_relative}")
     endif()
+    if(_relative MATCHES "^modes/" AND
+       _contents MATCHES "ROCJITSU_CODE_ARCH_|consan_arch_is_")
+        message(FATAL_ERROR
+            "ConSan mode implementation names a concrete architecture instead of consuming target facts: ${_relative}")
+    endif()
     if(_relative MATCHES "^targets/" AND _contents MATCHES "ConSanOptions")
         message(FATAL_ERROR
             "ConSan target provider consumes the orchestration input aggregate: ${_relative}")

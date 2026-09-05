@@ -28,6 +28,7 @@ struct ExpectedTargetProfile {
   rj_code_arch_t arch;
   ConSanArchitectureFamily architecture_family;
   ConSanAccumulatorModel accumulator_model;
+  ConSanScalarPlacementModel scalar_placement_model;
   ConSanDispatchIdentitySource dispatch_identity;
   std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form;
@@ -78,6 +79,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .arch = ROCJITSU_CODE_ARCH_CDNA3,
         .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
+        .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
@@ -112,7 +114,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_placement =
             {
-                .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
                 .scratch_vgpr_alignment = 2,
                 .branch_only_spill_embeds_setup_state = true,
             },
@@ -152,6 +153,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .arch = ROCJITSU_CODE_ARCH_CDNA4,
         .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
+        .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
@@ -186,7 +188,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_placement =
             {
-                .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
                 .scratch_vgpr_alignment = 2,
                 .branch_only_spill_embeds_setup_state = true,
             },
@@ -226,6 +227,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .arch = ROCJITSU_CODE_ARCH_RDNA3,
         .architecture_family = ConSanArchitectureFamily::Rdna,
         .accumulator_model = ConSanAccumulatorModel::None,
+        .scalar_placement_model = ConSanScalarPlacementModel::LivenessOnly,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
@@ -256,7 +258,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .moi_access = {.native_lds_spill_recovery = true},
         .moi_placement =
             {
-                .scalar_model = ConSanMoiScalarPlacementModel::LivenessOnly,
                 .scratch_vgpr_alignment = 1,
             },
         .moi_dispatch_identity_placement =
@@ -296,6 +297,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .arch = ROCJITSU_CODE_ARCH_RDNA4,
         .architecture_family = ConSanArchitectureFamily::Rdna,
         .accumulator_model = ConSanAccumulatorModel::None,
+        .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity =
             ConSanCommandProcessorWorkgroupIdentity{
@@ -340,7 +342,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_placement =
             {
-                .scalar_model = ConSanMoiScalarPlacementModel::SpillBacked,
                 .scratch_vgpr_alignment = 1,
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
@@ -379,6 +380,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .arch = ROCJITSU_CODE_ARCH_CDNA5,
         .architecture_family = ConSanArchitectureFamily::Cdna,
         .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
+        .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity =
             ConSanCommandProcessorWorkgroupIdentity{
@@ -424,7 +426,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_placement =
             {
-                .scalar_model = ConSanMoiScalarPlacementModel::SpillBacked,
                 .scratch_vgpr_alignment = 1,
                 .branch_only_spill_embeds_setup_state = true,
             },
@@ -468,6 +469,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.arch, expected.arch);
   EXPECT_EQ(actual.architecture_family, expected.architecture_family);
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
+  EXPECT_EQ(actual.scalar_placement_model, expected.scalar_placement_model);
   EXPECT_EQ(actual.dispatch_identity, expected.dispatch_identity);
   EXPECT_EQ(actual.command_processor_workgroup_identity,
             expected.command_processor_workgroup_identity);
@@ -607,10 +609,10 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("clobbered-address reload without native spill recovery",
                  [](auto &profiles) { profiles[0].moi_access.native_lds_spill_recovery = false; });
   expect_invalid("unsupported scalar placement model", [](auto &profiles) {
-    profiles[0].moi_placement.scalar_model = ConSanMoiScalarPlacementModel::Unsupported;
+    profiles[0].scalar_placement_model = ConSanScalarPlacementModel::Unsupported;
   });
   expect_invalid("unknown scalar placement model", [](auto &profiles) {
-    profiles[0].moi_placement.scalar_model = static_cast<ConSanMoiScalarPlacementModel>(255u);
+    profiles[0].scalar_placement_model = static_cast<ConSanScalarPlacementModel>(255u);
   });
   expect_invalid("unsupported scratch VGPR alignment",
                  [](auto &profiles) { profiles[0].moi_placement.scratch_vgpr_alignment = 4u; });

@@ -279,7 +279,8 @@ private:
 }
 
 [[nodiscard]] uint16_t sc_vcc_save_sgpr_width(const ConSanTargetProfile &target) {
-  return consan_arch_is_cdna3_or_cdna4(target.arch) ? 2u : 1u;
+  return target.scalar_placement_model == ConSanScalarPlacementModel::DescriptorPartitioned ? 2u
+                                                                                            : 1u;
 }
 
 [[nodiscard]] std::optional<uint16_t>
@@ -473,8 +474,8 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     std::span<const uint8_t> original_bytes, const ConSanProgramSite &site,
     const ConSanTargetProfile &target, const ConSanOptions &options, uint16_t scratch_vgpr,
     uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
-    std::span<const uint32_t> delay_words,
-    std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
+    std::span<const uint32_t> delay_words, std::optional<uint32_t> &guest_instruction_word_offset,
+    std::vector<std::string> &errors) {
   const rj_code_arch_t arch = target.arch;
   guest_instruction_word_offset.reset();
   auto required_vgprs = access_dword_count(site);
@@ -553,14 +554,16 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   }
   auto skip_action =
       instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(mismatch_action->size()), arch);
-  constexpr uint16_t kAmdGpuVccLo = 106;
-  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
+  const bool descriptor_partitioned =
+      target.scalar_placement_model == ConSanScalarPlacementModel::DescriptorPartitioned;
   const std::optional<uint32_t> save_vcc =
-      legacy_cdna ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
-                  : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
+      descriptor_partitioned
+          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
   const std::optional<uint32_t> restore_vcc =
-      legacy_cdna ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
-                  : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
+      descriptor_partitioned
+          ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
   if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;
@@ -661,7 +664,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
-    if (form.destination_accvgpr && legacy_cdna) {
+    if (form.destination_accvgpr && descriptor_partitioned) {
       const auto acc_read = consan_sc_build_cdna_accvgpr_read_b32(
           compare_scratch_vgpr, static_cast<uint16_t>(*form.destination_accvgpr + i), target);
       if (!acc_read) {

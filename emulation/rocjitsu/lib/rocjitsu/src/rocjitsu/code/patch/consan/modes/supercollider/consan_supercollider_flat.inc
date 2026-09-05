@@ -29,8 +29,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  const auto delay_words = consan_sc_build_delay_words(
-      arch, options, result.errors, "ConSan flat check/trap proof");
+  const auto delay_words =
+      consan_sc_build_delay_words(arch, options, result.errors, "ConSan flat check/trap proof");
   if (!delay_words)
     return;
 
@@ -81,7 +81,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         site_inst, owner_liveness, allocated_sgpr_count.value_or(0u), min_fresh_sgpr,
         REGISTER_SET_ALLOCATABLE_SGPRS, 2u, false, options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
-    if (!vcc_save && consan_arch_is_rdna4_or_cdna5(target.arch) && allocated_sgpr_count) {
+    if (!vcc_save && target.scalar_placement_model == ConSanScalarPlacementModel::SpillBacked &&
+        allocated_sgpr_count) {
       vcc_save = choose_sc_borrowed_scalar_range(*allocated_sgpr_count, 2u, options,
                                                  preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();

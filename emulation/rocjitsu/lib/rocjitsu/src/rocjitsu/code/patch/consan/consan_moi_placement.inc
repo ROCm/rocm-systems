@@ -39,9 +39,9 @@ order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
   return candidates;
 }
 
-[[nodiscard]] ConSanMoiScalarPlacementModel moi_scalar_placement_model(rj_code_arch_t arch) {
+[[nodiscard]] ConSanScalarPlacementModel moi_scalar_placement_model(rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
-  return target ? target->moi_placement.scalar_model : ConSanMoiScalarPlacementModel::Unsupported;
+  return target ? target->scalar_placement_model : ConSanScalarPlacementModel::Unsupported;
 }
 
 /// Return the first aligned register range admitted by one placement policy.
@@ -1140,7 +1140,7 @@ moi_resource_plan_can_be_recovered_by_persistent_placement(const ConSanCandidate
                                                            rj_code_arch_t arch) {
   if (plan.source != ConSanRegisterAllocationSource::Unsupported)
     return false;
-  if (moi_scalar_placement_model(arch) != ConSanMoiScalarPlacementModel::DescriptorPartitioned) {
+  if (moi_scalar_placement_model(arch) != ConSanScalarPlacementModel::DescriptorPartitioned) {
     return false;
   }
   // Persistent placement and resource planning form a fixed point for the
@@ -1260,7 +1260,7 @@ bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &sta
   return contexts && consan_detail::scalar_owner_contexts_admit_reserved_window(
                          contexts->summaries, base, count,
                          moi_scalar_placement_model(state.arch) ==
-                             ConSanMoiScalarPlacementModel::DescriptorPartitioned);
+                             ConSanScalarPlacementModel::DescriptorPartitioned);
 }
 
 struct MoiScalarOwnerContextGroup {
@@ -1331,7 +1331,7 @@ collect_moi_scalar_owner_contexts(std::span<const MoiScalarOwnerContextGroup> gr
 [[nodiscard]] bool moi_scalar_contexts_conflict_with_physical_vcc(
     std::span<const consan_detail::ScalarOwnerContextSummary> contexts,
     std::span<const MoiSgprRange> ranges, rj_code_arch_t arch) {
-  return moi_scalar_placement_model(arch) == ConSanMoiScalarPlacementModel::DescriptorPartitioned &&
+  return moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::DescriptorPartitioned &&
          consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(contexts, ranges);
 }
 
@@ -1340,7 +1340,7 @@ collect_moi_scalar_owner_contexts(std::span<const MoiScalarOwnerContextGroup> gr
     uint16_t width, rj_code_arch_t arch) {
   return consan_detail::scalar_owner_contexts_admit_reserved_window(
       contexts, base, width,
-      moi_scalar_placement_model(arch) == ConSanMoiScalarPlacementModel::DescriptorPartitioned);
+      moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::DescriptorPartitioned);
 }
 
 /// One register-file view for an ordered scalar-placement attempt.
@@ -2187,8 +2187,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         !owners.empty() && component_contexts->all_use_dynamic_stack;
     const bool all_owners_use_fixed_stack =
         !owners.empty() && component_contexts->all_use_fixed_stack;
-    const ConSanMoiScalarPlacementModel scalar_model = moi_scalar_placement_model(arch);
-    const bool spill_backed_target = scalar_model == ConSanMoiScalarPlacementModel::SpillBacked;
+    const ConSanScalarPlacementModel scalar_model = moi_scalar_placement_model(arch);
+    const bool spill_backed_target = scalar_model == ConSanScalarPlacementModel::SpillBacked;
     const bool spill_backed_branch_only =
         inline_layout && spill_backed_target &&
         (all_owners_use_dynamic_stack || all_owners_use_fixed_stack);
@@ -2211,12 +2211,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       component_domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
       if (options.moi_dynamic_stack_spill)
         component_domain.occupy_dynamic_stack_state();
-      if (scalar_model == ConSanMoiScalarPlacementModel::DescriptorPartitioned)
+      if (scalar_model == ConSanScalarPlacementModel::DescriptorPartitioned)
         component_domain.occupy(0u, static_cast<uint16_t>(initialized_end));
-      const uint32_t fresh_begin =
-          scalar_model == ConSanMoiScalarPlacementModel::DescriptorPartitioned
-              ? std::max(initialized_end, component_contexts->tail_floor)
-              : component_contexts->tail_floor;
+      const uint32_t fresh_begin = scalar_model == ConSanScalarPlacementModel::DescriptorPartitioned
+                                       ? std::max(initialized_end, component_contexts->tail_floor)
+                                       : component_contexts->tail_floor;
       // The Inline scalar window is saved after the VGPR frame is established
       // and restored before that frame is released. RDNA4 may therefore
       // borrow initialized guest SGPRs; only the frame-bootstrap temporaries
@@ -2383,7 +2382,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     assigned_any = true;
   }
   const bool can_exclude_incompatible_component =
-      moi_scalar_placement_model(arch) == ConSanMoiScalarPlacementModel::DescriptorPartitioned;
+      moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::DescriptorPartitioned;
   if (missed_required_assignment && !can_exclude_incompatible_component) {
     owner_transient_sgprs.clear();
     return false;
@@ -2552,8 +2551,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       const bool relocation_recovers_component =
           dispatch == prior_dispatch || assigned_component_local;
       if (relocation_recovers_component &&
-          (assigned_component_local || moi_scalar_placement_model(arch) ==
-                                           ConSanMoiScalarPlacementModel::DescriptorPartitioned)) {
+          (assigned_component_local ||
+           moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::DescriptorPartitioned)) {
         warnings.emplace_back("ConSan MOI reserved an owner-wide EXEC-save window and assigned "
                               "component-local scalar state where needed");
         if (dispatch != prior_dispatch)
@@ -2601,7 +2600,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // memory, but frame setup still needs one object-wide dead scalar tuple.
   // Establish both parts as one transaction so later component overrides do
   // not accidentally overlap the persistent setup state.
-  if (moi_scalar_placement_model(arch) == ConSanMoiScalarPlacementModel::SpillBacked &&
+  if (moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::SpillBacked &&
       inline_layout && scalar_contexts.all_use_dynamic_stack &&
       problem.mode_semantics().inline_access_present && state.valid && availability.saw_site) {
     MoiScalarPlacementDomain domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries,
@@ -2634,7 +2633,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // This is deliberately more conservative than site-local liveness: the
   // retained window is safe across entry setup and every guest instruction
   // in each admitted kernel.
-  if (moi_scalar_placement_model(arch) == ConSanMoiScalarPlacementModel::SpillBacked) {
+  if (moi_scalar_placement_model(arch) == ConSanScalarPlacementModel::SpillBacked) {
     const std::span<const consan_detail::ScalarOwnerContextSummary> no_contexts;
     MoiScalarPlacementDomain high_domain(arch, ordinary_sgpr_limit, no_contexts);
     high_domain.occupy(options.moi_owner_sgpr.base(), 1u);
@@ -3163,7 +3162,7 @@ validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResour
   const bool branch_only_scalar_invalid =
       point.moi_branch_only_spill &&
       (!inline_layout || !point.has_inline_moi_scalar_spill() ||
-       moi_scalar_placement_model(arch) != ConSanMoiScalarPlacementModel::SpillBacked ||
+       moi_scalar_placement_model(arch) != ConSanScalarPlacementModel::SpillBacked ||
        !point.moi_exec_save_sgpr || point.moi_scalar_spill_setup);
   const bool dynamic_bootstrap_invalid = [&] {
     if (!point.moi_branch_only_spill || !point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
@@ -3176,7 +3175,7 @@ validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResour
         [&](std::optional<uint16_t> reg, uint16_t width) { bootstrap_domain.occupy(reg, width); });
     return !inline_layout || !point.has_inline_moi_scalar_spill() ||
            !point.moi_dynamic_stack_spill ||
-           moi_scalar_placement_model(arch) != ConSanMoiScalarPlacementModel::SpillBacked ||
+           moi_scalar_placement_model(arch) != ConSanScalarPlacementModel::SpillBacked ||
            base % 2u != 0u || point.moi_scalar_spill_setup ||
            !bootstrap_domain.can_select(base, 2u, /*require_dead=*/false);
   }();
@@ -3387,7 +3386,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   };
   const bool crosses_cdna_accvgpr_boundary =
       moi_scalar_placement_model(program_inventory.arch()) ==
-          ConSanMoiScalarPlacementModel::DescriptorPartitioned &&
+          ConSanScalarPlacementModel::DescriptorPartitioned &&
       std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                !plan.owner_descriptor_file_offsets.empty() &&
@@ -3402,7 +3401,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   // retain the smaller scalar-dispatch representation.
   const bool needs_cdna_component_dispatch_placement =
       moi_scalar_placement_model(program_inventory.arch()) ==
-          ConSanMoiScalarPlacementModel::DescriptorPartitioned &&
+          ConSanScalarPlacementModel::DescriptorPartitioned &&
       uses_resident_wave_private_state && options.moi_dispatch_identity.private_fallback() &&
       !needs_persistent_dispatch_vgprs;
   if (crosses_cdna_accvgpr_boundary || needs_cdna_component_dispatch_placement) {
@@ -3932,10 +3931,10 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       !persistent_demand.synchronization_requires_persistent_owner &&
       (persistent_demand.prefer_private_epoch_for_dynamic_lds ||
        (would_grow_descriptor && persistent_demand.prefer_private_epoch_for_descriptor_growth));
-  const ConSanMoiScalarPlacementModel scalar_model = moi_scalar_placement_model(arch);
+  const ConSanScalarPlacementModel scalar_model = moi_scalar_placement_model(arch);
   const bool rdna_needs_scalar_epoch =
-      scalar_model != ConSanMoiScalarPlacementModel::Unsupported &&
-      scalar_model != ConSanMoiScalarPlacementModel::DescriptorPartitioned &&
+      scalar_model != ConSanScalarPlacementModel::Unsupported &&
+      scalar_model != ConSanScalarPlacementModel::DescriptorPartitioned &&
       !debug.test_force_private_epoch &&
       persistent_demand.scalar_state_required_for_private_or_overflow &&
       (persistent_end > kMaxVgprs || prefer_private_epoch);

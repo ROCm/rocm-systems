@@ -11,6 +11,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   profile.target = ROCJITSU_CODE_TARGET_GFX1250;
   profile.arch = ROCJITSU_CODE_ARCH_CDNA5;
   profile.accumulator_model = ConSanAccumulatorModel::SelectableVgprBank;
+  profile.scalar_placement_model = ConSanScalarPlacementModel::SpillBacked;
   profile.program_analysis = &kConSanCdna5ProgramAnalysisOperations;
   profile.dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral;
   profile.command_processor_workgroup_identity = {
@@ -51,7 +52,6 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   };
   profile.moi_access.dynamic_stack_uses_scalar_reservoir = true;
   profile.moi_access.lazy_workgroup_shadow = true;
-  profile.moi_placement.scalar_model = ConSanMoiScalarPlacementModel::SpillBacked;
   profile.moi_placement.branch_only_spill_embeds_setup_state = true;
   profile.moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector;

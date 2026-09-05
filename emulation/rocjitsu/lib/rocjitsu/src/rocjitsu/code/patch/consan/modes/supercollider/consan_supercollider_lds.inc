@@ -6,8 +6,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   const ConSanRequest &request = options;
   const ConSanDebugOverrides &debug = options;
 
-  const auto delay_words = consan_sc_build_delay_words(
-      arch, options, result.errors, "ConSan LDS check/trap proof");
+  const auto delay_words =
+      consan_sc_build_delay_words(arch, options, result.errors, "ConSan LDS check/trap proof");
   if (!delay_words)
     return;
 
@@ -133,9 +133,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      [&](uint64_t owner) {
                                        const ConSanProgramContainer *kernel =
                                            owner_analysis.kernel(owner);
-                                       return kernel &&
-                                              consan_container_selected(request, debug,
-                                                                        kernel->name);
+                                       return kernel && consan_container_selected(request, debug,
+                                                                                  kernel->name);
                                      })
                : std::ranges::all_of(
                      site_context.owners.descriptor_file_offsets, [&](uint64_t owner) {
@@ -196,10 +195,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             ? choose_sc_dead_vcc_save_sgpr(site_inst, owner_liveness, *allocated_sgpr_count,
                                            min_preferred_vcc_save_sgpr, dead_vcc_selection_limit,
                                            sc_vcc_save_sgpr_width(target),
-                                           consan_arch_is_cdna3_or_cdna4(target.arch), options)
+                                           target.scalar_placement_model ==
+                                               ConSanScalarPlacementModel::DescriptorPartitioned,
+                                           options)
             : std::nullopt;
     bool spill_vcc_save_to_vgpr = false;
-    if (!vcc_save && consan_arch_is_rdna4_or_cdna5(target.arch) && allocated_sgpr_count) {
+    if (!vcc_save && target.scalar_placement_model == ConSanScalarPlacementModel::SpillBacked &&
+        allocated_sgpr_count) {
       vcc_save = choose_sc_borrowed_scalar_range(*allocated_sgpr_count, 1u, options);
       spill_vcc_save_to_vgpr = vcc_save.has_value();
     }
@@ -495,11 +497,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words = build_lds_check_trap_words(original_bytes, site, target, options,
-                                            candidate.scratch_vgpr, candidate.vcc_save_sgpr,
-                                            candidate.selectable_vgpr_bank_mode.value_or(0u),
-                                            *delay_words, guest_instruction_word_offset,
-                                            result.errors);
+    auto words = build_lds_check_trap_words(
+        original_bytes, site, target, options, candidate.scratch_vgpr, candidate.vcc_save_sgpr,
+        candidate.selectable_vgpr_bank_mode.value_or(0u), *delay_words,
+        guest_instruction_word_offset, result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);

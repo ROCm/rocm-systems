@@ -6,6 +6,7 @@
   ConSanTargetProfile profile;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
   profile.accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned;
+  profile.scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned;
   profile.program_analysis = &kConSanCdna3Cdna4ProgramAnalysisOperations;
   profile.resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6};
   profile.vgpr_allocation_granularity_wave64 = 8;
@@ -24,7 +25,6 @@
   profile.moi_access.native_lds_spill_recovery = true;
   profile.moi_access.clobbered_address_spill_reload = true;
   profile.moi_placement = {
-      .scalar_model = ConSanMoiScalarPlacementModel::DescriptorPartitioned,
       .scratch_vgpr_alignment = 2,
       .branch_only_spill_embeds_setup_state = true,
   };
