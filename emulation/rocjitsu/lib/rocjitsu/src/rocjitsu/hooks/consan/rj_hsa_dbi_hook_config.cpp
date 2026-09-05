@@ -107,28 +107,36 @@ struct BoolEnvBinding {
   return true;
 }
 
-[[nodiscard]] bool parse_u32_env(const char *name, uint32_t default_value, uint32_t *out) {
+template <typename UInt>
+[[nodiscard]] bool parse_unsigned_env(const char *name, UInt default_value, UInt *out,
+                                      int base = 0) {
   const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
     *out = default_value;
     return true;
   }
   if (!std::isdigit(static_cast<unsigned char>(*value))) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint32\n", name, value);
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint%zu\n", name, value,
+                 sizeof(UInt) * 8u);
     return false;
   }
 
   errno = 0;
   char *end = nullptr;
-  const unsigned long parsed = std::strtoul(value, &end, 10);
+  const unsigned long long parsed = std::strtoull(value, &end, base);
   if (end == value || *end != '\0' || errno == ERANGE ||
-      parsed > std::numeric_limits<uint32_t>::max()) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint32\n", name, value);
+      parsed > std::numeric_limits<UInt>::max()) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint%zu\n", name, value,
+                 sizeof(UInt) * 8u);
     return false;
   }
 
-  *out = static_cast<uint32_t>(parsed);
+  *out = static_cast<UInt>(parsed);
   return true;
+}
+
+[[nodiscard]] bool parse_u32_env(const char *name, uint32_t default_value, uint32_t *out) {
+  return parse_unsigned_env(name, default_value, out, 10);
 }
 
 [[nodiscard]] bool parse_optional_i32_env(const char *name, std::optional<int32_t> *out) {
@@ -185,27 +193,7 @@ struct BoolEnvBinding {
 
 [[nodiscard]] bool parse_u64_env(const char *name, uint64_t default_value, uint64_t *out,
                                  int base = 0) {
-  const char *value = std::getenv(name);
-  if (value == nullptr || *value == '\0') {
-    *out = default_value;
-    return true;
-  }
-  if (!std::isdigit(static_cast<unsigned char>(*value))) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint64\n", name, value);
-    return false;
-  }
-
-  errno = 0;
-  char *end = nullptr;
-  const unsigned long long parsed = std::strtoull(value, &end, base);
-  if (end == value || *end != '\0' || errno == ERANGE ||
-      parsed > std::numeric_limits<uint64_t>::max()) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint64\n", name, value);
-    return false;
-  }
-
-  *out = static_cast<uint64_t>(parsed);
-  return true;
+  return parse_unsigned_env(name, default_value, out, base);
 }
 
 template <typename Enum>
@@ -978,30 +966,18 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_optional_sgpr_pair_env("RJ_CONSAN_MOI_EXEC_SAVE_SGPR",
                                     &config.requested_moi_exec_save_sgpr))
     return std::nullopt;
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_records &&
-      config.moi_auto_report_buffer_size == 0) {
-    warn_env("RJ_CONSAN_MOI_REQUIRE_RECORDS",
-             "this guard only checks HSA-tool-owned auto report buffers");
-  }
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_replay_conflict &&
-      config.moi_auto_report_buffer_size == 0) {
-    warn_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
-             "this guard only checks HSA-tool-owned auto report buffers");
-  }
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_diagnostics &&
-      config.moi_auto_report_buffer_size == 0) {
-    warn_env("RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS",
-             "this guard only checks HSA-tool-owned auto report buffers");
-  }
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_forbid_diagnostics &&
-      config.moi_auto_report_buffer_size == 0) {
-    warn_env("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS",
-             "this guard only checks HSA-tool-owned auto report buffers");
-  }
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_forbid_overflow &&
-      config.moi_auto_report_buffer_size == 0) {
-    warn_env("RJ_CONSAN_MOI_FORBID_OVERFLOW",
-             "this guard only checks HSA-tool-owned auto report buffers");
+  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_auto_report_buffer_size == 0) {
+    const std::pair<bool, const char *> report_guards[] = {
+        {config.moi_require_records, "RJ_CONSAN_MOI_REQUIRE_RECORDS"},
+        {config.moi_require_replay_conflict, "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"},
+        {config.moi_require_diagnostics, "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"},
+        {config.moi_forbid_diagnostics, "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"},
+        {config.moi_forbid_overflow, "RJ_CONSAN_MOI_FORBID_OVERFLOW"},
+    };
+    for (const auto &[enabled, name] : report_guards) {
+      if (enabled)
+        warn_env(name, "this guard only checks HSA-tool-owned auto report buffers");
+    }
   }
   if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_diagnostics &&
       config.moi_forbid_diagnostics) {
