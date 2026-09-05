@@ -723,11 +723,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u), arch);
   MoiPublicationExec other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u), arch);
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   // The low/high address-match journals are dead once owner qualification
   // begins. Reuse them for the longer-lived same-owner and validated masks.
   // InlineShadow reserves +8:+9 for guest VCC and +10 for guest SCC; using
@@ -1792,11 +1788,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   words.reserve(
       candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
       (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +

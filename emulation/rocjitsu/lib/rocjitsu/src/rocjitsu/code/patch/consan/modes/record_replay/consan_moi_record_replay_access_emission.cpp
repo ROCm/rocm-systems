@@ -197,11 +197,7 @@ namespace consan_moi_impl {
                 (point.moi_owner_epoch_vgprs.owner() || derived_owner_vgpr ? 9u : 0u) +
                 (point.moi_owner_epoch_vgprs.epoch() ? 9u : 0u) + derived_owner_words.size());
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   const auto restore_exec_label = sequence.make_label();
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
   // that effective address before executing the displaced guest instruction;

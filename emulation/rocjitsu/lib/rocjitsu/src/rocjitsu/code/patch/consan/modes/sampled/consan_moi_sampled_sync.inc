@@ -127,11 +127,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto existing_label = sequence.make_label();
   const auto collision_label = sequence.make_label();

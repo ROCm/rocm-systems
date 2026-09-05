@@ -381,11 +381,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
                      : 0u) +
                 (candidate.lowering_offset(access_range) != 0u ? 3u : 0u));
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   const auto collision_label = sequence.make_label();
   const auto different_identity_label = sequence.make_label();
   const auto restore_label = sequence.make_label();

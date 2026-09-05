@@ -1497,11 +1497,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t valid_workgroup_exec_sgpr = static_cast<uint16_t>(exec_base + 22u);
   const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
   InstructionSequence sequence(words);
-  const auto require_emission = [&](bool success, std::string_view message = {}) {
-    if (sequence && !success && !message.empty())
-      errors.emplace_back(message);
-    sequence.require(success);
-  };
+  MoiEmissionRequirement require_emission(sequence, errors);
   const auto restore_valid_workgroup =
       instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_workgroup_exec_sgpr, arch);
   require_emission(restore_valid_workgroup.has_value(),

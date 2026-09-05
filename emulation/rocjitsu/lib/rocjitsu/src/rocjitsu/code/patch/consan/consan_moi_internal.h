@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_preload.h"
 #include "rocjitsu/code/patch/consan/targets/consan_moi_target_ops.h"
+#include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include <algorithm>
@@ -34,6 +35,26 @@
 #include <vector>
 
 namespace rocjitsu::consan_moi_impl {
+
+/// Adds MOI's common first-failure diagnostic policy to an instruction
+/// sequence. Helpers can append directly to the shared word stream; invoking
+/// this requirement records only the first failing operation and makes the
+/// whole sequence fail atomically.
+class MoiEmissionRequirement {
+public:
+  MoiEmissionRequirement(InstructionSequence &sequence, std::vector<std::string> &errors)
+      : sequence_(sequence), errors_(errors) {}
+
+  void operator()(bool success, std::string_view message = {}) {
+    if (sequence_ && !success && !message.empty())
+      errors_.emplace_back(message);
+    sequence_.require(success);
+  }
+
+private:
+  InstructionSequence &sequence_;
+  std::vector<std::string> &errors_;
+};
 
 /// Immutable mode semantics and ABI facts that affect common resource solving
 /// and emission. These decisions are selected once by the mode owner from
