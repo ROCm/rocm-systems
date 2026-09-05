@@ -1982,10 +1982,8 @@ void install_test_access_coverage(
         .member_ordinal = 0u,
         .range_ordinal = 0u,
     };
-    std::vector<rocjitsu::ConSanProbeIntentId> intent_ids;
     if (decision_kind == rocjitsu::ConSanSiteDecisionKind::Admitted) {
       const rocjitsu::ConSanProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
-      intent_ids.push_back(id);
       plan.probe_intents.push_back({
           .id = id,
           .engine = engine,
@@ -1996,14 +1994,13 @@ void install_test_access_coverage(
           .position = rocjitsu::ConSanProbePosition::Before,
           .synchronization_association = std::nullopt,
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .atomic_lowering_form = std::nullopt,
       });
     }
     plan.site_decisions.push_back({
-        .engine = engine,
         .semantic_site = semantic,
         .kind = decision_kind,
         .reason = reason,
-        .intent_ids = std::move(intent_ids),
     });
   }
   ASSERT_TRUE(plan.valid());
@@ -5417,7 +5414,8 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
                .kind = rocjitsu::ConSanProbeIntentKind::BarrierRecord,
                .position = rocjitsu::ConSanProbePosition::After,
                .synchronization_association = std::nullopt,
-               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None},
+               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+               .atomic_lowering_form = std::nullopt},
               {.id = {1u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
                .source_site = {1u},
@@ -5425,7 +5423,9 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
                .covered_semantic_sites = {atomic},
                .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
                .position = rocjitsu::ConSanProbePosition::After,
-               .synchronization_association = atomic_association},
+               .synchronization_association = atomic_association,
+               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+               .atomic_lowering_form = std::nullopt},
               {.id = {2u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
                .source_site = {2u},
@@ -5433,7 +5433,9 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
                .covered_semantic_sites = {fence},
                .kind = rocjitsu::ConSanProbeIntentKind::FenceRecord,
                .position = rocjitsu::ConSanProbePosition::After,
-               .synchronization_association = fence_association},
+               .synchronization_association = fence_association,
+               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+               .atomic_lowering_form = std::nullopt},
           },
   };
   EXPECT_TRUE(plan.valid());
@@ -5494,6 +5496,7 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
           .position = rocjitsu::ConSanProbePosition::Before,
           .synchronization_association = std::nullopt,
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .atomic_lowering_form = std::nullopt,
       }},
   };
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
@@ -5796,6 +5799,8 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
           .position = rocjitsu::ConSanProbePosition::After,
           .synchronization_association =
               rocjitsu::ConSanSynchronizationAssociationId{"auto-report-atomic"},
+          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .atomic_lowering_form = std::nullopt,
       }},
   };
   EXPECT_TRUE(plan.valid());
@@ -5829,11 +5834,9 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
     };
     const rocjitsu::ConSanProbeIntentId intent_id{static_cast<uint32_t>(plan.probe_intents.size())};
     plan.site_decisions.push_back({
-        .engine = engine,
         .semantic_site = semantic,
         .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
         .reason = rocjitsu::ConSanAccessPolicyReason::None,
-        .intent_ids = {intent_id},
     });
     plan.probe_intents.push_back({
         .id = intent_id,
@@ -5845,6 +5848,7 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
         .position = rocjitsu::ConSanProbePosition::Before,
         .synchronization_association = std::nullopt,
         .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+        .atomic_lowering_form = std::nullopt,
     });
   }
   ASSERT_TRUE(plan.valid());

@@ -56,20 +56,6 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
 
-[[nodiscard]] bool append_moi_sync_intent_lowering_commit(
-    const ConSanObservationPlan &observation, std::vector<std::string> &errors,
-    std::span<const ConSanProbeIntentId> intent_ids, const ConSanCommittedPatchGeometry &patch,
-    std::string_view probe_name, std::vector<ConSanCommittedLowering> &commits) {
-  auto commit = make_consan_instrumented_patch_lowering(observation, intent_ids, patch);
-  if (!commit) {
-    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                        " produced an invalid intent-bound lowering");
-    return false;
-  }
-  commits.push_back(std::move(*commit));
-  return true;
-}
-
 [[nodiscard]] SampledAtomicSemanticsResult
 sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source) {
   using Reason = SampledAtomicSemanticsReason;

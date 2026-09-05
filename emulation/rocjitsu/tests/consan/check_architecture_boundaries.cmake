@@ -1879,13 +1879,13 @@ if(NOT _derived_operating_point_transition_count EQUAL 2)
         "ConSan coordinator must derive both accepted placement transitions"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_commit_contract)
-if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
-   NOT _moi_sync_commit_contract MATCHES "plan[.]intent_ids[(][)]")
-    message(FATAL_ERROR
-        "ConSan synchronization commit boundary lost its plan-owned intent set"
+foreach(_sync_emission_owner IN ITEMS consan_moi_sync_emission.h consan_moi_sync_emission.cpp)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_sync_emission_owner}"
+        "append_moi_sync_(intent_)?lowering_commit"
+        "synchronization emission must not retain the obsolete plan-copying commit boundary"
     )
-endif()
+endforeach()
 foreach(_sync_emission_owner IN ITEMS consan_moi_sync_emission.h consan_moi_sync_emission.cpp)
     _consan_assert_match_count_at_most(
         "${_consan_dir}/${_sync_emission_owner}"

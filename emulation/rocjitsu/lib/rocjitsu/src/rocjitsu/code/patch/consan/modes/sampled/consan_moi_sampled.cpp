@@ -163,25 +163,6 @@ sampled_runtime_mapping_including_staged(const ConSanTransformArtifacts &result)
   return mapping;
 }
 
-/// Returns the SCC snapshot that remains valid after a sampled access body.
-///
-/// Fixed layouts leave the guest SCC snapshot in the runtime gate's residue
-/// field. Spill-backed layouts restore the complete transient window, so their
-/// separately allocated setup SCC register remains the stable snapshot.
-std::optional<uint16_t>
-moi_sampled_access_return_scc_sgpr(const MoiScalarPreservationState &preservation_state) {
-  if (!preservation_state.exec_save_sgpr)
-    return std::nullopt;
-  if (preservation_state.has_compact_spill()) {
-    return preservation_state.scalar_spill_setup
-               ? std::optional<uint16_t>(
-                     preservation_state.scalar_spill_setup->temporaries.scc_save_sgpr)
-               : std::nullopt;
-  }
-  const auto publication = moi_sampled_publication_state_sgprs(preservation_state.exec_save_sgpr);
-  return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
-}
-
 MoiObjectModePlan
 plan_sampled_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                          const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
