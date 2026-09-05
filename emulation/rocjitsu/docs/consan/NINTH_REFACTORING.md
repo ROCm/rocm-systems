@@ -115,6 +115,24 @@ type names. The destination design remains part of the variable being solved
 for. It does prescribe one-way movement toward stable identity, fewer
 representations, narrower phase-owned facts, and deletion-backed results.
 
+The operational contract is an **OR for continuation and an AND for
+completion**:
+
+- continue whenever architectural work can still materially improve the
+  actual design, even if that work is line-neutral or temporarily grows the
+  implementation;
+- continue whenever production implementation can still be responsibly
+  reduced, even if the major architectural boundaries are already sound; and
+- stop only when deep investigation finds no worthwhile remaining progress
+  on either axis.
+
+Architectural work does not have to justify itself solely as a promise of
+future shrinkage. Clearer ownership, stable identity, enforceable layering,
+better locality, fewer conceptual representations, and a more legible mental
+model are first-class results. Conversely, once those properties are sound,
+deletion and simplification remain first-class work rather than optional
+cleanup.
+
 ## 4. Primary campaign: one program-site arena and synchronization graph
 
 ### 4.1 Current representation chain
@@ -449,9 +467,12 @@ deep-read the new actual shape.
 
 Completion means that this repeated audit no longer finds a credible large,
 medium, or small opportunity on **either** axis—not that the tree has reached
-a chosen size and not that shrinkage alone has plateaued. “No opportunity”
-requires positive evidence from the current code: no parallel representation
-or lifecycle whose replacement would improve ownership or delete its joins;
+a chosen size, not that architectural cleanup alone has plateaued, and not
+that shrinkage alone has plateaued. Exhausting one axis only changes where
+the next work is sought; it does not satisfy the completion criterion. “No
+opportunity” requires positive evidence from the current code: no parallel
+representation or lifecycle whose replacement would improve ownership or
+delete its joins;
 no internal data structure whose redesign would clarify the model or unlock
 meaningful sharing; no remaining layering violation, ambiguous component
 boundary, or mode or architecture leakage worth correcting; no legacy path or
