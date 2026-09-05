@@ -168,25 +168,22 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
 }
 
 [[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words,
-                                 const consan_moi_detail::ConSanMoiReportDispatchIdSource &dispatch,
-                                 const ConSanMoiWorkgroupSources &workgroup_sources,
-                                 uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
-                                 uint16_t owner_vgpr, rj_code_arch_t arch) {
+append_sampled_identity_hash(std::vector<uint32_t> &words,
+                             const consan_moi_detail::ConSanMoiReportDispatchIdSource &dispatch,
+                             const ConSanMoiWorkgroupSources &workgroup_sources,
+                             std::optional<uint16_t> owner_vgpr, uint32_t bucket_count,
+                             uint16_t result_vgpr, uint16_t temporary_vgpr,
+                             uint16_t coordinate_vgpr, rj_code_arch_t arch) {
   InstructionSequence sequence(words);
-  if (bank_count == 0 || !std::has_single_bit(bank_count))
+  if (bucket_count == 0 || !std::has_single_bit(bucket_count))
     return false;
-  if (bank_count == 1)
-    return sequence.emit(instrumentation::build_v_mov_b32_literal(bank_vgpr, 0, arch));
-  if (!append_moi_report_dispatch_id_pair(words, dispatch, bank_vgpr, temporary_vgpr, arch)) {
-    return false;
-  }
+  sequence.require(
+      append_moi_report_dispatch_id_pair(words, dispatch, result_vgpr, temporary_vgpr, arch));
   const auto mix = [&](uint16_t source) {
-    return sequence.emit(
-        instrumentation::build_v_xor_b32(bank_vgpr, vector_source_vgpr(source), bank_vgpr, arch));
+    sequence.append(instrumentation::build_v_xor_b32(result_vgpr, vector_source_vgpr(source),
+                                                     result_vgpr, arch));
   };
-  if (!mix(temporary_vgpr))
-    return false;
+  mix(temporary_vgpr);
   const std::array<std::pair<const ConSanMoiWorkgroupSource *, uint32_t>, 4> tuple_sources = {{
       {&workgroup_sources.x, 0u},
       {&workgroup_sources.y, 1u},
@@ -196,76 +193,53 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   for (const auto &[source, dimension_shift] : tuple_sources) {
     if (!source->has_value())
       continue;
-    if (!consan_detail::append_workgroup_source_value(words, *source, temporary_vgpr, arch))
-      return false;
-    if (dimension_shift != 0u &&
-        !sequence.emit(instrumentation::build_v_lshlrev_b32(
-            temporary_vgpr, scalar_positive_inline_u32(dimension_shift), temporary_vgpr, arch)))
-      return false;
-    if (!mix(temporary_vgpr))
-      return false;
+    sequence.require(
+        consan_detail::append_workgroup_source_value(words, *source, coordinate_vgpr, arch));
+    if (dimension_shift != 0u)
+      sequence.append(instrumentation::build_v_lshlrev_b32(
+          coordinate_vgpr, scalar_positive_inline_u32(dimension_shift), coordinate_vgpr, arch));
+    mix(coordinate_vgpr);
   }
+  if (owner_vgpr)
+    mix(*owner_vgpr);
+  sequence
+      .append(instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                                   result_vgpr, arch))
+      .append(instrumentation::build_v_xor_b32(result_vgpr, vector_source_vgpr(temporary_vgpr),
+                                               result_vgpr, arch))
+      .append(instrumentation::build_v_mul_lo_u32_literal(result_vgpr, temporary_vgpr, 0x85ebca6bu,
+                                                          result_vgpr, arch),
+              instrumentation::build_v_and_b32_literal(result_vgpr, bucket_count - 1u, result_vgpr,
+                                                       arch));
+  return sequence.finish();
+}
+
+[[nodiscard]] bool
+append_sampled_window_bank_index(std::vector<uint32_t> &words,
+                                 const consan_moi_detail::ConSanMoiReportDispatchIdSource &dispatch,
+                                 const ConSanMoiWorkgroupSources &workgroup_sources,
+                                 uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
+                                 uint16_t owner_vgpr, rj_code_arch_t arch) {
+  if (bank_count == 1)
+    return InstructionSequence(words).emit(
+        instrumentation::build_v_mov_b32_literal(bank_vgpr, 0, arch));
   // A causal-window bank is an evidence-retention bucket, not a workgroup
   // identity. Include the wave owner so several waves touching the same
   // sampled address can retain independent windows instead of racing for one
   // first-publisher slot. Barrier and atomic paths use the same owner-aware
   // hash, so synchronization metadata remains joined to the corresponding
   // access window.
-  if (!mix(owner_vgpr))
-    return false;
-  if (!sequence.emit(instrumentation::build_v_lshrrev_b32(
-          temporary_vgpr, scalar_positive_inline_u32(16), bank_vgpr, arch)))
-    return false;
-  if (!mix(temporary_vgpr))
-    return false;
-  return sequence.emit_all(
-      instrumentation::build_v_mul_lo_u32_literal(bank_vgpr, temporary_vgpr, 0x85ebca6bu, bank_vgpr,
-                                                  arch),
-      instrumentation::build_v_and_b32_literal(bank_vgpr, bank_count - 1u, bank_vgpr, arch));
+  return append_sampled_identity_hash(words, dispatch, workgroup_sources, owner_vgpr, bank_count,
+                                      bank_vgpr, temporary_vgpr, temporary_vgpr, arch);
 }
 
 [[nodiscard]] bool append_sampled_workgroup_residue(std::vector<uint32_t> &words,
                                                     const MoiSampledAccessEmissionPlan &plan,
                                                     uint16_t residue_vgpr, uint16_t temporary_vgpr,
                                                     uint16_t coordinate_vgpr, rj_code_arch_t arch) {
-  InstructionSequence sequence(words);
-  if (!append_moi_report_dispatch_id_pair(words, plan.dispatch_id, residue_vgpr, temporary_vgpr,
-                                          arch)) {
-    return false;
-  }
-  const auto mix = [&](uint16_t source) {
-    return sequence.emit(instrumentation::build_v_xor_b32(residue_vgpr, vector_source_vgpr(source),
-                                                          residue_vgpr, arch));
-  };
-  if (!mix(temporary_vgpr))
-    return false;
-  const std::array<std::pair<const ConSanMoiWorkgroupSource *, uint32_t>, 4> tuple_sources = {{
-      {&plan.workgroup_sources.x, 0u},
-      {&plan.workgroup_sources.y, 1u},
-      {&plan.workgroup_sources.z, 2u},
-      {&plan.workgroup_sources.cluster_workgroup_id, 3u},
-  }};
-  for (const auto &[source, dimension_shift] : tuple_sources) {
-    if (!source->has_value())
-      continue;
-    if (!consan_detail::append_workgroup_source_value(words, *source, coordinate_vgpr, arch))
-      return false;
-    if (dimension_shift != 0u &&
-        !sequence.emit(instrumentation::build_v_lshlrev_b32(
-            coordinate_vgpr, scalar_positive_inline_u32(dimension_shift), coordinate_vgpr, arch)))
-      return false;
-    if (!mix(coordinate_vgpr))
-      return false;
-  }
-  if (!sequence.emit(instrumentation::build_v_lshrrev_b32(
-          temporary_vgpr, scalar_positive_inline_u32(16), residue_vgpr, arch)))
-    return false;
-  if (!mix(temporary_vgpr))
-    return false;
-  return sequence.emit_all(instrumentation::build_v_mul_lo_u32_literal(
-                               residue_vgpr, temporary_vgpr, 0x85ebca6bu, residue_vgpr, arch),
-                           instrumentation::build_v_and_b32_literal(
-                               residue_vgpr, plan.runtime_sample_stride - 1u, residue_vgpr, arch));
+  return append_sampled_identity_hash(words, plan.dispatch_id, plan.workgroup_sources, std::nullopt,
+                                      plan.runtime_sample_stride, residue_vgpr, temporary_vgpr,
+                                      coordinate_vgpr, arch);
 }
 
 [[nodiscard]] bool append_sampled_banked_address(std::vector<uint32_t> &words,
