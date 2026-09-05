@@ -14,8 +14,6 @@
 #include <cstdio>
 #include <cerrno>
 
-#include <hip/hip_runtime.h>
-
 // Forward declarations of RCCL types used in function signatures.
 struct ncclTopoSystem;
 struct ncclTopoGraph;
@@ -119,12 +117,10 @@ int hipMemGetAddressRange(void**, size_t*, void*) { return 0; }
 int hipDeviceSynchronize() { return 0; }
 int hipMemcpy(void*, const void*, size_t, int) { return 0; }
 int hipGetDevice(int* d) { if (d) *d = 0; return 0; }
-// Versioned HIP ABI symbol used by inline hipGetDeviceProperties() in alloc.h
-// (rcclSkipCuMemFree). HostUnitTests links with -no-hip-rt, so provide a stub.
-hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int /*device*/) {
-  if (prop) std::memset(prop, 0, sizeof(*prop));
-  return hipSuccess;
-}
+// Versioned HIP ABI used by inline hipGetDeviceProperties() in alloc.h
+// (rcclSkipCuMemFree). source-wrappers links -no-hip-rt. Do not include
+// hip_runtime.h in this TU: it conflicts with the int-returning stubs.
+int hipGetDevicePropertiesR0600(void* /*prop*/, int /*device*/) { return 0; }
 int hipSetDevice(int) { return 0; }
 int hipMalloc(void**, size_t) { return 0; }
 int hipFree(void*) { return 0; }
