@@ -43,34 +43,9 @@ namespace {
          lhs.association == rhs.association;
 }
 
-[[nodiscard]] std::vector<std::string>
-source_container_names(const SynchronizationInventoryView &inventory,
-                       std::span<const ConSanSyncEvent *const> aliases) {
-  std::vector<std::string> result;
-  result.reserve(aliases.size());
-  for (const ConSanSyncEvent *event : aliases) {
-    const std::string fallback(inventory.container_name(*event));
-    const std::span<const std::string> sources = event->source_containers.empty()
-                                                     ? std::span(&fallback, 1u)
-                                                     : std::span(event->source_containers);
-    for (const std::string &source : sources) {
-      if (std::ranges::find(result, source) == result.end())
-        result.push_back(source);
-    }
-  }
-  std::ranges::sort(result);
-  return result;
-}
-
-[[nodiscard]] bool filter_matches(const SynchronizationInventoryView &inventory,
-                                  std::span<const ConSanSyncEvent *const> aliases,
-                                  std::string_view filter) {
-  return filter.empty() || std::ranges::any_of(aliases, [&](const ConSanSyncEvent *event) {
-           if (inventory.container_name(*event).find(filter) != std::string::npos)
-             return true;
-           return std::ranges::any_of(event->source_containers, [&](const std::string &source) {
-             return source.find(filter) != std::string::npos;
-           });
+[[nodiscard]] bool filter_matches(std::span<const std::string> names, std::string_view filter) {
+  return filter.empty() || std::ranges::any_of(names, [&](const std::string &name) {
+           return name.find(filter) != std::string::npos;
          });
 }
 
@@ -317,7 +292,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     }
 
     const SemanticSiteId semantic_id = event_semantic_id(inventory, event);
-    const std::vector<std::string> names = source_container_names(synchronization, aliases);
+    const std::vector<std::string> names = synchronization.source_container_names(aliases);
     const bool conflicting_alias = std::ranges::any_of(aliases, [&](const ConSanSyncEvent *alias) {
       return !event_policy_semantics_equal(synchronization, event, *alias);
     });
@@ -325,15 +300,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     const ConSanCapabilityDisposition capability =
         form ? consan_capability_disposition(inventory.target(), request.engine, *form)
              : ConSanCapabilityDisposition::OutOfContract;
-    std::vector<uint64_t> owner_descriptors;
-    for (const ConSanSyncEvent *alias : aliases) {
-      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*alias)) {
-        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
-            owner_descriptors.end()) {
-          owner_descriptors.push_back(owner.descriptor_file_offset);
-        }
-      }
-    }
+    const std::vector<uint64_t> owner_descriptors =
+        synchronization.execution_owner_descriptors(aliases);
     ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
     std::optional<ConSanAtomicLoweringForm> lowering_form;
@@ -342,7 +310,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::TrackingDisabled;
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       reason = ConSanAtomicPolicyReason::EngineMutationOnly;
-    } else if (!filter_matches(synchronization, aliases, request.container_filter) ||
+    } else if (!filter_matches(names, request.container_filter) ||
                !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
                                                      request.kernel_name_allowlist)) {
       reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
@@ -433,6 +401,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       }
     }
     const SemanticSiteId fence_id = fence.fence_event;
+    const std::vector<std::string> names =
+        synchronization.source_container_names(fence_events);
     const ConSanCapabilityDisposition capability = consan_capability_disposition(
         inventory.target(), request.engine, ConSanCapabilityForm::AddressedOrdinaryFence);
     const bool conflicting_alias =
@@ -449,25 +419,18 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .association = std::nullopt,
         .communication_lowering_form = std::nullopt,
         .intent_ids = {},
-        .source_containers = source_container_names(synchronization, fence_events),
+        .source_containers = names,
     };
     if (!fence.sequence_identity.empty())
       decision.association = ConSanSynchronizationAssociationId{fence.sequence_identity};
-    std::vector<uint64_t> owner_descriptors;
-    for (const ConSanSyncEvent *event : fence_events) {
-      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*event)) {
-        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
-            owner_descriptors.end()) {
-          owner_descriptors.push_back(owner.descriptor_file_offset);
-        }
-      }
-    }
+    const std::vector<uint64_t> owner_descriptors =
+        synchronization.execution_owner_descriptors(fence_events);
 
     if (!request.tracking_enabled) {
       decision.reason = ConSanFencePolicyReason::TrackingDisabled;
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
-    } else if (!filter_matches(synchronization, fence_events, request.container_filter) ||
+    } else if (!filter_matches(names, request.container_filter) ||
                !consan_site_matches_kernel_allowlist(inventory, owner_descriptors,
                                                      decision.source_containers,
                                                      request.kernel_name_allowlist)) {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 
 #include <algorithm>
 #include <map>
@@ -10,10 +11,6 @@
 
 namespace rocjitsu {
 namespace {
-
-[[nodiscard]] bool runtime_kernel(std::string_view name) {
-  return name.starts_with("__amd_rocclr_");
-}
 
 [[nodiscard]] bool event_semantics_equal(const SynchronizationInventoryView &inventory,
                                          const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
@@ -49,25 +46,6 @@ namespace {
                       rhs.inside_scalar_clause, rhs.scope, rhs.barrier_id,
                       rhs.barrier_operand_source, rhs.barrier_scope, rhs.participant_count,
                       rhs.participant_mask);
-}
-
-[[nodiscard]] std::vector<std::string>
-container_names(const SynchronizationInventoryView &inventory,
-                std::span<const ConSanSyncEvent *const> aliases) {
-  std::vector<std::string> names;
-  names.reserve(aliases.size());
-  for (const ConSanSyncEvent *event : aliases) {
-    const std::string fallback(inventory.container_name(*event));
-    const std::span<const std::string> sources = event->source_containers.empty()
-                                                     ? std::span(&fallback, 1u)
-                                                     : std::span(event->source_containers);
-    for (const std::string &source : sources) {
-      if (std::ranges::find(names, source) == names.end())
-        names.push_back(source);
-    }
-  }
-  std::ranges::sort(names);
-  return names;
 }
 
 [[nodiscard]] ConSanCapabilityForm barrier_form(const ConSanBarrierSite &barrier) {
@@ -149,7 +127,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   for (const auto &[offset, aliases] : events_by_offset) {
     const ConSanSyncEvent &event = *aliases.front();
     const ConSanBarrierSite *barrier = synchronization.source_as<ConSanBarrierSite>(event);
-    const std::vector<std::string> names = container_names(synchronization, aliases);
+    const std::vector<std::string> names = synchronization.source_container_names(aliases);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
     std::optional<ConSanProbeIntentId> intent_id;
@@ -161,20 +139,13 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
                           std::ranges::none_of(names, [&](const std::string &name) {
                             return name.find(request.container_filter) != std::string::npos;
                           });
-    std::vector<uint64_t> owner_descriptors;
-    for (const ConSanSyncEvent *alias : aliases) {
-      for (const ConSanExecutionOwner &owner : synchronization.execution_owners(*alias)) {
-        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
-            owner_descriptors.end()) {
-          owner_descriptors.push_back(owner.descriptor_file_offset);
-        }
-      }
-    }
+    const std::vector<uint64_t> owner_descriptors =
+        synchronization.execution_owner_descriptors(aliases);
     const bool allowlist_filtered = !consan_site_matches_kernel_allowlist(
         inventory, owner_descriptors, names, request.kernel_name_allowlist);
     const bool only_runtime_kernels = std::ranges::all_of(aliases, [&](const auto *alias) {
       return synchronization.in_kernel(*alias) &&
-             runtime_kernel(synchronization.container_name(*alias));
+             is_rocclr_runtime_kernel_name(synchronization.container_name(*alias));
     });
     bool redundant = false;
     if (event.operation == ConSanSyncOperation::BarrierFull) {

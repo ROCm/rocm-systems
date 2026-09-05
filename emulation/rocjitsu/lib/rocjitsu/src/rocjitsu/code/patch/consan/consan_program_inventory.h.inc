@@ -345,6 +345,35 @@ struct SynchronizationInventoryView {
     return left != nullptr && right != nullptr && *left == *right;
   }
 
+  [[nodiscard]] std::vector<std::string>
+  source_container_names(std::span<const ConSanSyncEvent *const> aliases) const {
+    std::vector<std::string> names;
+    for (const ConSanSyncEvent *event : aliases) {
+      const std::string fallback(container_name(*event));
+      const std::span<const std::string> sources = event->source_containers.empty()
+                                                       ? std::span(&fallback, 1u)
+                                                       : std::span(event->source_containers);
+      for (const std::string &source : sources) {
+        if (std::ranges::find(names, source) == names.end())
+          names.push_back(source);
+      }
+    }
+    std::ranges::sort(names);
+    return names;
+  }
+
+  [[nodiscard]] std::vector<uint64_t>
+  execution_owner_descriptors(std::span<const ConSanSyncEvent *const> aliases) const {
+    std::vector<uint64_t> descriptors;
+    for (const ConSanSyncEvent *event : aliases) {
+      for (const ConSanExecutionOwner &owner : execution_owners(*event))
+        descriptors.push_back(owner.descriptor_file_offset);
+    }
+    std::ranges::sort(descriptors);
+    descriptors.erase(std::ranges::unique(descriptors).begin(), descriptors.end());
+    return descriptors;
+  }
+
   /// Resolve one typed event identity to its sole authoritative record. An
   /// absent identity returns null; physical aliases have already been
   /// canonicalized before this immutable view is published.
@@ -633,6 +662,17 @@ public:
     if (const ConSanProgramContainer *record = container(site.container.id);
         record != nullptr && record->is_kernel())
       owners.push_back(record->descriptor_file_offset);
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    return owners;
+  }
+  [[nodiscard]] std::vector<uint64_t> execution_owner_descriptors(
+      std::span<const ConSanProgramSite *const> aliases) const {
+    std::vector<uint64_t> owners;
+    for (const ConSanProgramSite *site : aliases) {
+      for (const ConSanExecutionOwner &owner : site->execution_owners)
+        owners.push_back(owner.descriptor_file_offset);
+    }
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
     return owners;
