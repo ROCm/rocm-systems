@@ -903,24 +903,22 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     group.identity = init.identity + "|lifecycle-group=static-run";
     group.container_name = init.container_name;
     group.in_kernel = init.in_kernel;
-    group.basic_block_index = init.basic_block_index;
-    group.begin_text_offset = init.begin_text_offset;
-    group.end_text_offset = init.end_text_offset;
     group.member_semantic_ids = init.member_semantic_ids;
     group.barrier_id = init.barrier_id;
     group.barrier_scope = init.barrier_scope;
+    const std::optional<uint32_t> basic_block_index = init.basic_block_index;
+    uint64_t end_text_offset = init.end_text_offset;
 
     const auto append_member = [&](const ConSanSyncSequence &sequence) {
-      group.end_text_offset = sequence.end_text_offset;
+      end_text_offset = sequence.end_text_offset;
       group.member_semantic_ids.insert(group.member_semantic_ids.end(),
                                        sequence.member_semantic_ids.begin(),
                                        sequence.member_semantic_ids.end());
     };
     const auto is_contiguous = [&](const ConSanSyncSequence &sequence) {
-      return group.basic_block_index && sequence.basic_block_index == group.basic_block_index &&
+      return basic_block_index && sequence.basic_block_index == basic_block_index &&
              sequence.container_name == group.container_name &&
-             sequence.in_kernel == group.in_kernel &&
-             sequence.begin_text_offset == group.end_text_offset;
+             sequence.in_kernel == group.in_kernel && sequence.begin_text_offset == end_text_offset;
     };
     const auto has_matching_static_id = [&](const ConSanSyncSequence &sequence) {
       return group.barrier_id && sequence.barrier_id == group.barrier_id &&
@@ -930,7 +928,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
               sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32);
     };
 
-    if (!group.basic_block_index || !group.barrier_id ||
+    if (!basic_block_index || !group.barrier_id ||
         group.barrier_scope == ConSanBarrierSite::Scope::Unknown ||
         (init.barrier_operand_source != ConSanBarrierSite::OperandSource::Immediate &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::StaticM0Literal32 &&
@@ -1008,7 +1006,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
       groups.push_back(std::move(group));
       continue;
     }
-    group.confidence = ConSanSemanticConfidence::Conservative;
+    group.issue = ConSanBarrierLifecycleIssue::None;
     groups.push_back(std::move(group));
   }
 }

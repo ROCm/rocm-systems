@@ -68,7 +68,7 @@ TEST(ConSan, BarrierFaultInventoryIssuesAreTypedAndRenderStableDiagnostics) {
   destination.issue = MoveIssue::FenceOperation;
   EXPECT_FALSE(destination.suitable());
   ConSanBarrierLifecycleGroup lifecycle;
-  lifecycle.confidence = ConSanSemanticConfidence::Conservative;
+  lifecycle.issue = LifecycleIssue::None;
   EXPECT_TRUE(lifecycle.admissible());
   lifecycle.issue = LifecycleIssue::MissingJoin;
   EXPECT_FALSE(lifecycle.admissible());

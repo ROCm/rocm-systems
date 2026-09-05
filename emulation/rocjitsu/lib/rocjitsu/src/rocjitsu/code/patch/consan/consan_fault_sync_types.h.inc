@@ -402,20 +402,13 @@ struct ConSanBarrierLifecycleGroup {
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
-  std::optional<uint32_t> basic_block_index;
-  uint64_t begin_text_offset = 0;
-  uint64_t end_text_offset = 0;
   /// Stable original-program identities of every event in lifecycle order.
   std::vector<SemanticSiteId> member_semantic_ids;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::None;
+  ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::Count;
 
-  [[nodiscard]] bool admissible() const {
-    return issue == ConSanBarrierLifecycleIssue::None &&
-           confidence == ConSanSemanticConfidence::Conservative;
-  }
+  [[nodiscard]] bool admissible() const { return issue == ConSanBarrierLifecycleIssue::None; }
 };
 
 /// Checks the non-instruction metadata required before an ordinary load and
