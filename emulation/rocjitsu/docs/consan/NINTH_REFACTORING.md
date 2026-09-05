@@ -73,8 +73,10 @@ These ranges overlap, are not additive commitments, and are expressly **not
 completion targets**. If every macro prototype fails its deletion test, the
 present tree still appears to contain an aggregate **1,500–3,000 lines** of
 smaller cleanup, but that route alone would return the project to a shallow
-slope. Work ends because the opportunity space has been exhausted by deep
-investigation, not because any line count has been reached.
+slope. Work ends because both the architectural-improvement space and the
+implementation-shrinkage space have been exhausted by deep investigation,
+not because any line count has been reached or either one of those spaces has
+become less productive on its own.
 
 ## 3. Ninth-refactoring mandate
 
@@ -95,13 +97,18 @@ boundaries explicit.
 
 The controlling rule is nevertheless stricter than “unify similar structs”:
 
-> Change a data structure only when doing so deletes a representation
-> boundary and its joins.
+> Change a data structure only when doing so removes a real architectural
+> boundary defect, deletes implementation, or enables a concrete continuation
+> toward either result.
 
 Common field names alone do not justify a merger. Adding a new canonical
-model while retaining adapters to all old representations is not progress.
-The currency of this refactoring is deleted storage, deleted projection
-passes, deleted reconciliation logic, and deleted end-to-end implementation.
+model while retaining adapters to all old representations is not progress by
+itself. The currencies of this refactoring are independently (1) clearer,
+better-enforced ownership, identity, layering, and locality, and (2) deleted
+storage, projection passes, reconciliation logic, and end-to-end
+implementation. A change need not earn both currencies to be worthwhile, but
+it must earn at least one without creating disproportionate debt in the
+other.
 
 The plan deliberately does not prescribe the final class hierarchy or exact
 type names. The destination design remains part of the variable being solved
@@ -205,11 +212,13 @@ semantically duplicated kernel/function loops. If it merely adds an arena
 beside those representations, it fails.
 
 The full lift succeeds when it actually removes the old representations and
-their joins while leaving a clearer, smaller system. Intermediate commits may
-temporarily grow when they name the old representation they enable a near-
-term commit to delete. A growing compatibility layer without a scheduled
-deletion point must be reverted rather than normalized. No numerical line
-threshold determines whether this campaign is finished.
+their joins while leaving a clearer system, preferably also a smaller one.
+Intermediate commits may temporarily grow when they name the old
+representation they enable a near-term commit to delete or establish a
+substantial architectural boundary that the old model could not express. A
+growing compatibility layer without a scheduled deletion point or a durable
+architectural payoff must be reverted rather than normalized. No numerical
+line threshold determines whether this campaign is finished.
 
 ## 5. Secondary campaign: one typed edit transaction
 
@@ -390,12 +399,14 @@ Every completed vertical slice must:
 - remove the displaced legacy implementation rather than leaving permanent
   compatibility layers.
 
-Temporary growth is permissible only within a named vertical replacement
-whose old implementation and deletion point are explicit. A slice that
-cannot produce structural simplification and real deletion after its hard
-case is understood should be documented as negative evidence and reverted or
-cleanly retired. Iteration must not continue indefinitely around a non-
-shrinking abstraction. Line counts remain useful telemetry for detecting
+Temporary growth is permissible within a named vertical replacement whose
+old implementation and deletion point are explicit, or when the slice earns
+a durable architectural improvement that can be stated and tested precisely.
+A slice that produces neither structural simplification nor real deletion
+after its hard case is understood should be documented as negative evidence
+and reverted or cleanly retired. Iteration must not continue indefinitely
+around an abstraction that is neither shrinking the implementation nor
+improving its architecture. Line counts remain useful telemetry for detecting
 growth and measuring realized gains, never a gate for ending the refactoring.
 
 ## 11. Exhaustion criterion
@@ -403,10 +414,14 @@ growth and measuring realized gains, never a gate for ending the refactoring.
 The ninth refactoring is not complete merely because one prototype works, a
 round-number line target is reached, the named candidates above have been
 visited, or the remaining files look tidier. The candidates in this document
-seed the search; they do not bound it. The work continues while a deep read
-can identify any credible structural or local change that should reduce the
-implementation while preserving behavior and improving or maintaining its
-architecture.
+seed the search; they do not bound it. Architecture and implementation size
+are independent continuation axes. The work continues while a deep read can
+identify either (1) a credible structural or local change that materially
+improves component boundaries, ownership, identity, layering, mode locality,
+architecture locality, or comprehensibility, or (2) a credible change that
+reduces production implementation while preserving sound architecture and
+behavior. One axis reaching diminishing returns does not end the refactoring
+while the other can still make meaningful progress.
 
 At a minimum, the three presently identified macro questions need evidence-
 backed answers:
@@ -433,11 +448,16 @@ investigate, implement or falsify, delete displaced code, consolidate, and
 deep-read the new actual shape.
 
 Completion means that this repeated audit no longer finds a credible large,
-medium, or small shrinkage opportunity—not that the tree has reached a chosen
-size. “No opportunity” requires positive evidence from the current code: no
-parallel representation or lifecycle whose replacement would delete its
-joins; no internal data structure whose redesign would unlock meaningful
-sharing; no remaining mode or architecture leakage that duplicates common
-mechanism; no legacy path or compatibility layer that can responsibly be
-retired; and no collection of local cleanups worth harvesting. At the present
-baseline, that condition has not been met.
+medium, or small opportunity on **either** axis—not that the tree has reached
+a chosen size and not that shrinkage alone has plateaued. “No opportunity”
+requires positive evidence from the current code: no parallel representation
+or lifecycle whose replacement would improve ownership or delete its joins;
+no internal data structure whose redesign would clarify the model or unlock
+meaningful sharing; no remaining layering violation, ambiguous component
+boundary, or mode or architecture leakage worth correcting; no legacy path or
+compatibility layer that can responsibly be retired; and no collection of
+local cleanups worth harvesting. Architectural progress may justify continued
+work without immediate shrinkage, and shrinkage may justify continued work
+after the major architectural boundaries are sound. Only exhaustion of both
+ends the ninth refactoring. At the present baseline, that condition has not
+been met.
