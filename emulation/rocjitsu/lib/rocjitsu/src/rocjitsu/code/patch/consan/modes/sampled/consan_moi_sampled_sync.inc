@@ -127,6 +127,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
+  const auto require_emission = [&](bool success, std::string_view message = {}) {
+    if (sequence && !success && !message.empty())
+      errors.emplace_back(message);
+    sequence.require(success);
+  };
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto existing_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
@@ -180,104 +185,84 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     words.push_back(
         build_v_mov_b32_e32(*plan.owner_epoch_vgprs.epoch, *plan.persistent_sgprs.epoch(), arch));
   }
-  if (!append_save_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
-    return std::nullopt;
-  }
-  if (!sequence.emit(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at EXEC snapshot");
-    return std::nullopt;
-  }
+  require_emission(append_save_moi_special_state(words, plan.scalar_abi.special_state, arch),
+                   "ConSan MOI sampled barrier failed at special-state save");
+  require_emission(
+      sequence.emit(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch)),
+      "ConSan MOI sampled barrier failed at EXEC snapshot");
   for (const SampledBarrierWindow &window : candidate.windows) {
     const auto next_window_label = sequence.make_label();
-    if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at window-scan EXEC restoration");
-      return std::nullopt;
-    }
-    if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
-                                          window.bank_count, bank_vgpr, value,
-                                          *plan.owner_epoch_vgprs.owner, arch)) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at causal-window bank selection");
-      return std::nullopt;
-    }
+    require_emission(
+        sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)),
+        "ConSan MOI sampled barrier failed at window-scan EXEC restoration");
+    require_emission(append_sampled_window_bank_index(
+                         words, plan.dispatch_id, plan.workgroup_sources, window.bank_count,
+                         bank_vgpr, value, *plan.owner_epoch_vgprs.owner, arch),
+                     "ConSan MOI sampled barrier failed at causal-window bank selection");
     if (window.first_slot != 0u) {
       // VALUE is dead after bank selection and is distinct from BANK. Use it
       // as CDNA4's explicit literal temporary while keeping the result in BANK.
-      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
-              bank_vgpr, value, window.first_slot, bank_vgpr, arch))) {
-        errors.emplace_back("ConSan MOI sampled barrier failed at absolute slot materialization");
-        return std::nullopt;
-      }
+      require_emission(sequence.emit(instrumentation::build_v_add_u32_literal(
+                           bank_vgpr, value, window.first_slot, bank_vgpr, arch)),
+                       "ConSan MOI sampled barrier failed at absolute slot materialization");
     }
-    if (!consan_detail::append_moi_indexed_address(
-            words,
-            {.table_address = first_window_address,
-             .stride_bytes = sizeof(ConSanMoiSampledCausalWindow),
-             .address_vgpr = base,
-             .index_vgpr = bank_vgpr},
-            *target)) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at causal-window addressing");
-      return std::nullopt;
-    }
+    require_emission(consan_detail::append_moi_indexed_address(
+                         words,
+                         {.table_address = first_window_address,
+                          .stride_bytes = sizeof(ConSanMoiSampledCausalWindow),
+                          .address_vgpr = base,
+                          .index_vgpr = bank_vgpr},
+                         *target),
+                     "ConSan MOI sampled barrier failed at causal-window addressing");
 
-    if (!consan_moi_impl::append_sampled_causal_window_validation(
-            words, sequence,
-            {.generation = plan.report_generation,
-             .dispatch_id = plan.dispatch_id,
-             .workgroup_sources = plan.workgroup_sources,
-             .address_vgpr = base,
-             .value_vgpr = value,
-             .expected_vgpr = expected,
-             .epoch_vgpr = *plan.owner_epoch_vgprs.epoch,
-             .first_entry_vgpr = bank_vgpr,
-             .temporary_exec_sgpr = temporary_exec,
-             .mismatch_label = next_window_label,
-             .arch = arch})) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at causal-window validation");
-      return std::nullopt;
-    }
-    if (!sequence.emit_branch(matched_window_label,
-                              InstructionSequence::BranchKind::Unconditional) ||
-        !sequence.bind(next_window_label))
-      return std::nullopt;
+    require_emission(consan_moi_impl::append_sampled_causal_window_validation(
+                         words, sequence,
+                         {.generation = plan.report_generation,
+                          .dispatch_id = plan.dispatch_id,
+                          .workgroup_sources = plan.workgroup_sources,
+                          .address_vgpr = base,
+                          .value_vgpr = value,
+                          .expected_vgpr = expected,
+                          .epoch_vgpr = *plan.owner_epoch_vgprs.epoch,
+                          .first_entry_vgpr = bank_vgpr,
+                          .temporary_exec_sgpr = temporary_exec,
+                          .mismatch_label = next_window_label,
+                          .arch = arch}),
+                     "ConSan MOI sampled barrier failed at causal-window validation");
+    sequence.branch(matched_window_label, InstructionSequence::BranchKind::Unconditional)
+        .bind_label(next_window_label);
   }
-  if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional) ||
-      !sequence.bind(matched_window_label))
-    return std::nullopt;
+  sequence.branch(restore_label, InstructionSequence::BranchKind::Unconditional)
+      .bind_label(matched_window_label);
 
-  const auto narrow_current = [&]() -> bool {
-    if (!sequence.emit(
-            instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
+  const auto narrow_current = [&]() {
+    sequence.append(instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))
+        .branch(restore_label, InstructionSequence::BranchKind::SccZero);
   };
   // A workgroup barrier resumes every wave. Elect the first logical owner
   // before the wave-local lane election below so exactly one wave can publish
   // the workgroup-wide transition. Without this narrowing, every wave races
   // the same metadata slot and the losing waves look like unsupported sync.
-  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-          scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at owner election");
-    return std::nullopt;
-  }
-  if (!narrow_current()) {
+  require_emission(sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+                       scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch)),
+                   "ConSan MOI sampled barrier failed at owner election");
+  const bool began_owner_narrowing = static_cast<bool>(sequence);
+  narrow_current();
+  if (began_owner_narrowing && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed at owner narrowing");
-    return std::nullopt;
-  }
   const auto max_epoch = instrumentation::build_v_mov_b32_literal(
       expected, consan_moi_sampled_watchpoint::max_epoch, arch);
   const auto epoch_has_successor = instrumentation::build_v_cmp_ne_u32_vcc(
       vector_source_vgpr(expected), *plan.owner_epoch_vgprs.epoch, arch);
-  if (!sequence.emit_all(max_epoch, epoch_has_successor)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at epoch successor check");
-    return std::nullopt;
-  }
-  if (!narrow_current()) {
+  require_emission(sequence.emit_all(max_epoch, epoch_has_successor),
+                   "ConSan MOI sampled barrier failed at epoch successor check");
+  const bool began_epoch_narrowing = static_cast<bool>(sequence);
+  narrow_current();
+  if (began_epoch_narrowing && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch narrowing");
-    return std::nullopt;
-  }
 
-  if (!sequence.emit_all(
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
           instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
                                                     scalar_positive_inline_u32(0), arch),
@@ -285,106 +270,86 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
                                                     static_cast<uint16_t>(temporary_exec + 1u),
                                                     vector_source_vgpr(lane_rank), arch),
           instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at lane election");
-    return std::nullopt;
-  }
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI sampled barrier failed at lane election");
 
-  if (!consan_detail::append_moi_indexed_address(
+  require_emission(
+      consan_detail::append_moi_indexed_address(
           words,
           {.table_address =
                first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
            .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
            .address_vgpr = base,
            .index_vgpr = bank_vgpr},
-          *target) ||
-      !sequence.emit_all(instrumentation::build_v_mov_b32_literal(
-                             value, kConSanMoiSampledSyncPublishingDescriptor, arch),
-                         instrumentation::build_v_mov_b32_literal(expected, 0u, arch),
-                         instrumentation::build_flat_atomic_cmpswap_b32(
-                             base, value, value, true, kAmdGpuScopeDevice, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim setup");
-    return std::nullopt;
-  }
-  if (!append_moi_global_atomic_wait(words, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
+          *target) &&
+          sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                                value, kConSanMoiSampledSyncPublishingDescriptor, arch),
+                            instrumentation::build_v_mov_b32_literal(expected, 0u, arch),
+                            instrumentation::build_flat_atomic_cmpswap_b32(
+                                base, value, value, true, kAmdGpuScopeDevice, arch)),
+      "ConSan MOI sampled barrier failed at metadata claim setup");
+  sequence.require(append_moi_global_atomic_wait(words, arch));
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim result");
-    return std::nullopt;
-  }
-  if (!sequence.emit_branch(existing_label, InstructionSequence::BranchKind::SccZero)) {
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI sampled barrier failed at metadata claim result");
+  const bool began_existing_branch = static_cast<bool>(sequence);
+  sequence.branch(existing_label, InstructionSequence::BranchKind::SccZero);
+  if (began_existing_branch && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata branch");
-    return std::nullopt;
-  }
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
                                                           *plan.owner_epoch_vgprs.epoch, arch);
-  if (!sequence.emit(increment)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at next-epoch materialization");
-    return std::nullopt;
-  }
-  if (!consan_detail::append_moi_indexed_address(
-          words,
-          {.table_address = first_metadata_address,
-           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
-           .address_vgpr = base,
-           .index_vgpr = bank_vgpr},
-          *target)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata addressing");
-    return std::nullopt;
-  }
-  if (!record.store_literal(0u, 0u) || !record.store_literal(4u, 0u) ||
-      !record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                         *plan.owner_epoch_vgprs.epoch) ||
-      !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after), next_epoch)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata body stores");
-    return std::nullopt;
-  }
-  if (!sequence.emit_all(
+  require_emission(sequence.emit(increment),
+                   "ConSan MOI sampled barrier failed at next-epoch materialization");
+  require_emission(consan_detail::append_moi_indexed_address(
+                       words,
+                       {.table_address = first_metadata_address,
+                        .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+                        .address_vgpr = base,
+                        .index_vgpr = bank_vgpr},
+                       *target),
+                   "ConSan MOI sampled barrier failed at metadata addressing");
+  require_emission(
+      record.store_literal(0u, 0u) && record.store_literal(4u, 0u) &&
+          record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) &&
+          record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                            *plan.owner_epoch_vgprs.epoch) &&
+          record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after), next_epoch),
+      "ConSan MOI sampled barrier failed at metadata body stores");
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_s_wait_global_store0(arch),
           instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch),
           instrumentation::build_v_mov_b32_literal(
-              expected, kConSanMoiSampledSyncPublishingDescriptor, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit setup");
-    return std::nullopt;
-  }
-  if (!consan_detail::append_moi_indexed_address(
-          words,
-          {.table_address =
-               first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
-           .address_vgpr = base,
-           .index_vgpr = bank_vgpr},
-          *target)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit addressing");
-    return std::nullopt;
-  }
-  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                    kAmdGpuScopeDevice, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit setup");
-    return std::nullopt;
-  }
-  if (!append_moi_global_atomic_wait(words, arch))
-    return std::nullopt;
-  if (!sequence.emit_all(
+              expected, kConSanMoiSampledSyncPublishingDescriptor, arch)),
+      "ConSan MOI sampled barrier failed at metadata commit setup");
+  require_emission(consan_detail::append_moi_indexed_address(
+                       words,
+                       {.table_address = first_metadata_address +
+                                         offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+                        .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+                        .address_vgpr = base,
+                        .index_vgpr = bank_vgpr},
+                       *target),
+                   "ConSan MOI sampled barrier failed at metadata commit addressing");
+  require_emission(sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
+                       base, value, value, true, kAmdGpuScopeDevice, arch)),
+                   "ConSan MOI sampled barrier failed at metadata commit setup");
+  sequence.require(append_moi_global_atomic_wait(words, arch));
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit result");
-    return std::nullopt;
-  }
-  if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
-    return std::nullopt;
-  if (!append_atomic_fetch_add_one_u32(
-          words, report_base + offsetof(ConSanMoiReportHeader, sampled_sync_metadata_count), value,
-          base, arch)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at success accounting");
-    return std::nullopt;
-  }
-  if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional))
-    return std::nullopt;
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI sampled barrier failed at metadata commit result");
+  sequence.branch(collision_label, InstructionSequence::BranchKind::SccZero);
+  require_emission(append_atomic_fetch_add_one_u32(
+                       words,
+                       report_base + offsetof(ConSanMoiReportHeader, sampled_sync_metadata_count),
+                       value, base, arch),
+                   "ConSan MOI sampled barrier failed at success accounting");
+  sequence.branch(restore_label, InstructionSequence::BranchKind::Unconditional);
 
   // The host model admits an exact pre-existing metadata record as an
   // idempotent publication. Shared barrier helpers can expose several
@@ -392,57 +357,49 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // path must implement the same contract instead of treating every failed
   // empty-slot claim as lost coverage. A different or partially published
   // record remains a collision.
-  if (!sequence.bind(existing_label)) {
+  const bool began_existing_bind = static_cast<bool>(sequence);
+  sequence.bind_label(existing_label);
+  if (began_existing_bind && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed to bind existing metadata");
-    return std::nullopt;
-  }
-  if (!sequence.emit_all(
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch),
           instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata descriptor");
-    return std::nullopt;
-  }
-  if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero))
-    return std::nullopt;
-  if (!sequence.emit(increment))
-    return std::nullopt;
-  if (!consan_detail::append_moi_indexed_address(
-          words,
-          {.table_address = first_metadata_address,
-           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
-           .address_vgpr = base,
-           .index_vgpr = bank_vgpr},
-          *target)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata addressing");
-    return std::nullopt;
-  }
-  const auto require_existing_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
-    if (!record.load(offset, value))
-      return false;
-    return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr),
-                                                                 value, arch)) &&
-           sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero);
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch)),
+      "ConSan MOI sampled barrier failed at existing metadata descriptor");
+  sequence.branch(collision_label, InstructionSequence::BranchKind::VccZero).append(increment);
+  require_emission(consan_detail::append_moi_indexed_address(
+                       words,
+                       {.table_address = first_metadata_address,
+                        .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+                        .address_vgpr = base,
+                        .index_vgpr = bank_vgpr},
+                       *target),
+                   "ConSan MOI sampled barrier failed at existing metadata addressing");
+  const auto require_existing_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) {
+    sequence.require(record.load(offset, value))
+        .append(
+            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch))
+        .branch(collision_label, InstructionSequence::BranchKind::VccZero);
   };
-  const auto require_existing_literal = [&](uint32_t offset, uint32_t literal) -> bool {
-    return sequence.emit(instrumentation::build_v_mov_b32_literal(expected, literal, arch)) &&
-           require_existing_vgpr(offset, expected);
+  const auto require_existing_literal = [&](uint32_t offset, uint32_t literal) {
+    sequence.append(instrumentation::build_v_mov_b32_literal(expected, literal, arch));
+    require_existing_vgpr(offset, expected);
   };
-  if (!require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address), 0u) ||
-      !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u, 0u) ||
-      !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) ||
-      !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                             *plan.owner_epoch_vgprs.epoch) ||
-      !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-                             next_epoch) ||
-      !sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional)) {
+  const bool began_existing_comparison = static_cast<bool>(sequence);
+  require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address), 0u);
+  require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u, 0u);
+  require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u);
+  require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                        *plan.owner_epoch_vgprs.epoch);
+  require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after), next_epoch);
+  sequence.branch(restore_label, InstructionSequence::BranchKind::Unconditional);
+  if (began_existing_comparison && !sequence)
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata comparison");
-    return std::nullopt;
-  }
 
-  if (!sequence.bind(collision_label))
-    return std::nullopt;
-  if (!sequence.emit_all(
+  sequence.bind_label(collision_label);
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
           instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
           instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
@@ -451,62 +408,51 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
                                                     static_cast<uint16_t>(temporary_exec + 1u),
                                                     vector_source_vgpr(lane_rank), arch),
           instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at collision lane election");
-    return std::nullopt;
-  }
-  if (!append_atomic_fetch_add_one_u32(
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)),
+      "ConSan MOI sampled barrier failed at collision lane election");
+  require_emission(
+      append_atomic_fetch_add_one_u32(
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_unsupported_sync_count),
-          value, base, arch)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at collision accounting");
-    return std::nullopt;
-  }
+          value, base, arch),
+      "ConSan MOI sampled barrier failed at collision accounting");
 
-  if (!sequence.bind(restore_label))
-    return std::nullopt;
-  if (!sequence.emit_all(
+  sequence.bind_label(restore_label);
+  require_emission(
+      sequence.emit_all(
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
           epoch_has_successor,
           instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch),
           instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch,
                                            scalar_positive_inline_u32(1),
                                            *plan.owner_epoch_vgprs.epoch, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at epoch-advance narrowing");
-    return std::nullopt;
-  }
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch)),
+      "ConSan MOI sampled barrier failed at epoch-advance narrowing");
   if (scalar_persistent) {
-    if (!sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
-                               *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch),
-                           instrumentation::build_salu_dependency_delay(arch))) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
-      return std::nullopt;
-    }
+    require_emission(
+        sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
+                              *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch),
+                          instrumentation::build_salu_dependency_delay(arch)),
+        "ConSan MOI sampled barrier failed at scalar epoch persistence");
   }
   if (private_layout) {
-    if (!sequence.emit_all(instrumentation::build_private_store_b32(
-                               *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
-                           instrumentation::build_s_wait_private_store0(arch))) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at private epoch store");
-      return std::nullopt;
-    }
+    require_emission(
+        sequence.emit_all(instrumentation::build_private_store_b32(
+                              *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
+                          instrumentation::build_s_wait_private_store0(arch)),
+        "ConSan MOI sampled barrier failed at private epoch store");
   }
-  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at special-state restore");
-    return std::nullopt;
-  }
-  if (!sequence.bind(fast_return_label))
-    return std::nullopt;
+  require_emission(append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch),
+                   "ConSan MOI sampled barrier failed at special-state restore");
+  sequence.bind_label(fast_return_label);
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (restore_guest_vgpr_bank)
-    if (!sequence.emit(instrumentation::build_s_set_vgpr_msb_transition(
-            0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch)))
-      return std::nullopt;
-  if (!sequence.resolve_branches(arch)) {
+    sequence.append(instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
+  if (!sequence.finish(arch)) {
     errors.emplace_back("ConSan MOI sampled barrier local branch is out of range");
     return std::nullopt;
   }
