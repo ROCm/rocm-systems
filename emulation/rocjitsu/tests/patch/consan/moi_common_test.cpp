@@ -479,8 +479,6 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   plan.source_site = {0u};
   plan.address_capture_intent = {.value = 6u};
   plan.evidence_intent = {.value = 7u};
-  plan.communication_site.size = 12u;
-  plan.communication_site.width_bits = 32u;
   plan.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
   plan.memory_role = ConSanSyncMemoryRole::Acquire;
   plan.patch_text_offset = 24u;
@@ -505,9 +503,6 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   consan_detail::MoiFenceEvidenceSitePlan aliased_intents = plan;
   aliased_intents.address_capture_intent = aliased_intents.evidence_intent;
   EXPECT_FALSE(aliased_intents.is_well_formed());
-  consan_detail::MoiFenceEvidenceSitePlan missing_communication = plan;
-  missing_communication.communication_site.width_bits = 0u;
-  EXPECT_FALSE(missing_communication.is_well_formed());
   consan_detail::MoiFenceEvidenceSitePlan missing_lowering_form = plan;
   missing_lowering_form.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::Count;
   EXPECT_FALSE(missing_lowering_form.is_well_formed());

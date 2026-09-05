@@ -143,8 +143,9 @@ void try_stage_atomic_record_fragments(std::span<const uint8_t> bytes, const Con
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate, arch, scalar_clause_patches,
-                                           result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate.site,
+                                           planned.candidate.scalar_clause_text_offset, arch,
+                                           scalar_clause_patches, result.errors))
       return;
   }
   std::vector<ConSanTextFragment> fragments;

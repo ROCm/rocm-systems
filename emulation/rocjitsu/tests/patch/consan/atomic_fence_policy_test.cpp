@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 
 #include <functional>
 
@@ -507,6 +508,39 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, ConSanAtomicPolicyReason::None);
+}
+
+TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSequenceHandles) {
+  ConSanSyncEvent event = make_ordinary_store_event();
+  ConSanSyncSequence sequence = make_atomic_sequence(event);
+  sequence.scope = ConSanMemoryScope::Workgroup;
+  const ProgramInventory inventory =
+      build_atomic_inventory({event}, {sequence}, {}, {make_global_store_site({})});
+  const ConSanSyncEvent &published_event = inventory.sync().sync_events.front();
+
+  const std::optional<ConSanAtomicSite> communication =
+      consan_moi_impl::materialize_moi_communication_site(
+          inventory, published_event.source_site, ConSanSyncSequenceId{0u});
+  ASSERT_TRUE(communication.has_value());
+  EXPECT_EQ(communication->text_offset, event.text_offset());
+  EXPECT_EQ(communication->width_bits, 32u);
+  EXPECT_EQ(communication->scope, ConSanMemoryScope::Workgroup);
+  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
+                   inventory, {}, ConSanSyncSequenceId{0u})
+                   .has_value());
+  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
+                   inventory, published_event.source_site, {})
+                   .has_value());
+
+  ProgramInventoryBuilder unsupported(inventory);
+  ConSanOrdinaryMemorySite *ordinary =
+      unsupported.program_sites()[published_event.source_site.ordinal]
+          .get_if<ConSanOrdinaryMemorySite>();
+  ASSERT_NE(ordinary, nullptr);
+  ordinary->support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
+  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
+                   unsupported.view(), published_event.source_site, ConSanSyncSequenceId{0u})
+                   .has_value());
 }
 
 TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceCommunication) {

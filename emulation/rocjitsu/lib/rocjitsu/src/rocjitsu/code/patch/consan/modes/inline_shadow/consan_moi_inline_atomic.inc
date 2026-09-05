@@ -364,8 +364,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate, arch, scalar_clause_patches,
-                                           result.errors))
+    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate.site,
+                                           planned.candidate.scalar_clause_text_offset, arch,
+                                           scalar_clause_patches, result.errors))
       return;
   }
 

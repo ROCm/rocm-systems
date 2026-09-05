@@ -44,6 +44,7 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
   }
   struct PlannedFenceRecord : MoiPlannedRecordEvent {
     MoiFenceEvidenceSitePlan candidate;
+    ConSanAtomicSite communication_site;
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedFenceRecord> selected;
@@ -62,6 +63,13 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
         result.program_inventory.sync().find_event(candidate.event);
     if (fence_event == nullptr) {
       result.errors.emplace_back("ConSan MOI fence record patch lost its evidence event");
+      return;
+    }
+    const std::optional<ConSanAtomicSite> communication_site =
+        materialize_moi_communication_site(result.program_inventory, candidate.source_site,
+                                           candidate.sequence);
+    if (!communication_site) {
+      result.errors.emplace_back("ConSan MOI fence record patch lost its communication site");
       return;
     }
     const uint64_t fence_text_offset = fence_event->text_offset();
@@ -159,7 +167,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     note_descriptor_requirements(descriptor_requirements, record_event->resources);
     note_moi_sgpr_requirements(scalar_requirements, record_event->resources, record_event->emission,
                                arch);
-    selected.push_back({std::move(*record_event), std::move(candidate), address_plan});
+    selected.push_back(
+        {std::move(*record_event), std::move(candidate), *communication_site, address_plan});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -167,10 +176,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
   }
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   for (const PlannedFenceRecord &planned : selected) {
-    MoiAtomicEvidenceSitePlan scalar_clause_candidate;
-    scalar_clause_candidate.site = planned.candidate.communication_site;
-    scalar_clause_candidate.scalar_clause_text_offset = planned.candidate.scalar_clause_text_offset;
-    if (!append_atomic_scalar_clause_patch(old_text, scalar_clause_candidate, arch,
+    if (!append_atomic_scalar_clause_patch(old_text, planned.communication_site,
+                                           planned.candidate.scalar_clause_text_offset, arch,
                                            scalar_clause_patches, result.errors))
       return;
   }
@@ -194,7 +201,8 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     const uint32_t patch_size = planned.candidate.patch_size;
     uint32_t guest_instruction_offset = 0u;
     auto cave_words = build_fence_record_cave_words(
-        active_bytes, planned.candidate, *container, fence_event->text_offset(),
+        active_bytes, planned.candidate, planned.communication_site, *container,
+        fence_event->text_offset(),
         planned.address_plan, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset,

@@ -486,7 +486,8 @@ using consan_moi_detail::kFenceRecordLayout;
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
-    const ConSanProgramContainer &container, uint64_t fence_text_offset,
+    const ConSanAtomicSite &communication_site, const ConSanProgramContainer &container,
+    uint64_t fence_text_offset,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
@@ -502,13 +503,13 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI fence record patch has no supported target profile");
     return std::nullopt;
   }
-  if (!address_plan.supported() || !candidate.communication_site.scope ||
-      (target->requires_raw_memory_order_qualifier && !candidate.communication_site.raw_th) ||
+  if (!address_plan.supported() || !communication_site.scope ||
+      (target->requires_raw_memory_order_qualifier && !communication_site.raw_th) ||
       !candidate.is_well_formed()) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
     return std::nullopt;
   }
-  const auto report_scope = consan_moi_record_replay_scope(*candidate.communication_site.scope);
+  const auto report_scope = consan_moi_record_replay_scope(*communication_site.scope);
   if (!report_scope) {
     errors.emplace_back("ConSan MOI fence record patch requires a recordable causal scope");
     return std::nullopt;
@@ -664,7 +665,7 @@ using consan_moi_detail::kFenceRecordLayout;
         .literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind))
         .literal(offsetof(ConSanMoiFenceRecord, scope), *report_scope)
         .literal(offsetof(ConSanMoiFenceRecord, semantics),
-                 candidate.communication_site.raw_th.value_or(0u))
+                 communication_site.raw_th.value_or(0u))
         .vgpr(offsetof(ConSanMoiFenceRecord, communication_token), recorded_address_vgpr)
         .vgpr(offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
               static_cast<uint16_t>(recorded_address_vgpr + 1u));

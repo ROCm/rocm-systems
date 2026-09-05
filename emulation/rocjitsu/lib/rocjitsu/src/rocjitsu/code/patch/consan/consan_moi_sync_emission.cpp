@@ -283,15 +283,14 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
     }
-    if (communication->kind == ConSanSyncKind::Atomic) {
-      const ConSanAtomicSite *site =
-          inventory.program_site<ConSanAtomicSite>(communication->source_site);
-      if (site == nullptr) {
-        errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
-        return {};
-      }
-      plan.communication_site = *site;
-    } else {
+    const std::optional<ConSanAtomicSite> communication_site =
+        materialize_moi_communication_site(inventory, communication->source_site,
+                                           plan.sequence);
+    if (!communication_site) {
+      errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
+      return {};
+    }
+    if (communication->kind == ConSanSyncKind::OrdinaryMemory) {
       const ConSanOrdinaryMemorySite *site =
           inventory.program_site<ConSanOrdinaryMemorySite>(communication->source_site);
       if (site == nullptr ||
@@ -301,7 +300,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
         errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
         return {};
       }
-      plan.communication_site = consan_atomic_communication_site(*site);
       if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
         if (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
@@ -321,8 +319,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
         plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
       }
     }
-    if (sequence->scope)
-      plan.communication_site.scope = sequence->scope;
     plan.communication_lowering_form = *decision.communication_lowering_form;
     if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
@@ -483,15 +479,16 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
 }
 
 [[nodiscard]] bool append_atomic_scalar_clause_patch(std::span<const uint8_t> text,
-                                                     const MoiAtomicEvidenceSitePlan &candidate,
+                                                     const ConSanAtomicSite &site,
+                                                     std::optional<uint64_t> scalar_clause_offset,
                                                      rj_code_arch_t arch,
                                                      std::vector<ConSanPatchInfo> &patches,
                                                      std::vector<std::string> &errors) {
-  if (!candidate.scalar_clause_text_offset)
+  if (!scalar_clause_offset)
     return true;
-  const uint64_t offset = *candidate.scalar_clause_text_offset;
+  const uint64_t offset = *scalar_clause_offset;
   if (offset > text.size() || sizeof(uint32_t) > text.size() - offset ||
-      offset >= candidate.site.text_offset) {
+      offset >= site.text_offset) {
     errors.emplace_back("ConSan MOI atomic scalar-clause offset is outside its text prefix");
     return false;
   }

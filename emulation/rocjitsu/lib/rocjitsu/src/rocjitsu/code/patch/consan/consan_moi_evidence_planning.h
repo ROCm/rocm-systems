@@ -20,6 +20,15 @@ resolve_moi_evidence_container(const ProgramInventory &inventory, ConSanProgramS
 [[nodiscard]] std::string moi_evidence_container_name(const ProgramInventory &inventory,
                                                       ConSanProgramSiteId source_site);
 
+/// Reconstruct the operand-rich communication view at a native-lowering
+/// boundary from authoritative inventory handles. Ordered ordinary-memory
+/// operations are normalized to the same transient view as native atomics;
+/// sequence-qualified scope supersedes the decoder's instruction-local fact.
+[[nodiscard]] std::optional<ConSanAtomicSite>
+materialize_moi_communication_site(const ProgramInventory &inventory,
+                                   ConSanProgramSiteId source_site,
+                                   ConSanSyncSequenceId sequence);
+
 [[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
 build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,
                                       const ConSanObservationPlan &observation,

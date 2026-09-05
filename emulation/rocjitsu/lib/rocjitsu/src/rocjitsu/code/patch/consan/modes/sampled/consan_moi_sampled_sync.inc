@@ -1356,8 +1356,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   std::vector<ConSanPatchInfo> scalar_clause_patches;
   staged_fragments.reserve(selected.size() * 2u);
   for (const Planned &planned : selected) {
-    if (!append_atomic_scalar_clause_patch(old_text, planned.candidate.atomic, arch,
-                                           scalar_clause_patches, result.errors))
+    if (!append_atomic_scalar_clause_patch(
+            old_text, planned.candidate.atomic.site,
+            planned.candidate.atomic.scalar_clause_text_offset, arch, scalar_clause_patches,
+            result.errors))
       return;
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);

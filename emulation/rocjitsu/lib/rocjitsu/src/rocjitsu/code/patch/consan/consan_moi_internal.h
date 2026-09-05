@@ -713,11 +713,11 @@ struct MoiAtomicEvidenceSitePlan {
 /// A fence record represents one graph-qualified communication sequence, not
 /// every cache instruction that happens to resemble a fence. This value joins
 /// the admitted `FenceRecord` intent to its normalized fence association and
-/// to the operand-rich communication instruction whose effective address must
-/// be reported. The patch range may cover only the fence or, for an acquire
+/// to the stable communication source whose effective address must be
+/// reported. The patch range may cover only the fence or, for an acquire
 /// sequence, the complete address-bearing load-through-fence interval. Native
-/// lowering consumes these already-selected facts and must not rescan the
-/// synchronization graph or reinterpret cache ordering.
+/// lowering resolves decoded operands from `source_site` only at its boundary;
+/// it must not rescan the synchronization graph or reinterpret cache ordering.
 struct MoiFenceEvidenceSitePlan {
   /// Stable inventory-local identity of the admitted fence event.
   ConSanSyncEventId event;
@@ -732,10 +732,6 @@ struct MoiFenceEvidenceSitePlan {
   /// by the fence record. This intent can name the address-bearing ordinary
   /// operation while `event` names the completing fence.
   ConSanProbeIntentId address_capture_intent;
-
-  /// Operand-rich address-bearing atomic or ordinary-memory instruction.
-  /// Ordering meaning remains owned by `sequence`, not this decode copy.
-  ConSanAtomicSite communication_site;
 
   /// Classifier-owned address form for the communication operation.
   ConSanAtomicLoweringForm communication_lowering_form;
@@ -769,7 +765,6 @@ struct MoiFenceEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return event.valid() && sequence.valid() && source_site.valid() && evidence_intent.valid() &&
            address_capture_intent.valid() && evidence_intent != address_capture_intent &&
-           communication_site.size != 0u && communication_site.width_bits != 0u &&
            communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            (memory_role == ConSanSyncMemoryRole::Release ||
             memory_role == ConSanSyncMemoryRole::Acquire) &&
