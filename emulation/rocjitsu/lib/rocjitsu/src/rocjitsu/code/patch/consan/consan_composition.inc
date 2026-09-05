@@ -184,23 +184,6 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
   return result;
 }
 
-/// Remove every destructive fault kind while retaining independently planned
-/// perturbation policy. A composed instrumentation pass uses this boundary to
-/// ensure it cannot accidentally reapply the already committed fault.
-void clear_fault_mutation_kinds(MutationRequest &request) {
-  request.fault_drop_barrier = false;
-  request.fault_move_barrier = false;
-  request.fault_mutate_barrier_id_scope = false;
-  request.fault_mutate_barrier_participants = false;
-  request.fault_atomic_wrong_address = false;
-  request.fault_atomic_weaken_order = false;
-  request.fault_atomic_weaken_scope = false;
-  request.fault_lds_wrong_address = false;
-  request.fault_ordinary_wrong_address = false;
-  request.fault_ordinary_weaken_order = false;
-  request.fault_ordinary_weaken_scope = false;
-}
-
 [[nodiscard]] ConSanTransformArtifacts
 lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                    const ConSanMoiOperatingPoint &initial_operating_point,
@@ -268,7 +251,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 
   ConSanOptions instrument_options = options;
   ConSanPreappliedMutationLayout instrument_preapplied;
-  clear_fault_mutation_kinds(instrument_options);
+  clear_consan_fault_mutations(instrument_options);
   // Cardinality was enforced on the mutation stage. The subsequent
   // instrumentation-only pass has no mutation of its own to count.
   instrument_options.fault_require_exactly_one = false;

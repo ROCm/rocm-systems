@@ -26,24 +26,27 @@ struct RuntimePolicy {
   bool operator==(const RuntimePolicy &) const = default;
 };
 
-/// Return a copy retaining selection/proof and perturbation data but with every
-/// live fault-transform switch disabled. Inventory sizing uses this operation
-/// to analyze pristine sanitizer semantics without losing the caller's exact
-/// selection metadata.
+/// Disable every live fault-transform switch while retaining exact selection,
+/// proof, and perturbation data.
+inline void clear_consan_fault_mutations(MutationRequest &request) {
+  request.fault_drop_barrier = false;
+  request.fault_move_barrier = false;
+  request.fault_mutate_barrier_id_scope = false;
+  request.fault_mutate_barrier_participants = false;
+  request.fault_atomic_wrong_address = false;
+  request.fault_atomic_weaken_order = false;
+  request.fault_atomic_weaken_scope = false;
+  request.fault_lds_wrong_address = false;
+  request.fault_ordinary_wrong_address = false;
+  request.fault_ordinary_weaken_order = false;
+  request.fault_ordinary_weaken_scope = false;
+}
+
+/// Return a copy suitable for pristine semantic inventory sizing.
 [[nodiscard]] inline MutationRequest
 without_consan_fault_mutations(const MutationRequest &request) {
   MutationRequest result = request;
-  result.fault_drop_barrier = false;
-  result.fault_move_barrier = false;
-  result.fault_mutate_barrier_id_scope = false;
-  result.fault_mutate_barrier_participants = false;
-  result.fault_atomic_wrong_address = false;
-  result.fault_atomic_weaken_order = false;
-  result.fault_atomic_weaken_scope = false;
-  result.fault_lds_wrong_address = false;
-  result.fault_ordinary_wrong_address = false;
-  result.fault_ordinary_weaken_order = false;
-  result.fault_ordinary_weaken_scope = false;
+  clear_consan_fault_mutations(result);
   result.fault_require_exactly_one = false;
   return result;
 }
