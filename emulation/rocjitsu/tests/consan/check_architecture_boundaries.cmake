@@ -76,6 +76,10 @@ foreach(_file IN LISTS _consan_layout_files)
         message(FATAL_ERROR
             "ConSan target operations escaped into mode ownership: ${_relative}")
     endif()
+    if(_relative MATCHES "^targets/" AND _contents MATCHES "ConSanOptions")
+        message(FATAL_ERROR
+            "ConSan target provider consumes the orchestration input aggregate: ${_relative}")
+    endif()
 endforeach()
 
 foreach(_directory IN ITEMS record_replay sampled inline_shadow)
@@ -344,6 +348,11 @@ foreach(_file IN LISTS _target_component_sources)
         "${_file}"
         "#include.*consan_(sync_analysis|fault_injection|moi_pipeline|supercollider|final_validation|validation_inventory|composition|pipeline)[.]h"
         "target normalization may not depend on analysis, transformation, validation, or orchestration"
+    )
+    _consan_assert_no_match(
+        "${_file}"
+        "ConSanOptions"
+        "target providers may consume normalized requests and capabilities, not the orchestration aggregate"
     )
     _consan_assert_no_match(
         "${_file}"
