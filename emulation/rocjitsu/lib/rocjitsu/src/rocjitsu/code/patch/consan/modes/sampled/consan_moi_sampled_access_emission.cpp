@@ -63,44 +63,41 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
   const uint64_t prior_address = plan.report_buffer_address + plan.sampled_watchpoints_offset +
                                  static_cast<uint64_t>(prior_record_index) * sizeof(uint64_t);
   InstructionSequence sequence(words);
+  MoiStagedEmission emission(sequence, errors, "ConSan MOI sampled checker");
   const auto done_label = sequence.make_label();
 
-  if (!append_sampled_banked_address(words, prior_address, sizeof(uint64_t), plan.window_bank_count,
-                                     bank_vgpr, address_lo_vgpr, arch) ||
-      !sequence.emit_all(instrumentation::build_v_mov_b32_literal(prior_low_vgpr, 0u, arch),
-                         instrumentation::build_v_mov_b32_literal(prior_high_vgpr, 0u, arch),
-                         instrumentation::build_flat_atomic_add_u64(
-                             address_lo_vgpr, prior_low_vgpr, prior_low_vgpr,
-                             /*return_old_value=*/true, kAmdGpuScopeDevice, arch))) {
-    errors.emplace_back("ConSan MOI sampled checker could not atomically snapshot the prior slot");
-    return false;
-  }
-  if (!append_moi_global_atomic_wait(words, arch))
-    return false;
+  emission.stage("prior-slot snapshot");
+  emission.require(
+      append_sampled_banked_address(words, prior_address, sizeof(uint64_t), plan.window_bank_count,
+                                    bank_vgpr, address_lo_vgpr, arch) &&
+      sequence.emit_all(instrumentation::build_v_mov_b32_literal(prior_low_vgpr, 0u, arch),
+                        instrumentation::build_v_mov_b32_literal(prior_high_vgpr, 0u, arch),
+                        instrumentation::build_flat_atomic_add_u64(
+                            address_lo_vgpr, prior_low_vgpr, prior_low_vgpr,
+                            /*return_old_value=*/true, kAmdGpuScopeDevice, arch)));
+  emission.require(append_moi_global_atomic_wait(words, arch));
   auto append_required_predicate = [&](std::optional<uint32_t> compare) {
     if (!sequence.emit(compare))
       return false;
     return sequence.emit_branch(done_label, InstructionSequence::BranchKind::VccZero);
   };
 
-  if (!sequence.emit(
-          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI sampled checker could not decode validity");
-    return false;
-  }
-  if (!append_required_predicate(
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch)) ||
-      !append_extract_exact_shadow_field(words, address_lo_vgpr, current_low_vgpr,
-                                         consan_moi_sampled_watchpoint::owner_shift,
-                                         consan_moi_sampled_watchpoint::max_owner, arch) ||
-      !append_extract_exact_shadow_field(words, address_hi_vgpr, prior_low_vgpr,
-                                         consan_moi_sampled_watchpoint::owner_shift,
-                                         consan_moi_sampled_watchpoint::max_owner, arch) ||
-      !append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI sampled checker could not compare owners");
-    return false;
-  }
+  emission.stage("validity and owner comparison");
+  emission.require(sequence.emit(
+      instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch)));
+  emission.require(append_required_predicate(
+                       instrumentation::build_v_cmp_ne_u32_vcc(
+                           scalar_positive_inline_u32(0), tmp_vgpr, arch)) &&
+                   append_extract_exact_shadow_field(
+                       words, address_lo_vgpr, current_low_vgpr,
+                       consan_moi_sampled_watchpoint::owner_shift,
+                       consan_moi_sampled_watchpoint::max_owner, arch) &&
+                   append_extract_exact_shadow_field(
+                       words, address_hi_vgpr, prior_low_vgpr,
+                       consan_moi_sampled_watchpoint::owner_shift,
+                       consan_moi_sampled_watchpoint::max_owner, arch) &&
+                   append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
+                       vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch)));
 
   const uint32_t low_epoch_generation_mask =
       static_cast<uint32_t>(consan_moi_sampled_watchpoint::epoch_generation_mask);
@@ -118,54 +115,41 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
     return append_required_predicate(instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch));
   };
-  if (!append_equal_masked(current_low_vgpr, prior_low_vgpr, low_epoch_generation_mask) ||
-      !append_equal_masked(current_high_vgpr, prior_high_vgpr, high_generation_mask) ||
-      !append_equal_masked(current_high_vgpr, prior_high_vgpr, high_range_mask)) {
-    errors.emplace_back("ConSan MOI sampled checker could not compare ordering or ranges");
-    return false;
-  }
+  emission.stage("ordering and range comparison");
+  emission.require(
+      append_equal_masked(current_low_vgpr, prior_low_vgpr, low_epoch_generation_mask) &&
+      append_equal_masked(current_high_vgpr, prior_high_vgpr, high_generation_mask) &&
+      append_equal_masked(current_high_vgpr, prior_high_vgpr, high_range_mask));
 
-  if (!append_extract_exact_shadow_field(
+  emission.stage("access-kind comparison");
+  emission.require(
+      append_extract_exact_shadow_field(
           words, address_lo_vgpr, current_low_vgpr,
           consan_moi_sampled_watchpoint::access_kind_shift,
-          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) ||
-      !append_extract_exact_shadow_field(
-          words, address_hi_vgpr, prior_low_vgpr, consan_moi_sampled_watchpoint::access_kind_shift,
-          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch)) {
-    errors.emplace_back("ConSan MOI sampled checker could not decode access kinds");
-    return false;
-  }
-  if (!sequence.emit(instrumentation::build_v_and_b32(tmp_vgpr, vector_source_vgpr(address_lo_vgpr),
-                                                      address_hi_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI sampled checker could not compare access kinds");
-    return false;
-  }
-  if (!append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
+          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) &&
+      append_extract_exact_shadow_field(
+          words, address_hi_vgpr, prior_low_vgpr,
+          consan_moi_sampled_watchpoint::access_kind_shift,
+          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) &&
+      sequence.emit(instrumentation::build_v_and_b32(
+          tmp_vgpr, vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch)) &&
+      append_required_predicate(instrumentation::build_v_cmp_ne_u32_vcc(
           scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read)),
-          tmp_vgpr, arch))) {
-    errors.emplace_back("ConSan MOI sampled checker could not predicate conflicting kinds");
-    return false;
-  }
+          tmp_vgpr, arch)));
 
   const uint64_t immediate_conflict_count_address =
       plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
-  if (!append_atomic_fetch_add_one_u32(words, immediate_conflict_count_address, tmp_vgpr,
-                                       plan.scratch_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI sampled checker could not increment the conflict counter");
-    return false;
-  }
+  emission.stage("conflict publication");
+  emission.require(append_atomic_fetch_add_one_u32(
+      words, immediate_conflict_count_address, tmp_vgpr, plan.scratch_vgpr, arch));
 
   // VCC is instrumentation-local here. The sampled body's common exit
   // restores guest VCC from its dedicated snapshot, so saving VCC in this
   // helper is both unnecessary and unsafe: moi_exec_save_sgpr is the
   // immutable guest-EXEC snapshot which that exit later consumes.
-  if (!sequence.bind(done_label))
-    return false;
-  if (!sequence.resolve_branches(arch)) {
-    errors.emplace_back("ConSan MOI sampled checker skip branch is out of range");
-    return false;
-  }
-  return true;
+  emission.stage("control-flow resolution");
+  emission.require(sequence.bind(done_label));
+  return emission.finish(arch);
 }
 
 [[nodiscard]] bool
