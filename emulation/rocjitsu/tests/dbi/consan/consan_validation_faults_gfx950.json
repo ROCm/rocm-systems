@@ -55,6 +55,41 @@
         }
       ]
     },
+    "pytorch-torch-sort": {
+      "faults": [
+        {
+          "id": "barrier-drop-key-load-retirement",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected s_barrier is the unconditional retirement edge after BlockLoad writes and reads the shared LoadKeys transpose storage in the executed float, int64-index, 128-thread, 8-item radixSortKVInPlace specialization. The same shared union is immediately reused by BlockLoad for values after this edge. The four-row, 256-column float32 workload necessarily launches this specialization, so dropping the edge exposes cross-wave LDS reuse while preserving the exact production workload."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:ba3d6ae2c8bf0257|kernel=_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b|kind=barrier|pc=0x000000000027f1ac|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "1",
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b"
+              }
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b"
+              }
+            }
+          }
+        }
+      ]
+    },
     "d128-pressure": {
       "faults": [
         {

@@ -6195,6 +6195,53 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_torch_sort_fault_targets_key_load_retirement(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-sort"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-key-load-retirement",
+        )
+
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        kernel = (
+            "_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda"
+            "6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b"
+        )
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x000000000027f1ac", site)
+        self.assertIn("occurrence=0", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn("shared LoadKeys", fault["reach_witness"]["evidence"])
+        self.assertIn("shared union", fault["reach_witness"]["evidence"])
+
+        sampled, trials = validation._fault_trials(fault, "sampled")
+        self.assertEqual(sampled["detector"], "not_detected")
+        self.assertEqual(sampled["oracle"], "pass")
+        self.assertEqual(
+            sampled["environment"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1"
+        )
+        self.assertEqual(
+            sampled["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
+        inline, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(inline["detector"], "detected")
+        self.assertEqual(inline["oracle"], "any")
+        self.assertEqual(
+            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(
+            inline["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx950_d128_pressure_inline_fault_is_redundant_barrier_miss(
         self,
     ) -> None:
