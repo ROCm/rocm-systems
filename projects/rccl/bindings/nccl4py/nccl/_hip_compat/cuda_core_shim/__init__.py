@@ -13,9 +13,10 @@ so the resulting shim has no dependency on cuda-bindings, cuda-core,
 ``nvidia-*`` packages, or ``hip-python-as-cuda``.
 
 Scope: exactly the symbols imported by ``nccl/core/*.py`` (``Device``,
-``Stream``, ``Buffer``, ``MemoryResource``, ``system``, ``IsStreamT``,
-``DevicePointerT``, ``StridedMemoryView``,
-``args_viewable_as_strided_memory``). Anything outside that surface is
+``Stream``, ``Buffer``, ``MemoryResource``, ``system``, ``IsStreamType``,
+``DevicePointerType``, ``StridedMemoryView``,
+``args_viewable_as_strided_memory``), each reachable under every spelling
+cuda.core has used for it. Anything outside that surface is
 intentionally not provided.
 
 Stop-gap: a future ROCm-native ``hip.core`` will make this layer
@@ -31,6 +32,9 @@ from types import ModuleType
 from typing import Any, Callable
 
 __all__ = ["_register_as_cuda_core"]
+
+_TYPING_NAMES = ("IsStreamType", "DevicePointerType", "IsStreamT", "DevicePointerT")
+_SUBMODULES = ("system", "utils", "typing", "experimental", "_stream", "_memory")
 
 
 def _make_lazy_module(
@@ -61,19 +65,23 @@ def _resolve_cuda_core(name: str) -> Any:
         from ._memory import MemoryResource
 
         return MemoryResource
-    if name == "system":
-        return sys.modules["cuda.core.system"]
-    if name == "utils":
-        return sys.modules["cuda.core.utils"]
-    if name == "IsStreamT":
-        from .typing import IsStreamT
-
-        return IsStreamT
-    if name == "DevicePointerT":
-        from .typing import DevicePointerT
-
-        return DevicePointerT
+    if name in _SUBMODULES:
+        return sys.modules[f"cuda.core.{name}"]
+    if name in _TYPING_NAMES:
+        return _resolve_cuda_core_typing(name)
     raise AttributeError(f"module 'cuda.core' has no attribute {name!r} (HIP shim)")
+
+
+def _resolve_cuda_core_typing(name: str) -> Any:
+    if name in ("IsStreamType", "IsStreamT"):
+        from .typing import IsStreamType
+
+        return IsStreamType
+    if name in ("DevicePointerType", "DevicePointerT"):
+        from .typing import DevicePointerType
+
+        return DevicePointerType
+    raise AttributeError(f"module 'cuda.core.typing' has no attribute {name!r} (HIP shim)")
 
 
 def _resolve_cuda_core_system(name: str) -> Any:
@@ -97,11 +105,9 @@ def _resolve_cuda_core_utils(name: str) -> Any:
 
 
 def _resolve_cuda_core_stream(name: str) -> Any:
-    # Fallback path used by nccl/core/typing.py (`from cuda.core._stream import IsStreamT`).
-    if name == "IsStreamT":
-        from .typing import IsStreamT
-
-        return IsStreamT
+    # Pre-1.0 cuda.core kept the stream protocol in this private module.
+    if name in ("IsStreamType", "IsStreamT"):
+        return _resolve_cuda_core_typing(name)
     if name == "Stream":
         from ._stream import Stream
 
@@ -110,12 +116,9 @@ def _resolve_cuda_core_stream(name: str) -> Any:
 
 
 def _resolve_cuda_core_memory(name: str) -> Any:
-    # Fallback path used by nccl/core/memory.py
-    # (`from cuda.core._memory._buffer import DevicePointerT`).
-    if name == "DevicePointerT":
-        from .typing import DevicePointerT
-
-        return DevicePointerT
+    # Pre-1.0 cuda.core kept the device-pointer alias in this private module.
+    if name in ("DevicePointerType", "DevicePointerT"):
+        return _resolve_cuda_core_typing(name)
     if name == "Buffer":
         from ._memory import Buffer
 
@@ -149,6 +152,7 @@ def _register_as_cuda_core() -> None:
     cuda_core = _make_lazy_module("cuda.core", _resolve_cuda_core, is_pkg=True)
     cuda_core_system = _make_lazy_module("cuda.core.system", _resolve_cuda_core_system)
     cuda_core_utils = _make_lazy_module("cuda.core.utils", _resolve_cuda_core_utils)
+    cuda_core_typing = _make_lazy_module("cuda.core.typing", _resolve_cuda_core_typing)
     cuda_core_stream = _make_lazy_module("cuda.core._stream", _resolve_cuda_core_stream)
     cuda_core_memory = _make_lazy_module(
         "cuda.core._memory", _resolve_cuda_core_memory, is_pkg=True
@@ -160,8 +164,13 @@ def _register_as_cuda_core() -> None:
     sys.modules["cuda.core"] = cuda_core
     sys.modules["cuda.core.system"] = cuda_core_system
     sys.modules["cuda.core.utils"] = cuda_core_utils
+    sys.modules["cuda.core.typing"] = cuda_core_typing
     sys.modules["cuda.core._stream"] = cuda_core_stream
     sys.modules["cuda.core._memory"] = cuda_core_memory
     sys.modules["cuda.core._memory._buffer"] = cuda_core_memory_buffer
+
+    # cuda.core 0.5.0 kept `experimental` as a deprecated alias of the same objects.
+    for suffix in ("", ".system", ".utils", ".typing", "._stream", "._memory", "._memory._buffer"):
+        sys.modules[f"cuda.core.experimental{suffix}"] = sys.modules[f"cuda.core{suffix}"]
 
     cuda_pkg.core = cuda_core  # type: ignore[attr-defined]
