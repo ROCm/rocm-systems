@@ -13,8 +13,81 @@
 #include <io.h>
 #endif
 
+#include <mutex>
+#include <vector>
+
 // ================================================================================================
 namespace hip {
+
+// ================================================================================================
+// Deferred emulated-IPC-event cleanup
+//
+// See DeferredIpcEventCleanup in hip_event.hpp for the rationale. ~IPCEventEmulated()
+// enqueues here instead of running ihipHostUnregister()/munmap/shm_unlink inline,
+// because ihipHostUnregister() calls device->SyncAllStreams() and would make
+// hipEventDestroy() block on unrelated device work.
+namespace {
+std::mutex g_deferredIpcCleanupLock;
+std::vector<DeferredIpcEventCleanup> g_deferredIpcCleanup;
+
+// Safety valve: if a process never reaches a drain point, don't grow unbounded.
+// When exceeded, the next enqueue performs an inline drain (this reintroduces a
+// SyncAllStreams cost, but only on the rare overflow path).
+constexpr size_t kDeferredIpcCleanupThreshold = 256;
+
+// Physical IPC cleanup. Must run only where a device-wide wait is acceptable,
+// since ihipHostUnregister() -> SyncAllStreams().
+void cleanupDeferredIpcEvent(const DeferredIpcEventCleanup& item) {
+  if (item.shmem == nullptr) {
+    return;
+  }
+  ihipHostUnregister(&item.shmem->signal);
+  if (!amd::Os::MemoryUnmapFile(item.shmem, sizeof(hip::ihipIpcEventShmem_t))) {
+    // print hipErrorInvalidHandle;
+  }
+  if (item.owners_after_decrement == 0) {
+    amd::Os::shm_unlink(item.ipc_name);
+  }
+}
+}  // namespace
+
+void enqueueDeferredIpcEventCleanup(const DeferredIpcEventCleanup& item) {
+  std::vector<DeferredIpcEventCleanup> overflow;
+  {
+    std::scoped_lock lock(g_deferredIpcCleanupLock);
+    g_deferredIpcCleanup.push_back(item);
+    if (g_deferredIpcCleanup.size() > kDeferredIpcCleanupThreshold) {
+      overflow.swap(g_deferredIpcCleanup);
+    }
+  }
+  // Drain outside the lock on the rare overflow path.
+  for (const auto& it : overflow) {
+    cleanupDeferredIpcEvent(it);
+  }
+}
+
+void drainDeferredIpcEventCleanup(int device_id) {
+  std::vector<DeferredIpcEventCleanup> ready;
+  {
+    std::scoped_lock lock(g_deferredIpcCleanupLock);
+    if (device_id < 0) {
+      ready.swap(g_deferredIpcCleanup);
+    } else {
+      auto it = g_deferredIpcCleanup.begin();
+      while (it != g_deferredIpcCleanup.end()) {
+        if (it->device_id == device_id) {
+          ready.push_back(*it);
+          it = g_deferredIpcCleanup.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
+  }
+  for (const auto& it : ready) {
+    cleanupDeferredIpcEvent(it);
+  }
+}
 
 hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
 hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType type);

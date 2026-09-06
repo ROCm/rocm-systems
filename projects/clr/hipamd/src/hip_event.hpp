@@ -72,6 +72,32 @@ typedef struct ihipIpcEventShmem_s {
   alignas(64) uint32_t signal[IPC_SIGNALS_PER_EVENT];
 } ihipIpcEventShmem_t;
 
+// Deferred cleanup of emulated-IPC-event shared memory.
+//
+// Physical IPC cleanup (ihipHostUnregister -> munmap -> shm_unlink) is moved out
+// of ~IPCEventEmulated() so that hipEventDestroy() does not block on unrelated
+// GPU work. ihipHostUnregister() internally calls device->SyncAllStreams(),
+// which drains ALL pending streams on the device within the current context;
+// calling it from the destroy path makes hipEventDestroy() latency proportional
+// to whatever unrelated work happens to be queued. Instead we enqueue the
+// cleanup and drain it at points where a device-wide wait is already expected.
+struct DeferredIpcEventCleanup {
+  ihipIpcEventShmem_t* shmem;  //!< mapped IPC shared memory to unregister/unmap
+  std::string ipc_name;        //!< shm object name (unlinked when owners == 0)
+  int owners_after_decrement;  //!< owners count after this process released
+  int device_id;               //!< device whose streams the cleanup will drain
+};
+
+// Enqueue an emulated-IPC-event cleanup item. O(1) and non-blocking.
+void enqueueDeferredIpcEventCleanup(const DeferredIpcEventCleanup& item);
+
+// Drain pending emulated-IPC-event cleanups. Must only be called where a
+// device-wide blocking wait is already semantically expected (e.g.
+// hipDeviceSynchronize / hipDeviceReset / runtime teardown), because the
+// physical cleanup calls ihipHostUnregister() -> SyncAllStreams(). Passing
+// device_id < 0 drains items for all devices.
+void drainDeferredIpcEventCleanup(int device_id = -1);
+
 class EventMarker : public amd::Marker {
  public:
   EventMarker(amd::HostQueue& stream, bool disableFlush, bool markerTs = false,
@@ -213,8 +239,25 @@ class IPCEventEmulated : public Event {
   ~IPCEventEmulated() override {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
-      // Make sure event is synchronized
+      // Poll the IPC signal (this event's own completion). Cheap when the event
+      // is already complete; otherwise it only waits for this event's recorded
+      // work -- it does NOT drain unrelated streams.
       hipError_t status = synchronize();
+      (void)status;
+#if !defined(_MSC_VER)
+      // POSIX: defer the physical IPC cleanup (ihipHostUnregister ->
+      // SyncAllStreams, munmap, shm_unlink) out of the destroy path so
+      // hipEventDestroy() does not block on unrelated device work (the #7520
+      // stall). Drained later at a safe device-wide sync point.
+      hip::ihipIpcEventShmem_t* shmem = ipc_evt_.ipc_shmem_;
+      ipc_evt_.ipc_shmem_ = nullptr;  // detach the user-facing handle
+      hip::enqueueDeferredIpcEventCleanup(
+          {shmem, ipc_evt_.ipc_name_, owners, deviceId()});
+#else
+      // Windows/PAL: keep the original inline cleanup. The destroy-latency issue
+      // (#7520) was reported and validated only on Linux, so the emulated path
+      // here is left unchanged to avoid an untested behavior shift on a path
+      // that has no ROCr-IPC-signal alternative.
       status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
@@ -222,13 +265,14 @@ class IPCEventEmulated : public Event {
       if (owners == 0) {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
-    }
-#if !defined(_MSC_VER)
-    // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty()) {
-      shm_unlink(ipc_evt_.ipc_name_.c_str());
-    }
 #endif
+    }
+    // NOTE: the previous unconditional POSIX shm_unlink() that ran here (outside
+    // the ipc_shmem_ guard, under #if !defined(_MSC_VER)) was removed. It fired
+    // even when owners > 0 (peers still hold the shmem) or when ipc_shmem_ was
+    // null / already unlinked, racing peers that still needed to open the shm by
+    // name. The amd::Os::shm_unlink in the owners == 0 path is the correct and
+    // sufficient unlink.
   }
   bool createIpcEventShmemIfNeeded();
   hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;

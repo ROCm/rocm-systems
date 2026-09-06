@@ -590,6 +590,11 @@ hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig) {
 hipError_t hipDeviceReset(void) {
   HIP_INIT_API(hipDeviceReset);
 
+  // Run any deferred emulated-IPC-event cleanup before tearing down the device,
+  // while it (and its registered host memory) is still valid. This is a safe
+  // drain point: device reset already implies a full device-wide wait/teardown.
+  hip::drainDeferredIpcEventCleanup(hip::getCurrentDevice()->deviceId());
+
   hip::getCurrentDevice()->Reset();
 
   HIP_RETURN(hipSuccess);
@@ -682,6 +687,9 @@ hipError_t hipDeviceSynchronize() {
   CHECK_SUPPORTED_DURING_CAPTURE();
   constexpr bool kDoWaitForCpu = false;
   hip::getCurrentDevice()->SyncAllStreams(kDoWaitForCpu);
+  // Safe drain point: the device was just synchronized, so the SyncAllStreams()
+  // inside the deferred IPC cleanup (ihipHostUnregister) is now cheap.
+  hip::drainDeferredIpcEventCleanup(hip::getCurrentDevice()->deviceId());
   HIP_RETURN_DURATION(hipSuccess);
 }
 
