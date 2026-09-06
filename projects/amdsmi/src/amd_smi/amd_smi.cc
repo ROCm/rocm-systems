@@ -57,6 +57,7 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -8466,6 +8467,17 @@ static bool is_dry_run() {
   return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
+// The fwupd UMA carveout is a platform-wide APU BIOS setting, so it must only be
+// consulted for the integrated (FUSION) GPU -- never a discrete GPU that merely
+// lacks the amdgpu sysfs node. Uses the ASIC AMDGPU_IDS_FLAGS_FUSION flag.
+static bool gpu_handle_is_apu(amdsmi_processor_handle processor_handle) {
+  amdsmi_asic_info_t asic_info = {};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic_info) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  return (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+}
+
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDevice* gpu_device,
                                                           amdsmi_uma_carveout_info_t* info) {
   if (gpu_device == nullptr || info == nullptr) {
@@ -8579,8 +8591,30 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+  // Prefer the fwupd path; the amdgpu sysfs node is the fallback when fwupd is
+  // unavailable, and also supplies the current value when fwupd redacts it for
+  // an unprivileged caller (below). The fwupd call itself touches no gpu_device
+  // state, so it runs without the device mutex; only the sysfs reads take it.
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_get_carveout_info(info);
+    if (fwupd_ret == AMDSMI_STATUS_SUCCESS) {
+      // fwupd redacts the current value for an unprivileged caller
+      // (current_index == num_options). When the world-readable amdgpu sysfs
+      // node is present, fill current_index from it so an unprivileged `static`
+      // still shows the active carveout without a PolicyKit prompt.
+      if (info->current_index == info->num_options) {
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+        amdsmi_uma_carveout_info_t sysfs_info{};
+        if (get_gpu_uma_carveout_info_internal(gpu_device, &sysfs_info) == AMDSMI_STATUS_SUCCESS &&
+            sysfs_info.current_index < info->num_options) {
+          info->current_index = sysfs_info.current_index;
+        }
+      }
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
 
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
   return get_gpu_uma_carveout_info_internal(gpu_device, info);
 }
 
@@ -8596,6 +8630,19 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
 #ifdef ENABLE_WSL_BACKEND
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
+
+  // Prefer the fwupd path for the write: fwupd brokers authorization through
+  // PolicyKit (an active desktop session is prompted; no explicit root needed),
+  // which the root-only amdgpu sysfs node cannot do. fwupd returns
+  // AMDSMI_STATUS_NOT_SUPPORTED when it cannot service the request (no libdbus,
+  // no daemon, or the setting is absent); fall back to the sysfs node then. Runs
+  // before the device mutex because the fwupd path never touches gpu_device.
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
+    if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+      return fwupd_ret;
+    }
+  }
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 

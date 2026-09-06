@@ -59,6 +59,11 @@ message("")
 # re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+# fwupd_carveout_test is built as its own executable below because it compiles
+# fwupd_carveout.cc directly, whose amd::smi::fwupd_* symbols are hidden in the
+# shared library. Keep it out of the main amdsmitst target so shared-only builds
+# do not fail with undefined references.
+list(FILTER unitSources EXCLUDE REGEX "/fwupd_carveout_test\\.cc$")
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
@@ -137,3 +142,21 @@ install(
     COMPONENT ${TESTS_COMPONENT}
     PATTERN "__pycache__" EXCLUDE
 )
+
+# Hardware-free unit test for the fwupd UMA carveout adapter. On a host without
+# the fwupd carveout BIOS setting -- i.e. any CI machine: no APU firmware exposes
+# it, and typically no fwupd daemon or D-Bus system bus is present -- both entry
+# points must report NOT_SUPPORTED so the amdgpu sysfs node stays the sole UMA
+# carveout interface. Kept in its own target/subdir so the aux_source_directory()
+# sweep above does not pull it into ${TEST}.
+add_executable(
+    fwupd_carveout_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/fwupd_carveout_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi/fwupd_carveout.cc
+)
+target_include_directories(
+    fwupd_carveout_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi
+)
+target_link_libraries(fwupd_carveout_test GTest::gtest GTest::gtest_main ${CMAKE_DL_LIBS})
+add_test(NAME fwupd_carveout_test COMMAND fwupd_carveout_test)
