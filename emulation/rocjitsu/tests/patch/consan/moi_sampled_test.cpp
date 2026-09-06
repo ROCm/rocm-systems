@@ -1263,6 +1263,33 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->relocated_guest_instruction_offset);
   ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
+  // A large composed image can place the metadata marker after an access-only
+  // trampoline prefix. The two inventory ranges still describe the same
+  // ordered atomic, with the metadata range nested inside the access range.
+  ConSanTransformArtifacts nested_inventory = result;
+  auto nested_atomic =
+      std::ranges::find(nested_inventory.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(nested_atomic, nested_inventory.patches.end());
+  nested_atomic->trampoline_offset += 88u;
+  nested_atomic->trampoline_size -= 88u;
+  const std::vector<std::string> nested_errors =
+      validate_consan_modified_elf(bytes, nested_inventory);
+  EXPECT_TRUE(nested_errors.empty()) << testing::PrintToString(nested_errors);
+
+  // Containment alone is insufficient: a nested range from another source
+  // instruction must remain an invalid overlap.
+  ConSanTransformArtifacts unrelated_inventory = nested_inventory;
+  auto unrelated_atomic =
+      std::ranges::find(unrelated_inventory.patches,
+                        ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(unrelated_atomic, unrelated_inventory.patches.end());
+  unrelated_atomic->anchor_offset = 0u;
+  const std::vector<std::string> unrelated_errors =
+      validate_consan_modified_elf(bytes, unrelated_inventory);
+  EXPECT_TRUE(std::ranges::any_of(unrelated_errors, [](const std::string &error) {
+    return error.find("partially overlapping patch ranges") != std::string::npos;
+  })) << testing::PrintToString(unrelated_errors);
   const auto sampled_mappings = consan_sampled_static_access_mappings(result);
   ASSERT_EQ(sampled_mappings.size(), 1u);
   ASSERT_GT(sampled_mappings.front().bank_count, 1u);

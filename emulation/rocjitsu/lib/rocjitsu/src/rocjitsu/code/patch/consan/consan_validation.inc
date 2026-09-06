@@ -239,15 +239,13 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
         continue;
       const bool exact_alias =
           existing->bytes.begin == next.bytes.begin && existing->bytes.end == next.bytes.end;
-      const bool nested_cross_phase =
-          existing->phase != next.phase &&
-          ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
-           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end));
+      const bool nested =
+          (existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
+          (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end);
+      const bool nested_cross_phase = existing->phase != next.phase && nested;
       const bool nested_composed_access_atomic =
           existing->phase == ConSanPatchPhase::Instrumentation &&
-          next.phase == ConSanPatchPhase::Instrumentation &&
-          ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
-           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end)) &&
+          next.phase == ConSanPatchPhase::Instrumentation && nested &&
           (((existing->kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
              existing->kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
             next.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) ||
@@ -256,8 +254,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
             existing->kind == ConSanPatchKind::TrampolineMoiAtomicRecord));
       const bool nested_composed_sampled_access_atomic =
           existing->phase == ConSanPatchPhase::Instrumentation &&
-          next.phase == ConSanPatchPhase::Instrumentation &&
-          existing->bytes.begin == next.bytes.begin &&
+          next.phase == ConSanPatchPhase::Instrumentation && nested &&
+          existing->source_anchor == next.source_anchor &&
           (((existing->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
              existing->kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
             next.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) ||
