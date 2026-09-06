@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
+# Temporary no-op change on rocprofiler-systems to exercise TheRock Multi-arch CI
+
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
     AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
