@@ -91,15 +91,23 @@ make_mock_queue(const hsa::AgentCache& agent)
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
 
+using query_clock_t = std::function<aqlprofile_att_gpu_clock_t(void)>;
+
 class MockPackets : public hsa::SQTTBufferingPackets
 {
 public:
-    MockPackets(aqlprofile_handle_t _handle, query_status_t _query)
+    MockPackets(aqlprofile_handle_t _handle, query_status_t _query, query_clock_t _clock)
     : hsa::SQTTBufferingPackets(_handle, 0)
-    , query_fn(_query){};
+    , query_fn(std::move(_query))
+    , clock_fn(std::move(_clock)){};
 
     std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
-    query_status_t                           query_fn;
+    aqlprofile_att_gpu_clock_t               get_gpu_clock() const override
+    {
+        return clock_fn ? clock_fn() : aqlprofile_att_gpu_clock_t{};
+    }
+    query_status_t query_fn;
+    query_clock_t  clock_fn;
 };
 
 struct consumer_producer_t
@@ -120,7 +128,8 @@ struct consumer_producer_t
 consumer_producer_t
 start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               query_status_t                                  query_fn,
-              rocprofiler_user_data_t                         userdata)
+              rocprofiler_user_data_t                         userdata,
+              query_clock_t                                   clock = {})
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -158,7 +167,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     // them here or the producer aborts with small_vector::at out_of_range.
     control_packet->populate_before();
     control_packet->populate_after();
-    auto buffer_packet    = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    auto buffer_packet =
+        std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn, clock);
     buffer_packet->header = 1;
 
     auto mock_queue          = make_mock_queue(*agent);
@@ -243,6 +253,95 @@ TEST(thread_trace, status_query)
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
+}
+
+TEST(thread_trace, timestamps_follow_buffer_boundaries)
+{
+    using timestamp_t = rocprofiler_thread_trace_timestamp_t;
+    struct state_t
+    {
+        std::atomic<size_t>                                     data_callbacks{0};
+        std::mutex                                              mut;
+        std::map<uint64_t, std::pair<timestamp_t, timestamp_t>> timestamps;
+    } state;
+
+    rocprofiler::thread_trace::test_init();
+
+    auto* ext_table           = rocprofiler::hsa::get_amd_ext_table();
+    auto  original_convert_fn = ext_table->hsa_amd_profiling_convert_tick_to_system_domain_fn;
+    ext_table->hsa_amd_profiling_convert_tick_to_system_domain_fn =
+        [](hsa_agent_t, uint64_t gpu_clock, uint64_t* system_clock) {
+            *system_clock = gpu_clock * 10;
+            return HSA_STATUS_SUCCESS;
+        };
+
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        auto* callback_state = static_cast<state_t*>(userdata.ptr);
+        {
+            auto lock = std::lock_guard{callback_state->mut};
+            callback_state->timestamps.emplace(
+                shader_data.chunk_index,
+                std::make_pair(shader_data.start_timestamp, shader_data.end_timestamp));
+        }
+        callback_state->data_callbacks.fetch_add(1);
+    };
+
+    auto input_buffer =
+        std::vector<size_t>(rocprofiler::thread_trace::MOCK_BUFFER_SIZE / sizeof(size_t));
+    auto status_calls = std::atomic<size_t>{0};
+    auto query_status = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        auto called = status_calls.load();
+        if(called >= 2 || called > state.data_callbacks.load()) return std::nullopt;
+        status_calls.fetch_add(1);
+        auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data = input_buffer.data();
+        status.size = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
+        return status;
+    };
+
+    auto clock_calls = std::atomic<uint64_t>{0};
+    auto query_clock = [&]() {
+        auto call = clock_calls.fetch_add(1);
+        return aqlprofile_att_gpu_clock_t{100, 100 * (call + 1)};
+    };
+    auto userdata = rocprofiler_user_data_t{.ptr = &state};
+    auto threads =
+        rocprofiler::thread_trace::start_threads(fetch_cb, query_status, userdata, query_clock);
+
+    while(state.data_callbacks.load() < 3)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
+    threads.join_all();
+    ext_table->hsa_amd_profiling_convert_tick_to_system_domain_fn = original_convert_fn;
+
+    auto lock = std::lock_guard{state.mut};
+    ASSERT_GE(state.timestamps.size(), 4u);
+    const auto& header = state.timestamps.at(0);
+    const auto& first  = state.timestamps.at(1);
+    const auto& second = state.timestamps.at(2);
+    const auto& final  = state.timestamps.at(3);
+
+    EXPECT_EQ(header.first.gpu_clock, 0u);
+    EXPECT_EQ(header.first.system_clock, 0u);
+    EXPECT_EQ(header.second.gpu_clock, 0u);
+    EXPECT_EQ(header.second.system_clock, 0u);
+
+    EXPECT_EQ(first.first.gpu_clock, 100u);
+    EXPECT_EQ(first.second.gpu_clock, 200u);
+    EXPECT_EQ(second.first.gpu_clock, first.second.gpu_clock);
+    EXPECT_EQ(second.second.gpu_clock, 300u);
+    EXPECT_EQ(final.first.gpu_clock, second.second.gpu_clock);
+    EXPECT_EQ(final.second.gpu_clock, 400u);
+
+    for(const auto& [chunk, timestamps] : state.timestamps)
+    {
+        if(chunk == 0) continue;
+        EXPECT_LT(timestamps.first.gpu_clock, timestamps.second.gpu_clock);
+        EXPECT_LT(timestamps.first.system_clock, timestamps.second.system_clock);
+        EXPECT_EQ(timestamps.first.system_clock, timestamps.first.gpu_clock * 10);
+        EXPECT_EQ(timestamps.second.system_clock, timestamps.second.gpu_clock * 10);
+    }
 }
 
 TEST(thread_trace, multiple_calls)

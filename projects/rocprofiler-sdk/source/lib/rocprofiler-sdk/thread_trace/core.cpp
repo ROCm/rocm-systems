@@ -70,6 +70,9 @@ struct cbdata_t
     rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
     const rocprofiler_user_data_t*                  userdata   = nullptr;
     uint64_t                                        next_chunk = 0;
+
+    rocprofiler_thread_trace_timestamp_t start_timestamp{};
+    rocprofiler_thread_trace_timestamp_t end_timestamp{};
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -99,6 +102,8 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+    shader_data.start_timestamp  = cb_data.start_timestamp;
+    shader_data.end_timestamp    = cb_data.end_timestamp;
 
     cb_data.cb_fn(shader_data, *cb_data.userdata);
     // The iterator guarantees the last chunk is tagged with END; here we just
@@ -208,6 +213,13 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
+    int se_id   = 0;
+    for(auto mask = params.shader_engine_mask; (mask & 1) == 0; mask >>= 1)
+        ++se_id;
+
+    auto clock            = hsa::get_gpu_clock(handle, se_id);
+    cb_dt.start_timestamp = convert_timestamp(queue->hsa_agent, clock.start);
+    cb_dt.end_timestamp   = convert_timestamp(queue->hsa_agent, clock.latest);
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
