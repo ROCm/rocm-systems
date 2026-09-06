@@ -89,10 +89,6 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
-static inline bool rcclIsGfx120x(char const* arch) {
-  return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
-}
-
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -100,6 +96,22 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
                                /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncSendRecv*/ 0,
+                               /*ncclFuncSend*/ 0,
+                               /*ncclFuncRecv*/ 0};
+  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
+
+int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
+                               /*ncclFuncReduce*/ 8192,
+                               /*ncclFuncAllGather*/ 49152,
+                               /*ncclFuncReduceScatter*/ 49152,
+                               /*ncclFuncAllReduce*/ 32768,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -135,16 +147,23 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && rcclIsGfx120x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
-    const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
-    if (str) {
-      int disable = strtol(str, NULL, 0);
-      if (disable == 1) {
-        info->protocol = NCCL_PROTO_SIMPLE;
-      }
+    /**
+     * We prefer simple protocol when p2p_disabled = 1,
+     * This is due to a fix in LL protocol implementation
+     * for gfx120x with __HIP_MEMORY_SCOPE_SYSTEM in prims_ll.h
+     * causing poor performance but keeps the LL protocol functional
+     */
+    bool p2p_disabled = ncclParamP2pDisable();
+    if (p2p_disabled) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+    }
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110" /*match gfx110x*/)) {
+    if (comm->nNodes == 1) {
+      info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
     }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
@@ -215,7 +234,10 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
-  if (comm->nNodes < 2 || !rcclParamChannelTuningEnable()) {
+  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  //Make an exception for gfx110x and gfx120x
+  if ((!isGfx_110x_120x && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
     return ncclSuccess;
   }
@@ -242,14 +264,16 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
   int minNChannels = ncclParamMinNchannels();
   int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
   size_t bytesPerRank = divUp(nBytes, comm->nRanks);
-
+  const int myRank = comm->rank;
   for (int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex) {
     size_t minByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][0];
     size_t maxByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][1];
-    INFO(NCCL_TUNING,
-         "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
-         "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-         nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    if (myRank == 0) {
+      INFO(NCCL_TUNING,
+           "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
+           "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+           nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    }
     if (minByteThreshold == CHAN_THRESHOLDS_UNDEFINED || maxByteThreshold == CHAN_THRESHOLDS_UNDEFINED) {
       INFO(NCCL_TUNING, "RCCL tuning model does not define threshold for coll:%i and nbytes:%lu", coll, nBytes);
       break; // Skip undefined thresholds
@@ -262,15 +286,19 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
       if (channelCount >= minNChannels && channelCount <= maxNChannels && channelCount >= minCTAs &&
           channelCount <= maxCTAs) {
         nc = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
-        INFO(NCCL_TUNING,
-             "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
-             "MinTrafficPerchannel thresholds",
-             channelCount);
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
+               "MinTrafficPerchannel thresholds",
+               channelCount);
+        }
       } else {
-        INFO(NCCL_TUNING,
-             "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
-             "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-             channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
+               "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+               channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        }
       }
 
       break;
