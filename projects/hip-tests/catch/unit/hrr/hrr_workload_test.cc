@@ -3042,6 +3042,12 @@ TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
     p.srcPitch = SZ; p.srcHeight = 1;
     p.dstPitch = SZ; p.dstHeight = 1;
     HIP_CHECK(hipDrvMemcpy3D(&p)); }
+  // hipDrvMemcpy3D is host-synchronous only when the copy touches host memory;
+  // ihipMemcpyParam3D() forces the D2D case asynchronous, so (3) is merely
+  // enqueued on the null stream.  s was created with hipStreamNonBlocking and so
+  // never joins the null stream, leaving the readback below unordered against
+  // the copy unless it is drained here.
+  HIP_CHECK(hipDeviceSynchronize());
 
   int* h = new int[N]();
   HIP_CHECK(hipMemcpyAsync(h, C, SZ, hipMemcpyDeviceToHost, s));
@@ -3152,6 +3158,10 @@ TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
     p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B); p.dstPitch = SZ;
     p.WidthInBytes  = SZ; p.Height = 1;
     HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+  // Same ordering hazard as the 3D workload above: hipDrvMemcpy2DUnaligned goes
+  // through ihipMemcpyParam3D(), which forces the D2D case asynchronous on the
+  // null stream, and s is non-blocking.
+  HIP_CHECK(hipDeviceSynchronize());
 
   int* h = new int[N]();
   HIP_CHECK(hipMemcpyAsync(h, B, SZ, hipMemcpyDeviceToHost, s));
