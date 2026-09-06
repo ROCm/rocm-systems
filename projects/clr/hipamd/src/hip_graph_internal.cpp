@@ -137,6 +137,7 @@ bool Graph::isGraphValid(Graph* pGraph) {
 // ================================================================================================
 void Graph::AddNode(const Node& node) {
   vertices_.emplace_back(node);
+  MarkTopologyChanged();
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
           GetGraphNodeTypeString(node->GetType()), node);
   node->SetParentGraph(this);
@@ -145,6 +146,7 @@ void Graph::AddNode(const Node& node) {
 // ================================================================================================
 void Graph::RemoveNode(const Node& node) {
   vertices_.erase(std::remove(vertices_.begin(), vertices_.end(), node), vertices_.end());
+  MarkTopologyChanged();
   delete node;
 }
 
@@ -979,11 +981,25 @@ bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
   return false;
 }
 
+std::vector<Node> Graph::GetUpdateTopoOrder() {
+  amd::ScopedLock lock(updateTopoOrderLock_);
+  if (updateTopoOrderVersion_ != topologyVersion_) {
+    updateTopoOrder_.clear();
+    TopologicalOrder(updateTopoOrder_);
+    updateTopoOrderVersion_ = topologyVersion_;
+  }
+  return updateTopoOrder_;
+}
+
 // ================================================================================================
 void Graph::clone(Graph* newGraph, bool cloneNodes) const {
   newGraph->pOriginalGraph_ = this;
+  newGraph->topologyVersion_ = topologyVersion_;
+  newGraph->originalTopologyVersion_ = topologyVersion_;
+  newGraph->originalGraphId_ = id_;
   for (hip::GraphNode* entry : vertices_) {
     GraphNode* node = entry->clone();
+    node->originalNode_ = entry;
     node->SetParentGraph(newGraph);
     newGraph->vertices_.push_back(node);
     newGraph->clonedNodes_[entry] = node;
@@ -1614,6 +1630,7 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
 
   {
     std::shared_lock<std::shared_mutex> trim_guard(graphExecTrimLock_);
+    std::shared_lock<std::shared_mutex> update_guard(execUpdateLock_);
     this->retain();
   }
 
@@ -1892,20 +1909,11 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       size_t filteredIdx = enabledPackets.size();
       enabledPackets.push_back(dispatchPackets[i]);
       enabledKernelNames.push_back(dispatchKernelNames[i]);
-      // appendPacketToFlatBuffer also appends the index-aligned metadata slot
-      // (zero-filled when this index has no metadata packet). Empty slots
-      // (barriers / uncaptured dispatches) are then stamped
-      // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them — a zeroed
-      // slot would be type 0 (VENDOR_SPECIFIC), which the CP could process.
       const uint8_t* metadata_raw =
           (hasMetadata && i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i]
                                                               : nullptr;
       appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      if (hasMetadata && metadata_raw == nullptr) {
-        invalidateMetadataSlot(filteredFlatMetadataData.data() +
-                               filteredFlatMetadataData.size() - kMetadataPktSize);
-      }
 
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
     } else {
@@ -1947,10 +1955,6 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       enabledKernelNames.push_back(nullptr);
       appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      if (hasMetadata) {
-        invalidateMetadataSlot(filteredFlatMetadataData.data() +
-                               filteredFlatMetadataData.size() - kMetadataPktSize);
-      }
       patch.flat_packet =
           filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
     }
@@ -1977,7 +1981,7 @@ void GraphExecSegmented::PacketBatch::restorePatchListPointers(
 }
 
 // ================================================================================================
-hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
+hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSlots) {
   // Fixme: Only single stream child graph nodes are supported.
   hipError_t status = hipSuccess;
 
@@ -2047,8 +2051,14 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
           std::vector<uint8_t*> nodePackets;
           std::vector<const std::string*> nodeKernelNames;
           std::vector<uint8_t*> nodeMetadataPackets;
+          const bool nodeEnabled = currentNode->GetEnabled() != 0;
+          if (!nodeEnabled) {
+            currentNode->SetEnabled(1);
+          }
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
-                                                     &nodeKernelNames, &nodeMetadataPackets);
+                                                     &nodeKernelNames, &nodeMetadataPackets,
+                                                     reuseKernargSlots);
+          currentNode->SetEnabled(nodeEnabled);
 
           if (status != hipSuccess || nodePackets.empty()) {
             LogError("Packet capture failed");
@@ -2076,8 +2086,11 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
                                                   nodeMetadataPackets.end());
 
           // Store node mapping with range info
-          newBatch.nodeRanges.push_back({startIndex, packetCount, true});
+          newBatch.nodeRanges.push_back({startIndex, packetCount, nodeEnabled});
           newBatch.nodeToRangeIndex[currentNode] = rangeIndex;
+          if (!nodeEnabled) {
+            ++newBatch.disabledNodeCount;
+          }
 
           // Mark this node as successfully captured
           currentSegBatch.node_capture_status[j] = true;
@@ -2124,7 +2137,7 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
           }
         }
 
-        status = childGraphExec->CaptureAndFormPacketsForGraph();
+        status = childGraphExec->CaptureAndFormPacketsForGraph(reuseKernargSlots);
         if (status != hipSuccess) {
           ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
                   "[hipGraph] Child graph packet capture failed for child graph in segment, "
@@ -2162,6 +2175,14 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
     auto it = pktToFlat.find(patch.packet);
     if (it != pktToFlat.end()) {
       patch.flat_packet = it->second;
+    }
+  }
+
+  for (auto& [seg_id, segBatch] : segmentBatches_) {
+    for (auto& batch : segBatch.packet_batches) {
+      if (batch.disabledNodeCount > 0) {
+        batch.rebuildFilteredLists(sync_plan_.patch_list);
+      }
     }
   }
 
@@ -2210,9 +2231,16 @@ hipError_t GraphExecSegmented::CaptureAQLPackets() {
 
 // ================================================================================================
 hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
-  if (!node->GraphCaptureEnabled()) {
+  if (node->GetType() == hipGraphNodeTypeGraph) {
     return hipSuccess;
   }
+  auto rebuildPackets = [&]() {
+    for (auto* packetBatch : updatedPacketBatches_) {
+      packetBatch->updatePending = false;
+    }
+    updatedPacketBatches_.clear();
+    return CaptureAndFormPacketsForGraph(reuseKernargSlots_);
+  };
   // Todo: Add batching support for multi-device linear graph
   // Use node_to_segment_id_ for O(1) segment lookup
   auto segIdIt = node_to_segment_id_.find(node);
@@ -2234,13 +2262,12 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
   for (auto& packetBatch : segBatch.packet_batches) {
     auto it = packetBatch.nodeToRangeIndex.find(node);
     if (it != packetBatch.nodeToRangeIndex.end()) {
+      if (!node->GraphCaptureEnabled()) {
+        return rebuildPackets();
+      }
       // Found the batch containing this node - update packets
       PacketBatch::NodeRange& range = packetBatch.nodeRanges[it->second];
 
-      // Capture new packets for this node
-      std::vector<uint8_t*> newPackets;
-      std::vector<const std::string*> newKernelNames;
-      std::vector<uint8_t*> newMetadataPackets;
       // A disabled node's CreateCommand returns early without emitting any
       // command, so CaptureAndFormPacket would yield zero packets and the
       // packet-count-change path below would delete the node's dispatch slot
@@ -2251,13 +2278,15 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
       if (saved_enabled_state == 0) {
         node->SetEnabled(1);
       }
-      hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
-                                                                      &newKernelNames,
-                                                                      &newMetadataPackets);
+      hipError_t status = node->CaptureAndFormPacket(kernArgManager_, nullptr, nullptr, nullptr,
+                                                     reuseKernargSlots_);
       node->SetEnabled(saved_enabled_state);
       if (status != hipSuccess) {
         return status;
       }
+      const std::vector<uint8_t*>& newPackets = node->GetAqlPackets();
+      const std::vector<uint8_t*>& newMetadataPackets = node->GetMetadataPackets();
+      const std::string* newKernelName = node->GetKernelName();
       // Number of packets per node can change
       const size_t oldPacketCount = range.packetCount;
       const size_t newPacketCount = newPackets.size();
@@ -2330,7 +2359,7 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
         uint8_t* oldPkt = packetBatch.dispatchPackets[packetIndex];
         uint8_t* newPkt = newPackets[i];
         packetBatch.dispatchPackets[packetIndex] = newPkt;
-        packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
+        packetBatch.dispatchKernelNames[packetIndex] = newKernelName;
         if (hasMetadata) {
           packetBatch.dispatchMetadataPackets[packetIndex] =
               (i < newMetadataPackets.size()) ? newMetadataPackets[i] : nullptr;
@@ -2346,25 +2375,50 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           }
         }
       }
-      // Rebuild the flat buffer immediately so the next dispatch uses updated packets.
-      // The flat buffer always represents the full packet sequence; the dispatch path
-      // independently skips it when any nodes are disabled (disabledNodeCount != 0).
-      packetBatch.rebuildFlatBuffer();
-
-      // Refresh flat_packet pointers in the patch list since rebuildFlatBuffer
-      // reallocated flatPacketData, invalidating previous flat_packet pointers.
-      for (auto& patch : sync_plan_.patch_list) {
-        for (size_t pi = 0; pi < packetBatch.dispatchPackets.size(); ++pi) {
-          if (patch.packet == packetBatch.dispatchPackets[pi]) {
-            patch.flat_packet = packetBatch.flatPacketData.data() + pi * PacketBatch::kAqlPktSize;
-            break;
-          }
+      if (batchAQLPacketUpdates_) {
+        if (!packetBatch.updatePending) {
+          packetBatch.updatePending = true;
+          updatedPacketBatches_.push_back(&packetBatch);
         }
+      } else {
+        RebuildAQLPacketBatch(packetBatch);
       }
       return hipSuccess;
     }
   }
-  return hipSuccess;  // Node not in any batch
+  return hipSuccess;
+}
+
+void GraphExecSegmented::BeginAQLPacketUpdates(bool allowKernargReuse) {
+  for (auto* packetBatch : updatedPacketBatches_) {
+    packetBatch->updatePending = false;
+  }
+  updatedPacketBatches_.clear();
+  reuseKernargSlots_ = allowKernargReuse && referenceCount() == 1;
+  batchAQLPacketUpdates_ = true;
+  for (auto node : Graph::GetNodes()) {
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      static_cast<ChildGraphNode*>(node)->SetParentKernargReuse(reuseKernargSlots_);
+    }
+  }
+}
+
+void GraphExecSegmented::EndAQLPacketUpdates() {
+  batchAQLPacketUpdates_ = false;
+  reuseKernargSlots_ = false;
+  for (auto* packetBatch : updatedPacketBatches_) {
+    RebuildAQLPacketBatch(*packetBatch);
+    packetBatch->updatePending = false;
+  }
+  updatedPacketBatches_.clear();
+}
+
+void GraphExecSegmented::RebuildAQLPacketBatch(PacketBatch& packetBatch) {
+  packetBatch.rebuildFlatBuffer();
+  packetBatch.restorePatchListPointers(sync_plan_.patch_list);
+  if (packetBatch.disabledNodeCount > 0) {
+    packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
+  }
 }
 
 // ================================================================================================
@@ -2393,11 +2447,13 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
   memset(dst + kSigOff, 0, sizeof(uint64_t));
 
   // Append the matching metadata-prefetch packet so flatMetadata stays index-
-  // aligned with flatData. A nullptr |metadata_raw| yields a zeroed slot.
+  // aligned with flatData. A nullptr |metadata_raw| yields an invalid slot.
   const size_t metaOff = flatMetadata.size();
   flatMetadata.insert(flatMetadata.end(), kMetadataPktSize, 0);
   if (metadata_raw != nullptr) {
     memcpy(flatMetadata.data() + metaOff, metadata_raw, kMetadataPktSize);
+  } else {
+    invalidateMetadataSlot(flatMetadata.data() + metaOff);
   }
 }
 
@@ -2429,20 +2485,6 @@ void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
         (i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i] : nullptr;
     appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, flatPacketData,
                              validPacketFullHeaders, flatMetadataData);
-  }
-  // Build flat metadata buffer (kMetadataPktSize per slot).
-  // Slots without captured metadata (barriers, uncaptured dispatches) are published as
-  // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them.
-  if (!dispatchMetadataPackets.empty()) {
-    flatMetadataData.resize(n * kMetadataPktSize, 0);
-    for (size_t i = 0; i < n; ++i) {
-      uint8_t* slot = flatMetadataData.data() + i * kMetadataPktSize;
-      if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
-        std::memcpy(slot, dispatchMetadataPackets[i], kMetadataPktSize);
-      } else {
-        invalidateMetadataSlot(slot);
-      }
-    }
   }
 }
 
@@ -3095,10 +3137,9 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
 hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
 
-  // Retain under shared lock so hipDeviceGraphMemTrim's refcount check is accurate.
-  // The lock blocks only while trim holds the exclusive (write) lock.
   {
     std::shared_lock<std::shared_mutex> trim_guard(graphExecTrimLock_);
+    std::shared_lock<std::shared_mutex> update_guard(execUpdateLock_);
     this->retain();
   }
 
