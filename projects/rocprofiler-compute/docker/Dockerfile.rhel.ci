@@ -2,6 +2,9 @@ ARG DISTRO=rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
+# Re-declare so VERSION is accessible in RUN commands (ARGs before FROM go out of scope after FROM)
+ARG VERSION
+
 ENV HOME=/root
 ENV SHELL=/bin/bash
 ENV BASH_ENV=/etc/bash.bashrc
@@ -16,10 +19,18 @@ ARG EXTRA_PACKAGES=""
 
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && \
-    yum install -y --allowerasing curl dpkg-devel python3-pip wget zlib-devel which git && \
+    yum install -y --allowerasing curl dpkg-devel python3-pyyaml python3.11 python3.11-pip wget zlib-devel which git && \
     yum clean all && \
-    python3 -m pip install --upgrade pip && \
-    python3 -m pip install 'cmake==3.21'
+    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 2 && \
+    alternatives --set python3 /usr/bin/python3.11 && \
+    python3.11 -m pip install --upgrade pip && \
+    python3.11 -m pip install 'cmake==3.21' && \
+    MAJOR_VERSION=$(echo ${VERSION} | cut -d. -f1) && \
+    if [ "$MAJOR_VERSION" = "8" ]; then \
+        yum install -y gcc-toolset-12-gcc gcc-toolset-12-gcc-c++ && \
+        ln -sf /opt/rh/gcc-toolset-12/root/usr/bin/gcc /usr/local/bin/gcc && \
+        ln -sf /opt/rh/gcc-toolset-12/root/usr/bin/g++ /usr/local/bin/g++; \
+    fi
 
 # The Rock Tarball
 ARG GPU_TYPE=""
