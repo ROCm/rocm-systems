@@ -124,12 +124,12 @@ analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
 
   result.replay_performed = true;
   for (const ConSanMoiAccessRecord &record : access_records) {
-    uint64_t record_end = static_cast<uint64_t>(record.start_cell) + record.cell_count;
-    if (record_end == 0 && record.lds_byte_count != 0) {
-      const ConSanMoiLdsCellRange range =
-          consan_moi_lds_cell_range_for_bytes(record.lds_byte_offset, record.lds_byte_count);
-      record_end = static_cast<uint64_t>(range.start_cell) + range.cell_count;
-    }
+    const uint64_t record_end =
+        record.lds_byte_count != 0
+            ? (static_cast<uint64_t>(record.lds_byte_offset) + record.lds_byte_count +
+               consan_moi_shadow_cell::granule_bytes - 1u) >>
+                  consan_moi_shadow_cell::granule_shift
+            : static_cast<uint64_t>(record.start_cell) + record.cell_count;
     result.required_shadow_entry_count = std::max(result.required_shadow_entry_count, record_end);
   }
   constexpr uint64_t kMaxAutoReplayShadowEntries = 1u << 20u;

@@ -1212,7 +1212,8 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     }
     if (g_seed_auto_replay_overlimit_range) {
       constexpr uint32_t kOverlimitCell = (1u << 20u) + 1u;
-      records[second_record_index].lds_byte_offset = kOverlimitCell * sizeof(uint64_t);
+      records[second_record_index].lds_byte_offset =
+          kOverlimitCell * rocjitsu::consan_moi_shadow_cell::granule_bytes;
       records[second_record_index].start_cell = kOverlimitCell;
     }
     g_seed_auto_replay_report_succeeded = true;
@@ -3603,6 +3604,43 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
       record_replay_report_analysis.mode));
   EXPECT_EQ(record_replay_report_analysis.summary.sampled_conflict_count, 0u);
   EXPECT_EQ(record_replay_report_analysis.summary.replay_conflict_count, 1u);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayShadowCapacityUsesExactUnalignedByteRange) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/0,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 1;
+  const std::array records = {
+      rocjitsu::ConSanMoiAccessRecord{
+          .generation = 7,
+          .workgroup_x = 2,
+          .wave_id = 1,
+          .lane_mask = 0x1,
+          .instruction_offset = 0x10,
+          .access_kind = static_cast<uint32_t>(AccessKind::Write),
+          .lds_byte_offset = 2045,
+          .lds_byte_count = 4,
+          // The static-width cell count cannot encode the extra cell touched
+          // when the runtime address is unaligned.
+          .start_cell = 511,
+          .cell_count = 1,
+          .epoch = 4,
+          .event_index = 41,
+      },
+  };
+
+  const auto replay = rocjitsu::consan_hook::analyze_auto_moi_record_replay(
+      header, records, {}, {}, {}, {}, false,
+      /*logical_access_range_count=*/0, /*address_group_headroom=*/0);
+
+  EXPECT_EQ(replay.required_shadow_entry_count, 513u);
+  EXPECT_EQ(replay.replay_shadow_entry_count, 513u);
+  EXPECT_FALSE(replay.shadow_bounded);
+  EXPECT_FALSE(replay.replay.metadata_full);
+  EXPECT_FALSE(replay.effective_conflict);
 }
 
 TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRegions) {
