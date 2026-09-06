@@ -46,10 +46,33 @@ target_include_directories(hrr-playback PRIVATE
 )
 target_compile_definitions(hrr-playback PRIVATE
   __HIP_PLATFORM_AMD__
+  "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 find_package(Threads REQUIRED)
 target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
+
+# Build identity reported by --version. Stamped by a build rule rather than at
+# configure time so it cannot name a commit the binary was not built from; see
+# HrrVersionStamp.cmake. Generated into the binary dir, which is already on the
+# include path below.
+set(HRR_BUILD_INFO_H ${CMAKE_CURRENT_BINARY_DIR}/hrr_build_info.h)
+set(HRR_VERSION_STAMP ${CMAKE_CURRENT_SOURCE_DIR}/HrrVersionStamp.cmake)
+set(HRR_VERSION_STAMP_ARGS
+  -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+  -DOUT_FILE=${HRR_BUILD_INFO_H}
+  -P ${HRR_VERSION_STAMP}
+)
+# Also generate once at configure time so the very first compile has the header
+# regardless of how the generator orders the custom target.
+execute_process(COMMAND ${CMAKE_COMMAND} ${HRR_VERSION_STAMP_ARGS})
+add_custom_target(hrr_build_info ALL
+  COMMAND ${CMAKE_COMMAND} ${HRR_VERSION_STAMP_ARGS}
+  BYPRODUCTS ${HRR_BUILD_INFO_H}
+  COMMENT "Stamping hrr-playback build revision"
+)
+add_dependencies(hrr-playback hrr_build_info)
+target_include_directories(hrr-playback PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
 

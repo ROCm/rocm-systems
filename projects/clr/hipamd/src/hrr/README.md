@@ -85,7 +85,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer |
+| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -95,11 +95,13 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--replace-kernel N=P` | Launch recorded kernel `N` from external code object `P` instead |
 | `--sync-after-launch` | `hipDeviceSynchronize` after every kernel launch |
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
+| `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
+| `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
 
 ### Replay environment
 

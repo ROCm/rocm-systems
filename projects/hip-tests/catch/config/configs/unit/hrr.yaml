@@ -60,6 +60,10 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [playback, cpu]
+  Unit_HRR_Playback_VersionOption:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [playback, cpu]
   Unit_HRR_Recovery_CompleteArchive:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]

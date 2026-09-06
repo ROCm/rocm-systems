@@ -100,6 +100,14 @@ struct PlaybackContext {
     bool skip_device_sync  = false;
     bool sync_after_launch = false;  // hipDeviceSynchronize after every kernel launch
     bool sync_after_event  = false;  // hipDeviceSynchronize after EVERY dispatched event
+    // Keep replaying after a handler returns an error instead of stopping at
+    // the first one. Off by default: for a debugging replay the first error is
+    // the answer, and continuing past it only produces cascading noise. Turn
+    // it on to survey a whole archive — which API fails, and what the ones
+    // after it do — rather than to reproduce a fault.
+    bool continue_on_error = false;
+    std::atomic<size_t> events_failed{0};
+    std::atomic<size_t> code_objects_failed{0};
     // Sync watchdog: max wall-clock ms to wait for a device synchronize before
     // declaring the GPU wedged (0 = disabled / wait forever). Surfaces hung
     // kernels (e.g. a StreamK producer/consumer flag spin-wait) as a diagnostic
