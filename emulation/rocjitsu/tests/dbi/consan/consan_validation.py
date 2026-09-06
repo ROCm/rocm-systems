@@ -1959,6 +1959,11 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
         "tp2-combined": {
             "record_replay_runtime_sample_stride": 256,
+            # Preserve the exact measured two-rank oracle without repeating
+            # it as an instrumented warmup. The measured-only row completes
+            # in about 210 seconds on the current host.
+            "sharktank_skip_warmup": True,
+            "run_timeout_seconds": 360,
         },
         # The two SGEMM benchmark blocks repeat the same six Exact sizes but
         # have very different solution spaces. Preserve both blocks in every

@@ -2574,7 +2574,8 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(workloads["tp2-family"]["run_timeout_seconds"], 180)
         self.assertEqual(workloads["tp2-decode"]["run_timeout_seconds"], 600)
-        self.assertEqual(workloads["tp2-combined"]["run_timeout_seconds"], 180)
+        self.assertEqual(workloads["tp2-combined"]["run_timeout_seconds"], 360)
+        self.assertTrue(workloads["tp2-combined"]["sharktank_skip_warmup"])
         for workload_id, expected_mode in (
             ("tp2-family", "prefill"),
             ("tp2-decode", "decode"),
@@ -2590,7 +2591,7 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(command[command.index("--mode") + 1], expected_mode)
             self.assertEqual(
                 "--skip-warmup" in command,
-                workload_id == "tp2-decode",
+                workload_id in {"tp2-decode", "tp2-combined"},
             )
         gfx950_workloads = {
             workload["id"]: workload
@@ -2638,7 +2639,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx950", "tp2-family", 300),
                 ("gfx1250", "tp2-family", 180),
                 ("gfx1250", "tp2-decode", 600),
-                ("gfx1250", "tp2-combined", 180),
+                ("gfx1250", "tp2-combined", 360),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),
