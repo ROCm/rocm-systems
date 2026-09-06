@@ -215,3 +215,71 @@ def get_hip_fatbin_size(binary_path: Path) -> Optional[int]:
             return struct.unpack("<Q", data[sh_off + 0x20 : sh_off + 0x28])[0]
 
     return None
+
+
+def patch_hip_fatbin_to_nobits(
+    source_path: Path,
+    output_path: Path,
+) -> Path:
+    """
+    Create a copy of an ELF binary whose .hip_fatbin section is SHT_NOBITS.
+
+    This reproduces the shape of a *separated debug file* — the output of
+    ``objcopy --only-keep-debug``, which TheRock publishes as its ``*_dbg``
+    artifacts. Such a file keeps every allocated section header (including
+    ``.hip_fatbin``) but converts them to SHT_NOBITS, so the section occupies
+    no file space and holds no device code.
+
+    Patching the section header is sufficient and keeps the helper hermetic
+    (no objcopy required to build the fixture).
+
+    Args:
+        source_path: Path to source ELF binary with a .hip_fatbin section
+        output_path: Path for the patched output binary
+
+    Returns:
+        Path to the created output file
+
+    Raises:
+        ElfPatchError: If source is not a valid ELF or has no .hip_fatbin
+        FileNotFoundError: If source file doesn't exist
+    """
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source binary not found: {source_path}")
+
+    data = bytearray(source_path.read_bytes())
+
+    if data[:4] != b"\x7fELF":
+        raise ElfPatchError(f"Not an ELF file: {source_path}")
+
+    e_shoff = struct.unpack("<Q", data[0x28:0x30])[0]
+    e_shentsize = struct.unpack("<H", data[0x3A:0x3C])[0]
+    e_shnum = struct.unpack("<H", data[0x3C:0x3E])[0]
+    e_shstrndx = struct.unpack("<H", data[0x3E:0x40])[0]
+
+    if e_shentsize != 64:
+        raise ElfPatchError(
+            f"Unexpected section header size: {e_shentsize} (expected 64)"
+        )
+
+    shstrtab_hdr_off = e_shoff + e_shstrndx * e_shentsize
+    shstrtab_offset = struct.unpack(
+        "<Q", data[shstrtab_hdr_off + 0x18 : shstrtab_hdr_off + 0x20]
+    )[0]
+
+    for i in range(e_shnum):
+        sh_off = e_shoff + i * e_shentsize
+        sh_name_idx = struct.unpack("<I", data[sh_off : sh_off + 4])[0]
+
+        name_start = shstrtab_offset + sh_name_idx
+        name_end = data.index(0, name_start)
+        section_name = data[name_start:name_end].decode("ascii", errors="replace")
+
+        if section_name == ".hip_fatbin":
+            # sh_type lives at offset 0x04 in Elf64_Shdr; SHT_NOBITS == 8.
+            struct.pack_into("<I", data, sh_off + 0x04, 8)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(data)
+            return output_path
+
+    raise ElfPatchError(f"No .hip_fatbin section found in: {source_path}")
