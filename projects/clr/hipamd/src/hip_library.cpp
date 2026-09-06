@@ -426,7 +426,8 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
       HIP_RETURN(hipErrorInvalidValue);
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      if ((value < 0) || (value > (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
+      if ((value < 0) || (static_cast<size_t>(value) >
+                          (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       wrkGrpInfo->maxDynamicSharedSizeBytes_ = value;

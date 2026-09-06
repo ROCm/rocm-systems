@@ -58,7 +58,7 @@ class Var {
   // Types of variable
   enum DeviceVarKind { DVK_Variable = 0, DVK_Surface, DVK_Texture, DVK_Managed };
 
-  Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
+  Var(const std::string& name, DeviceVarKind dVarKind, size_t size,
       FatBinaryInfo** modules = nullptr);
 
   Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t size, unsigned align,
@@ -96,8 +96,6 @@ class Var {
   std::string name_;                //!< Symbol name for code-object lookup (not a unique key)
   DeviceVarKind dVarKind_;          //!< Classification: regular, surface, texture, or managed
   size_t size_;                     //!< Size of the variable in bytes
-  int type_;                        //!< Channel type (textures/surfaces only)
-  int norm_;                        //!< Normalisation flag (textures/surfaces only)
   FatBinaryInfo** modules_;         //!< Owning fat binary; nullptr for dynamic COs
   void* managedVarPtr_;             //!< Host pointer to managed-memory allocation (DVK_Managed)
   size_t align_;                    //!< Alignment of the managed allocation in bytes

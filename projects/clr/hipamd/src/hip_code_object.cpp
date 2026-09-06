@@ -52,8 +52,8 @@ DynCO::~DynCO() {
 
   for (auto& elem : vars_) {
     if (elem.second->GetVarKind() == Var::DVK_Managed) {
-      hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
-      assert(err == hipSuccess);
+      [[maybe_unused]] hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
+      assert(err == hipSuccess && "Failed to free managed variable pointer");
     }
 
     delete elem.second;
@@ -231,7 +231,7 @@ hipError_t DynCO::populateDynGlobalVars() {
 
   for (auto& elem : var_names) {
     vars_.insert(
-        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, 0, 0, nullptr)));
+        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, nullptr)));
   }
 
   for (auto& elem : var_names) {
@@ -400,7 +400,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   auto managedVarsIter = managedVars_.find(module);
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
-      hipError_t err = hipSuccess;
+      [[maybe_unused]] hipError_t err = hipSuccess;
       if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
         err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {

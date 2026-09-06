@@ -1984,10 +1984,8 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
 
 amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData) {
   size_t nlen = 0;
-  size_t* userDataInfo = nullptr;
   amd_comgr_status_t status;
   amd_comgr_symbol_type_t type;
-  std::vector<std::string>* var_names = nullptr;
 
   /* Unpack the user data */
   SymbolInfo* sym_info = reinterpret_cast<SymbolInfo*>(userData);

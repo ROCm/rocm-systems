@@ -388,7 +388,7 @@ class Device : public NullDevice {
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
-    if ((index < 0) || (index >= cpu_agents_.size())) {
+    if ((index < 0) || (static_cast<size_t>(index) >= cpu_agents_.size())) {
       // Return default CPU agent
       return cpu_agent_info_->agent;
     }
@@ -559,7 +559,7 @@ class Device : public NullDevice {
   bool addMapTarget(amd::Memory* memory) const;
 
   //! Returns a ROC memory object from AMD memory object
-  roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
+  [[nodiscard]] roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
   //! Create internal blit program

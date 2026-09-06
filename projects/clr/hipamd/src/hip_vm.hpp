@@ -24,12 +24,11 @@ int VmmOwnerDeviceIndex(const hipMemAllocationProp& prop);
 
 class GenericAllocation : public amd::RuntimeObject {
   amd::Memory& phys_mem_ref_;        //<! Physical memory object
-  size_t size_;                      //<! Allocated size
   hipMemAllocationProp properties_;  //<! Allocation Properties
 
  public:
-  GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop)
-      : phys_mem_ref_(phys_mem_ref), size_(size), properties_(prop) {}
+  GenericAllocation(amd::Memory& phys_mem_ref, const hipMemAllocationProp& prop)
+      : phys_mem_ref_(phys_mem_ref), properties_(prop) {}
   ~GenericAllocation() {
     // Host-backed allocations (Host / HostNuma / HostNumaCurrent) are allocated on
     // host_context; only Device allocations live on a per-device context indexed by

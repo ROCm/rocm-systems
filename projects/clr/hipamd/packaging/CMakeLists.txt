@@ -117,8 +117,19 @@ install(FILES ${CMAKE_BINARY_DIR}/hipamd/hip-config-nvidia.cmake DESTINATION ${C
 find_program(DOXYGEN_EXE doxygen)
 if(DOXYGEN_EXE)
     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
+        # doxy.cfg's INPUT/EXAMPLE_PATH/IMAGE_PATH entries are relative to the
+        # config's own directory, so doxygen must be run from there or the paths
+        # fail to resolve. Running from there would send the relative
+        # OUTPUT_DIRECTORY into the source tree, so emit a wrapper config that
+        # includes doxy.cfg and overrides OUTPUT_DIRECTORY to the build dir where
+        # the install() below expects the generated HTML.
+        set(DOXYGEN_WRAPPER_CFG "${CMAKE_CURRENT_BINARY_DIR}/doxy_build.cfg")
+        file(WRITE "${DOXYGEN_WRAPPER_CFG}"
+            "@INCLUDE = ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg\n"
+            "OUTPUT_DIRECTORY = ${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI\n")
         add_custom_target(build_doxygen ALL
-            COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg)
+            COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${DOXYGEN_WRAPPER_CFG}
+            WORKING_DIRECTORY ${HIP_COMMON_DIR}/docs/doxygen-input)
     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
         add_custom_target(build_doxygen ALL
             COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile)

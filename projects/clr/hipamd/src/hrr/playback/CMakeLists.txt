@@ -48,6 +48,16 @@ target_compile_definitions(hrr-playback PRIVATE
   __HIP_PLATFORM_AMD__
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
+target_link_libraries(hrr-playback PRIVATE clr_warnings)
+# The playback tool replays captured traces verbatim, which legitimately calls
+# deprecated HIP entry points (hipTexRefGetArray, hipMallocHost, ...). Keep the
+# target strict under -Werror (via clr_warnings), but disable
+# -Wdeprecated-declarations entirely so those intentional calls don't warn — the
+# project-wide -Wno-error softening leaves them as noisy warnings, which isn't
+# applicable here.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr-playback PRIVATE -Wno-deprecated-declarations)
+endif()
 find_package(Threads REQUIRED)
 target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
 

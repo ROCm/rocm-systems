@@ -107,6 +107,7 @@ if(WIN32)
   target_compile_definitions(rocclr PUBLIC ATI_OS_WIN)
 else()
   target_compile_definitions(rocclr PUBLIC ATI_OS_LINUX)
+  target_link_libraries(rocclr PRIVATE clr_warnings)
 endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)

@@ -108,7 +108,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // location.id is interpreted per location type: a device index for Device, a
   // NUMA node id for HostNuma, and ignored for Host / HostNumaCurrent.
   if (prop->location.type == hipMemLocationTypeDevice) {
-    if (prop->location.id < 0 || prop->location.id >= g_devices.size()) {
+    if (prop->location.id < 0 || static_cast<size_t>(prop->location.id) >= g_devices.size()) {
       HIP_RETURN(hipErrorInvalidDevice);
     }
   } else if (prop->location.type == hipMemLocationTypeHostNuma) {
@@ -189,7 +189,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
       (prop->location.type == hipMemLocationTypeDevice) ? prop->location.id : dev->deviceId();
   phys_mem_obj->getUserData().locationType = prop->location.type;
   phys_mem_obj->getUserData().numaNode = numaNode;
-  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
+  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, *prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   HIP_RETURN(hipSuccess);
@@ -242,7 +242,8 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
   HIP_INIT_API(hipMemGetAccess, flags, location, ptr);
 
   if (flags == nullptr || location == nullptr || ptr == nullptr ||
-      location->type != hipMemLocationTypeDevice || location->id >= g_devices.size()) {
+      location->type != hipMemLocationTypeDevice ||
+      static_cast<size_t>(location->id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue)
   }
 
@@ -264,14 +265,14 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
 
   HIP_INIT_API(hipMemGetAllocationGranularity, granularity, prop, option);
 
-  if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
-      prop->type != hipMemAllocationTypeUncached) ||
+  if (granularity == nullptr || prop == nullptr ||
+      (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached) ||
       (prop->location.type != hipMemLocationTypeDevice &&
        prop->location.type != hipMemLocationTypeHost &&
        prop->location.type != hipMemLocationTypeHostNuma &&
        prop->location.type != hipMemLocationTypeHostNumaCurrent) ||
       (prop->location.type == hipMemLocationTypeDevice &&
-       prop->location.id >= g_devices.size()) ||
+       static_cast<size_t>(prop->location.id) >= g_devices.size()) ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -329,7 +330,7 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   prop.requestedHandleTypes = shHandleType;
 
   phys_mem_obj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
-  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, 0, prop);
+  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   if (!amd::MemObjMap::FindMemObj(phys_mem_obj->getSvmPtr())) {
@@ -501,7 +502,8 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
     int numaNode = -1;
     amd::Device* accessDev = nullptr;
     if (accessLocationType == hipMemLocationTypeDevice) {
-      if (desc[desc_idx].location.id < 0 || desc[desc_idx].location.id >= g_devices.size()) {
+      if (desc[desc_idx].location.id < 0 ||
+          static_cast<size_t>(desc[desc_idx].location.id) >= g_devices.size()) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       accessDev = g_devices[desc[desc_idx].location.id]->devices()[0];

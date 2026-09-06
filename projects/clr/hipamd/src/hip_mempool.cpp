@@ -33,7 +33,7 @@ hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device) {
   if (mem_pool == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (device < 0 || device >= g_devices.size()) {
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
   *mem_pool = reinterpret_cast<hipMemPool_t>(g_devices[device]->GetDefaultMemoryPool());
@@ -43,7 +43,7 @@ hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device) {
 // ================================================================================================
 hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool) {
   HIP_INIT_API(hipDeviceSetMemPool, device, mem_pool);
-  if ((mem_pool == nullptr) || (device >= g_devices.size())) {
+  if ((mem_pool == nullptr) || (static_cast<size_t>(device) >= g_devices.size())) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (!hip::tls.capture_streams_.empty() || !g_captureStreams.empty()) {
@@ -61,7 +61,7 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool) {
 // ================================================================================================
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device) {
   HIP_INIT_API(hipDeviceGetMemPool, mem_pool, device);
-  if ((mem_pool == nullptr) || (device >= g_devices.size())) {
+  if ((mem_pool == nullptr) || (static_cast<size_t>(device) >= g_devices.size())) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   *mem_pool = reinterpret_cast<hipMemPool_t>(g_devices[device]->GetCurrentMemoryPool());
@@ -194,7 +194,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
         event = nullptr;
       } else {
         // Make sure runtime sends a notification to the worker thread
-        auto result = event->ready();
+        (void)event->ready();
       }
     }
 
@@ -248,9 +248,9 @@ hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* de
     HIP_RETURN(hipErrorInvalidDevice);
   }
   auto hip_mem_pool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
-  for (int i = 0; i < count; ++i) {
+  for (size_t i = 0; i < count; ++i) {
     if (desc_list[i].location.type == hipMemLocationTypeDevice) {
-      if (desc_list[i].location.id >= g_devices.size()) {
+      if (static_cast<size_t>(desc_list[i].location.id) >= g_devices.size()) {
         HIP_RETURN(hipErrorInvalidDevice);
       }
       if (desc_list[i].flags == hipMemAccessFlagsProtNone) {
@@ -277,7 +277,7 @@ hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
   }
   auto hip_mem_pool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
   if (location->type == hipMemLocationTypeDevice) {
-    if (location->id >= g_devices.size()) {
+    if (static_cast<size_t>(location->id) >= g_devices.size()) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     auto device = g_devices[location->id];
@@ -301,7 +301,7 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
   }
   // Make sure the pool creation occurs on a valid device
   if ((pool_props->location.type != hipMemLocationTypeDevice) ||
-      (pool_props->location.id >= g_devices.size())) {
+      (static_cast<size_t>(pool_props->location.id) >= g_devices.size())) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -496,7 +496,7 @@ hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (location->id >= g_devices.size()) {
+  if (static_cast<size_t>(location->id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -539,7 +539,7 @@ hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (location->id >= g_devices.size()) {
+  if (static_cast<size_t>(location->id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -564,7 +564,7 @@ hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* locati
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (location->id < 0 || location->id >= g_devices.size()) {
+  if (location->id < 0 || static_cast<std::size_t>(location->id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

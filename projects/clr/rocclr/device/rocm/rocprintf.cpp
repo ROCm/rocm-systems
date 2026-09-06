@@ -429,7 +429,6 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
       return false;
     }
 
-    uint sb = 0;
     uint sbt = 0;
 
     // Handle HIP nonhostcall printf here, However longterm goal

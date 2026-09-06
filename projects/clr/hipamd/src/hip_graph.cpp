@@ -1314,9 +1314,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   // Add temporary node to check if all parallel streams have joined
   hip::GraphNode* pGraphNode;
   pGraphNode = reinterpret_cast<hip::GraphNode*>(new hip::GraphEmptyNode());
-  hipError_t status =
-      ihipGraphAddNode(pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-                       s->GetLastCapturedNodes().size());
+  (void)ihipGraphAddNode(pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                         s->GetLastCapturedNodes().size());
   if (s->GetCaptureGraph()->GetLeafNodeCount() > 1) {
     std::vector<hip::GraphNode*> leafNodes = s->GetCaptureGraph()->GetLeafNodes();
     // Manually added nodes doesnt result in hipErrorStreamCaptureUnjoined. Remove them from leaf
@@ -1765,14 +1764,14 @@ hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* num
     *numNodes = graphNodes.size();
     HIP_RETURN(hipSuccess);
   } else if (*numNodes <= graphNodes.size()) {
-    for (int i = 0; i < *numNodes; i++) {
+    for (size_t i = 0; i < *numNodes; i++) {
       nodes[i] = reinterpret_cast<hipGraphNode_t>(graphNodes[i]);
     }
   } else {
-    for (int i = 0; i < graphNodes.size(); i++) {
+    for (size_t i = 0; i < graphNodes.size(); i++) {
       nodes[i] = reinterpret_cast<hipGraphNode_t>(graphNodes[i]);
     }
-    for (int i = graphNodes.size(); i < *numNodes; i++) {
+    for (size_t i = graphNodes.size(); i < *numNodes; i++) {
       nodes[i] = nullptr;
     }
     *numNodes = graphNodes.size();
@@ -1792,14 +1791,14 @@ hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
     *pNumRootNodes = nodes.size();
     HIP_RETURN(hipSuccess);
   } else if (*pNumRootNodes <= nodes.size()) {
-    for (int i = 0; i < *pNumRootNodes; i++) {
+    for (size_t i = 0; i < *pNumRootNodes; i++) {
       pRootNodes[i] = reinterpret_cast<hipGraphNode_t>(nodes[i]);
     }
   } else {
-    for (int i = 0; i < nodes.size(); i++) {
+    for (size_t i = 0; i < nodes.size(); i++) {
       pRootNodes[i] = reinterpret_cast<hipGraphNode_t>(nodes[i]);
     }
-    for (int i = nodes.size(); i < *pNumRootNodes; i++) {
+    for (size_t i = nodes.size(); i < *pNumRootNodes; i++) {
       pRootNodes[i] = nullptr;
     }
     *pNumRootNodes = nodes.size();
@@ -2106,7 +2105,6 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   hip::ChildGraphNode* childNode = reinterpret_cast<hip::ChildGraphNode*>(clonedNode);
 
   // After SetParams updates node parameters in-place, we need to update the cached AQL packets
-  auto graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
   {
     std::vector<hip::GraphNode*> childGraphNodes;
     childNode->TopologicalOrder(childGraphNodes);
@@ -2238,7 +2236,7 @@ hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_
   }
   std::vector<hip::GraphNode*> depNodes;
   const std::vector<hip::GraphNode*>& graphNodes = s->GetCaptureGraph()->GetNodes();
-  for (int i = 0; i < numDependencies; i++) {
+  for (size_t i = 0; i < numDependencies; i++) {
     if ((deps[i] == nullptr) ||
         std::find(std::begin(graphNodes), std::end(graphNodes), deps[i]) == std::end(graphNodes)) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -2292,18 +2290,18 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
     *numEdges = edges.size();
     HIP_RETURN(hipSuccess);
   } else if (*numEdges <= edges.size()) {
-    for (int i = 0; i < *numEdges; i++) {
+    for (size_t i = 0; i < *numEdges; i++) {
       from[i] = reinterpret_cast<hipGraphNode_t>(edges[i].first);
       to[i] = reinterpret_cast<hipGraphNode_t>(edges[i].second);
     }
   } else {
-    for (int i = 0; i < edges.size(); i++) {
+    for (size_t i = 0; i < edges.size(); i++) {
       from[i] = reinterpret_cast<hipGraphNode_t>(edges[i].first);
       to[i] = reinterpret_cast<hipGraphNode_t>(edges[i].second);
     }
     // If numEdges > actual number of edges, the remaining entries in from and to will be set to
     // NULL
-    for (int i = edges.size(); i < *numEdges; i++) {
+    for (size_t i = edges.size(); i < *numEdges; i++) {
       from[i] = nullptr;
       to[i] = nullptr;
     }
@@ -2325,16 +2323,16 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
     *pNumDependencies = dependencies.size();
     HIP_RETURN(hipSuccess);
   } else if (*pNumDependencies <= dependencies.size()) {
-    for (int i = 0; i < *pNumDependencies; i++) {
+    for (size_t i = 0; i < *pNumDependencies; i++) {
       pDependencies[i] = reinterpret_cast<hipGraphNode_t>(dependencies[i]);
     }
   } else {
-    for (int i = 0; i < dependencies.size(); i++) {
+    for (size_t i = 0; i < dependencies.size(); i++) {
       pDependencies[i] = reinterpret_cast<hipGraphNode_t>(dependencies[i]);
     }
     // pNumDependencies > actual number of dependencies, the remaining entries in pDependencies
     // will be set to NULL
-    for (int i = dependencies.size(); i < *pNumDependencies; i++) {
+    for (size_t i = dependencies.size(); i < *pNumDependencies; i++) {
       pDependencies[i] = nullptr;
     }
     *pNumDependencies = dependencies.size();
@@ -2354,16 +2352,16 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
     *pNumDependentNodes = dependents.size();
     HIP_RETURN(hipSuccess);
   } else if (*pNumDependentNodes <= dependents.size()) {
-    for (int i = 0; i < *pNumDependentNodes; i++) {
+    for (size_t i = 0; i < *pNumDependentNodes; i++) {
       pDependentNodes[i] = reinterpret_cast<hipGraphNode_t>(dependents[i]);
     }
   } else {
-    for (int i = 0; i < dependents.size(); i++) {
+    for (size_t i = 0; i < dependents.size(); i++) {
       pDependentNodes[i] = reinterpret_cast<hipGraphNode_t>(dependents[i]);
     }
     // pNumDependentNodes > actual number of dependents, the remaining entries in pDependentNodes
     // will be set to NULL
-    for (int i = dependents.size(); i < *pNumDependentNodes; i++) {
+    for (size_t i = dependents.size(); i < *pNumDependentNodes; i++) {
       pDependentNodes[i] = nullptr;
     }
     *pNumDependentNodes = dependents.size();
@@ -2860,7 +2858,7 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   }
   if (pNodeParams->poolProps.location.type == hipMemLocationTypeDevice) {
     if (pNodeParams->poolProps.location.id < 0 ||
-        pNodeParams->poolProps.location.id >= g_devices.size()) {
+        static_cast<size_t>(pNodeParams->poolProps.location.id) >= g_devices.size()) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }
@@ -3077,7 +3075,7 @@ hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::UserObject* object = new hip::UserObject(destroy, ptr, flags);
+  hip::UserObject* object = new hip::UserObject(destroy, ptr);
   //! Creating object adds one reference.
   if (initialRefcount > 1) {
     object->increaseRefCount(static_cast<const unsigned int>(initialRefcount - 1));
@@ -3265,7 +3263,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN(hipErrorInvalidValue);
   }
   hipGraphNodeType nodeType = nodeParams->type;
-  hip::GraphNode* node;
+  hip::GraphNode* node = nullptr;
   hipError_t status = hipSuccess;
   hip::GraphMemAllocNode* mem_alloc_node;
   amd::Memory* memory;
@@ -3340,7 +3338,8 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
         HIP_RETURN(hipErrorInvalidValue);
       }
       if (params.poolProps.location.type == hipMemLocationTypeDevice) {
-        if (params.poolProps.location.id < 0 || params.poolProps.location.id >= g_devices.size()) {
+        if (params.poolProps.location.id < 0 ||
+            static_cast<size_t>(params.poolProps.location.id) >= g_devices.size()) {
           HIP_RETURN(hipErrorInvalidValue);
         }
       }

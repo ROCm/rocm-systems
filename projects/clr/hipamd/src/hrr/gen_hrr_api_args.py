@@ -2091,7 +2091,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         return "\n".join(lines) + "\n"
 
     # payload points to the full hrr_args_* struct (header + fields).
-    lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload);")
+    lines.append(f"  [[maybe_unused]] const auto* a = reinterpret_cast<const {sname}*>(payload);")
 
     # Check if this API creates/destroys allocs or handles
     is_alloc_create  = entry.name in _ALLOC_CREATE_APIS

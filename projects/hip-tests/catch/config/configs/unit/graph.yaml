@@ -1513,6 +1513,9 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Priority:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [node]
