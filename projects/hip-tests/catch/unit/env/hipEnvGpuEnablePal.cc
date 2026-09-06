@@ -22,8 +22,8 @@
  * ----------------
  * GPU_ENABLE_PAL | Windows | Linux
  * ---------------|---------|-------
- * Not set        | PAL (1) | ROCr (0)
- * "" (empty)     | PAL (1) | ROCr (0)
+ * Not set        | ROCr (0) | ROCr (0)
+ * "" (empty)     | ROCr (0) | ROCr (0)
  * "0"            | ROCr (0)| ROCr (0)
  * "1"            | PAL (1) | PAL (1)
  * "2"            | Auto (2)| Auto (2)
@@ -59,9 +59,9 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_Default_UsesPlatformDefault) {
   bool rocrInitialized = (output.find("] ROCr backend initialized") != std::string::npos);
 
 #if defined(_WIN32)
-  // Windows: default should use PAL
-  REQUIRE(palInitialized == true);
-  REQUIRE(rocrInitialized == false);
+  // Windows: default should use ROCr
+  REQUIRE(rocrInitialized == true);
+  REQUIRE(palInitialized == false);
 #else
   // Linux: default should use ROCr
   REQUIRE(rocrInitialized == true);
@@ -98,9 +98,9 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_UsesPlatformDefault) {
   bool rocrInitialized = (output.find("] ROCr backend initialized") != std::string::npos);
 
 #if defined(_WIN32)
-  // Windows: empty string should use PAL (platform default)
-  REQUIRE(palInitialized == true);
-  REQUIRE(rocrInitialized == false);
+  // Windows: empty string should use ROCr (platform default)
+  REQUIRE(rocrInitialized == true);
+  REQUIRE(palInitialized == false);
 #else
   // Linux: empty string should use ROCr (platform default)
   REQUIRE(rocrInitialized == true);
