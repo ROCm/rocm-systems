@@ -919,10 +919,10 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids.size(), 1u);
-  EXPECT_EQ(consan_committed_semantic_sites(
-                result, result.coverage_ledger.lowering_commits().front())
-                .size(),
-            2u);
+  EXPECT_EQ(
+      consan_committed_semantic_sites(result, result.coverage_ledger.lowering_commits().front())
+          .size(),
+      2u);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1378,6 +1378,57 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
                                               ROCJITSU_CODE_ARCH_CDNA4);
     EXPECT_NE(std::find(trampoline.begin(), trampoline.end(), move), trampoline.end());
   }
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
+TEST(ConSanMoi, Cdna4SampledRetainsSingleRoleAtomicOverRedundantReleaseHalf) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+      /*scope=*/2, kArch);
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  ASSERT_TRUE(atomic && wait);
+
+  std::vector<uint32_t> text_words(800u, build_s_nop(0, kArch));
+  text_words[0] = 0xd81a0004u;
+  text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
+  auto position = text_words.begin() + 20;
+  position = std::ranges::copy(release, position).out;
+  *position++ = *wait;
+  position = std::ranges::copy(*atomic, position).out;
+  *position++ = *wait;
+  position = std::ranges::copy(acquire, position).out;
+  text_words[40] = 0xd86c0004u;
+  text_words[41] = 0x04000002u; // ds_read_b32 v4, v2 offset:4
+  position = text_words.begin() + 60;
+  position = std::ranges::copy(release, position).out;
+  *position++ = *wait;
+  position = std::ranges::copy(*atomic, position).out;
+  *position++ = *wait;
+  text_words.back() = build_s_endpgm(kArch);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.set_moi_owner_epoch_vgprs(20, 21);
+  options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(8);
+  options.max_patches = 8;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_cdna4_lds_code_object(text_words, "sampled_atomic_role_priority"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            2u)
+      << testing::PrintToString(result.patches) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -6256,7 +6307,7 @@ TEST(ConSanMoi, SampledIncompleteAndDynamicBarriersCannotAdvanceEpoch) {
   }
 }
 
-TEST(ConSanMoi, SampledBarrierWithoutPrecedingSelectedWindowReportsLoweringGap) {
+TEST(ConSanMoi, SampledBarrierBeforeFirstSelectedWindowAdvancesEpoch) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   words[100] = 0xBE804EC1u;
   words[101] = 0xBF94FFFFu;
@@ -6276,17 +6327,27 @@ TEST(ConSanMoi, SampledBarrierWithoutPrecedingSelectedWindowReportsLoweringGap) 
       make_rdna4_lds_code_object(words, "sampled_barrier_before_window"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
-                               &ConSanPatchInfo::kind),
-            0u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(patch->anchor_offset, 101u * sizeof(uint32_t));
   ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
                                   [&](const ConSanBarrierSiteDecision &decision) {
                                     return decision.kind == ConSanSiteDecisionKind::Admitted &&
                                            consan_decision_has_lowering(
                                                result, decision,
-                                               ConSanLoweringOutcomeKind::PlacementRejected);
+                                               ConSanLoweringOutcomeKind::Instrumented);
                                   }));
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto advance =
+      build_v_add_nc_u32_e32(options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+                             options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(advance);
+  EXPECT_NE(std::ranges::find(trampoline, *advance), trampoline.end());
 }
 
 TEST(ConSanMoi, SampledRejectedBarriersStillPreserveAccessOwnerAtEntry) {

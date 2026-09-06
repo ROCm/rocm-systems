@@ -517,6 +517,12 @@ void try_apply_sampled_barrier_sync_patch(
     const ConSanSyncSequence &sequence = *sequence_ptr;
     const std::string_view sequence_container_name =
         result.program_inventory.sync().container_name(sequence);
+    const ConSanBarrierSite *barrier_site =
+        result.program_inventory.program_site<ConSanBarrierSite>(barrier_plan.source_site);
+    if (barrier_site == nullptr) {
+      result.errors.emplace_back("ConSan MOI sampled barrier lost its decoded source");
+      return;
+    }
     std::vector<SampledBarrierWindow> windows;
     bool every_owner_has_window = true;
     std::string owner_lowering_failure;
@@ -581,6 +587,22 @@ void try_apply_sampled_barrier_sync_patch(
         selected_window = SampledBarrierWindow{window->first_slot, window->bank_count};
       }
       if (!selected_window) {
+        // A barrier before the owner's first selected access still has to
+        // advance the sampled epoch. The device body already implements this
+        // case: it observes that the associated window is not Ready, skips
+        // metadata publication, and persists the next epoch. Use the nearest
+        // following window as the static route to that epoch-only path.
+        for (const ConSanSampledStaticAccessMapping *window : owner_windows->second) {
+          const auto distance = sampled_cfg_forward_distance(
+              resource_state, owner_descriptor_file_offset, barrier_site->text_offset,
+              window->access.original_site.original_text_offset);
+          if (!distance || (closest && *closest <= *distance))
+            continue;
+          closest = *distance;
+          selected_window = SampledBarrierWindow{window->first_slot, window->bank_count};
+        }
+      }
+      if (!selected_window) {
         every_owner_has_window = false;
         break;
       }
@@ -611,12 +633,6 @@ void try_apply_sampled_barrier_sync_patch(
     }
     const uint64_t owner_descriptor =
         result.program_inventory.kernel(sequence_owners.front())->descriptor_file_offset;
-    const ConSanBarrierSite *barrier_site =
-        result.program_inventory.program_site<ConSanBarrierSite>(barrier_plan.source_site);
-    if (barrier_site == nullptr) {
-      result.errors.emplace_back("ConSan MOI sampled barrier lost its decoded source");
-      return;
-    }
     candidates.push_back({&sequence, barrier_plan, barrier_site, owner_descriptor,
                           std::move(windows), uses_cluster_workgroup_id});
   }
@@ -1128,10 +1144,28 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // sanitizer's answer. Window indices include their recovered kernel-owner
   // context, so mutually exclusive shared-helper owners remain independent.
   std::vector<bool> rejected(proposed.size(), false);
+  const auto candidate_has_opposite_side = [&](size_t association_index) {
+    const Association &association = proposed[association_index];
+    return std::ranges::any_of(proposed, [&](const Association &other) {
+      return other.candidate_index == association.candidate_index && other.side != association.side;
+    });
+  };
   for (size_t i = 0; i < proposed.size(); ++i) {
     for (size_t j = i + 1u; j < proposed.size(); ++j) {
       if (proposed[i].window_index != proposed[j].window_index)
         continue;
+      // An acquire-release operation can have independent release and acquire
+      // payload associations. If one of those halves competes with the only
+      // association of a single-role atomic, retain the single-role edge: the
+      // acquire-release operation remains covered by its opposite half, while
+      // rejecting the other edge would drop an admitted atomic entirely.
+      const bool lhs_has_opposite_side = candidate_has_opposite_side(i);
+      const bool rhs_has_opposite_side = candidate_has_opposite_side(j);
+      if (proposed[i].candidate_index != proposed[j].candidate_index &&
+          lhs_has_opposite_side != rhs_has_opposite_side) {
+        rejected[lhs_has_opposite_side ? i : j] = true;
+        continue;
+      }
       if (proposed[i].distance < proposed[j].distance)
         rejected[j] = true;
       else if (proposed[j].distance < proposed[i].distance)
@@ -1168,6 +1202,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         rejected[i] = rejected[j] = true;
     }
   }
+
   std::vector<Candidate> associated;
   // One physical atomic patch can carry both directional associations.
   const size_t static_patch_budget = std::min<size_t>(options.max_patches, candidates.size());
@@ -1187,8 +1222,22 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     const std::optional<size_t> primary =
         acquire_association ? acquire_association : release_association;
-    if (!primary)
+    if (!primary) {
+      const size_t proposed_count =
+          std::ranges::count_if(proposed, [&](const Association &association) {
+            return association.candidate_index == candidate_index;
+          });
+      const size_t rejected_count = std::ranges::count_if(
+          std::views::iota(size_t{0}, proposed.size()), [&](size_t association_index) {
+            return proposed[association_index].candidate_index == candidate_index &&
+                   rejected[association_index];
+          });
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync has no surviving causal-window association at text " +
+          std::to_string(candidates[candidate_index].source.site.text_offset) + " (proposed=" +
+          std::to_string(proposed_count) + ", rejected=" + std::to_string(rejected_count) + ")");
       continue;
+    }
     Candidate candidate = candidates[candidate_index];
     const Window &primary_window = windows[proposed[*primary].window_index];
     candidate.selected_slot = primary_window.slot;
