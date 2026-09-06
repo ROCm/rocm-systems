@@ -10660,6 +10660,46 @@ hipError_t hipExtDisableLogging();
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
 /**
+ * @brief Return up to @p maxHandles copy-engine handles a kernel on @p device
+ * submits through for copies from @p srcDevice memory to @p dstDevice memory.
+ *
+ * Each handle is a different engine, best first by the same policy as host
+ * copies between those ends, drawn only from the engines in @p engineMask; spread
+ * work over them (for example by blockIdx) to avoid queueing every workgroup
+ * behind one engine. The policy still decides which engines may carry these
+ * copies at all (some are reserved, e.g. for host transfers), so a masked-in
+ * engine it rules out is not returned. Operations on one handle
+ * start in order on its engine; signals say when they finish. A copy between
+ * other ends still works on a handle but may run on a less suitable engine.
+ * Handles are passed to a kernel by value and stay valid until runtime
+ * teardown. Only kernels running on @p device may submit through them: their
+ * rings and state live in that device's memory.
+ *
+ * Fewer than @p maxHandles come back when fewer engines may carry these copies
+ * or the device's ring limit is reached: rings are created on first use, at most
+ * GPU_MAX_SDMA_DEVICE_QUEUES per device, which is 0 by default, so kernel-side
+ * copies are off unless it is set.
+ *
+ * @param [in]  device      HIP device ordinal whose kernels submit.
+ * @param [in]  srcDevice   Device holding the source, or hipCpuDeviceId for host memory.
+ * @param [in]  dstDevice   Device holding the destination, or hipCpuDeviceId for host memory.
+ * @param [in]  engineMask  Bit i allows SDMA engine i (KFD's numbering, as in
+ *                          recommended_sdma_engine_id_mask), e.g. 1 << i for that
+ *                          engine alone; HIP_EXT_COPY_ENGINE_ALL_ENGINES for any.
+ *                          Must not be 0.
+ * @param [in]  maxHandles  Capacity of @p handles; at least 1.
+ * @param [out] handles     Receives the handles, best first.
+ * @param [out] numHandles  Receives how many were written.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice,
+ * #hipErrorNotSupported when no engine in @p engineMask on @p device can take these
+ * copies from a kernel.
+ */
+hipError_t hipExtCopyEngineGetDeviceHandles(int device, int srcDevice, int dstDevice,
+                                            uint64_t engineMask, int maxHandles,
+                                            hipExtCopyEngineDeviceHandle* handles,
+                                            int* numHandles);
+/**
 * @}
 */
 #ifdef __cplusplus
