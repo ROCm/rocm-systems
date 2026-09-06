@@ -62,7 +62,7 @@
 
 cmake_minimum_required(VERSION 3.8)
 
-project(amd-dbgapi VERSION 0.80.0)
+project(amd-dbgapi VERSION 0.81.0)
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -144,6 +144,7 @@ add_library(amd-dbgapi
   src/agent.cpp
   src/architecture.cpp
   src/callbacks.cpp
+  src/cluster.cpp
   src/code_object.cpp
   src/debug.cpp
   src/dispatch.cpp
