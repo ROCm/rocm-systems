@@ -691,6 +691,8 @@ if(BUILD_TESTS)
   )
 
   add_executable(rccl-UnitTestsGdr ${TEST_GDR_SOURCE_FILES})
+  # Ensure hipify-staged headers (including debug.h) exist before compiling this target.
+  add_dependencies(rccl-UnitTestsGdr hipify_all)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
@@ -912,14 +914,12 @@ if(BUILD_TESTS)
         set_target_properties(${test_executable} PROPERTIES LINK_FLAGS "${MPI_CXX_LINK_FLAGS}")
       endif()
     endif()
-    # rccl-UnitTestsGinAnvilPlugin is a self-contained host unit test: it compiles
-    # the plugin sources directly and provides its own stubs (bootstrap/devr/debug/
-    # factory), so it must NOT link librccl.so. When RCCL is built with
-    # ENABLE_ROCSHMEM_GIN=ON but ENABLE_ROCSHMEM=OFF, librccl.so carries unresolved
-    # rocSHMEM symbols (e.g. rocshmem::envvar::log_flags) that would fail at load
-    # time for any executable linking it.
+    # These host-only tests compile code directly with local stubs and must not
+    # link librccl.so (avoids runtime ABI coupling and unresolved rocSHMEM in
+    # plugin-only builds).
     if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin" OR
-       test_executable STREQUAL "rccl-UnitTestsDevRuntime")
+       test_executable STREQUAL "rccl-UnitTestsDevRuntime" OR
+       test_executable STREQUAL "rccl-UnitTestsGdr")
       # Intentionally no rccl link; needed symbols come from the compiled-in
       # source(s) + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
     elseif(BUILD_SHARED_LIBS)
@@ -1016,6 +1016,11 @@ if(BUILD_TESTS)
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
+
+  # gdr_peermem.h lives in src/include. Add late so hipify-staged headers
+  # (e.g. debug.h) from RCCL_COMMON_INCLUDE_DIRS take precedence.
+  target_include_directories(rccl-UnitTestsGdr PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
 
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
   # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,

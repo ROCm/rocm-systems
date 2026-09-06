@@ -15,12 +15,11 @@
 #include <system_error>
 #include <unistd.h>
 
-// Weak stub for ncclDebugLog, required because gdr_peermem.cc uses the debug.h
-// INFO() macro. Debug builds: ncclDebugLog is exported from librccl.so
-// (-fvisibility=default), so the strong shared-library definition wins at link
-// time and this stub is unused. Release builds: ncclDebugLog is hidden in
-// librccl.so (-fvisibility=hidden), so this stub provides the symbol and drops logs.
-// Mirrors the pattern in test/AltRsmiTests.cpp.
+// Weak stubs for debug globals/logging used by debug.h INFO() in gdr_peermem.cc.
+// They keep this test self-contained when it intentionally does not link librccl.so.
+// If linked with librccl.so, the strong shared-library definitions take precedence.
+int __attribute__((weak)) ncclDebugLevel = 0;
+uint64_t __attribute__((weak)) ncclDebugMask = 0;
 void __attribute__((weak)) ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
 namespace RcclUnitTesting {
