@@ -1683,6 +1683,23 @@ class ConSanValidationTest(unittest.TestCase):
         }
         self.assertLessEqual(manifest_workloads, client_workloads)
 
+    def test_pytorch_softmax_retains_cross_target_lds_qualifying_width(self) -> None:
+        client_path = Path(validation.__file__).with_name(
+            "consan_pytorch_validation.py"
+        )
+        tree = ast.parse(client_path.read_text(), filename=str(client_path))
+        width_assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "SOFTMAX_REDUCTION_WIDTH"
+                for target in node.targets
+            )
+        )
+        self.assertEqual(ast.literal_eval(width_assignment.value), 4096)
+
     def test_coverage_output_contract_rejects_unknown_profile(self) -> None:
         workload = replace(
             validation.WORKLOAD_BY_ID["pytorch-torch-mode"],

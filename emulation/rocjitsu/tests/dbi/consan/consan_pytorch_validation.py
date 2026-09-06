@@ -19,6 +19,12 @@ from triton.experimental import gluon
 import triton.experimental.gluon.language as ttgl
 
 
+# Widths below 4096 select a register-only gfx950 softmax implementation and
+# therefore cannot exercise ConSan's LDS engines dynamically. Keep this shared
+# exact-oracle row on the smallest width that qualifies both CDNA4 and CDNA5.
+SOFTMAX_REDUCTION_WIDTH = 4096
+
+
 def _write_oracle_result(outcome: str, detail: object) -> None:
     result_path = os.environ.get("CONSAN_ROW_RESULT_PATH") or os.environ.get(
         "CONSAN_WORKLOAD_RESULT_PATH"
@@ -566,7 +572,9 @@ def _run_norm_softmax(
     norm_input[:, 0] = 3.0
     norm_input[:, 1] = 4.0
     expected_norm = torch.full((8,), 5.0, dtype=torch.float32)
-    softmax_input = torch.linspace(-4.0, 4.0, 1024, dtype=torch.float32).repeat(4, 1)
+    softmax_input = torch.linspace(
+        -4.0, 4.0, SOFTMAX_REDUCTION_WIDTH, dtype=torch.float32
+    ).repeat(4, 1)
     expected_softmax = torch.softmax(softmax_input, dim=1)
     device_norm_input = norm_input.to(device="cuda")
     device_softmax_input = softmax_input.to(device="cuda")
