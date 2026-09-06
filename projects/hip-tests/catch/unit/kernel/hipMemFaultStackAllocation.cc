@@ -13,9 +13,9 @@ Testcase Scenarios :
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
-const size_t N = 100000;
+static size_t memFaultN() { return isQuickLevel() ? 10000 : 100000; }
 
-__global__ void MyKernelConstSize(int* C_d, const int* A_d) {
+__global__ void MyKernelConstSize(int* C_d, const int* A_d, size_t N) {
   constexpr size_t A1size = 1024;
   int A1[A1size];
 
@@ -28,7 +28,7 @@ __global__ void MyKernelConstSize(int* C_d, const int* A_d) {
   }
 }
 
-__global__ void MyKernelVariableSize(int* C_d, const int* A_d) {
+__global__ void MyKernelVariableSize(int* C_d, const int* A_d, size_t N) {
   constexpr size_t A1size = 1024;
   int A1[1024];
 
@@ -41,7 +41,7 @@ __global__ void MyKernelVariableSize(int* C_d, const int* A_d) {
   }
 }
 
-static bool verify(const int* C_d, const int* A_d) {
+static bool verify(const int* C_d, const int* A_d, size_t N) {
   for (size_t i = 0; i < N; i++) {
     if (C_d[i] != A_d[i] + i % 1024) {
       return false;
@@ -53,6 +53,7 @@ static bool verify(const int* C_d, const int* A_d) {
 HIP_TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
   hipError_t ret;
   int *A_d, *C_d;
+  const size_t N = memFaultN();
   const size_t Nbytes = N * sizeof(int);
   const unsigned threadsPerBlock = 256;
   const unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
@@ -67,18 +68,18 @@ HIP_TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
   }
 
   SECTION("Calling Kernel which allocate ConstSize to local array") {
-    hipLaunchKernelGGL(MyKernelConstSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d);
+    hipLaunchKernelGGL(MyKernelConstSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, N);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
     HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(true == verify(C_d, A_d));
+    REQUIRE(true == verify(C_d, A_d, N));
   }
   SECTION("Calling Kernel which allocate VariableSize to local array") {
-    hipLaunchKernelGGL(MyKernelVariableSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d);
+    hipLaunchKernelGGL(MyKernelVariableSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, N);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
     HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(true == verify(C_d, A_d));
+    REQUIRE(true == verify(C_d, A_d, N));
   }
 
   HIP_CHECK(hipFree(C_d));
