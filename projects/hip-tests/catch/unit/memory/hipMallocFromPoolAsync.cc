@@ -472,7 +472,8 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
   // Use the common mempool
   testObj.useCommonMempool(mempool);
   bool results = testObj.hasHostBufs();
-  for (int iter = 0; results && (iter < LAUNCH_ITERATIONS); iter++) {
+  const int launchIters = isQuickLevel() ? 2 : LAUNCH_ITERATIONS;
+  for (int iter = 0; results && (iter < launchIters); iter++) {
     out.iteration = iter;
     // Allocate memory and initialize it on stream
     testObj.allocFromMempool(stream);
@@ -511,7 +512,7 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
 static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue testtype,
                                                             bool bUseDefault = false) {
   // create a stream
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
   // The pool and the streams must live on the same device
@@ -583,7 +584,8 @@ static bool checkReuseFollowEventDepFlag(int N, enum eTestValue testtype) {
   HIP_CHECK(hipStreamCreate(&testStream1));
   HIP_CHECK(hipStreamCreate(&testStream2));
   bool results = true;
-  for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
+  const int launchIters = isQuickLevel() ? 2 : LAUNCH_ITERATIONS;
+  for (int iter = 0; iter < launchIters; iter++) {
     hipEvent_t Event1;
     HIP_CHECK(hipEventCreate(&Event1));
     // Allocate memory and initialize it on testStream1
@@ -629,7 +631,8 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
   HIP_CHECK(hipStreamCreate(&testStream1));
   HIP_CHECK(hipStreamCreate(&testStream2));
   bool results = true;
-  for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
+  const int launchIters = isQuickLevel() ? 2 : LAUNCH_ITERATIONS;
+  for (int iter = 0; iter < launchIters; iter++) {
     // Allocate memory and initialize it on testStream1
     testObj.allocFromMempool(testStream1);
     testObj.transferToMempool(testStream1);
@@ -946,7 +949,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_MultStream_UserStreams) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies) {
-  checkMempoolSupported(0) constexpr int N = 1 << 20;
+  checkMempoolSupported(0) const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true == checkReuseFollowEventDepFlag(N, testDisabled));
   REQUIRE(true == checkReuseFollowEventDepFlag(N, testEnabled));
 }
@@ -963,7 +966,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic) {
-  checkMempoolSupported(0) constexpr int N = 1 << 20;
+  checkMempoolSupported(0) const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true == checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowOpportunistic, testDisabled));
   REQUIRE(true == checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowOpportunistic, testEnabled));
 }
@@ -980,7 +983,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies) {
-  checkMempoolSupported(0) constexpr int N = 1 << 20;
+  checkMempoolSupported(0) const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true ==
           checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowInternalDependencies, testDisabled));
   REQUIRE(true ==

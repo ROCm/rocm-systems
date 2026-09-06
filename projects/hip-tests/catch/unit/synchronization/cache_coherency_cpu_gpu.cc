@@ -106,7 +106,7 @@ static bool cpu_to_gpu_coherency() {
   int *A_res, *A_h, *B_h, *X_h, *Y_h;
   unsigned int hresult = 0;
   unsigned int* dresult = nullptr;
-  size_t N = 1024;
+  size_t N = isQuickLevel() ? 16 : 1024;
   size_t Nbytes = N * sizeof(int);
   int numDevices = 0;
   int deviceFineGrain = 0;
