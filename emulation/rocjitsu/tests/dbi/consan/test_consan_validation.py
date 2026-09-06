@@ -2553,6 +2553,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workloads["tp1-prefill"]["run_timeout_seconds"], 60)
         self.assertTrue(workloads["tp1-decode-combined"]["sharktank_skip_warmup"])
         self.assertEqual(workloads["qwen-prefill"]["run_timeout_seconds"], 360)
+        self.assertEqual(workloads["pytorch-torch-sort"]["run_timeout_seconds"], 360)
         self.assertEqual(
             workloads["tp1-prefill"]["record_replay_runtime_sample_stride"],
             256,
@@ -2649,6 +2650,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),
                 ("gfx1250", "pytorch-torch-histc", 30),
+                ("gfx1250", "pytorch-torch-sort", 360),
                 ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1260),
             )
             for target, workload, expected_timeout in cases:

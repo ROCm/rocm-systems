@@ -1987,6 +1987,13 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 360,
         },
+        # Complete Inline Shadow instrumentation of the unchanged segmented
+        # sort oracle takes about 214 seconds through RocJITsu. Preserve the
+        # full exact workload under a target-specific bound with enough room
+        # for ordinary host-load variance.
+        "pytorch-torch-sort": {
+            "run_timeout_seconds": 360,
+        },
         # The two SGEMM benchmark blocks repeat the same six Exact sizes but
         # have very different solution spaces. Preserve both blocks in every
         # shard and give each size an independent all-client oracle, teardown
