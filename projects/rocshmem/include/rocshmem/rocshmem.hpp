@@ -65,9 +65,12 @@ constexpr char VERSION[] = ROCSHMEM_VERSION;
 /******************************************************************************
  **************************** HOST INTERFACE **********************************
  *****************************************************************************/
-#if defined(HAVE_EXTERNAL_MPI)
+#if defined(MPI_VERSION)
 /**
  * @brief Initialize the rocSHMEM runtime and underlying transport layer.
+ *
+ * @note This declaration is only available when @c <mpi.h> is included
+ *       before @c <rocshmem/rocshmem.hpp>.
  *
  * @param[in] comm      MPI Communicator that rocSHMEM will be using
  *                      If MPI_COMM_NULL, rocSHMEM will be using MPI_COMM_WORLD
@@ -131,10 +134,13 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nu
 __host__ void* rocshmem_ptr(const void *dest, int pe);
 __device__ ATTR_NO_INLINE void* rocshmem_ptr(const void *dest, int pe);
 
-#if defined(HAVE_EXTERNAL_MPI)
+#if defined(MPI_VERSION)
 /**
  * @brief Initialize the rocSHMEM runtime and underlying transport layer
  *        with an attempt to enable the requested thread support.
+ *
+ * @note This declaration is only available when @c <mpi.h> is included
+ *       before @c <rocshmem/rocshmem.hpp>.
  *
  * @param[in] requested Requested thread mode (from rocshmem_thread_ops)
  *                      for host-facing functions.

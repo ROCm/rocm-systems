@@ -164,41 +164,55 @@ int main(int argc, char *argv[]) {
   TesterArguments args(argc, argv);
 
   /***
-   * Determine which runtime to use and select a GPU
+   * Determine which runtime to use and select a GPU.
+   * Probe env vars in priority order; first match wins.
    */
-  char* slr_np = getenv("ROCSHMEM_SLR_NP");
-  char* ompi_local_rank = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
   bool using_slr = false;
 
-  int num_devices = 0;
+  struct { const char* var; bool is_slr; } providers[] = {
+    {"OMPI_COMM_WORLD_LOCAL_RANK", false},  // Open MPI / prterun
+    {"MPI_LOCALRANKID",            false},  // MPICH Hydra
+    {"SLURM_LOCALID",              false},  // SLURM
+    {"FLUX_TASK_LOCAL_ID",         false},  // Flux
+    {"LOCAL_RANK",                 false},  // torchrun / generic
+    {"ROCSHMEM_SLR_NP",            true},   // SLR runtime
+  };
 
-  if (slr_np != nullptr) {
-    // Using SLR runtime — fork before any HIP calls; HIP contexts are not fork-safe
-    using_slr = true;
-    int rank, nranks;
-    init_slr(&rank, &nranks);
-    CHECK_HIP(hipGetDeviceCount(&num_devices));
-    if (rank >= num_devices) {
-      std::cerr << "Error: rank " << rank << " exceeds the number of available GPUs ("
-                << num_devices << "). Aborting.\n";
-      abort();
+  int local_rank = -1;
+  for (auto& p : providers) {
+    const char* v = getenv(p.var);
+    if (v) {
+      using_slr = p.is_slr;
+      if (p.is_slr) {
+        int nranks;
+        init_slr(&local_rank, &nranks);
+      } else {
+        local_rank = atoi(v);
+      }
+      break;
     }
-    CHECK_HIP(hipSetDevice(rank));
-  } else if (ompi_local_rank != nullptr) {
-    // Using MPI runtime
-    CHECK_HIP(hipGetDeviceCount(&num_devices));
-    int device_id = atoi(ompi_local_rank);
-    if (device_id >= num_devices) {
-      std::cerr << "Error: OMPI_COMM_WORLD_LOCAL_RANK=" << device_id
-                << " exceeds the number of available GPUs (" << num_devices
-                << "). Aborting.\n";
-      abort();
-    }
-    CHECK_HIP(hipSetDevice(device_id));
-  } else {
-    printf("Could not determine runtime: set ROCSHMEM_SLR_NP for SLR or use Open MPI `mpiexec`\n");
+  }
+
+  if (local_rank < 0) {
+    fprintf(stderr,
+        "Could not determine local GPU rank.\n"
+        "Supported env vars: OMPI_COMM_WORLD_LOCAL_RANK (Open MPI/prterun), "
+        "MPI_LOCALRANKID (MPICH Hydra), SLURM_LOCALID (SLURM), "
+        "FLUX_TASK_LOCAL_ID (Flux), LOCAL_RANK (torchrun), "
+        "ROCSHMEM_SLR_NP (SLR)\n");
     abort();
   }
+
+  int num_devices = 0;
+  CHECK_HIP(hipGetDeviceCount(&num_devices));
+
+  if (local_rank >= num_devices) {
+    std::cerr << "Error: local rank " << local_rank
+              << " exceeds the number of available GPUs (" << num_devices
+              << "). Aborting.\n";
+    abort();
+  }
+  CHECK_HIP(hipSetDevice(local_rank));
 
   /**
    * Must initialize rocshmem to access arguments needed by the tester.
@@ -285,7 +299,12 @@ int main(int argc, char *argv[]) {
       rocshmem_init();
     }
 #else
-    rocshmem_init();
+  if (getenv("ROCSHMEM_TEST_UUID") && atoi(getenv("ROCSHMEM_TEST_UUID")) != 0) {
+    fprintf(stderr,
+        "Warning: ROCSHMEM_TEST_UUID=1 requested but this binary was built without PMIx support.\n"
+        "  UUID-based initialization is not available. Falling back to rocshmem_init().\n");
+  }
+  rocshmem_init();
 #endif
   }
 

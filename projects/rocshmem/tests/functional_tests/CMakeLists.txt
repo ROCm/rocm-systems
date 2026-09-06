@@ -91,7 +91,9 @@ target_sources(
 if (BUILD_TESTS_ONLY)
   #TODO these find_packages should be performed as-needed in rocshmem-config.cmake
   find_package(hip REQUIRED)
-  find_package(MPI)
+  if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
+    find_package(MPI)
+  endif()
   find_package(Threads REQUIRED)
   find_package(rocshmem REQUIRED)
 
