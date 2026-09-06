@@ -1518,12 +1518,6 @@ class NDRangeKernelCommand : public Command {
   //! Return the kernel NDRange.
   const NDRangeContainer& sizes() const { return sizes_; }
 
-  //! updates kernel NDRange.
-  void setSizes(const size_t* globalWorkOffset, const size_t* globalWorkSize,
-                const size_t* localWorkSize) {
-    sizes_.update(3, globalWorkOffset, globalWorkSize, localWorkSize);
-  }
-
   //! Return the shared memory size
   uint32_t sharedMemBytes() const { return sharedMemBytes_; }
 
@@ -1560,9 +1554,6 @@ class NDRangeKernelCommand : public Command {
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
-
-  //! Set the local work size.
-  void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
 
   //! Set the number of workgroups
   void setNumWorkgroups() {

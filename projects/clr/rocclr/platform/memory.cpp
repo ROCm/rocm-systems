@@ -13,6 +13,7 @@
 #include "device/device.hpp"
 
 #include <atomic>
+#include <cmath>
 
 namespace amd {
 

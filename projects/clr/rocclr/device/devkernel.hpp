@@ -9,11 +9,11 @@
 #include "platform/context.hpp"
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
+#include "platform/ndrange.hpp"
 
 namespace amd {
 class Device;
 class KernelSignature;
-class NDRange;
 
 struct KernelParameterDescriptor {
   enum Desc {
