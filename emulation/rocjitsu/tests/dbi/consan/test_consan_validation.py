@@ -6162,6 +6162,51 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_hip_matmul_fault_targets_fp16_tile_publication(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["hip-matmul-m128-n128-k128"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-fp16-tile-publication",
+        )
+
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        kernel = (
+            "_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_"
+            "Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii"
+        )
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x0000000000003d18", site)
+        self.assertIn("occurrence=0", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        evidence = fault["reach_witness"]["evidence"]
+        self.assertIn("A_shared and B_shared", evidence)
+        self.assertIn("All four waves", evidence)
+
+        supercollider, trials = validation._fault_trials(fault, "supercollider")
+        self.assertEqual(supercollider["detector"], "not_detected")
+        self.assertEqual(supercollider["oracle"], "any")
+        self.assertEqual(
+            supercollider["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
+        inline, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(inline["detector"], "detected")
+        self.assertEqual(inline["oracle"], "any")
+        self.assertEqual(
+            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(
+            inline["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx950_torch_mode_inline_fault_targets_bitonic_stage(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]

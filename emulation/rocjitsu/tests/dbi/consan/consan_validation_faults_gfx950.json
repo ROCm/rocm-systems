@@ -4,6 +4,39 @@
   "evidence_model": "reviewed against fresh target-specific inventories",
   "review_required": false,
   "workloads": {
+    "hip-matmul-m128-n128-k128": {
+      "faults": [
+        {
+          "id": "barrier-drop-fp16-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first s_barrier is the unconditional tile-publication edge in the executed 256-thread FP16 MFMA kernel. All four waves store disjoint portions of A_shared and B_shared before it, then every wave reads peer-produced portions immediately after it for the MFMA loop. The exact 128-cubed validation command necessarily launches this <8,8> specialization."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:a04a57924d96c21b|kernel=_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii|kind=barrier|pc=0x0000000000003d18|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii"
+              }
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii"
+              }
+            }
+          }
+        }
+      ]
+    },
     "qwen-prefill": {
       "faults": [
         {
