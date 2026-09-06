@@ -1262,7 +1262,33 @@ write_rocpd(
     auto insert_process_data = [&db, &tool_metadata, &cfg, node_id, this_pid]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
         auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
-        auto json_env          = get_json_string([](auto& ar) {
+
+        static constexpr auto sensitive_env_keywords =
+            std::array<std::string_view, 10>{"api_key",
+                                             "auth",
+                                             "cert",
+                                             "credential",
+                                             "key",
+                                             "password",
+                                             "private",
+                                             "pwd",
+                                             "secret",
+                                             "token"};
+
+        auto contains_sensitive_keyword = [](std::string_view name) {
+            auto lower_name = std::string{name};
+            std::transform(
+                lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) {
+                    return std::tolower(c);
+                });
+            return std::any_of(sensitive_env_keywords.begin(),
+                               sensitive_env_keywords.end(),
+                               [&lower_name](std::string_view keyword) {
+                                   return lower_name.find(keyword) != std::string::npos;
+                               });
+        };
+
+        auto json_env = get_json_string([&contains_sensitive_keyword](auto& ar) {
             size_t i = 0;
             while(true)
             {
@@ -1272,8 +1298,14 @@ write_rocpd(
                 {
                     auto evar = std::string{itr}.substr(0, pos);
                     auto eval = std::string{itr}.substr(pos + 1);
-                    ROCP_TRACE << "ENV: " << evar << " = " << eval;
-                    if(eval.find(';') != std::string::npos)
+
+                    if(contains_sensitive_keyword(evar))
+                    {
+                        ROCP_INFO << fmt::format(
+                            "Env variable {} was excluded due to potentially sensitive content",
+                            evar);
+                    }
+                    else if(eval.find(';') != std::string::npos)
                     {
                         ROCP_INFO << fmt::format(
                             "Env variable {} was sanitized due to semi-colon in the value", evar);
