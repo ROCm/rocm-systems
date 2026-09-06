@@ -473,24 +473,17 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
  * struct using the shipped library's layout, not ours. If our declaration is
  * smaller the library writes past the end of the caller's object, and any
  * shift moves the fields we read. Neither shows up as a compiler diagnostic,
- * so recognize the three shipped layouts here: a mismatch must be a deliberate
- * update, not a silent memory bug. Some pre-release ROCm 7.14 snapshots used
- * AMDSMI_FABRIC_MAX_LOCAL_GPUS=8, while final ROCm 7.14 and ROCm 7.15 use 16
- * without changing the amd_smi major, and amd_smi 27.x added a second union
- * member that enlarges the outer struct without moving the v1 window.
+ * so recognize the shipped layouts here: a mismatch must be a deliberate
+ * update, not a silent memory bug.
  ************************************************************************/
 constexpr size_t kAmdSmiFabricInfo8GpuSize = 288;
 constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
 constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
 constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
-// The v1 payload in the 16-GPU shape sits after bdf (8) and fabric_version (4) and runs 244 bytes.
-// amd_smi 27.x writes exactly up to its end on the v1 path, which is what separates it at runtime
-// from the older libraries that assign the whole object.
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
 constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
 
-// The one fact the guard and the buffer both turn on.
 constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
 
 constexpr bool amdSmiFabricLayoutIs8Gpu =
@@ -505,14 +498,7 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
 
-// amd_smi 27.x added amdsmi_fabric_info_v2_t to the payload union. That member is larger than v1,
-// so the outer struct grows and reserved moves, but the v1 window we read keeps its 16-GPU
-// offsets. Recognize it by those offsets plus an outer struct that outgrew the 16-GPU size, rather
-// than by a third hardcoded size, so a later v2 growth does not break the build again. The
-// reserved clause keeps the anchor both siblings have: it does not locate the v1 window, but it
-// does keep reserved from overlapping the bytes the detector reads as v1. RCCL
-// does not read v2, and a runtime on this layout is classified by amdSmiDetectFabricRuntimeLayout
-// and routed to sysfs by amd_smi_ensureFabricInitialized.
+// 27.x enlarged the union without moving the v1 window. No exact size, so a later v2 growth does not break the build.
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
   sizeof(amdsmi_fabric_info_v1_t) == 244 && kAmdSmiFabricHeaderIsExtended &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
@@ -596,19 +582,9 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
   }
 }
 
-// amd_smi shipped several payload sizes under the same SONAME. Fill a canary buffer, let the
-// library write into it, then identify the runtime by how far the canary survived. The three
-// shipped implementations write different extents: 26.x value-initializes a local struct and
-// assigns the complete object, so it writes all 288 or all 320 bytes, while 27.x assigns
-// field-wise and stops after the v1 payload at kAmdSmiFabricV1PayloadEnd.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
-// Never smaller than the struct our header declares, because amdSmiFabricInfoBufferAsInfo
-// reinterpret_casts the array to amdsmi_fabric_info_t* and a 320-byte array cannot name a
-// 552-byte object. The floor is also never below the largest layout we classify. Note it carries
-// no slack beyond that, so on a 16-GPU header the detector's upper window is empty and a runtime
-// that wrote past 320 would not be distinguished from one that stopped there. Reaching that case
-// means the library already overran a stack buffer, which no shipped runtime does.
+// Must cover the declared struct: amdSmiFabricInfoBufferAsInfo casts the array to amdsmi_fabric_info_t*.
 constexpr size_t kAmdSmiFabricInfoBufferSize =
   kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
 
@@ -623,10 +599,7 @@ enum class amdSmiFabricRuntimeLayout {
   Unknown,
 };
 
-// Canary everywhere except the request header. bdf and fabric_version are zeroed so the probe asks
-// for exactly what the per-device call at amd_smi_ensureFabricInitialized asks for; leaving the
-// canary in fabric_version would send 0xA5A5A5A5 and measure a request RCCL never makes. The zeroed
-// prefix is excluded from the detector's windows, so it is never mistaken for a library write.
+// Zero the request header so the probe asks what the per-device call asks; a canary fabric_version selects nothing.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
   memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
@@ -636,7 +609,6 @@ inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer
   return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
 }
 
-// All bytes still canary: the runtime did not write anywhere in this window.
 inline bool amdSmiFabricWindowAllCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
   for (size_t i = begin; i < end; ++i) {
     if (buffer.bytes[i] != kAmdSmiFabricBufferCanary) {
@@ -646,9 +618,6 @@ inline bool amdSmiFabricWindowAllCanary(const amdSmiFabricInfoBuffer& buffer, si
   return true;
 }
 
-// No byte still canary: the runtime wrote all of this window, whatever the bytes say. Not the
-// negation of the predicate above; for a window wider than one byte both can be false, and on an
-// empty window both are true.
 inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
   for (size_t i = begin; i < end; ++i) {
     if (buffer.bytes[i] == kAmdSmiFabricBufferCanary) {
@@ -658,29 +627,14 @@ inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, siz
   return true;
 }
 
-// Windows must stay ordered and non-empty, or an arm silently stops discriminating.
 static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
                 kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricInfo8GpuSize &&
                 kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricInfo16GpuSize &&
                 kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
               "fabric probe windows are out of order");
 
-// Identify the runtime by its write extent, which is the only thing all three shipped libraries
-// differ in observably:
-//
-//   256 bytes : 27.x, field-wise up to the end of the v1 payload
-//   288 bytes : 8-GPU, whole-object assign
-//   320 bytes : 16-GPU, whole-object assign
-//
-// Each arm confirms a layout instead of inferring it: everything below the boundary must have been
-// written and everything above it must not have been. Anything else, including a sparse or short
-// write and a call that wrote nothing, is Unknown and falls back to sysfs. Identifying a layout by
-// elimination would send an unrecognized runtime down the typed path, which is the one outcome the
-// probe exists to prevent.
-//
-// The upper window of the last arm is empty when the build header is not extended, so an
-// over-writing runtime is only rejected on an extended build. Reaching that case at all means the
-// library already overran the buffer, which no shipped runtime does.
+// Write extents: 256 = 27.x field-wise, 288 = 8-GPU whole-object, 320 = 16-GPU whole-object.
+// Each arm confirms both halves rather than inferring by elimination, so a sparse or short write stays Unknown.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
   if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd) &&
       amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
