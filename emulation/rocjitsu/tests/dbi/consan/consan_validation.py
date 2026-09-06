@@ -1898,6 +1898,14 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 120,
         },
+        # Inline Shadow completes the exact segmented-mode oracle in roughly
+        # 43 seconds through gfx950 emulation. The shared 30-second bound is
+        # appropriate for native execution but expires during ordinary
+        # emulator work, so retain the same bounded margin as the neighboring
+        # segmented-sort row.
+        "pytorch-torch-mode": {
+            "run_timeout_seconds": 120,
+        },
         # The exact HIP matmul row launches only six compact workgroups.  None
         # of their current dispatch identities selects a workgroup at the
         # production stride, so the otherwise complete 739-access/109-barrier

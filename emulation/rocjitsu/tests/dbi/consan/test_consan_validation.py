@@ -2446,6 +2446,9 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-torch-sort"]["run_timeout_seconds"], 120
         )
         self.assertEqual(
+            workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120
+        )
+        self.assertEqual(
             workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60
         )
         native_spellings = json.dumps(
@@ -2667,6 +2670,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),
                 ("gfx1250", "pytorch-torch-histc", 30),
+                ("gfx950", "pytorch-torch-mode", 120),
+                ("gfx1250", "pytorch-torch-mode", 30),
                 ("gfx1250", "pytorch-norm-softmax", 60),
                 ("gfx1250", "pytorch-torch-sort", 360),
                 ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1260),
