@@ -6326,6 +6326,46 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_two_tile_streamk_fault_targets_initial_publication(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID[
+            "hip-streamk-two-tile-m256-n256-k256"
+        ]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-initial-tile-publication",
+        )
+
+        kernel = (
+            "_ZN7streamk23two_tile_streamk_kernelILj64ELj256ENS_12gemm_shape_tI"
+            "Li128ELi128ELi16EEENS1_ILi32ELi32ELi16EEENS1_ILi64ELi64ELi1EEENS"
+            "1_ILi2ELi2ELi1EEES5_DF16_DF16_fEEvjjjPKT6_S8_PKT7_PS9_jjjjT8_SD_"
+            "PiPSD_"
+        )
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x00000000000016d8", site)
+        self.assertIn("occurrence=0", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        evidence = fault["reach_witness"]["evidence"]
+        self.assertIn("All four waves", evidence)
+        self.assertIn("peer LDS reads", evidence)
+
+        policy, trials = validation._fault_trials(fault, "supercollider")
+        self.assertEqual(policy["detector"], "not_detected")
+        self.assertEqual(policy["oracle"], "any")
+        self.assertEqual(
+            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx950_torch_mode_inline_fault_targets_bitonic_stage(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
