@@ -6207,6 +6207,73 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_hipkittens_faults_target_prologue_publication(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        cases = {
+            "hipkittens-bf16fp32-16x32": {
+                "kernel": "_Z8micro_tk13micro_globalsiii",
+                "pc": "0x000000000000044c",
+                "occurrence": "1",
+                "waves": "eight waves",
+                "profiles": {
+                    "supercollider": ("not_detected", "any"),
+                    "inline-shadow": ("not_detected", "any"),
+                },
+            },
+            "hipkittens-mxfp8-4wave": {
+                "kernel": (
+                    "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens"
+                    "2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1"
+                    "EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_"
+                ),
+                "pc": "0x0000000000001768",
+                "occurrence": "0",
+                "waves": "four waves",
+                "profiles": {
+                    "supercollider": ("not_detected", "any"),
+                    "inline-shadow": ("detected", "any"),
+                },
+            },
+        }
+
+        for workload_id, expected in cases.items():
+            with self.subTest(workload=workload_id):
+                workload = validation.WORKLOAD_BY_ID[workload_id]
+                fault = validation._load_fault(
+                    path,
+                    "gfx950",
+                    workload,
+                    "barrier-drop-prologue-tile-publication",
+                )
+                site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+                self.assertIn(f"kernel={expected['kernel']}", site)
+                self.assertIn(f"pc={expected['pc']}", site)
+                self.assertIn(f"occurrence={expected['occurrence']}", site)
+                self.assertEqual(
+                    fault["reach_witness"]["kind"],
+                    "reviewed-unconditional-final-isa",
+                )
+                evidence = fault["reach_witness"]["evidence"]
+                self.assertIn(expected["waves"], evidence)
+                self.assertIn("peer LDS reads", evidence)
+
+                for profile in ("supercollider", "inline-shadow"):
+                    policy, trials = validation._fault_trials(fault, profile)
+                    detector, oracle = expected["profiles"][profile]
+                    self.assertEqual(policy["detector"], detector)
+                    self.assertEqual(policy["oracle"], oracle)
+                    self.assertEqual(
+                        policy["environment"].get(
+                            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"
+                        ),
+                        "1" if detector == "detected" else None,
+                    )
+                    self.assertEqual(
+                        policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
+                        expected["kernel"],
+                    )
+                    self.assertEqual(trials, [{}])
+
     def test_gfx950_torch_mode_inline_fault_targets_bitonic_stage(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]

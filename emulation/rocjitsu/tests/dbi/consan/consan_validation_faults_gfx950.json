@@ -37,6 +37,71 @@
         }
       ]
     },
+    "hipkittens-bf16fp32-16x32": {
+      "faults": [
+        {
+          "id": "barrier-drop-prologue-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected s_barrier at .text+0x44c is the first unconditional prologue publication edge in the executed 256-thread micro_tk kernel. All eight waves issue cooperative global-to-LDS loads for the first A and B tiles and wait for them before this edge; peer LDS reads begin immediately afterward. The exact 256-cubed validation command necessarily launches this sole specialization. The deterministic emulator schedule may preserve the exact result without producing a conflict, so both engines retain this preselected site as a qualified miss rather than changing selectors after observation."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:749e02187cb971c3|kernel=_Z8micro_tk13micro_globalsiii|kind=barrier|pc=0x000000000000044c|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z8micro_tk13micro_globalsiii"
+              }
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z8micro_tk13micro_globalsiii"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hipkittens-mxfp8-4wave": {
+      "faults": [
+        {
+          "id": "barrier-drop-prologue-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first s_barrier at .text+0x1768 is the unconditional prologue publication edge in the executed 256-thread MXFP8 kernel. All four waves cooperatively load the first two A and B tiles into LDS and wait for those stores before this edge; peer LDS reads begin immediately afterward. The exact 256-cubed validation command necessarily launches this sole specialization. SuperCollider's deterministic emulator schedule may preserve the exact result without producing a conflict, so that engine retains this preselected site as a qualified miss rather than changing selectors after observation."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:4123db6d959395d7|kernel=_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_|kind=barrier|pc=0x0000000000001768|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_"
+              }
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_"
+              }
+            }
+          }
+        }
+      ]
+    },
     "qwen-prefill": {
       "faults": [
         {
