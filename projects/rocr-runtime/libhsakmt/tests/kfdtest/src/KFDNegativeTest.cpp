@@ -280,3 +280,217 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
 
     TEST_END
 }
+
+/**
+ * Test compute queue reset with invalid opcode
+ *
+ * This test validates that an invalid PM4 opcode triggers queue reset.
+ */
+TEST_F(KFDNegativeTest, ComputeQueueInvalidOpcode) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    const HsaNodeProperties *nodeProps = m_NodeInfo.GetNodeProperties(defaultGPUNode);
+    bool perQueueResetSupported = nodeProps->Capability.ui32.PerQueueResetSupported;
+
+    if (perQueueResetSupported) {
+        int pipefd[2];
+        pipe(pipefd);
+
+        pid_t childPid = fork();
+
+        if (childPid == 0) {
+            // Child process: submit bad packet with invalid opcode
+            KFDBaseComponentTest::TearDown();
+            KFDBaseComponentTest::SetUp();
+
+            LOG() << "Child ==> Wait on parent to set reset event" << std::endl;
+            char buf;
+            read(pipefd[0], &buf, 1);
+
+            PM4Queue queue;
+            ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+
+            PM4ReleaseMemoryPacket packet = PM4ReleaseMemoryPacket(m_FamilyId, true, 0, 0, false, false, 1);
+
+            // Corrupt the opcode
+            PM4_TYPE_3_HEADER *header = (PM4_TYPE_3_HEADER *)packet.GetPacket();
+            header->opcode = 0xf2;  // Invalid opcode in range 0xf1-0xfb (per IGT test)
+
+            queue.PlaceAndSubmitPacket(packet);
+            LOG() << "Child ==> Launching packet with invalid opcode (0xf2) then dequeue" << std::endl;
+            // Invalid opcode causes silent hang - wait for MES to detect it
+            WaitOnValue(queue.GetResource()->Queue_read_ptr, queue.GetPendingWptr(), g_TestTimeOut);
+            queue.Destroy();
+
+            LOG() << "Child ==> Complete" << std::endl;
+
+            exit(0);
+        } else {
+            int childStatus = 0;
+
+            HsaEvent *resetEvent;
+            ASSERT_SUCCESS(CreateHWExceptionEvent(false, false, defaultGPUNode, &resetEvent));
+
+            char buf = 'x';
+            write(pipefd[1], &buf, 1);
+            LOG() << "Parent ==> Wait on child to launch bad packet" << std::endl;
+            waitpid(childPid, &childStatus, 0);
+
+            // Parent process should not intercept reset event on child queue reset
+            EXPECT_NE(HSAKMT_STATUS_SUCCESS, HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, 100));
+
+            HsaMemoryBuffer destBuf(PAGE_SIZE, defaultGPUNode, false);
+            destBuf.Fill(0xFF);
+            HsaEvent *event;
+            ASSERT_SUCCESS(CreateQueueTypeEvent(false, false, defaultGPUNode, &event));
+
+            PM4Queue queue;
+            ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+
+            LOG() << "Parent ==> Submit queue packet to verify process is healthy" << std::endl;
+            queue.PlaceAndSubmitPacket(PM4WriteDataPacket(destBuf.As<unsigned int*>(), 0, 0));
+            queue.Wait4PacketConsumption(event);
+            EXPECT_TRUE(WaitOnValue(destBuf.As<unsigned int*>(), 0));
+
+            HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+            HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent);
+            EXPECT_SUCCESS(queue.Destroy());
+
+            LOG() << "Parent ==> Complete" << std::endl;
+        }
+    } else {
+        LOG() << "Skipping test: Family ID 0x" << m_FamilyId << " with per-queue reset support = "
+              << perQueueResetSupported << std::endl;
+    }
+
+    TEST_END
+}
+
+/**
+ * Test SDMA queue reset with invalid opcode
+ *
+ * This test validates that an invalid SDMA opcode triggers queue reset.
+ */
+TEST_F(KFDNegativeTest, SDMAQueueInvalidOpcode) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    int gpuNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(gpuNode, 0) << "failed to get default GPU Node";
+
+    const HsaNodeProperties *nodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    int totalEngines = nodeProps->NumSdmaEngines + nodeProps->NumSdmaXgmiEngines;
+    bool perSDMAQueueResetSupported = nodeProps->Capability2.ui32.PerSDMAQueueResetSupported;
+
+    if (perSDMAQueueResetSupported && totalEngines > 0) {
+        int pipe1[2];
+        int pipe2[2];
+        pipe(pipe1);
+        pipe(pipe2);
+
+        LOG() << std::dec << "Running SDMA queue reset with invalid opcode on " << totalEngines
+              << " SDMA engines" << std::endl;
+
+        pid_t childPid = fork();
+
+        if (childPid == 0) {
+            KFDBaseComponentTest::TearDown();
+            KFDBaseComponentTest::SetUp();
+            close(pipe1[1]); // Close write end of pipe1
+            close(pipe2[0]); // Close read end of pipe2
+            HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
+            unsigned int *dest = destBuf.As<unsigned int*>();
+
+            for (int i = 0; i < totalEngines; i++) {
+                // Wait for parent to schedule healthy queue on engine
+                char buf1, buf2 = '0' + i;
+                read(pipe1[0], &buf1, 1);
+                ASSERT_EQ(buf1, buf2);
+
+                // Submit bad queue with invalid opcode and destroy to trigger reset
+                SDMAQueueByEngId queue(i);
+                ASSERT_SUCCESS(queue.Create(gpuNode));
+
+                // Create a normal SDMA packet, then corrupt its opcode directly
+                SDMAWriteDataPacket packet(queue.GetFamilyId(), &dest[0], 0, 6);
+
+                // Corrupt the opcode
+                SDMA_PKT_WRITE_UNTILED *sdmaPacket = (SDMA_PKT_WRITE_UNTILED *)packet.GetPacket();
+                sdmaPacket->HEADER_UNION.op = 0xf2;  // Invalid opcode (per IGT test)
+
+                queue.PlaceAndSubmitPacket(packet);
+                Delay(50);
+                LOG() << std::dec << "Reset SDMA queue on engine " << i
+                      << " with invalid opcode (0xf2)" << std::endl;
+                queue.Destroy();
+
+                // Ack reset to parent and wait for parent to check healthy queue
+                write(pipe2[1], &buf2, 1);
+                read(pipe1[0], &buf1, 1);
+                ASSERT_EQ(buf1, buf2);
+            }
+
+            close(pipe1[0]);
+            close(pipe2[1]);
+            LOG() << "Child ==> Complete" << std::endl;
+            exit(0);
+        } else {
+            int childStatus = 0;
+            close(pipe1[0]); // Close read end of pipe1
+            close(pipe2[1]); // Close write end of pipe2
+
+            HsaMemoryBuffer pollBuf(PAGE_SIZE, gpuNode, false);
+            HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
+            unsigned int *poll = pollBuf.As<unsigned int*>();
+            unsigned int *dest = destBuf.As<unsigned int*>();
+            uint32_t targetDestValue = 0x12345678;
+
+            for (int i = 0; i < totalEngines; i++) {
+                poll[0] = 0;
+                dest[0] = 0;
+                HsaEvent *event;
+                HsaEvent *resetEvent;
+                ASSERT_SUCCESS(CreateHWExceptionEvent(false, false, gpuNode, &resetEvent));
+                ASSERT_SUCCESS(CreateQueueTypeEvent(false, false, gpuNode, &event));
+
+                SDMAQueueByEngId queue(i);
+                ASSERT_SUCCESS(queue.Create(gpuNode));
+
+                // Submit write on poll to maintain non-zero read/write pointer
+                // in engine during reset
+                queue.PlaceAndSubmitPacket(SDMAPollRegMemPacket(&poll[0], 1));
+                queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), &dest[0], targetDestValue));
+
+                // Wait for child to trigger reset on engine
+                char buf1 = '0' + i, buf2;
+                write(pipe1[1], &buf1, 1);
+                read(pipe2[0], &buf2, 1);
+                ASSERT_EQ(buf1, buf2);
+
+                // Expect no reset event, then update poll to trigger write completion check
+                EXPECT_NE(HSAKMT_STATUS_SUCCESS, HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, 100));
+                poll[0] = 1;
+                queue.Wait4PacketConsumption();
+                EXPECT_TRUE(WaitOnValue(&dest[0], targetDestValue));
+                HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+                HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent);
+                EXPECT_SUCCESS(queue.Destroy());
+                write(pipe1[1], &buf1, 1);
+            }
+
+            waitpid(childPid, &childStatus, 0);
+            close(pipe1[1]);
+            close(pipe2[0]);
+            LOG() << "Parent ==> Complete" << std::endl;
+        }
+    } else {
+        LOG() << "Skipping test: Family ID 0x" << m_FamilyId
+              << " with per-sdma queue reset support = "
+              << perSDMAQueueResetSupported
+              << ", total SDMA engines = " << totalEngines << std::endl;
+    }
+
+    TEST_END
+}
