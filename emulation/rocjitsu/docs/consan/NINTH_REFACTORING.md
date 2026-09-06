@@ -703,3 +703,148 @@ work without immediate shrinkage, and shrinkage may justify continued work
 after the major architectural boundaries are sound. Only exhaustion of both
 ends the ninth refactoring. At the present baseline, that condition has not
 been met.
+
+## 12. Completion audit
+
+This section records the result of executing the plan above. Earlier sections
+are retained as the contemporaneous hypothesis and mandate; where they predict
+remaining opportunity, this current-tree audit is authoritative.
+
+At commit `82f08d74b4f`, the governing production implementation contains
+**65,742 lines**: 56,678 in the patch library and 9,064 in the ConSan HSA
+hooks. This is 1,763 lines (2.6 percent) below the ninth-refactoring baseline
+of 67,505. Tests, generated code, build files, documentation, comments, and
+blank lines remain excluded. The relatively modest net deletion understates
+the representation replacement: the campaign introduced stable identities,
+typed products, and boundary tests while deleting the old projections and
+joins they displaced. The broader post-fourth high point was 91,450 governing
+lines, so the implementation is now 25,708 lines smaller than that state.
+
+### 12.1 Required macro questions
+
+1. **Program-site/container/synchronization arena: implemented.**
+   `75fc78105fe` through `5ec94d3ae09` established one decoded-site arena and
+   one executable-container representation. `1a741f4c112` decodes directly
+   into that arena. Subsequent slices made source-site and container handles
+   authoritative throughout synchronization, faults, policy, evidence,
+   placement, and runtime attribution. The former raw-site vectors,
+   access-inventory projection, copied container facts, physical-event reverse
+   lookup, and offset-based operand recovery are gone. `ConSanSyncEvent` and
+   `ConSanSyncSequence` remain intentionally: they are graph vertices and
+   derived hyperedges, not duplicate decoded sites. The event retains derived
+   synchronization semantics and stable graph identity; the sequence retains
+   only sequence-level membership and semantics.
+2. **Typed edit transaction: implemented to its valid boundary; the proposed
+   universal transaction was falsified.** `dd6f42cc918` introduced the shared
+   local text-edit transaction and `996ea1d200c` moved the remaining direct
+   rewrites through it. `debbd574c08` removed the shadow fault-transform
+   stage, while `160a5323933`, `0a792fe5f96`, `1b72dfb0a06`, and
+   `ab0db8b139a` replaced copied perturbation and mutation carrying with typed
+   semantic products. Mutation followed by instrumentation must still cross
+   a real semantic boundary: the mutated image is reinventoried because the
+   second transform must analyze the changed program. Treating that boundary
+   as a source-coordinate overlay would retain the same second analysis and
+   add a virtual-image implementation; it would not delete another lifecycle.
+3. **Probe-program hard pair: falsified; transactional mechanism retained.**
+   `93ad3ad78c9` established sticky transactional instruction emission, and the
+   following emission slices removed manual rollback and repeated failure
+   propagation throughout all engines. A hard-pair audit of the five largest
+   emitters found a shared instruction vocabulary but no shared ten-operation
+   sequence. That vocabulary is already implemented once in the instruction
+   builders and `InstructionSequence`. A further IR would preserve roughly
+   one IR operation per current builder operation and add a lowering pass; it
+   would be an adapter, not a replacement.
+
+### 12.2 Secondary inventory
+
+- Target strategies now own analysis registration, access forms, mnemonic
+  dialect, workgroup-shadow support, scalar placement, and architecture
+  capabilities. Common code no longer infers a synthetic architecture
+  lineage. The remaining 46 target-family predicates are either target
+  registry construction or policy distinctions already represented by the
+  selected profile; another strategy facade has a sub-hundred-line envelope.
+- Shared HSA infrastructure now owns code-object reader registration, file
+  snapshots, automatic report allocation, and API-slot interposition. The
+  remaining ConSan hook flow is sanitizer policy and transform/report
+  lifetime, not a second generic HSA wrapper.
+- `InstructionSequence` and `MoiEmissionRequirement` provide the planned
+  sticky failure and transactional checkpoints. Report-registry lifecycle,
+  bounded record reservation, lane election, runtime gates, and diagnostic
+  aggregation have likewise been consolidated.
+- Link reachability and production-caller audits removed every evidenced
+  obsolete or test-only production operation. All 113 ConSan objects are
+  build-owned; the build asserts that new production sources cannot be left
+  unlisted. Remaining link-discarded definitions are inline operations whose
+  production calls were folded into their callers.
+- A tagged patch-proof variant was rejected after consumer tracing. Geometry,
+  routing, ABI effects, mutation proof, and pristine fault proof already have
+  narrow base contracts. A variant would reduce object slack but require
+  kind-dispatch accessors in final validation and every producer, increasing
+  implementation without removing a proof derivation.
+- The four observation-decision records deliberately retain different typed
+  reason and capability facts. Their common identity and admission vocabulary
+  is already shared. A tagged universal record would replace direct typed
+  vectors with variant filtering across policy, diagnostics, placement, and
+  mode consumers for only a few declaration lines of possible deletion.
+- Register-backed and private-backed prologues share launch-source,
+  workgroup-shadow, dispatch, and instruction-transaction helpers. Their
+  remaining bodies differ because one preserves and repairs entry SGPRs while
+  the other emits private spill/store/wait state. A universal state-writer
+  callback would retain both algorithms. Only a small coordinate-packing
+  fragment is similar, below the threshold for another high-risk prologue
+  rewrite.
+- Independent final validation remains intentionally independent. It
+  redecodes final bytes and rederives resource, ABI, routing, mutation, and
+  evidence claims instead of trusting producer-side plans. A declarative
+  matcher can compress syntax by hundreds of lines, but no duplicate semantic
+  validator or removable validation phase remains.
+- Legacy environment spellings are public compatibility behavior and cannot
+  be retired by an internal refactoring without a product decision. Empty
+  implementation tombstones contribute no governing lines. The remaining
+  local helper opportunities are individually or collectively too small to
+  constitute a useful architectural slice and would return the campaign to
+  the explicitly rejected micro-refactoring plateau.
+
+### 12.3 Exhaustion result
+
+Repeated current-tree audits covered the largest remaining regions: the HSA
+load lifecycle, placement, final validation, synchronization analysis, fault
+injection, prologue emission, every mode emitter, observation policy, and the
+program inventory. They also covered compiled-symbol reachability, build
+ownership, normalized clones, mode instruction subsequences, target
+predicates, failure propagation, configuration compatibility, and the
+historical commits that produced each prior multi-thousand-line deletion.
+
+No parallel representation, alternate transform lifecycle, copied mode
+backend, architecture matrix, dead production reservoir, or internal data
+structure with a credible replacement payoff remains. The tempting
+similarities left in placement, prologue, decision records, and proof records
+encode different constraints or independently derived evidence; merging them
+would add variants and callbacks while retaining their algorithms. This is
+the positive evidence required by the exhaustion criterion, not merely a
+failure to notice another candidate.
+
+The aggressive 20,000-line hypothesis is therefore falsified under the
+preserved product contract. Achieving that reduction from the current tree
+would require removing supported behavior, weakening independent proof,
+breaking compatibility, moving or generating implementation outside the
+count, cosmetic reformatting, or replacing working algorithms with an
+unvalidated ground-up rewrite. None is an architectural shrinkage result.
+Both continuation axes are now exhausted at the scale that justifies another
+refactoring slice: the remaining code can still receive ordinary maintenance,
+but NINTH has no evidenced structural or accumulated cleanup campaign left to
+pursue.
+
+### 12.4 Final validation
+
+The final `ninja -j16` build completed successfully using the local TheRock
+toolchain. The architectural-boundary checker passed. The complete registered
+nonphysical RocJitsu gate then ran with `ctest -LE physical
+--output-on-failure -j16`: CTest attempted 9,494 tests with zero failures, of
+which 9 environment-dependent cases skipped, and reported one additional
+disabled registration. Thus 9,485 tests executed and passed. The gate included
+all 2,918 ConSan simulator registrations across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250. In accordance with the current testing policy, no
+physical-gfx1201 qualification was run for this documentation-only final
+audit; the last production change had already passed the complete 1,568-case
+ConSan binary matrix and the architectural-boundary checker.
