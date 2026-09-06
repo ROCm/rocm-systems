@@ -144,6 +144,10 @@ hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop);
 hipError_t hipEventQuery(hipEvent_t event);
 hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
 hipError_t hipEventSynchronize(hipEvent_t event);
+hipError_t hipExtCopyEngineGetDeviceHandles(int device, int srcDevice, int dstDevice,
+                                            uint64_t engineMask, int maxHandles,
+                                            hipExtCopyEngineDeviceHandle* handles,
+                                            int* numHandles);
 hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
                                         uint32_t* hopcount);
 hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
@@ -1079,6 +1083,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipEventQuery_fn = hip::hipEventQuery;
   ptrDispatchTable->hipEventRecord_fn = hip::hipEventRecord;
   ptrDispatchTable->hipEventSynchronize_fn = hip::hipEventSynchronize;
+  ptrDispatchTable->hipExtCopyEngineGetDeviceHandles_fn = hip::hipExtCopyEngineGetDeviceHandles;
   ptrDispatchTable->hipExtGetLinkTypeAndHopCount_fn = hip::hipExtGetLinkTypeAndHopCount;
   ptrDispatchTable->hipExtLaunchKernel_fn = hip::hipExtLaunchKernel;
   ptrDispatchTable->hipExtLaunchMultiKernelMultiDevice_fn = hip::hipExtLaunchMultiKernelMultiDevice;
@@ -2349,6 +2354,8 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecAffinitySupport_fn, 557);
 
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
 HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtCopyEngineGetDeviceHandles_fn, 559);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2356,9 +2363,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 559)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 560)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 44,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 45,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
