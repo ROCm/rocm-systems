@@ -177,6 +177,13 @@ void Heap::SetAccess(hip::Device* device, bool enable) {
 
 // ================================================================================================
 void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
+  // VMM path calls NullStream() (acquires device lock_) inside lock_pool_ops_.
+  // Device:: methods hold lock_ and then acquire lock_pool_ops_, so calling
+  // NullStream() while holding lock_pool_ops_ creates an AB/BA deadlock.
+  // Pre-fetch outside the lock — NullStream() is lock-free after first init.
+  if (state_.use_vm_heap_) {
+    (void)device_->NullStream(false);
+  }
   std::scoped_lock lock(lock_pool_ops_);
 
   void* dev_ptr = nullptr;
@@ -243,6 +250,13 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
 
 // ================================================================================================
 bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
+  // VMM path calls NullStream() (acquires device lock_) inside lock_pool_ops_.
+  // Device:: methods hold lock_ and then acquire lock_pool_ops_, so calling
+  // NullStream() while holding lock_pool_ops_ creates an AB/BA deadlock.
+  // Pre-fetch outside the lock — NullStream() is lock-free after first init.
+  if (state_.use_vm_heap_) {
+    (void)g_devices[memory->getUserData().deviceId]->NullStream(false);
+  }
   {
     std::scoped_lock lock(lock_pool_ops_);
 
@@ -283,9 +297,6 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
 
     if (ts.refcount_ == 0 && memory->getUserData().vaddr_mem_obj != nullptr) {
       auto va_mem = memory->getUserData().vaddr_mem_obj;
-      if (stream == nullptr) {
-        stream = g_devices[memory->getUserData().deviceId]->NullStream();
-      }
       // Unmap virtual address from memory
       auto cmd = new amd::VirtualMapCommand(*stream, amd::Command::EventWaitList{},
                                             va_mem->getSvmPtr(), va_mem->getSize(), nullptr);
