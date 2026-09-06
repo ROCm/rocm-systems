@@ -3,8 +3,14 @@
 # DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
 # This file belongs in that repo at
 #   .github/workflows/rccl_perf_regression.yml
-# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
-# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
+# It runs on self-hosted org runners (org: ROCm) on the Tensorwave submit host,
+# one per role, registered with --no-default-labels so `runs-on` is the role
+# label alone (adding self-hosted matches no runner and the job queues forever):
+#   rccl-build    tw-gfx950-ainic-ROCm-scale-rccl-build-1
+#   rccl-detect   tw-gfx950-ainic-ROCm-scale-rccl-detect-1
+# They must NOT also carry tw-gfx950-ainic-ROCm-scale-runner, or they pick up
+# GIN/AINIC GPU jobs. Sharing that generic label serialises build+detect+GIN
+# on one agent while the other two sit idle.
 # The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
@@ -68,13 +74,11 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
-    # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
-    # -- see "Runner capacity" in the PR's known gaps. With one runner, this
-    # still shortens how long the 4-node reservation is held per PR.)
     concurrency:
       group: rccl-perf-gate-build
       cancel-in-progress: false
-    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    # Role label only; see file header. Do not add self-hosted.
+    runs-on: [rccl-build]
     timeout-minutes: 60
     outputs:
       config_json: ${{ steps.resolve.outputs.config_json }}
@@ -111,42 +115,119 @@ jobs:
             # waiting for/running its detect step. Templating the shared prod
             # config file in place (the old behavior) would let one PR's build
             # clobber another PR's in-flight detect config -- give every run
-            # its own copy instead.
-            RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
+            # its own copy instead. configs/ is not writable by the
+            # runner user, so copy into a dir we can create on the
+            # world-writable RCCL_CI_ROOT share.
+            mkdir -p "${RCCL_CI_ROOT}/run-configs"
+            RUN_CONFIG="${RCCL_CI_ROOT}/run-configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
             # Set the output before sbatch runs (not after) so the cleanup-on-
             # failure step below can still find this path if sbatch fails.
             echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
-            sbatch --wait \
+            # Submit without --wait and trap scancel: a cancelled GitHub step
+            # otherwise leaves sp_build holding a rccl_ci node until wall clock.
+            # Install the handler *before* sbatch: bash expands ${JOB_ID} when
+            # the trap fires, not when it is installed, so a signal arriving in
+            # the submit window still cancels once the id lands.
+            JOB_ID=""
+            cleanup_build() {
+              trap - EXIT INT TERM HUP
+              if [[ -n "${JOB_ID}" ]]; then
+                echo "==> cancelling sp_build job ${JOB_ID}"
+                scancel "${JOB_ID}" 2>/dev/null || true
+              fi
+            }
+            # A bash trap *returns* to where the signal interrupted, so a
+            # signal-only handler would scancel and then drop straight back
+            # into the poll loop. Exit explicitly (128+SIGTERM) instead.
+            on_signal_build() {
+              cleanup_build
+              exit 143
+            }
+            trap cleanup_build EXIT
+            trap on_signal_build INT TERM HUP
+            JOB_ID="$(sbatch --parsable \
               --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
               --reservation="${SLURM_RESERVATION}" \
-              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch"
+              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch")"
+            # --parsable prints `<id>` or `<id>;<cluster>`, and sacct/scancel
+            # want the bare id; a `;cluster` suffix would make every sacct call
+            # below error into /dev/null and spin to the job timeout. Mirrors
+            # parse_parsable_job_id() in submit_slurm_job.py.
+            JOB_ID="${JOB_ID##*$'\n'}"
+            JOB_ID="${JOB_ID%%;*}"
+            # Persist for the `if: cancelled()` backup step below: GitHub
+            # SIGKILLs the step ~2.5s after SIGTERM, which can beat the trap.
+            printf '%s\n' "${JOB_ID}" > "${RUNNER_TEMP}/sp_build-slurm-job-id"
+            echo "Submitted sp_build job ${JOB_ID}"
+            while true; do
+              state="$(sacct -j "${JOB_ID}" -X -n -P --format=State 2>/dev/null | awk '{print $1; exit}')"
+              case "${state}" in
+                COMPLETED|FAILED|CANCELLED|TIMEOUT|NODE_FAIL|PREEMPTED|OUT_OF_MEMORY|BOOT_FAIL|DEADLINE)
+                  break ;;
+              esac
+              # Sleep in 1s slices: bash does not run a trap while a foreground
+              # external command is executing, so a single `sleep 15` would
+              # delay cleanup_build by up to 14s -- long past the ~2.5s the
+              # runner waits before SIGKILL.
+              for _ in $(seq 15); do sleep 1; done
+            done
+            trap - EXIT INT TERM HUP
+            state="$(sacct -j "${JOB_ID}" -X -n -P --format=State | awk '{print $1; exit}')"
+            if [[ "${state}" != COMPLETED ]]; then
+              echo "ERROR: sp_build job ${JOB_ID} ended in ${state:-unknown}"
+              exit 1
+            fi
           else
             echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: scancel sp_build if GitHub cancelled
+        # Backup for cleanup_build: GitHub gives the step ~2.5s after SIGTERM
+        # before SIGKILL, and a SIGKILL'd bash runs no trap at all. The id file
+        # is written immediately after sbatch, so it is there whenever there is
+        # an allocation to release.
+        if: cancelled()
+        run: |
+          set -euo pipefail
+          id_file="${RUNNER_TEMP}/sp_build-slurm-job-id"
+          if [[ -f "${id_file}" ]]; then
+            job_id="$(tr -d '[:space:]' < "${id_file}")"
+            echo "==> GitHub cancelled; scancel ${job_id}"
+            scancel "${job_id}" || true
+          else
+            echo "==> GitHub cancelled; no sp_build job id (sbatch never returned)"
           fi
 
       - name: Clean up per-run config copy on build failure
         # Covers the case the detect job's own cleanup step can't: if sbatch
         # fails after the per-run config copy was made, `detect` never runs
         # (needs: build), so nothing else removes this file from NFS.
-        if: failure()
+        # cancelled() too: `failure()` alone is false on a cancelled job, which
+        # would leave the copy on NFS forever.
+        if: failure() || cancelled()
         env:
           _CONFIG: ${{ steps.resolve.outputs.config_json }}
         run: |
           case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+            "${RCCL_CI_ROOT}"/run-configs/ci_detect_run_*.json|"${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
   detect:
     needs: build
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Serialise: the pinned calibration nodes can host only one A/B job at a
-    # time, and thresholds are only valid there. Do NOT cancel in-progress (a
-    # running allocation must finish cleanly to release the nodes).
+    # time, and thresholds are only valid there. cancel-in-progress stays false
+    # at the GitHub layer so a superseded PR does not SIGKILL a running detect
+    # and leave the 4-node allocation. Detect submit/cancel lives in ROCm/cvs
+    # (submit_and_poll.sh on the branch linked in the file header); a bash trap
+    # does not run after GitHub SIGKILL (~2.5s), so that script's own cancel
+    # path is the follow-up, not this workflow. Role label only; see file
+    # header. Do not add self-hosted.
     concurrency:
       group: rccl-perf-gate-pinned-nodes
       cancel-in-progress: false
-    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    runs-on: [rccl-detect]
     timeout-minutes: 540
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
@@ -200,7 +281,7 @@ jobs:
           _CONFIG: ${{ needs.build.outputs.config_json }}
         run: |
           case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+            "${RCCL_CI_ROOT}"/run-configs/ci_detect_run_*.json|"${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
       - name: Gate on detector verdict

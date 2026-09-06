@@ -326,14 +326,28 @@ jobs:
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_WORKDIR}/.ci-out/cache"
           mkdir -p "${RCCL_DEVICE_API_CACHE}"/{ompi,downloads}
           ci_lib="${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib"
-          # submit_slurm_job.py does sbatch --wait + sacct cross-check (a bare
-          # --wait exits 0 even for scheduler-killed jobs).
-          python3 "${ci_lib}/submit_slurm_job.py" \
+          # exec: GHA cancel sends SIGINT/SIGTERM to this step's PID. Without
+          # exec that is bash, which does not run the Python handler and is
+          # SIGKILL'd after 2.5s, leaving the Slurm job running.
+          exec python3 "${ci_lib}/submit_slurm_job.py" \
             --script "${ci_lib}/${SUITE}.sbatch" \
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
             --partition "${RCCL_SLURM_PARTITION}" \
             --reservation "${RCCL_SLURM_RESERVATION}" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
+
+      - name: scancel Slurm job if GitHub cancelled
+        if: cancelled()
+        run: |
+          set -euo pipefail
+          id_file="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/slurm-job-id"
+          if [[ -f "${id_file}" ]]; then
+            job_id="$(tr -d '[:space:]' < "${id_file}")"
+            echo "==> GitHub cancelled; scancel ${job_id}"
+            scancel "${job_id}" || true
+          else
+            echo "==> GitHub cancelled; no slurm-job-id file (sbatch never returned)"
+          fi
 
       - name: Dump compute-node logs
         if: always()
