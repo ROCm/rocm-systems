@@ -48,6 +48,11 @@ try:
         rocshmem_buffer_unregister,
         rocshmem_buffer_unregister_all,
         rocshmem_ptr,
+        rocshmem_query_qp_info,
+        rocshmem_qp_introspect_available,
+        rocshmem_qp_introspect_provider,
+        QpInfo,
+        QpInfoVendor,
         rocshmem_barrier_all,
         rocshmem_barrier,
         rocshmem_barrier_all_on_stream,
@@ -237,6 +242,9 @@ __all__ = [
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
     'TeamConfig',
+    # GDA queue-pair introspection
+    'QpInfo',
+    'QpInfoVendor',
     # Core framework-agnostic symmetric memory
     'SymmetricBuffer',
     'rocshmem_create_buffer',
