@@ -1891,12 +1891,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # The segmented sort is likewise a compact four-row dispatch. Its
         # current token misses the production stride entirely even though all
         # 56,884 accesses and 6,032 barriers are instrumented. Select each
-        # workgroup for validation. The clean process completes in about 33
-        # seconds and the reviewed diagnostic fault in about 51 seconds, so a
-        # 60-second target envelope bounds both without weakening the cadence.
+        # workgroup for validation. The clean process completes in about 68
+        # seconds through gfx950 emulation, so a 120-second target envelope
+        # bounds it without weakening the cadence.
         "pytorch-torch-sort": {
             "record_replay_runtime_sample_stride": 1,
-            "run_timeout_seconds": 60,
+            "run_timeout_seconds": 120,
         },
         # The exact HIP matmul row launches only six compact workgroups.  None
         # of their current dispatch identities selects a workgroup at the

@@ -2443,7 +2443,7 @@ class ConSanValidationTest(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 60
+            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 120
         )
         self.assertEqual(
             workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60
