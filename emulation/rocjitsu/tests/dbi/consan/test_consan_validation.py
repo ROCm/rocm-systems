@@ -2634,7 +2634,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx950", "tp1-decode-combined", 300),
                 ("gfx1250", "tp1-decode-combined", 180),
                 ("gfx1250", "qwen-prefill", 180),
-                ("gfx950", "tp2-family", 30),
+                ("gfx950", "tp2-family", 300),
                 ("gfx1250", "tp2-family", 180),
                 ("gfx1250", "tp2-decode", 300),
                 ("gfx1250", "tp2-combined", 180),

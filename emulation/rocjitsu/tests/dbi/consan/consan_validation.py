@@ -1839,6 +1839,13 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
         },
+        # Complete SuperCollider coverage of all three TP2 oracles takes
+        # roughly 253 seconds through RocJitsu. The former generic 30-second
+        # bound expired during normal execution before the workload or hook
+        # could publish a verdict.
+        "tp2-family": {
+            "run_timeout_seconds": 300,
+        },
         "clip-bf16": {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
