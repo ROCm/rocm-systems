@@ -1300,6 +1300,9 @@ memory:
   Unit_hipMemPoolSetAccess_NegTst:
     <<: *level_2
     tags: [alloc, P1]
+  Unit_hipMemPoolSetAccess_ValidationMatrix:
+    <<: *level_2
+    tags: [alloc, multigpu]
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
