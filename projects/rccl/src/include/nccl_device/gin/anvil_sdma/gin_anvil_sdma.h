@@ -25,6 +25,12 @@ using nccl::utility::loadConst;
 
 static constexpr int kSdmaDirtyBitWidth = NCCL_GIN_ANVIL_SDMA_DIRTY_BITS;
 
+struct ncclGinAnvilSdmaRequest {
+  uint32_t complete;
+};
+static_assert(sizeof(ncclGinAnvilSdmaRequest) <= sizeof(ncclGinRequest_t),
+              "ncclGinAnvilSdmaRequest must fit in ncclGinRequest_t");
+
 NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
@@ -136,17 +142,23 @@ NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, boo
   if (hasCounter) {
     if (sdmaDataPath && handle != nullptr) {
       ::sdma_anvil::quiet(*handle);
+      // Earlier small puts and PutValue operations use IPC rather than this
+      // queue, so quiet alone does not order all traffic before the signal.
+      NCCL_GIN_THREADFENCE_SYSTEM();
     } else {
-      __threadfence_system();
+      NCCL_GIN_THREADFENCE_SYSTEM();
     }
   } else if (sdmaDataPath && handle != nullptr) {
     ::sdma_anvil::quiet(*handle);
+    // A standalone barrier signal must follow both queued SDMA traffic and
+    // sub-threshold IPC puts issued on the same context.
+    NCCL_GIN_THREADFENCE_SYSTEM();
   } else if (sdmaDataPath) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else {
-    __threadfence_system();
+    NCCL_GIN_THREADFENCE_SYSTEM();
   }
 }
 
@@ -195,8 +207,13 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (hasWins && !useIpcPut) {
       handle = queueHandle(rsCtx, peer, blockId);
       if (handle == nullptr) useIpcPut = true;
+    } else if (!hasWins && (hasSignal || hasCounter)) {
+      // A standalone strong signal is used by GIN barriers to publish completion
+      // of puts issued earlier on this context. Keep it ordered after the peer's
+      // SDMA queue, otherwise the barrier signal can overtake the payload.
+      handle = queueHandle(rsCtx, peer, blockId);
     }
-    bool sdmaDataPath = hasWins && !useIpcPut && handle != nullptr;
+    bool sdmaDataPath = ((!hasWins && handle != nullptr) || (hasWins && !useIpcPut && handle != nullptr));
     bool sdmaFusedSignal = false;
 
     if (hasWins) {
@@ -446,26 +463,95 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
-                                      ncclGinWindow_t, size_t, size_t, bool,
-                                      ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
-    __builtin_trap();
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t remoteWin,
+                                      size_t remoteOff, ncclGinWindow_t localWin, size_t localOff, size_t bytes,
+                                      bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)optFlags;
+    using nccl::gin::anvil::detail::anvilCtxValid;
+    using nccl::gin::anvil::detail::effectiveChannel;
+    using nccl::gin::anvil::detail::markSdmaDirty;
+    using nccl::gin::anvil::detail::queueHandle;
+    using nccl::gin::anvil::detail::resolveRemotePeerVa;
+    using nccl::gin::anvil::ipcPut;
+    using nccl::utility::loadConst;
+
+    if (coop.thread_rank() != 0 || bytes == 0) return;
+
+    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    if (!anvilCtxValid(rsCtx)) return;
+    const int blockId = blockIdx.x + blockIdx.y * gridDim.x;
+    ncclGinAnvilSdmaMemHandle* remoteMh = (ncclGinAnvilSdmaMemHandle*)remoteWin;
+    ncclGinAnvilSdmaMemHandle* localMh = (ncclGinAnvilSdmaMemHandle*)localWin;
+    if (remoteMh == nullptr || localMh == nullptr) return;
+    void* remoteSrc = resolveRemotePeerVa(rsCtx, remoteMh, peer, remoteOff);
+    void* localDst = reinterpret_cast<void*>(loadConst(&localMh->baseAddr) + localOff);
+    if (remoteSrc == nullptr || localDst == nullptr) return;
+
+    size_t threshold = loadConst(&rsCtx->sdmaThreshold);
+    auto* handle = bytes > threshold ? queueHandle(rsCtx, peer, blockId) : nullptr;
+    if (handle == nullptr) {
+      ipcPut(localDst, remoteSrc, bytes);
+      return;
+    }
+
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+    const size_t segMax = gin_sdma::kGinPutSegBytes;
+    const size_t nSeg = gin_sdma::ginPutSegmentCount(bytes, segMax);
+    for (size_t si = 0; si < nSeg; ++si) {
+      const gin_sdma::PutSegment seg = gin_sdma::ginPutSegmentAt(bytes, segMax, si);
+      void* segDst = static_cast<void*>(static_cast<char*>(localDst) + seg.offset);
+      void* segSrc = static_cast<void*>(static_cast<char*>(remoteSrc) + seg.offset);
+      ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
+    }
+    markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
   }
 };
 
 template <>
 struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool,
-                                      ncclGinDescriptorSmem*, uint32_t) {
-    __builtin_trap();
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, int peer, ncclGinRequest_t* outRequest, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, uint32_t optFlags) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)optFlags;
+    using nccl::utility::loadConst;
+    auto* request = reinterpret_cast<nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest*>(outRequest);
+    request->complete = 0;
+
+    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    if (nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
+      uint64_t* dirtyPtr = loadConst(&rsCtx->sdmaDirty);
+      uint64_t dirty =
+        dirtyPtr == nullptr ? 0 : __hip_atomic_load(dirtyPtr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      int numCh = loadConst(&rsCtx->numChannels);
+      auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+      for (int ch = 0; ch < numCh; ++ch) {
+        int bitIdx = peer * numCh + ch;
+        if (bitIdx < 0 || bitIdx >= nccl::gin::anvil::detail::kSdmaDirtyBitWidth) continue;
+        if ((dirty & (1ULL << bitIdx)) == 0) continue;
+        auto* handle = handles == nullptr ? nullptr : loadConst(handles + bitIdx);
+        if (handle != nullptr) ::sdma_anvil::quiet(*handle);
+      }
+    }
+    request->complete = 1;
   }
 };
 
 template <>
 struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool,
-                                      ncclGinDescriptorSmem*, cuda::memory_order, uint32_t*) {
-    __builtin_trap();
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t& request, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)ord;
+    (void)abortFlag;
+    auto& sdmaRequest = reinterpret_cast<nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest&>(request);
+    // FlushAsync completes inline on this backend, so Wait only fences once the
+    // request is already marked complete; there is no async poll loop here.
+    if (sdmaRequest.complete) NCCL_GIN_THREADFENCE_SYSTEM();
   }
 };
 

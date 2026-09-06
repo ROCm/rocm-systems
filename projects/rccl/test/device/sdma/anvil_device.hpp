@@ -5,6 +5,10 @@
 
 namespace sdma_anvil {
 
+// Weak so every HIP TU that includes this stub can device-link on its own,
+// while rccl-UnitTestsFixtures still gets a single merged symbol.
+__device__ unsigned long long g_sdmaStubQuietCount __attribute__((weak)) = 0;
+
 struct SdmaQueueDeviceHandle {
   int tag;
 };
@@ -32,6 +36,9 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
   memcpyDevice(dst, src, size);
 }
 
-__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) { (void)handle; }
+__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
+  (void)handle;
+  atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+}
 
 }  // namespace sdma_anvil
