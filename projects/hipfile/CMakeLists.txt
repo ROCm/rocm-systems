@@ -4,6 +4,8 @@
 
 # Top-level CMake file for AIS
 
+# Temporary no-op change on hipfile to exercise TheRock Multi-arch CI
+
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required(VERSION 3.21)
 
