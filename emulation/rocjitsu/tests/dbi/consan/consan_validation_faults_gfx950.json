@@ -90,6 +90,31 @@
         }
       ]
     },
+    "pytorch-torch-histc": {
+      "faults": [
+        {
+          "id": "barrier-drop-shared-bin-initialization",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first s_barrier is the unconditional publication edge after all waves zero the shared histogram bins and before they begin atomic accumulation in the executed unweighted float32 shared-memory kernelHistogram1D specialization. The 64-bin float32 workload necessarily selects shared memory and launches this specialization, so dropping the edge exposes cross-wave initialization/atomic-update races."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:ea885f80f648cce1|kernel=_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_|kind=barrier|pc=0x0000000000038fc0|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_"
+              }
+            }
+          }
+        }
+      ]
+    },
     "d128-pressure": {
       "faults": [
         {

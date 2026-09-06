@@ -6242,6 +6242,45 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_histc_inline_fault_targets_shared_bin_initialization(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-shared-bin-initialization",
+        )
+
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        kernel = (
+            "_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_"
+            "23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_"
+            "6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_"
+            "13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_"
+            "NSC_IKS6_SE_EElS8_S8_SE_T6_"
+        )
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x0000000000038fc0", site)
+        self.assertIn("occurrence=0", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        evidence = fault["reach_witness"]["evidence"]
+        self.assertIn("zero the shared histogram", evidence)
+        self.assertIn("atomic accumulation", evidence)
+
+        policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(policy["detector"], "not_detected")
+        self.assertEqual(policy["oracle"], "pass")
+        self.assertEqual(
+            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx950_d128_pressure_inline_fault_is_redundant_barrier_miss(
         self,
     ) -> None:
