@@ -13,6 +13,7 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
+#include "hip_mempool_impl.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -167,6 +168,12 @@ hipError_t ihipFree(void* ptr) {
   amd::Memory* memory_object = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (memory_object != nullptr) {
     auto device_id = memory_object->getUserData().deviceId;
+
+    // Already released by a graph mem free node, but retained in MemObjMap for reuse
+    auto* graph_pool = g_devices[device_id]->GetGraphMemoryPool();
+    if (graph_pool != nullptr && graph_pool->IsFreedMemory(memory_object)) {
+      return hipErrorInvalidValue;
+    }
 
     // Find out if memory belongs to any memory pool
     if (!g_devices[device_id]->FreeMemory(memory_object, nullptr)) {
