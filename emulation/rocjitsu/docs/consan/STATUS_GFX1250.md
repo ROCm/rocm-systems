@@ -2,6 +2,8 @@
 
 Status snapshot: 2026-08-26. All rows use RocJitsu with `configs/gfx1250_mi455x.json`; FFM is not used. This balanced clean-tree refresh used source `e355d1479e` and artifacts under `/home/ossci/xx/consan-validation/production-design-revalidation-20260826-*`. Retained green cells keep their previously accepted paired-overhead and reviewed-fault evidence unless stated otherwise.
 
+Post-snapshot gfx1250 emulation revalidation is identified explicitly in the affected cells. Source `e3149e6e852` completed the Sampled `streamk-arrival` and `tree-atomic-or` clean contracts with exact numerical oracles, complete static and dynamic analysis, and zero forbidden diagnostics. The artifacts are `/tmp/consan-validation-gfx1250-sampled-streamk-20260906-b` and `/tmp/consan-validation-gfx1250-sampled-tree-20260906-a`.
+
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
 | Set | Priority | Workload / validation ID | SuperCollider | Record/Replay | Sampled | Inline Shadow |
@@ -14,8 +16,8 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 exact; 18/18 accesses | 🟨 exact/static complete at 18/18 and 8/8, but production cadence emits no replay records | 🟩 exact; 18/18 accesses and 8/8 barriers | 🟩 exact; 18/18 accesses and 4/4 barriers |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 four exact oracles; 24/24 accesses | 🟨 exact/complete, but 3,072 forbidden clean replay diagnostics | 🟩 four exact oracles; 24/24 accesses and 8/8 barriers | 🟥 strict load rejection: dense dispatcher exceeds reserved relay space |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 exact; 18/18 accesses | 🟨 exact/static complete at 18/18 and 8/8, but production cadence emits no replay records | 🟩 exact; 18/18 accesses and 8/8 barriers | 🟩 exact; 18/18 accesses and 4/4 barriers |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4/4 accesses | 🟩 exact; 4/4 accesses, 8/8 barriers, 10/10 atomics, and 16/16 fences | 🟧 exact; only 14/22 aggregate sites supported | 🟩 exact; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4/4 accesses | 🟩 exact; 4/4 accesses, 8/8 barriers, 10/10 atomics, and 16/16 fences | 🟧 exact; only 14/22 aggregate sites supported | 🟩 exact; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4/4 accesses | 🟩 exact; 4/4 accesses, 8/8 barriers, 10/10 atomics, and 16/16 fences | 🟩 gfx1250 emulation exact/complete; 64/64 accesses, 12/12 barriers, 1/1 atomic, and 2/2 fences | 🟩 exact; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4/4 accesses | 🟩 exact; 4/4 accesses, 8/8 barriers, 10/10 atomics, and 16/16 fences | 🟩 gfx1250 emulation exact/complete; 64/64 accesses, 12/12 barriers, 3/3 atomics, and 5/5 fences | 🟩 exact; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | Main E2E | P4 | hip-moi Jakub cooperative matmul (`jakub-attention`) | 🟩 four exact oracles; 70/70 accesses | 🟩 four exact oracles; 70/70 accesses and 8/8 barriers | 🟩 four exact oracles; 70/70 accesses and 8/8 barriers | 🟩 four exact oracles; 70/70 accesses and 4/4 barriers |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 exact; 70/70 accesses | 🟨 timeout-only at 55 s | 🟨 exact; 98/102 aggregate sites supported | 🟨 timeout-only at 55 s |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟩 exact; 42/42 accesses | 🟨 timeout-only at 55 s | 🟨 exact; 70/74 aggregate sites supported | 🟨 timeout-only at 55 s |
