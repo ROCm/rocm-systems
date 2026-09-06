@@ -1,6 +1,7 @@
 {
     "required_tables": [
         {
+            "min_rows": 1,
             "name": "events_args",
             "required_columns": [
                 "event_id",
@@ -9,7 +10,6 @@
                 "parent_stack_id",
                 "correlation_id"
             ],
-            "min_rows": 1,
             "validation_queries": [
                 {
                     "comparison": "greater_than",
@@ -21,6 +21,7 @@
             ]
         },
         {
+            "min_rows": 1,
             "name": "regions",
             "required_columns": [
                 "id",
@@ -28,7 +29,6 @@
                 "category",
                 "name"
             ],
-            "min_rows": 1,
             "validation_queries": [
                 {
                     "comparison": "greater_than",
@@ -40,6 +40,7 @@
             ]
         },
         {
+            "min_rows": 1,
             "name": "rocpd_info_agent",
             "required_columns": [
                 "id",
@@ -49,7 +50,6 @@
                 "type",
                 "name"
             ],
-            "min_rows": 1,
             "validation_queries": [
                 {
                     "comparison": "greater_than",
