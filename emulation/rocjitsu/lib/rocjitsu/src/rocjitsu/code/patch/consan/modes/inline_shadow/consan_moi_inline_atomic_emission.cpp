@@ -937,20 +937,36 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // EXEC mask. Advance a VGPR-backed epoch for the whole wave, but preserve
     // the validated acquire mask for token publication. An empty mask branches
     // around the widening so a failed acquire cannot resurrect inactive lanes.
+    // Private state was initially loaded only for the guest atomic's lanes, so
+    // reload it after widening and write the advanced wave segment back for
+    // every lane before later access caves rematerialize it.
     // Scalar persistent state is already wave-uniform and needs no widening.
     // Saturation stays fail-closed in the token readers.
     const bool widen_consumer_segment = inline_access_present && !plan.persistent_sgprs.epoch();
     std::vector<uint32_t> advance_words;
     InstructionSequence advance_sequence(advance_words);
-    if (widen_consumer_segment)
+    if (widen_consumer_segment) {
       advance_sequence.append(
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch));
+      if (plan.private_state) {
+        advance_sequence.require(advance_sequence.emit_all(
+            instrumentation::build_private_load_b32(plan.owner_epoch_vgprs.epoch,
+                                                    plan.private_state->epoch_offset, arch),
+            instrumentation::build_s_wait_private_load0(arch)));
+      }
+    }
     advance_sequence.append(instrumentation::build_v_add_u32(plan.owner_epoch_vgprs.epoch,
                                                              scalar_positive_inline_u32(1),
                                                              plan.owner_epoch_vgprs.epoch, arch),
                             instrumentation::build_v_min_u32_literal(
                                 plan.owner_epoch_vgprs.epoch, consan_moi_exact_shadow::max_epoch,
                                 plan.owner_epoch_vgprs.epoch, arch));
+    if (widen_consumer_segment && plan.private_state) {
+      advance_sequence.require(advance_sequence.emit_all(
+          instrumentation::build_private_store_b32(plan.owner_epoch_vgprs.epoch,
+                                                   plan.private_state->epoch_offset, arch),
+          instrumentation::build_s_wait_private_store0(arch)));
+    }
     if (widen_consumer_segment)
       advance_sequence.append(instrumentation::build_s_mov_b64(
           kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 16u), arch));

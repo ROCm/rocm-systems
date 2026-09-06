@@ -1110,6 +1110,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
                                               /*byte_offset=*/0u, kArch);
   const auto barrier = build_cdna4_s_barrier(kArch);
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
   const auto wait = build_cdna4_s_wait_flat0(kArch);
   const auto atomic = build_cdna4_flat_atomic_add_u32(
       /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
@@ -1134,6 +1135,9 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   full_pressure_words[cursor++] = *wait;
   std::copy(atomic->begin(), atomic->end(), full_pressure_words.begin() + cursor);
   cursor += atomic->size();
+  full_pressure_words[cursor++] = *wait;
+  std::copy(acquire.begin(), acquire.end(), full_pressure_words.begin() + cursor);
+  cursor += acquire.size();
   for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
     if (sgpr >= 48u && sgpr <= 50u)
       continue;
@@ -1323,6 +1327,55 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
             full_access->private_state_layout->dispatch_id_offset);
   EXPECT_EQ(atomic_patch->private_state_layout->ephemeral_base,
             full_access->private_state_layout->ephemeral_base);
+
+  const auto atomic_resource = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
+    return plan.site_kind == ConSanResourceSiteKind::Atomic &&
+           plan.text_offset == atomic_patch->anchor_offset &&
+           plan.scratch_vgpr == atomic_patch->scratch_vgpr;
+  });
+  ASSERT_NE(atomic_resource, result.resource_plans.end());
+  ASSERT_TRUE(atomic_patch->scratch_vgpr);
+  ASSERT_GE(atomic_resource->scratch_vgpr_count, 6u);
+  const uint16_t materialized_epoch =
+      static_cast<uint16_t>(*atomic_patch->scratch_vgpr + atomic_resource->scratch_vgpr_count - 3u);
+  const auto widen_exec = instrumentation::build_s_mov_b64(
+      kAmdGpuExecLo, consan_moi_impl::kScalarInlineNegativeOneOperand, kArch);
+  const auto load_epoch = instrumentation::build_private_load_b32(
+      materialized_epoch, atomic_patch->private_state_layout->epoch_offset, kArch);
+  const auto wait_load = instrumentation::build_s_wait_private_load0(kArch);
+  const auto advance_epoch = instrumentation::build_v_add_u32(
+      materialized_epoch, scalar_positive_inline_u32(1), materialized_epoch, kArch);
+  const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
+      materialized_epoch, consan_moi_exact_shadow::max_epoch, materialized_epoch, kArch);
+  const auto store_epoch = instrumentation::build_private_store_b32(
+      materialized_epoch, atomic_patch->private_state_layout->epoch_offset, kArch);
+  const auto wait_store = instrumentation::build_s_wait_private_store0(kArch);
+  const auto restore_acquire_exec = instrumentation::build_s_mov_b64(
+      kAmdGpuExecLo, static_cast<uint16_t>(full_assignment->exec_save_sgpr + 16u), kArch);
+  ASSERT_TRUE(widen_exec && load_epoch && wait_load && advance_epoch && saturate_epoch &&
+              store_epoch && wait_store && restore_acquire_exec);
+  std::vector<uint32_t> widened_load{*widen_exec};
+  widened_load.insert(widened_load.end(), load_epoch->begin(), load_epoch->end());
+  widened_load.push_back(*wait_load);
+  std::vector<uint32_t> advance_words(advance_epoch->begin(), advance_epoch->end());
+  advance_words.insert(advance_words.end(), saturate_epoch->begin(), saturate_epoch->end());
+  std::vector<uint32_t> persisted_store(store_epoch->begin(), store_epoch->end());
+  persisted_store.push_back(*wait_store);
+  persisted_store.push_back(*restore_acquire_exec);
+  const std::vector<uint32_t> atomic_words =
+      text_words_at_offset(patched, atomic_patch->trampoline_offset, atomic_patch->trampoline_size);
+  const auto load_position = std::search(atomic_words.begin(), atomic_words.end(),
+                                         widened_load.begin(), widened_load.end());
+  const auto advance_position = std::search(atomic_words.begin(), atomic_words.end(),
+                                            advance_words.begin(), advance_words.end());
+  const auto store_position = std::search(atomic_words.begin(), atomic_words.end(),
+                                          persisted_store.begin(), persisted_store.end());
+  ASSERT_NE(load_position, atomic_words.end());
+  ASSERT_NE(advance_position, atomic_words.end());
+  ASSERT_NE(store_position, atomic_words.end());
+  EXPECT_LT(load_position, advance_position);
+  EXPECT_LT(advance_position, store_position)
+      << "a lane-narrow acquire must update every lane's persistent private consumer segment";
 
   ConSanTransformArtifacts invalid = result;
   const auto invalid_access =
