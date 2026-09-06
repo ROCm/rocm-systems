@@ -25,6 +25,7 @@
 
 #include "libhsakmt.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
@@ -71,7 +72,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 						 bool ManualReset, bool IsSignaled,
 						 HsaEvent **Event)
 {
-	unsigned int event_limit = KFD_SIGNAL_EVENT_LIMIT;
+	uint64_t event_limit = KFD_SIGNAL_EVENT_LIMIT;
 
 	CHECK_KFD_OPEN();
 
@@ -101,7 +102,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 
 	if (hsakmt_is_dgpu && !events_page) {
 		events_page = hsakmt_allocate_exec_aligned_memory_gpu(ctx,
-			KFD_SIGNAL_EVENT_LIMIT * 8, PAGE_SIZE, 0, 0, true, false, true);
+			KFD_SIGNAL_EVENT_LIMIT * sizeof(*events_page), PAGE_SIZE, 0, 0, true, false, true);
 		if (!events_page) {
 			free(e);
 			pthread_mutex_unlock(&hsakmt_mutex);
@@ -122,7 +123,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 	e->EventId = args.event_id;
 
 	if (!events_page && args.event_page_offset > 0) {
-		events_page = mmap(NULL, event_limit * 8, PROT_WRITE | PROT_READ,
+		if (event_limit > SIZE_MAX / sizeof(*events_page)) {
+			free(e);
+			pthread_mutex_unlock(&hsakmt_mutex);
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+		events_page = mmap(NULL, event_limit * sizeof(*events_page), PROT_WRITE | PROT_READ,
 				MAP_SHARED, ctx->fd, args.event_page_offset);
 		if (events_page == MAP_FAILED) {
 			/* old kernels only support 256 events */
