@@ -10,7 +10,31 @@
 
 namespace amd::roc {
 
-bool Kernel::init() { return GetAttrCodePropMetadata(); }
+bool Kernel::init() {
+  if (!GetAttrCodePropMetadata()) {
+    return false;
+  }
+  // Reconcile the requirement with the capability here, at load: the metadata
+  // note is already parsed and pcie_atomics_ was decided at device init. Until
+  // now the two met only in submitKernelInternal, per dispatch, and the refusal
+  // surfaced as hipErrorIllegalState.
+  const amd::KernelSignature& sig = signature();
+  for (uint32_t i = sig.numParameters(); i < sig.numParametersAll(); ++i) {
+    if (sig.at(i).info_.oclObject_ == amd::KernelParameterDescriptor::HiddenHostcallBuffer &&
+        !device().info().pcie_atomics_) {
+      setHostcallUnsatisfiable(true);
+      LogPrintfError("kernel %s declares hidden_hostcall_buffer (device printf/assert) but device %s "
+                     "has no PCIe AtomicOps to the host (hipDeviceAttributeHostNativeAtomicSupported=0); %s",
+                     name().c_str(), device().info().name_,
+                     HIP_HOSTCALL_ALLOW_MISSING
+                         ? "HIP_HOSTCALL_ALLOW_MISSING=1: its launches proceed with a null hostcall "
+                           "buffer, and a hostcall from it will fault"
+                         : "its launches will return hipErrorNotSupported");
+      break;
+    }
+  }
+  return true;
+}
 
 bool Kernel::postLoad() {
   // Set the kernel symbol name and size/alignment based on the kernel metadata
