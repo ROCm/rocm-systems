@@ -760,6 +760,13 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mem_space_teams);
   }
 
+  // Link before GIN/RMA registration. Plugins such as Anvil SDMA resolve the
+  // user VA through ncclDevrGetLsaSelfAddr, which only searches memHead (and
+  // the LSA flat range). Registering after ncclDevCommCreate is legal, so the
+  // in-flight mem must already be on the list. Unlink on the failure path.
+  mem->next = devr->memHead;
+  devr->memHead = mem;
+
   if (devr->ginEnabled) {
     NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail_mem_space_teams);
   } else {
@@ -776,15 +783,24 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
 
-  // Add to list of mems.
-  mem->next = devr->memHead;
-  devr->memHead = mem;
-
   *outMem = mem;
   free(globalSegmentInfo);
   return ret;
 
 fail_mem_space_teams:
+  {
+    struct ncclDevrMemory** ptr = &devr->memHead;
+    while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
+    if (*ptr == mem) *ptr = mem->next;
+  }
+  if (mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  if (mem->rmaHostWins[0] != nullptr) {
+    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }
@@ -792,6 +808,7 @@ fail_mem_space:
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:
   if (mem != nullptr) {
+    free(mem->ginSegmentInfos);
     free(mem->memHandles);
     free(mem->segmentSizes);
     free(mem->lsaNumSegments);
