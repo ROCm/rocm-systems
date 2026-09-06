@@ -4907,13 +4907,16 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
 }
 
 TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
-  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_RDNA4);
-  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(release && acquire);
+  constexpr std::array<uint32_t, 3> kRelease = {
+      0xEE158004u,
+      0x00880000u,
+      0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5], no-return, device
+  };
+  constexpr std::array<uint32_t, 3> kAcquire = {
+      0xEE158004u,
+      0x00980000u,
+      0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5], return, device
+  };
   std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   size_t cursor = 0;
   // Keep sparse scalar values live from the access through both atomics. No
@@ -4929,10 +4932,12 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   constexpr std::array<uint32_t, 3> kGlobalWb = {0xEE0B0000u, 0x00000000u, 0x00000000u};
   std::copy(kGlobalWb.begin(), kGlobalWb.end(), text_words.begin() + cursor);
   cursor += kGlobalWb.size();
-  std::copy(release->begin(), release->end(), text_words.begin() + cursor);
-  cursor += release->size();
-  std::copy(acquire->begin(), acquire->end(), text_words.begin() + cursor);
-  cursor += acquire->size();
+  const size_t release_word = cursor;
+  std::copy(kRelease.begin(), kRelease.end(), text_words.begin() + cursor);
+  cursor += kRelease.size();
+  const size_t acquire_word = cursor;
+  std::copy(kAcquire.begin(), kAcquire.end(), text_words.begin() + cursor);
+  cursor += kAcquire.size();
   constexpr std::array<uint32_t, 3> kGlobalInv = {0xEE0AC000u, 0x00000000u, 0x00000000u};
   std::copy(kGlobalInv.begin(), kGlobalInv.end(), text_words.begin() + cursor);
   cursor += kGlobalInv.size();
@@ -4960,6 +4965,9 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_spill);
   EXPECT_FALSE(assignment.scalar_spill_setup);
+  EXPECT_FALSE(consan_detail::range_overlaps(assignment.exec_save_sgpr,
+                                             kConSanMoiInlineExecSaveSgprCount,
+                                             /*guest scalar address=*/4u, 2u));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
@@ -4973,6 +4981,15 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   std::vector<uint32_t> atomic_only_words = text_words;
   atomic_only_words[lds_access_word] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   atomic_only_words[lds_access_word + 1u] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto flat_release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto flat_acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(flat_release && flat_acquire);
+  std::copy(flat_release->begin(), flat_release->end(), atomic_only_words.begin() + release_word);
+  std::copy(flat_acquire->begin(), flat_acquire->end(), atomic_only_words.begin() + acquire_word);
   MoiOptions atomic_only_options = options;
   atomic_only_options.scratch_vgpr = 82u;
   atomic_only_options.set_moi_owner_epoch_vgprs(80u, 81u);

@@ -2166,6 +2166,40 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       state, site_plans, problem.observation_plan(), problem.inventory(),
       options.moi_initialize_owner_epoch && !inline_layout);
 
+  // A spill-backed Inline window may borrow ordinary live SGPRs because its
+  // guest values are preserved around each probe. Scalar address inputs are
+  // different: ordered-atomic lowering materializes the guest address after
+  // the spill save, so borrowing either input would destroy the address before
+  // it can be captured. Keep those operands out of each owner's spill domain
+  // while still allowing unrelated live scalar state to be borrowed.
+  const auto inline_atomic_scalar_inputs_for =
+      [&](std::span<const ConSanProgramContainerId> owners) {
+        std::vector<MoiSgprRange> ranges;
+        if (!inline_layout)
+          return ranges;
+        for (const ConSanCandidateResourcePlan &plan : site_plans) {
+          if (plan.site_kind != ConSanResourceSiteKind::Atomic ||
+              !std::ranges::any_of(plan.owner_kernel_ids, [&](ConSanProgramContainerId owner) {
+                return std::ranges::find(owners, owner) != owners.end();
+              })) {
+            continue;
+          }
+          for (ConSanProbeIntentId id : plan.intent_ids) {
+            const auto intent = std::ranges::find(problem.observation_plan().probe_intents, id,
+                                                  &ConSanProbeIntent::id);
+            if (intent == problem.observation_plan().probe_intents.end() ||
+                !intent->atomic_lowering_form)
+              continue;
+            const ConSanAtomicLoweringForm &form = *intent->atomic_lowering_form;
+            if (form.scalar_base_sgpr)
+              ranges.push_back({*form.scalar_base_sgpr, 2u});
+            if (form.scalar_offset_sgpr)
+              ranges.push_back({*form.scalar_offset_sgpr, 1u});
+          }
+        }
+        return ranges;
+      };
+
   const uint16_t count = moi_exec_save_sgpr_count(
       resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
       arch);
@@ -2207,6 +2241,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
           it != availability.unavailable_by_kernel_id.end())
         unavailable |= it->second;
     }
+    const std::vector<MoiSgprRange> inline_atomic_scalar_inputs =
+        inline_atomic_scalar_inputs_for(owners);
     // A code-object-wide EXEC window may already have a complete liveness
     // proof while only the persistent dispatch pair excludes this component.
     // Retain that transient window and override just the dispatch
@@ -2246,6 +2282,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       const uint32_t initialized_end = component_contexts->initialized_sgpr_count;
       MoiScalarPlacementDomain component_domain(arch, limit, component_contexts->summaries,
                                                 &unavailable);
+      for (const MoiSgprRange &range : inline_atomic_scalar_inputs)
+        component_domain.occupy(range.base, range.width);
       component_domain.occupy(options.moi_owner_sgpr.base(), 1u);
       component_domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
       if (options.moi_dynamic_stack_spill)
@@ -2344,6 +2382,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       for (const auto &summary : component_contexts->summaries)
         allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
       MoiScalarPlacementDomain branch_domain(arch, allocated_limit, component_contexts->summaries);
+      for (const MoiSgprRange &range : inline_atomic_scalar_inputs)
+        branch_domain.occupy(range.base, range.width);
       if (spill_backed_branch_only) {
         branch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
         branch_domain.occupy(options.moi_scalar_spill_setup
