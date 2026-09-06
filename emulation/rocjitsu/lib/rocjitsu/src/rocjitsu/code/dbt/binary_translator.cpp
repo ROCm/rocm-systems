@@ -4061,6 +4061,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       uint64_t target_begin = 0;
     };
     std::optional<ActiveGeneratedIslandPool> active_generated_island_pool;
+    struct ActiveClientPreservedSourceSpan {
+      uint64_t source_begin = 0;
+      uint64_t source_end = 0;
+      uint64_t target_begin = 0;
+    };
+    std::optional<ActiveClientPreservedSourceSpan> active_client_source_span;
     // reachable_kernel_blocks() materializes reached indices in source order.
     // Pool preservation relies on that ordering while one copied pool spans
     // several reachable slot blocks.
@@ -4069,13 +4075,21 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }));
     for (BasicBlock *block : scope.blocks) {
       uint64_t client_consumed_source_end = 0;
+      if (active_client_source_span &&
+          block->start_offset() >= active_client_source_span->source_end)
+        active_client_source_span.reset();
       std::optional<ActiveGeneratedIslandPool> block_generated_island_pool;
       if (active_generated_island_pool &&
           block->start_offset() < active_generated_island_pool->source_end) {
         block_generated_island_pool = active_generated_island_pool;
       }
       const uint64_t block_target_start =
-          block_generated_island_pool
+          active_client_source_span &&
+                  block->start_offset() >= active_client_source_span->source_begin &&
+                  block->start_offset() < active_client_source_span->source_end
+              ? active_client_source_span->target_begin +
+                    (block->start_offset() - active_client_source_span->source_begin)
+          : block_generated_island_pool
               ? block_generated_island_pool->target_begin +
                     (block->start_offset() - block_generated_island_pool->source_begin)
               : kernel_text.size();
@@ -4091,6 +4105,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
 
+        if (active_client_source_span && offset < active_client_source_span->source_end) {
+          target_offset_by_source_offset.emplace(
+              offset, active_client_source_span->target_begin +
+                          (offset - active_client_source_span->source_begin));
+          continue;
+        }
+        active_client_source_span.reset();
         if (offset < client_consumed_source_end)
           continue;
 
@@ -4244,36 +4265,118 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           if (client_rewrite) {
             const uint32_t client_source_size =
                 client_rewrite->source_size == 0u ? inst_size : client_rewrite->source_size;
-            bool source_span_valid = client_source_size >= inst_size &&
-                                     client_source_size % sizeof(uint32_t) == 0u &&
-                                     client_source_size <= block->end_offset() - offset;
+            const uint64_t source_span_end = offset + client_source_size;
+            bool source_span_valid =
+                client_source_size >= inst_size && client_source_size % sizeof(uint32_t) == 0u &&
+                offset <= text.size() && client_source_size <= text.size() - offset;
             uint64_t checked_source_end = offset;
-            for (auto span_it = it;
-                 source_span_valid && checked_source_end < offset + client_source_size; ++span_it) {
-              if (span_it == block->instructions().end()) {
-                source_span_valid = false;
-                break;
+            std::vector<const Instruction *> preserved_source_branches;
+            if (client_rewrite->preserved_source_span_byte_offset) {
+              const uint64_t replacement_size =
+                  client_rewrite->replacement_words
+                      ? client_rewrite->replacement_words->size() * sizeof(uint32_t)
+                      : 0u;
+              const uint32_t preserved_offset = *client_rewrite->preserved_source_span_byte_offset;
+              source_span_valid &= client_rewrite->replacement_words.has_value() &&
+                                   preserved_offset % sizeof(uint32_t) == 0u &&
+                                   preserved_offset <= replacement_size &&
+                                   client_source_size <= replacement_size - preserved_offset;
+              if (source_span_valid) {
+                const auto *replacement_bytes =
+                    reinterpret_cast<const uint8_t *>(client_rewrite->replacement_words->data());
+                source_span_valid = std::memcmp(replacement_bytes + preserved_offset,
+                                                text.data() + offset, client_source_size) == 0;
               }
-              const Instruction &span_instruction = *span_it;
-              const bool control_transfer =
-                  (span_instruction.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH |
-                                               INDIRECT_CALL | PROGRAM_TERMINATOR)) != 0 ||
-                  span_instruction.branch_offset_bytes().has_value();
-              if (span_instruction.src_loc() != checked_source_end ||
-                  (client_source_size > inst_size && control_transfer) ||
-                  (client_rewrite->replacement_words && control_transfer)) {
-                source_span_valid = false;
-                break;
+              while (source_span_valid && checked_source_end < source_span_end) {
+                const auto source_instruction =
+                    source_instruction_by_offset.find(checked_source_end);
+                if (source_instruction == source_instruction_by_offset.end() ||
+                    source_instruction->second == nullptr) {
+                  source_span_valid = false;
+                  break;
+                }
+                const Instruction &span_instruction = *source_instruction->second;
+                const uint64_t flags = span_instruction.flags();
+                if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR)) != 0) {
+                  source_span_valid = false;
+                  break;
+                }
+                if ((flags & (BRANCH | COND_BRANCH)) != 0 ||
+                    span_instruction.branch_offset_bytes()) {
+                  const auto delta = span_instruction.branch_offset_bytes();
+                  const int64_t target =
+                      delta ? static_cast<int64_t>(checked_source_end + span_instruction.size()) +
+                                  static_cast<int64_t>(*delta)
+                            : -1;
+                  if (!delta || span_instruction.raw_encoding() == nullptr || target < 0 ||
+                      static_cast<uint64_t>(target) >= text.size() ||
+                      !source_instruction_by_offset.contains(static_cast<uint64_t>(target))) {
+                    source_span_valid = false;
+                    break;
+                  }
+                  preserved_source_branches.push_back(&span_instruction);
+                }
+                checked_source_end += span_instruction.size();
               }
-              checked_source_end += span_instruction.size();
+              for (auto start = std::ranges::upper_bound(scope_block_starts, offset);
+                   source_span_valid && start != scope_block_starts.end() &&
+                   *start < source_span_end;
+                   ++start) {
+                BasicBlock *interior = scope_block_by_start.at(*start);
+                const bool external_predecessor =
+                    std::ranges::any_of(interior->predecessors(), [&](const BasicBlock *pred) {
+                      const Instruction *terminator =
+                          pred == nullptr ? nullptr : pred->terminator();
+                      return terminator == nullptr || terminator->src_loc() < offset ||
+                             terminator->src_loc() >= source_span_end;
+                    });
+                const bool external_call =
+                    std::ranges::any_of(scope.blocks, [&](const BasicBlock *candidate) {
+                      return candidate != nullptr &&
+                             std::ranges::any_of(
+                                 candidate->call_edges(), [&](const BasicBlock::CallEdge &edge) {
+                                   return edge.callee == interior &&
+                                          (edge.source_call_offset < offset ||
+                                           edge.source_call_offset >= source_span_end);
+                                 });
+                    });
+                source_span_valid &= !address_taken_offsets.contains(*start) &&
+                                     !external_predecessor && !external_call;
+              }
+            } else {
+              source_span_valid &= client_source_size <= block->end_offset() - offset;
+              for (auto span_it = it; source_span_valid && checked_source_end < source_span_end;
+                   ++span_it) {
+                if (span_it == block->instructions().end()) {
+                  source_span_valid = false;
+                  break;
+                }
+                const Instruction &span_instruction = *span_it;
+                const bool control_transfer =
+                    (span_instruction.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH |
+                                                 INDIRECT_CALL | PROGRAM_TERMINATOR)) != 0 ||
+                    span_instruction.branch_offset_bytes().has_value();
+                if (span_instruction.src_loc() != checked_source_end ||
+                    (client_source_size > inst_size && control_transfer) ||
+                    (client_rewrite->replacement_words && control_transfer)) {
+                  source_span_valid = false;
+                  break;
+                }
+                checked_source_end += span_instruction.size();
+              }
+              if (client_source_size > inst_size && !client_rewrite->replacement_words)
+                source_span_valid = false;
             }
-            source_span_valid &= checked_source_end == offset + client_source_size;
-            if (client_source_size > inst_size && !client_rewrite->replacement_words)
-              source_span_valid = false;
+            source_span_valid &= checked_source_end == source_span_end;
             if (!source_span_valid) {
               auto failure = make_kernel_failure(
                   DiagnosticKind::Legalization,
-                  "client instruction rewrite does not own one bounded basic-block source span",
+                  "client instruction rewrite does not own one bounded source span "
+                  "(requested=" +
+                      std::to_string(client_source_size) +
+                      " instruction=" + std::to_string(inst_size) +
+                      " block_end=" + std::to_string(block->end_offset()) +
+                      " checked_end=" + std::to_string(checked_source_end) + ")",
                   offset, std::string(inst.mnemonic()));
               if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
                 skip_scope = true;
@@ -4319,7 +4422,32 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                 ordinary_requirement,
                 descriptor_sgprs_for_ordinary_extent(ordinary_requirement, host_arch_));
             client_rewrite_size_by_source_offset.emplace(offset, client_source_size);
-            client_consumed_source_end = offset + client_source_size;
+            client_consumed_source_end = source_span_end;
+            if (client_rewrite->preserved_source_span_byte_offset) {
+              const uint64_t copied_target_begin =
+                  target_offset + client_rewrite->prefix_words.size() * sizeof(uint32_t) +
+                  *client_rewrite->preserved_source_span_byte_offset;
+              active_client_source_span = {
+                  .source_begin = offset,
+                  .source_end = source_span_end,
+                  .target_begin = copied_target_begin,
+              };
+              for (const Instruction *branch : preserved_source_branches) {
+                const int64_t source_target =
+                    static_cast<int64_t>(branch->src_loc() + branch->size()) +
+                    static_cast<int64_t>(*branch->branch_offset_bytes());
+                std::vector<uint32_t> branch_words(branch->size() / sizeof(uint32_t));
+                std::memcpy(branch_words.data(), branch->raw_encoding(), branch->size());
+                layout.branch_fixups.push_back(
+                    {.inst = branch,
+                     .source_inst_offset = branch->src_loc(),
+                     .source_target_offset = static_cast<uint64_t>(source_target),
+                     .target_inst_offset = copied_target_begin + (branch->src_loc() - offset),
+                     .target_window_bytes = static_cast<uint64_t>(branch->size()),
+                     .allow_window_growth = false,
+                     .translated_words = std::move(branch_words)});
+              }
+            }
             for (const InstructionRewriteMarker &marker : client_rewrite->markers) {
               pending_client_markers.push_back(
                   {.id = marker.id,
@@ -4696,7 +4824,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       }
       if (skip_scope)
         break;
-      if (block->has_implicit_terminator()) {
+      const bool block_end_consumed_by_client_span =
+          active_client_source_span &&
+          block->end_offset() > active_client_source_span->source_begin &&
+          block->end_offset() < active_client_source_span->source_end;
+      if (block->has_implicit_terminator() && !block_end_consumed_by_client_span) {
         // Materialize the CFG boundary as part of the translated block. Like
         // any other target-side expansion, the terminator belongs in relocated
         // function extents. Without an architectural terminator, ordinary text
@@ -4729,7 +4861,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           block->end_offset() >= active_marked_long_transfer->source_begin &&
           block->end_offset() <= active_marked_long_transfer->source_end;
       placement.target_end =
-          ends_inside_marked_window
+          block_end_consumed_by_client_span
+              ? active_client_source_span->target_begin +
+                    (block->end_offset() - active_client_source_span->source_begin)
+          : ends_inside_marked_window
               ? active_marked_long_transfer->target_begin +
                     (block->end_offset() - active_marked_long_transfer->source_begin)
           : block_generated_island_pool &&

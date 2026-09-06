@@ -3816,7 +3816,8 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
                                   .replacement_words =
                                       std::vector<uint32_t>{inserted_nop, source_nop},
                                   .markers = {},
-                                  .source_size = 0};
+                                  .source_size = 0,
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
@@ -3886,7 +3887,8 @@ TEST(BinaryTranslator, ClientRewriteLongBranchNeverUsesCdnaSpecialSgprs) {
                                   .replacement_words = std::nullopt,
                                   .markers = {},
                                   .source_size = 0,
-                                  .required_ordinary_sgpr_count = kExpectedBranchScratch};
+                                  .required_ordinary_sgpr_count = kExpectedBranchScratch,
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
@@ -3934,7 +3936,8 @@ TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMar
             .prefix_words = {prefix_nop},
             .replacement_words = std::nullopt,
             .markers = {{.id = 41, .byte_offset = 0}, {.id = 42, .byte_offset = sizeof(uint32_t)}},
-            .source_size = 0};
+            .source_size = 0,
+            .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
@@ -4036,7 +4039,8 @@ TEST(BinaryTranslator, ClientRewriteOwnsBoundedMultiInstructionSourceSpan) {
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words = std::vector<uint32_t>{replacement_nop},
                                   .markers = {},
-                                  .source_size = 2 * sizeof(uint32_t)};
+                                  .source_size = 2 * sizeof(uint32_t),
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
@@ -4082,13 +4086,69 @@ TEST(BinaryTranslator, ClientRewriteRejectsSourceSpanContainingControlTransfer) 
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words = std::vector<uint32_t>{words[0]},
                                   .markers = {},
-                                  .source_size = 2 * sizeof(uint32_t)};
+                                  .source_size = 2 * sizeof(uint32_t),
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
-  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
-                                   "bounded basic-block source span"));
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization, "bounded source span"));
+}
+
+TEST(BinaryTranslator, ClientRewriteWrapsByteIdenticalSingleEntryPollingLoop) {
+  const uint32_t before = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t poll = build_s_nop(1, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t retry =
+      cdna4::build_sopp(cdna4::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(-2)})[0];
+  const uint32_t relocated_retry =
+      cdna4::build_sopp(cdna4::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(-3)})[0];
+  const uint32_t finish = build_s_nop(2, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t after = build_s_nop(8, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> words = {poll, retry, finish,
+                                       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != 0)
+          return std::nullopt;
+        return InstructionRewrite{
+            .prefix_words = {},
+            .replacement_words = std::vector<uint32_t>{before, poll, retry, finish, after},
+            .markers = {},
+            .source_size = 3 * sizeof(uint32_t),
+            .required_ordinary_sgpr_count = 0u,
+            .preserved_source_span_byte_offset = sizeof(uint32_t),
+        };
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  ASSERT_GE(translated_words.size(), 6u);
+  EXPECT_TRUE(std::ranges::equal(std::array{before, poll, relocated_retry, finish, after,
+                                            build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+                                 translated_words.first(6u)));
+
+  const auto placement_for = [&](uint64_t source_offset) {
+    return std::ranges::find(result.text_placements, source_offset,
+                             &TranslatedTextPlacement::source_offset);
+  };
+  ASSERT_NE(placement_for(0u), result.text_placements.end());
+  ASSERT_NE(placement_for(sizeof(uint32_t)), result.text_placements.end());
+  ASSERT_NE(placement_for(2u * sizeof(uint32_t)), result.text_placements.end());
+  EXPECT_EQ(placement_for(0u)->target_offset, 0u)
+      << "entry into the wrapped region must execute its prefix";
+  EXPECT_EQ(placement_for(sizeof(uint32_t))->target_offset, 2u * sizeof(uint32_t));
+  EXPECT_EQ(placement_for(2u * sizeof(uint32_t))->target_offset, 3u * sizeof(uint32_t));
 }
 
 TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
@@ -4114,7 +4174,8 @@ TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
                                   .replacement_words =
                                       std::vector<uint32_t>{inserted_nop, source_nop},
                                   .markers = {},
-                                  .source_size = 0};
+                                  .source_size = 0,
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
 
@@ -4835,7 +4896,8 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
         return InstructionRewrite{.prefix_words = {},
                                   .replacement_words = std::vector<uint32_t>{first_nop, second_nop},
                                   .markers = {},
-                                  .source_size = 0};
+                                  .source_size = 0,
+                                  .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""

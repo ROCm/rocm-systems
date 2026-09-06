@@ -2355,7 +2355,8 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
             .prefix_words = {client_nop},
             .replacement_words = std::nullopt,
             .markers = {{.id = 71, .byte_offset = 0}, {.id = 72, .byte_offset = sizeof(uint32_t)}},
-            .source_size = 0};
+            .source_size = 0,
+            .preserved_source_span_byte_offset = std::nullopt};
       });
   const auto result = translator.translate(source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""

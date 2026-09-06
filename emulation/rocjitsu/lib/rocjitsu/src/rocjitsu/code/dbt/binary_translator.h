@@ -134,6 +134,14 @@ struct InstructionRewrite {
   /// every ordinary SGPR their prefix or replacement may access; architectural
   /// special registers such as EXEC, VCC, and XNACK are not part of the count.
   uint32_t required_ordinary_sgpr_count = 0;
+  /// Byte offset in `replacement_words` of an exact, contiguous copy of the
+  /// replaced source span.
+  ///
+  /// This opt-in lets a client retain a single-entry control-flow region (for
+  /// example, a compiler-generated polling loop) while wrapping it with new
+  /// code. The translator verifies the byte identity, rejects interior entries,
+  /// and relocates copied direct branches before relying on that geometry.
+  std::optional<uint32_t> preserved_source_span_byte_offset;
 };
 
 /// @brief Optional whole-text rewrite for one source instruction.

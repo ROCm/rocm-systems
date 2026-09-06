@@ -160,6 +160,7 @@ enum class FragmentMarkerRole : uint64_t {
     const size_t old_size = composed.size();
     composed.resize(old_size + source_size / sizeof(uint32_t));
     std::memcpy(composed.data() + old_size, source_text.data() + begin, end - begin);
+    rewrite.preserved_source_span_byte_offset = static_cast<uint32_t>(replacement_begin);
   }
 
   for (const ConSanTextFragment *fragment : around)
@@ -619,8 +620,15 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   if (!translated.dispatchable() || !errors.empty()) {
     errors.emplace_back(error_prefix + " could not relocate executable text");
     for (const TranslationDiagnostic &diagnostic : translated.diagnostics) {
-      if (diagnostic.severity == DiagnosticSeverity::Error)
-        errors.emplace_back("ConSan text relocation: " + diagnostic.message);
+      if (diagnostic.severity != DiagnosticSeverity::Error)
+        continue;
+      std::string rendered = "ConSan text relocation";
+      if (diagnostic.guest_offset)
+        rendered += " at .text+" + std::to_string(*diagnostic.guest_offset);
+      if (!diagnostic.mnemonic.empty())
+        rendered += " (" + diagnostic.mnemonic + ")";
+      rendered += ": " + diagnostic.message;
+      errors.push_back(std::move(rendered));
     }
     return std::nullopt;
   }

@@ -11445,6 +11445,72 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayWrapsGeneratedBufferPollingAcquireLoop) {
+  constexpr size_t kAcquireWord = 17u;
+  constexpr size_t kAcquireWords = 10u;
+  constexpr std::array<uint32_t, 28> text_words = {
+      0x84188209u, 0xBF860000u, 0x7E0A0280u, 0xBE9C0132u, 0xBE9E00FFu, 0xFFFFF000u, 0xBE9F0080u,
+      0x8B05FF1Eu, 0x0000007Fu, 0xBF870009u, 0x84059905u, 0x8B1DFF1Du, 0x01FFFFFFu, 0xBF870009u,
+      0x8C1D051Du, 0x851E871Eu, 0xBFC50000u, 0xC4050018u, 0x40883804u,
+      0x00000005u, // buffer_load_b32 v4, v5, s[28:31], s24 offen scope:device
+      0xBFC00000u, // s_wait_loadcnt 0
+      0x7E340504u, // v_readfirstlane_b32 s26, v4
+      0xBF06811Au, // s_cmp_eq_u32 s26, 1
+      0xBFA1FFE8u, // s_cbranch_scc0 to the address-setup loop header
+      0xEE0AC07Cu, 0x00080000u,
+      0x00000000u, // global_inv scope:device
+      0xBFB00000u, // s_endpgm
+  };
+  const std::span<const uint32_t> acquire_sequence(text_words.data() + kAcquireWord, kAcquireWords);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 24u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(70u);
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(4u, 0u, 0u, 0u, 0u, 0u, 2u);
+  options.max_patches = 4u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_record_buffer_poll"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified())
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " fences=" << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates)
+      << " decisions=" << testing::PrintToString(result.observation_plan().atomic_site_decisions);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
+  EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
+  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(sequence.begin_text_offset, kAcquireWord * sizeof(uint32_t));
+  EXPECT_EQ(sequence.end_text_offset, (kAcquireWord + kAcquireWords) * sizeof(uint32_t));
+  const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(fence, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(fence->anchor_offset, kAcquireWord * sizeof(uint32_t));
+  EXPECT_EQ(fence->original_size, acquire_sequence.size() * sizeof(uint32_t));
+  ASSERT_TRUE(fence->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> relocated_sequence =
+      text_words_at_offset(patched, *fence->relocated_guest_instruction_offset,
+                           acquire_sequence.size() * sizeof(uint32_t));
+  ASSERT_EQ(relocated_sequence.size(), acquire_sequence.size());
+  EXPECT_TRUE(std::ranges::equal(acquire_sequence.first(6u),
+                                 std::span<const uint32_t>(relocated_sequence).first(6u)));
+  EXPECT_EQ(relocated_sequence[6] & 0xffff0000u, acquire_sequence[6] & 0xffff0000u);
+  EXPECT_NE(relocated_sequence[6], acquire_sequence[6])
+      << "the copied retry branch must be relocated across the inserted capture prefix";
+  EXPECT_TRUE(std::ranges::equal(acquire_sequence.last(3u),
+                                 std::span<const uint32_t>(relocated_sequence).last(3u)));
+  expect_record_replay_text_transaction(result);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
 TEST(ConSanMoi, Gfx1250DenseAccessesRejectUnreachableHostWhenOwnerUsesRouterState) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kUnreachableBeginWord = 1u;
