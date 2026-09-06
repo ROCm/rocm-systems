@@ -483,6 +483,8 @@ constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
 constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
+// End of reserved in the 16-GPU layout. The last 4 bytes are trailing padding a compiler need not copy.
+constexpr size_t kAmdSmiFabricReserved16GpuEnd = 316;
 
 constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
 
@@ -631,22 +633,30 @@ inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, siz
 
 static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
                 kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricInfo8GpuSize &&
-                kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricInfo16GpuSize &&
+                kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricReserved16GpuEnd &&
+                kAmdSmiFabricReserved16GpuEnd < kAmdSmiFabricInfo16GpuSize &&
                 kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
               "fabric probe windows are out of order");
 
 // Write extents: 256 = 27.x field-wise, 288 = 8-GPU whole-object, 320 = 16-GPU whole-object.
-// Each arm confirms both halves rather than inferring by elimination, so a sparse or short write stays Unknown.
+// Confirmation reads only the reserved windows, which every writer zero-fills. The v1 payload is
+// live data that can legitimately hold a 0xA5 byte, so it is only tested for having been touched.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd) &&
-      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
+  const bool wroteV1 =
+    !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
+  const bool wrotePast8Gpu =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize);
+  const bool wrotePast16Gpu =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd);
+
+  if (wroteV1 && amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
     return amdSmiFabricRuntimeLayout::ExtendedUnion;
   }
-  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricInfo8GpuSize) &&
-      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
+  if (wrotePast8Gpu &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
-  if (amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricInfo16GpuSize) &&
+  if (wrotePast8Gpu && wrotePast16Gpu &&
       amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
     return amdSmiFabricRuntimeLayout::SixteenGpu;
   }

@@ -183,8 +183,8 @@ TEST(AmdSmiFabricRuntimeLayout, ClassifiesWriteExtents)
         {kAmdSmiFabricInfo16GpuSize, 0, 0xFF, amdSmiFabricRuntimeLayout::SixteenGpu},
         // 288 sits outside [256,288), so widening that window would reclassify this.
         {kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize, 0x00, amdSmiFabricRuntimeLayout::ExtendedUnion},
-        // Short of every layout, so nothing is confirmed.
-        {kAmdSmiFabricInfo16GpuSize - 1, 0, 0x00, amdSmiFabricRuntimeLayout::Unknown},
+        // Stops in the 16-GPU trailing padding, which a compiler need not copy.
+        {kAmdSmiFabricInfo16GpuSize - 1, 0, 0x00, amdSmiFabricRuntimeLayout::SixteenGpu},
     };
 
     for (const FabricExtentCase& c : cases) {
@@ -197,6 +197,18 @@ TEST(AmdSmiFabricRuntimeLayout, ClassifiesWriteExtents)
         EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), c.expected)
             << "wrote " << c.wrote << ", dirty " << c.dirtyByte << ", fill " << (int)c.fill;
     }
+}
+
+// ppod_id is a UUID and can legitimately contain the canary byte, so confirmation must never read
+// the v1 payload for content.
+TEST(AmdSmiFabricRuntimeLayout, CanaryValueInsideThePayloadIsStillAWrite)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricInfo16GpuSize);
+    buffer.bytes[kAmdSmiFabricV1PayloadBegin + 88] = kAmdSmiFabricBufferCanary;
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
 }
 
 // Touches the v1 payload without filling it, so no layout is confirmed. Identifying a layout by
@@ -213,11 +225,12 @@ TEST(AmdSmiFabricRuntimeLayout, SparseWriteIsUnknown)
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
 
+// A write above the payload with the payload itself untouched matches no runtime.
 TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
 {
     amdSmiFabricInfoBuffer buffer;
     amdSmiPrepareFabricInfoBuffer(buffer);
-    buffer.bytes[kAmdSmiFabricV1PayloadEnd - 1] = 0;
+    buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
