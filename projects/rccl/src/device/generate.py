@@ -413,6 +413,16 @@ def custom_sort_key(fn: Fn):
         all_regs.index(fn.reg)
     )
 
+# Unroll factors whose device functions are compiled for one arch only. The host
+# needs the same information at runtime (commSetUnrollFactor): on any other arch
+# these tables are all-nullptr, so accepting the unroll would trap on the device.
+# Emitted into host_table.cpp as ncclDevFuncUnrollArch[].
+unroll_arch_requirement = {
+  "8":  "gfx1250",
+  "16": "gfx1250",
+  "32": "gfx1250",
+}
+
 def get_arch_guard(fn):
   cond = None
 
@@ -420,8 +430,8 @@ def get_arch_guard(fn):
       # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
       # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
       cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
-  elif fn.unroll in ("8", "16", "32"):
-      cond = "defined(__gfx1250__)"
+  elif fn.unroll in unroll_arch_requirement:
+      cond = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
   elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
@@ -615,6 +625,19 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   out("bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {\n")
   for u in all_unrolls:
     out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
+  out("};\n")
+
+  # Being generated is not sufficient: a multi-arch build generates every unroll
+  # while get_arch_guard() still compiles some of them for one arch only. The
+  # host must additionally match the running GPU against this table, otherwise
+  # it dispatches into an all-nullptr table and traps on the device.
+  out("\n")
+  out("// Arch required by each unroll factor's device functions, or nullptr when\n")
+  out("// the unroll is built for every arch. Mirrors get_arch_guard().\n")
+  out("char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {\n")
+  for u in all_unrolls:
+    arch = unroll_arch_requirement.get(u)
+    out("  %s, // unroll %s\n" % ('"%s"' % arch if arch else "nullptr", u))
   out("};\n")
 
 # Maps to .cu filename which implements this func. The only constraint is that
