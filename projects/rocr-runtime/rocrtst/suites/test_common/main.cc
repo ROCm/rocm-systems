@@ -101,6 +101,7 @@
 #include "common/platform_filter.h"
 #include "common/base_rocr_utils.h"
 #include "common/env_config.h"
+#include "hsa/hsa_ext_amd.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -266,6 +267,33 @@ TEST(rocrtstFunc, Signal_Create_Concurrently) {
   if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateConcurrent();
   RunCustomTestEpilog(&sd);
+}
+
+TEST(rocrtstFunc, Signal_Wait_Multiple_With_Null_Entry) {
+  TestBase test;
+  if (!RunCustomTestProlog(&test)) return;
+
+  hsa_signal_t signal = {0};
+  ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_signal_create(7, 0, nullptr, &signal));
+  hsa_signal_t signals[] = {{0}, signal};
+  hsa_signal_condition_t conditions[] = {HSA_SIGNAL_CONDITION_EQ, HSA_SIGNAL_CONDITION_EQ};
+  hsa_signal_value_t values[] = {999, 7};
+
+  hsa_signal_value_t satisfying_value = 0;
+  EXPECT_EQ(1u,
+            hsa_amd_signal_wait_any(2, signals, conditions, values, 0, HSA_WAIT_STATE_ACTIVE,
+                                    &satisfying_value));
+  EXPECT_EQ(7, satisfying_value);
+
+  hsa_signal_value_t satisfying_values[] = {-1, -1};
+  EXPECT_EQ(0u,
+            hsa_amd_signal_wait_all(2, signals, conditions, values, 0, HSA_WAIT_STATE_ACTIVE,
+                                    satisfying_values));
+  EXPECT_EQ(0, satisfying_values[0]);
+  EXPECT_EQ(7, satisfying_values[1]);
+
+  EXPECT_EQ(HSA_STATUS_SUCCESS, hsa_signal_destroy(signal));
+  RunCustomTestEpilog(&test);
 }
 
 TEST(rocrtstFunc, Signal_Allocation_Validation) {
