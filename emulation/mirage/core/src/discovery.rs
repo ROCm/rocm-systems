@@ -23,12 +23,16 @@
 //! `LibSearch::search_dirs`:
 //!
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
-//! 2. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
+//! 2. `../lib` relative to the `mirage` binary — the library installed
+//!    beside it. This one comes *before* the build outputs above: an
+//!    installed prefix that happens to sit inside the checkout must
+//!    ship its own library rather than whatever the host last built
+//!    into `emulation/rocjitsu/build`.
+//! 3. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
 //!    (`<root>/lib`).
-//! 3. The ROCm SDK install root reported by `rocm-sdk path --root`
+//! 4. The ROCm SDK install root reported by `rocm-sdk path --root`
 //!    (`<root>/lib`) — present when a ROCm Python wheel venv is
 //!    active.
-//! 4. `../lib` relative to the `mirage` binary.
 //! 5. Standard system / ROCm library directories: `/opt/rocm/lib`,
 //!    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
 //!
@@ -166,6 +170,12 @@ impl LibSearch<'_> {
             }
         }
 
+        if self.system_fallbacks
+            && let Some(dir) = &exe_dir
+        {
+            dirs.push(dir.join("../lib"));
+        }
+
         // Always: backend-specific build outputs, relative to the mirage
         // binary.
         if let Some(dir) = &exe_dir {
@@ -186,10 +196,6 @@ impl LibSearch<'_> {
             // `<venv>/lib/pythonX.Y/site-packages/_rocm_sdk_devel/lib`.
             if let Some(root) = rocm_sdk_root() {
                 dirs.push(root.join("lib"));
-            }
-            // ../lib relative to the mirage binary.
-            if let Some(dir) = &exe_dir {
-                dirs.push(dir.join("../lib"));
             }
             // Standard system / ROCm library directories.
             for dir in STANDARD_LIB_DIRS {
@@ -550,6 +556,55 @@ mod tests {
         assert!(!is_lib_installed(&s));
         let guidance = install_guidance("TestEmulator", &s);
         assert!(guidance.contains("definitely-not-a-real-lib-xyz.so"));
+    }
+
+    /// The library installed beside the binary outranks any in-tree
+    /// build directory.
+    #[test]
+    fn the_installed_sibling_outranks_an_in_tree_build() {
+        let s = LibSearch {
+            file_env: &[],
+            dir_env: &[],
+            home_env: &[],
+            lib_name: "definitely-not-a-real-lib-xyz.so",
+            binary_relative_dirs: &["rocjitsu/build"],
+            system_fallbacks: true,
+        };
+
+        let candidates = s.candidate_paths();
+        let position = |needle: &str| {
+            candidates
+                .iter()
+                .position(|p| p.to_string_lossy().contains(needle))
+                .unwrap_or_else(|| panic!("{needle} is not searched at all: {candidates:?}"))
+        };
+
+        assert!(
+            position("../lib") < position("rocjitsu/build"),
+            "the installed sibling must be searched first: {candidates:?}"
+        );
+    }
+
+    /// A backend with a tightly-scoped discovery contract keeps it: the
+    /// installed-sibling rule is part of the generic fallbacks, so it
+    /// must stay behind `system_fallbacks` where it was moved from.
+    #[test]
+    fn the_installed_sibling_is_a_system_fallback() {
+        let s = LibSearch {
+            file_env: &[],
+            dir_env: &[],
+            home_env: &[],
+            lib_name: "definitely-not-a-real-lib-xyz.so",
+            binary_relative_dirs: &["rocjitsu/build"],
+            system_fallbacks: false,
+        };
+
+        assert!(
+            !s.candidate_paths()
+                .iter()
+                .any(|p| p.to_string_lossy().contains("../lib")),
+            "an opted-out backend must not gain `../lib`"
+        );
     }
 
     /// A search that finds nothing must say where it looked and what to
