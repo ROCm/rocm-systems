@@ -1817,6 +1817,8 @@ typedef struct {
  *  to modify how RSMI initializes.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED ROCm/KFD is not present on this system.
+ *  @retval ::RSMI_STATUS_INIT_ERROR initialization failed for other reasons.
  */
 rsmi_status_t rsmi_init(uint64_t init_flags);
 
