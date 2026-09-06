@@ -2,7 +2,7 @@
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
 # host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached],
-# rccl-UnitTestsMicroEnqueue[-devlinker]).
+# rccl-UnitTestsMicroEnqueue[-devlinker], rccl-UnitTestsMicroDevRuntime).
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -152,6 +152,7 @@ do_host_tests() {
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
+    "rccl-UnitTestsMicroDevRuntime:$SCRIPT_DIR/host_tests_micro_dev_runtime.xml"
   )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
