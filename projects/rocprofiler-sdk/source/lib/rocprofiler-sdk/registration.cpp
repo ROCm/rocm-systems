@@ -30,6 +30,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -1081,14 +1082,27 @@ initialize()
 
     ROCP_INFO << "rocprofiler initialize called...";
 
-    if(get_init_status() != 0)
+    if(get_init_status() == 1) return;
+
+    // A re-entrant call from the thread that is currently running the call_once
+    // below must return instead of blocking: invoke_client_configures() dlopens
+    // the tool library, whose constructor can call back into initialize(), and
+    // std::call_once on an in-progress once_flag deadlocks the thread executing
+    // it. Any *other* thread falls through and blocks until initialization
+    // completes, rather than proceeding against a partially initialized SDK.
+    static thread_local bool _initializing = false;
+    if(_initializing)
     {
-        ROCP_INFO << "rocprofiler initialize ignored...";
+        ROCP_INFO << "rocprofiler initialize ignored (re-entrant call during "
+                     "initialization)...";
         return;
     }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto _initializing_scope = common::scope_destructor{[]() { _initializing = false; },
+                                                            []() { _initializing = true; }};
+
         ROCP_INFO << "rocprofiler initialize started...";
         // set the "ROCPROFILER_REGISTER_LIBRARY" env var
         set_rocprofiler_register_library();
@@ -1294,10 +1308,20 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         return status;
     }
 
-    // init status may be -1 (currently initializing) or 1 (already initialized).
-    // if either case, we want to ignore this function call but if this is
-    if(rocprofiler::registration::get_init_status() != 0)
+    // Reaching here means init_status < 0 (currently initializing); an already
+    // initialized SDK (init_status > 0) took the anytime-initialization path
+    // above. The configuration window is closed, so we ignore this call and
+    // return CONFIGURATION_LOCKED with an explanatory warning.
+    if(auto _init_status = rocprofiler::registration::get_init_status(); _init_status != 0)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
+                        "rocprofiler-sdk initialization is already in progress (init_status="
+                     << _init_status
+                     << "). The configuration window is closed; this commonly occurs when the "
+                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
+                        "called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
