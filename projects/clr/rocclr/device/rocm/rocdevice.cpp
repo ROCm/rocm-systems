@@ -4120,11 +4120,58 @@ void Device::RetainGlobalSignal(void* signal) const {
 // ================================================================================================
 bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
   hw_events.resize(count, nullptr);
+
+  // A segmented graph's cross stream dependency is the object
+  // VirtualGPU::PublishOrderingEdge() names on the eager path - one command processor waits on
+  // a word another decrements - so it gets the same device resident placement, under the same
+  // orderingEdgeSignals() switch.  Placed at creation because a cross stream segment gets one
+  // ProfilingSignal that serves as both the producer's completion signal and the consumer's
+  // dependency; splitting the roles would need a second signal and a packet to decrement it.
+  // The completion role's host accesses - the re-arm in ResetHwEvents(), the satisfied test in
+  // HwQueueTracker::WaitingSignal(), the profiling timestamp read - are loads and plain stores,
+  // which this placement supports.  The read-modify-writes it does not are on tracker signals.
+  std::vector<hsa_signal_t> edges;
+  if (ordering_edge_signals_ && (count > 0)) {
+    hsa_agent_t agent = bkendDevice_;
+    // Value initialised by the vector; the descriptor rejects a non zero reserved field.
+    std::vector<hsa_amd_signal_create_desc_t> descs(count);
+    for (auto& desc : descs) {
+      desc.version = HSA_AMD_SIGNAL_CREATE_DESC_VERSION;
+      desc.flags = static_cast<uint16_t>(HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD);
+      desc.initial_value = kInitSignalValueOne;  // armed, as the host resident create below is
+      desc.attributes = HSA_AMD_SIGNAL_AMD_GPU_ONLY;
+      desc.num_consumers = 1;
+      desc.consumers = &agent;
+    }
+    Hsa::amd_signal_create_v2(descs.data(), static_cast<uint32_t>(descs.size()));
+    // On partial failure ROCr leaves a zero handle in the descriptors it refused; those slots
+    // fall back to the host resident create below.
+    edges.reserve(descs.size());
+    size_t created = 0;
+    for (const auto& desc : descs) {
+      edges.push_back(desc.signal);
+      created += (desc.signal.handle != 0) ? 1 : 0;
+    }
+    if (created != descs.size()) {
+      LogWarning("Ordering edge signal creation failed; graph dependencies stay host resident");
+    }
+  }
+
   for (int i = 0; i < count; ++i) {
     ProfilingSignal* ps = new ProfilingSignal();
-    if (HSA_STATUS_SUCCESS !=
+    if (!edges.empty() && (edges[i].handle != 0)) {
+      ps->signal_ = edges[i];
+      // Re-arm through the fenced store; ROCr's create-time store is a plain one.
+      Hsa::signal_silent_store_relaxed(ps->signal_, kInitSignalValueOne);
+    } else if (HSA_STATUS_SUCCESS !=
         Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
       delete ps;
+      // Nothing owns the edges past this index yet; the ones already taken are released below.
+      for (int j = i + 1; j < count; ++j) {
+        if (!edges.empty() && (edges[j].handle != 0)) {
+          Hsa::signal_destroy(edges[j]);
+        }
+      }
       for (int j = 0; j < i; ++j) {
         reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
         hw_events[j] = nullptr;
