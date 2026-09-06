@@ -20,18 +20,24 @@ namespace dda::common {
 
 __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
   : nBlocks_(nBlocks), flags_(static_cast<FlagType*>(flagsBuf)) {
-  assert(nRanks == NRANKS);
+  // nRanks may be < NRANKS (any 2..NRANKS) when RCCL_DDA_NRANKS_RELAX is set; the flag
+  // buffer is always sized/strided for NRANKS so the layout is count-independent.
+  assert(nRanks <= NRANKS);
+  (void)nRanks;
 }
 
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
-  assert(nRanks == NRANKS);
-  auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
+  assert(nRanks <= NRANKS);
+  (void)nRanks;
+  // Always allocate/stride for NRANKS so getFlagIdx(rank, block) stays valid
+  // regardless of the active participant count.
+  auto flagBuf = std::make_unique<DeviceBuffer>(NRANKS * nBlocks * sizeof(FlagType));
   if (flagBuf == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
   }
-  cudaError_t err = cudaMemset(flagBuf->get(), 0, nRanks * nBlocks * sizeof(FlagType));
+  cudaError_t err = cudaMemset(flagBuf->get(), 0, NRANKS * nBlocks * sizeof(FlagType));
   if (err != cudaSuccess) {
     WARN("DeviceMailbox::mallocAndInit: cudaMemset failed (%s)", cudaGetErrorString(err));
     return {nullptr, DeviceMailbox{}};
@@ -42,13 +48,13 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 
 __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
                                       const std::array<DeviceMailbox, NRANKS>& allMailboxes)
-  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes) {
-  assert(nRanks == NRANKS);
+  : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), allMailboxes_(allMailboxes) {
+  assert(nRanks <= NRANKS);
 }
 
 /* static */ __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(
   int nRanks, int nBlocks, int selfRank, void* bootstrap) {
-  assert(nRanks == NRANKS);
+  assert(nRanks <= NRANKS);
   auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
   auto& selfMboxBuf = selfAlloc.first;
   auto& selfMbox = selfAlloc.second;

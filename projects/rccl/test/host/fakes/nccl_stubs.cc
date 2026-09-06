@@ -59,6 +59,7 @@ ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; 
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
+bool ncclDdaNranksRelaxEnabled() { return false; }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
