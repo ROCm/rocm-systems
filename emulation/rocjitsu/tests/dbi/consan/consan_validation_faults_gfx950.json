@@ -135,6 +135,31 @@
         }
       ]
     },
+    "hip-streamk-simple-m256-n256-k256": {
+      "faults": [
+        {
+          "id": "barrier-drop-initial-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first s_barrier at .text+0x116c is the unconditional initial-tile publication edge in the executed 256-thread simple_streamk_kernel specialization. All four waves cooperatively write A and B fragments into the first LDS buffer before this edge, and peer LDS reads begin afterward. The exact 256-cubed, four-workgroup validation command necessarily launches this specialization. The deterministic emulator schedule may preserve the exact result without producing a conflict, so SuperCollider prospectively retains this preselected site as a qualified miss."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:5c33401c80351ed4|kernel=_ZN7streamk21simple_streamk_kernelILj64ELj256ENS_12gemm_shape_tILi128ELi128ELi8EEENS1_ILi32ELi32ELi8EEENS1_ILi64ELi64ELi1EEENS1_ILi2ELi2ELi1EEES5_fffEEvjjjPKT6_S8_PKT7_PS9_jjjjT8_SD_NS_18streamk_schedule_tIT1_SD_EE|kind=barrier|pc=0x000000000000116c|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN7streamk21simple_streamk_kernelILj64ELj256ENS_12gemm_shape_tILi128ELi128ELi8EEENS1_ILi32ELi32ELi8EEENS1_ILi64ELi64ELi1EEENS1_ILi2ELi2ELi1EEES5_fffEEvjjjPKT6_S8_PKT7_PS9_jjjjT8_SD_NS_18streamk_schedule_tIT1_SD_EE"
+              }
+            }
+          }
+        }
+      ]
+    },
     "qwen-prefill": {
       "faults": [
         {
