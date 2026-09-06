@@ -656,7 +656,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
              "falling back to sysfs");
         useSysfs = true;
       } else if (!layoutsAgree) {
-        WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %s layout, but the loaded library uses the %s "
+        WARN("AMD SMI fabric: ABI mismatch, RCCL was built for the %s layout, but the loaded library uses the %s "
              "layout; falling back to sysfs",
              amdSmiFabricLayoutIs8Gpu ? "8-GPU" : (amdSmiFabricLayoutIs16Gpu ? "16-GPU" : "extended-union"),
              runtimeLayoutIs8Gpu ? "8-GPU" : "16-GPU");
