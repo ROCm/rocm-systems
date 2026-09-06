@@ -1996,6 +1996,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "pytorch-torch-sort": {
             "run_timeout_seconds": 360,
         },
+        # Record/Replay of the cross-target LDS-qualifying softmax shape takes
+        # roughly 32 seconds in gfx1250 emulation. Retain a bounded whole-row
+        # margin rather than relying on the generic 30-second default.
+        "pytorch-norm-softmax": {
+            "run_timeout_seconds": 60,
+        },
         # The two SGEMM benchmark blocks repeat the same six Exact sizes but
         # have very different solution spaces. Preserve both blocks in every
         # shard and give each size an independent all-client oracle, teardown

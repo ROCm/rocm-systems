@@ -2667,6 +2667,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),
                 ("gfx1250", "pytorch-torch-histc", 30),
+                ("gfx1250", "pytorch-norm-softmax", 60),
                 ("gfx1250", "pytorch-torch-sort", 360),
                 ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1260),
             )
