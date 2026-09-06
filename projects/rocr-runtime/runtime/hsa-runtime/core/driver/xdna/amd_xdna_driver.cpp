@@ -56,6 +56,7 @@
 #include <libdrm/drm.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
@@ -756,6 +757,8 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   handle->handle = bo_handle.handle;
   handle->vaddr = bo_handle.vaddr;
   handle->size = size;
+  handle->owner = this;
+  handle->owns_allocation = true;
 
   return HSA_STATUS_SUCCESS;
 }
@@ -878,7 +881,9 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
+    const auto* source = static_cast<const core::DriverMemoryHandle*>(import_handle);
+
+    const int dmabuf_fd = source->dmabuf_fd;
 
     drm_prime_handle import_params = {};
     import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -889,7 +894,24 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
     }
 
     *handle = core::DriverMemoryHandle{import_params.handle};
-    handle->size = lseek(dmabuf_fd, 0, SEEK_END);
+    handle->owner = this;
+
+    // A drm_file holds at most one GEM handle per object, so importing an allocation this
+    // driver already owns hands back the owner's own handle instead of creating one, and
+    // releasing that in DestroyMemoryHandle would destroy the allocation.
+    handle->owns_allocation =
+        (source->owner != this) || (source->handle != static_cast<uint64_t>(import_params.handle));
+
+    // Establish the size from the dma-buf.
+    struct stat dmabuf_stat = {};
+    if (fstat(dmabuf_fd, &dmabuf_stat) != 0) {
+      const hsa_status_t rollback_err = DestroyMemoryHandle(handle);
+      assert(rollback_err == HSA_STATUS_SUCCESS && "Failed to release the imported BO.");
+      (void)rollback_err;
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    handle->size = static_cast<size_t>(dmabuf_stat.st_size);
+
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE:
@@ -972,21 +994,30 @@ hsa_status_t XdnaDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 }
 
 hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  // Attempt every release even if an earlier one fails, and clear the handle either way: a
+  // handle left holding an fd that was already closed would close it a second time, by which
+  // point the descriptor may name something else entirely.
+  hsa_status_t err = HSA_STATUS_SUCCESS;
+
   // Close the dmabuf_fd.
-  if (handle->dmabuf_fd >= 0) {
-    close(handle->dmabuf_fd);
+  if (handle->dmabuf_fd >= 0 && close(handle->dmabuf_fd) != 0) {
+    err = HSA_STATUS_ERROR;
   }
 
-  // Close the BO handle.
-  drm_gem_close close_params = {};
-  close_params.handle = handle->handle;
-  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  // Close the BO handle, unless there is none or it is borrowed from the handle that owns it,
+  // which ImportMemoryHandle decided when it created this one.
+  if (handle->owns_allocation &&
+      static_cast<uint32_t>(handle->handle) != AMDXDNA_INVALID_BO_HANDLE) {
+    drm_gem_close close_params = {};
+    close_params.handle = handle->handle;
+    hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);
+    if (ioctl_err != HSA_STATUS_SUCCESS) {
+      err = ioctl_err;
+    }
   }
   *handle = {};
 
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::QueryDriverVersion() {
