@@ -209,6 +209,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
 // ================================================================================================
 hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold) {
   HIP_INIT_API(hipMemPoolTrimTo, mem_pool, min_bytes_to_hold);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -220,6 +221,7 @@ hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold) {
 // ================================================================================================
 hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value) {
   HIP_INIT_API(hipMemPoolSetAttribute, mem_pool, attr, value);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -230,6 +232,7 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, vo
 // ================================================================================================
 hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value) {
   HIP_INIT_API(hipMemPoolGetAttribute, mem_pool, attr, value);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -241,6 +244,7 @@ hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, vo
 hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* desc_list,
                                size_t count) {
   HIP_INIT_API(hipMemPoolSetAccess, mem_pool, desc_list, count);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if ((mem_pool == nullptr) || (desc_list == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -272,6 +276,7 @@ hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* de
 hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
                                hipMemLocation* location) {
   HIP_INIT_API(hipMemPoolGetAccess, flags, mem_pool, location);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if ((mem_pool == nullptr) || (location == nullptr) || (flags == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -291,6 +296,7 @@ hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
 // ================================================================================================
 hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_props) {
   HIP_INIT_API(hipMemPoolCreate, mem_pool, pool_props);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if ((mem_pool == nullptr) || (pool_props == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -320,6 +326,7 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
 // ================================================================================================
 hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool) {
   HIP_INIT_API(hipMemPoolDestroy, mem_pool);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -384,6 +391,7 @@ hipError_t hipMemPoolExportToShareableHandle(void* shared_handle, hipMemPool_t m
                                              hipMemAllocationHandleType handle_type,
                                              unsigned int flags) {
   HIP_INIT_API(hipMemPoolExportToShareableHandle, shared_handle, mem_pool, handle_type, flags);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr || shared_handle == nullptr || flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -406,6 +414,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
                                                hipMemAllocationHandleType handle_type,
                                                unsigned int flags) {
   HIP_INIT_API(hipMemPoolImportFromShareableHandle, mem_pool, shared_handle, handle_type, flags);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr || shared_handle == nullptr || flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -435,6 +444,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
 // ================================================================================================
 hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* ptr) {
   HIP_INIT_API(hipMemPoolExportPointer, export_data, ptr);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (export_data == nullptr || ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -460,6 +470,7 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* p
 hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data) {
   HIP_INIT_API(hipMemPoolImportPointer, ptr, mem_pool, export_data);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (mem_pool == nullptr || export_data == nullptr || ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }

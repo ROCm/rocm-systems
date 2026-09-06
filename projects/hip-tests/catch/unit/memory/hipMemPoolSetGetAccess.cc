@@ -472,6 +472,37 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Test hipMemPoolSetAccess while a stream is capturing. The API is allowed in
+ * relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolSetGetAccess.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolSetAccess_Capture) {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  checkMempoolSupported(device_id)
+  MemPoolGuard mempool(MemPools::created, device_id);
+
+  hipMemAccessDesc desc;
+  memset(&desc, 0, sizeof(hipMemAccessDesc));
+  desc.location.type = hipMemLocationTypeDevice;
+  desc.location.id = device_id;
+  desc.flags = hipMemAccessFlagsProtReadWrite;
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), capture_err);
+  END_CAPTURE_SYNC(capture_err);
+}
+
+/**
  * End doxygen group hipMemPoolSetAccess.
  * @}
  */
@@ -653,4 +684,32 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice) {
     HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test hipMemPoolGetAccess while a stream is capturing. The API is allowed in
+ * relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolSetGetAccess.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolGetAccess_Capture) {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  checkMempoolSupported(device_id)
+  MemPoolGuard mempool(MemPools::created, device_id);
+
+  hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
+  hipMemLocation location = {hipMemLocationTypeDevice, device_id};
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolGetAccess(&flags, mempool.mempool(), &location), capture_err);
+  END_CAPTURE_SYNC(capture_err);
 }
