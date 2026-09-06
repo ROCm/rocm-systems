@@ -26,19 +26,16 @@
 #ifdef ENABLE_YAML_TAGS
 #include "hip_test_config.hh"
 
-#define SECOND_ARG(a, b, ...) b
-#define GET_TAGS(...) SECOND_ARG(__VA_ARGS__)
-#define HIP_TEST_CASE(name) TEST_CASE(#name, GET_TAGS(name))
-#define HIP_TEMPLATE_TEST_CASE(name, ...) TEMPLATE_TEST_CASE(#name, GET_TAGS(name), __VA_ARGS__)
+#define HIP_TEST_CASE(name) TEST_CASE(#name, name)
+#define HIP_TEMPLATE_TEST_CASE(name, ...) TEMPLATE_TEST_CASE(#name, name, __VA_ARGS__)
 
 #else
-#define GET_TAGS(...)
 #define HIP_TEST_CASE(name) TEST_CASE(#name, "")
 #define HIP_TEMPLATE_TEST_CASE(name, ...) TEMPLATE_TEST_CASE(#name, "", __VA_ARGS__)
 #endif
 
 /**
- * @brief Check if running at quick level (level_0).
+ * @brief Check if r1ning at quick level (level_0).
  * Use this to reduce test parameters for faster execution.
  */
 inline bool isQuickLevel() {

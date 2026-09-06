@@ -992,7 +992,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
   }
 }
 
-TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1278,7 +1278,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
   }
 }
 
-TEST_CASE(Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes)
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1475,7 +1475,7 @@ void testScanForTileSize()
   }
 }
 
-TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1495,7 +1495,7 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1533,7 +1533,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
 
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
@@ -1559,7 +1559,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
                    unsigned long long)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
@@ -1586,7 +1586,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int
 }
 
 // make sures that tiled blocks that use the y or z dimension work correctly
-TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
+HIP_TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1621,7 +1621,7 @@ TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
@@ -1647,7 +1647,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
                    unsigned long long)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
@@ -1706,7 +1706,7 @@ void __global__ binaryPartitionTiled(int* out, int* ranks)
   }
 }
 
-TEST_CASE(Unit_Thread_Block_Scan_partition)
+HIP_TEST_CASE(Unit_Thread_Block_Scan_partition)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
