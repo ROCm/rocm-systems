@@ -200,10 +200,10 @@ install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
 # separate header installation is needed here (and duplicating it breaks
 # TheRock artifact uniqueness checks — see ROCm/TheRock#7005).
 
-# Pure-logic unit tests. One compiles a header out of src/dxg on its own and
-# links nothing; the other reads the built library's dynamic symbol table.
-# Neither needs a GPU or a DXCore adapter, so `ctest` here works on a machine
-# with neither. Off by default so a packaging build is unaffected.
+# Pure-logic unit tests. One drives the KFD lifecycle state machine with
+# injected thunk calls; the other reads the built library's dynamic symbol
+# table. Neither needs a GPU or a DXCore adapter, so `ctest` here works on a
+# machine with neither. Off by default so a packaging build is unaffected.
 option ( BUILD_ROCDXG_TESTS "Build the librocdxg unit tests" OFF )
 if ( BUILD_ROCDXG_TESTS )
   enable_testing()

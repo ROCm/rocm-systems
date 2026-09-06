@@ -113,46 +113,38 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
-hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
-  if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
-
-  HsaSystemProperties props = {};
-  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
-
-  sys_props_ = props;
-  topology_snapshot_acquired_ = true;
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
-  if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
-
-  topology_snapshot_acquired_ = false;
-  return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                                               : HSA_STATUS_ERROR;
-}
-
-hsa_status_t KfdDriver::DisableRuntime() {
-  if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
-
-  runtime_enabled_ = false;
-  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
-                                                                              : HSA_STATUS_ERROR;
+KfdLifecycleOps KfdDriver::ThunkOps() {
+  KfdLifecycleOps ops;
+  ops.disable_runtime = []() {
+    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                                : HSA_STATUS_ERROR;
+  };
+  ops.release_snapshot = []() {
+    return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS
+        ? HSA_STATUS_SUCCESS
+        : HSA_STATUS_ERROR;
+  };
+  ops.close = []() {
+    return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                  : HSA_STATUS_ERROR;
+  };
+  ops.get_pid = []() { return os::GetProcessId(); };
+  return ops;
 }
 
 hsa_status_t KfdDriver::Init() {
-  // Own one snapshot from before the debug probe through BuildTopology().
-  if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
+  const hsa_status_t acquired = AcquireTopologySnapshot();
+  if (acquired != HSA_STATUS_SUCCESS) return acquired;
 
-  HSAKMT_STATUS ret = HSAKMT_CALL(
-      hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
-
-  runtime_enabled_ = true;
-  MAKE_NAMED_SCOPE_GUARD(runtime_guard, [this]() { DisableRuntime(); });
+  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+  const hsa_status_t enabled = lifecycle_.EnableRuntime([&ret]() {
+    ret = HSAKMT_CALL(
+        hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                                : HSA_STATUS_ERROR;
+  });
+  if (enabled != HSA_STATUS_SUCCESS) return enabled;
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -175,20 +167,10 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
-  runtime_guard.Dismiss();
-  snapshot_guard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ShutDown() {
-  const hsa_status_t disable_status = DisableRuntime();
-  const hsa_status_t release_status = ReleaseTopologySnapshot();
-  const hsa_status_t close_status = Close();
-
-  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
-  if (release_status != HSA_STATUS_SUCCESS) return release_status;
-  return close_status;
-}
+hsa_status_t KfdDriver::ShutDown() { return lifecycle_.ShutDown(); }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   auto tmp_driver = std::unique_ptr<core::Driver>(new KfdDriver("/dev/kfd"));
@@ -205,19 +187,41 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
   return HSA_STATUS_SUCCESS;
 }
 
+// KERNEL_ALREADY_OPENED means another in-process consumer opened the thunk
+// first - on WSL, amdsmi's opt-in WSL backend already reads the KMT topology
+// alongside this runtime, and rocprofiler-sdk joins it with #7016. It is
+// success because hsaKmtOpenKFD()'s already-opened branch in
+// libhsakmt/src/dxg/openclose.cpp increments dxg_open_count just as the first
+// open does: this driver holds a real reference and owes a real close. That is
+// why lifecycle_.Open() recording ownership here is correct and not a
+// double-count.
+//
+// libhsakmt/src/openclose.c increments hsakmt_kfd_open_count on its
+// already-opened branch too, so the same argument would hold for native KFD,
+// but this path still fails there, stranding that reference. Known,
+// pre-existing on develop, and out of scope for this change.
 hsa_status_t KfdDriver::Open() {
-  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
-  if (ret == HSAKMT_STATUS_SUCCESS ||
-      (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
-       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()))
-    return HSA_STATUS_SUCCESS;
-
-  return HSA_STATUS_ERROR;
+  return lifecycle_.Open([]() {
+    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+    if (ret == HSAKMT_STATUS_SUCCESS) return HSA_STATUS_SUCCESS;
+    if (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG())
+      return HSA_STATUS_SUCCESS;
+    return HSA_STATUS_ERROR;
+  });
 }
 
-hsa_status_t KfdDriver::Close() {
-  return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                                : HSA_STATUS_ERROR;
+hsa_status_t KfdDriver::Close() { return lifecycle_.Close(); }
+
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  return lifecycle_.AcquireSnapshot([this]() {
+    HsaSystemProperties props = {};
+    if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
+
+    sys_props_ = props;
+    return HSA_STATUS_SUCCESS;
+  });
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
@@ -923,6 +927,12 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
 }
 
 hsa_status_t KfdDriver::SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const {
+  // Optional thunk: the loader binds this one without failing the table load,
+  // so it stays null against a libhsakmt that does not export the RAS-poison
+  // opt-in. Missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtSetSigbusDelay) == nullptr)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+
   if (HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 

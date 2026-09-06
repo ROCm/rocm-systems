@@ -198,6 +198,39 @@ class Runtime {
   /// @brief Close and delete all agent driver objects from ::agent_drivers_.
   void DestroyDrivers();
 
+  /// @brief Give back everything AMD::Load() built: the agents it published,
+  /// what points at them, and the drivers it registered.
+  ///
+  /// @details The rollback for a load that failed. Acquire() keeps the
+  /// singleton after a failed Load() and only drops the reference count, so
+  /// whatever is still registered here is what the next hsa_init() finds. Both
+  /// drivers and agents are published by appending, so leaving them would make
+  /// the retry double them and re-run Init() on a driver the unwind already
+  /// closed - not a leak but a use of state that has been torn down.
+  ///
+  /// Tears down in the order ::Unload() uses, tolerates the half-built state a
+  /// failed load leaves behind, and is safe to run more than once.
+  void DestroyTopology();
+
+  /// @brief Give back the extensions, the aqlprofile probe handle and the
+  /// loader, in the reverse of the order ::Load() acquires them.
+  ///
+  /// @details These three sit between the topology and ::PostToolsInit(), so
+  /// both the rollback for a failure at that point and a normal ::Unload() have
+  /// to give back exactly this much, in exactly this order. Stated once so the
+  /// two cannot drift: the failure path is the one nobody runs.
+  ///
+  /// Tolerates any of them never having been acquired, and is safe to run more
+  /// than once.
+  void DestroyLoaderAndExtensions();
+
+  /// @brief Close the thunk and release the loader that owns it.
+  ///
+  /// @details The last thing ::Load() builds up from, so the last thing to go.
+  /// Safe to run more than once, and on a loader that never got as far as
+  /// binding its API table.
+  void DestroyThunkLoader();
+
   /// @brief Set the number of links connecting the agents in the platform.
   void SetLinkCount(size_t num_link);
 
@@ -534,7 +567,7 @@ class Runtime {
   const Flag& flag() const { return flag_; }
   Flag& flag() { return flag_; }
 
-  const ThunkLoader* thunkLoader() const { return thunkLoader_; }
+  const ThunkLoader* thunkLoader() const { return thunkLoader_.get(); }
 
   ExtensionEntryPoints extensions_;
 
@@ -1003,7 +1036,9 @@ class Runtime {
   // Track environment variables.
   Flag flag_;
 
-  ThunkLoader* thunkLoader_;
+  // Owned, because Load() builds one per attempt and every failure return below
+  // it has to give back the shared thunk it holds open.
+  std::unique_ptr<ThunkLoader> thunkLoader_;
 
   // Pools memory for SharedSignal (Signal ABI blocks)
   SharedSignalPool_t SharedSignalPool;
