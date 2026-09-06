@@ -32,6 +32,13 @@ _MAX_NUMBERED_SGPR = {
 
 def _gfx_generation(gpu_target):
     """Extract the major generation number from a target like 'gfx942' -> 9, 'gfx1200' -> 12."""
+    # Generic targets are named like 'gfx9-4-generic', 'gfx10-3-generic',
+    # 'gfx11-generic', 'gfx12-generic'. The number right after "gfx" is
+    # already the generation number.
+    m = re.match(r'gfx(\d+)(?:-\d+)?-generic$', gpu_target)
+    if m:
+        return int(m.group(1))
+
     m = re.match(r'gfx(\d+)', gpu_target)
     if not m:
         sys.exit(f"ERROR: cannot parse GPU target '{gpu_target}'")
