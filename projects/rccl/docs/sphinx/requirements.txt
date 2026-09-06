@@ -37,12 +37,14 @@ click==8.1.7
     #   sphinx-external-toc
 comm==0.2.2
     # via ipykernel
-cryptography==44.0.1
+cryptography==50.0.0
     # via pyjwt
 debugpy==1.8.12
     # via ipykernel
 decorator==5.1.1
     # via ipython
+defusedxml==0.7.1
+    # via sphinxcontrib-datatemplates
 deprecated==1.2.14
     # via pygithub
 docutils==0.21.2
@@ -176,6 +178,7 @@ pyyaml==6.0.1
     #   myst-parser
     #   rocm-docs-core
     #   sphinx-external-toc
+    #   sphinxcontrib-datatemplates
 pyzmq==26.2.0
     # via
     #   ipykernel
@@ -214,6 +217,8 @@ sphinx==7.3.7
     #   sphinx-design
     #   sphinx-external-toc
     #   sphinx-notfound-page
+    #   sphinxcontrib-datatemplates
+    #   sphinxcontrib-runcmd
 sphinx-book-theme==1.1.4
     # via rocm-docs-core
 sphinx-copybutton==0.5.2
@@ -262,8 +267,9 @@ traitlets==5.14.3
     #   matplotlib-inline
     #   nbclient
     #   nbformat
-typing-extensions==4.12.0
+typing-extensions==4.16.0
     # via
+    #   cryptography
     #   ipython
     #   myst-nb
     #   pydata-sphinx-theme
