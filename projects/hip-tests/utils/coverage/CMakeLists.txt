@@ -5,6 +5,8 @@
 cmake_minimum_required(VERSION 3.0)
 project(generateHipAPICoverage)
 
+# Temporary no-op change on hip-tests to exercise TheRock Multi-arch CI
+
 set(CMAKE_CXX_STANDARD 17)
 
 set(SRC
