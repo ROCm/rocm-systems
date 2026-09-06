@@ -28,6 +28,7 @@
 #include <array>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -89,6 +90,12 @@ struct output_stream
     std::ostream*  stream = nullptr;
     ostream_dtor_t dtor   = nullptr;
 };
+
+// Returns the directory that stops get_output_filename from writing this
+// artifact, or nothing when the path is usable. Creates nothing, so a caller
+// that cannot afford the ROCP_FATAL below can ask first.
+std::optional<std::string>
+check_output_path(const output_config& cfg, std::string_view fname, std::string_view ext);
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);

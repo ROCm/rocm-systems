@@ -87,6 +87,9 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
         return _fpath;
 
     auto _replace = [](auto& _v, const output_key& pitr) {
+        // a value containing its own key, such as %argv% when the key was
+        // typed on the command line, would be substituted forever
+        if(pitr.value.find(pitr.key) != std::string::npos) return;
         auto pos = std::string::npos;
         while((pos = _v.find(pitr.key)) != std::string::npos)
             _v.replace(pos, pitr.key.length(), pitr.value);
