@@ -817,6 +817,21 @@ hsaKmtUnmapMemoryToGPU(
     void*           MemoryAddress       //IN (page-aligned)
     );
 
+/**
+  Translates a GPU virtual address to the corresponding CPU virtual address.
+  On Windows/WDDM, GPU VAs differ from CPU VAs for userptr (registered) memory;
+  this function performs the reverse mapping using the translation table
+  populated by hsaKmtMapMemoryToGPUNodes.
+  On Linux/KFD, GPU VA == CPU VA so the input is returned unchanged.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtTranslateGpuVa(
+    void*           gpu_va,     //IN
+    void**          cpu_va      //OUT
+    );
+
 
 /**
   Notifies the kernel driver that a process wants to use GPU debugging facilities
