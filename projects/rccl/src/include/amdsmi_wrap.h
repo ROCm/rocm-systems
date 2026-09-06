@@ -605,7 +605,7 @@ enum class amdSmiFabricRuntimeLayout {
   Unknown,
 };
 
-// Zero the request header so the probe sends the same bytes the per-device call sends.
+// Zero the request header so it matches the per-device call; the payload stays canary by design.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
   memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
