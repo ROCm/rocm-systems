@@ -14,6 +14,7 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
 #include <cstring>
@@ -104,6 +105,10 @@ enum class FragmentMarkerRole : uint64_t {
 
   InstructionRewrite rewrite;
   rewrite.source_size = source_size;
+  for (const ConSanTextFragment *fragment : applicable) {
+    rewrite.required_ordinary_sgpr_count = std::max<uint32_t>(rewrite.required_ordinary_sgpr_count,
+                                                              fragment->patch.required_sgpr_count);
+  }
   std::vector<uint32_t> composed;
   const auto add_marker = [&](const ConSanTextFragment &fragment, FragmentMarkerRole role,
                               uint64_t byte_offset) {
@@ -582,6 +587,8 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
           {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::Begin), .byte_offset = begin});
       rewrite.prefix_words.insert(rewrite.prefix_words.end(), fragment.before_words.begin(),
                                   fragment.before_words.end());
+      rewrite.required_ordinary_sgpr_count = std::max<uint32_t>(
+          rewrite.required_ordinary_sgpr_count, fragment.patch.required_sgpr_count);
       rewrite.markers.push_back(
           {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::End),
            .byte_offset = static_cast<uint32_t>(rewrite.prefix_words.size() * sizeof(uint32_t))});
@@ -661,6 +668,24 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     }
     source_descriptor->kernel_code_entry_byte_offset =
         output_descriptor->kernel_code_entry_byte_offset;
+    // ConSan owns the pre-relocation resource transaction, but DBT may need one
+    // additional ordinary SGPR pair when instrumentation growth makes a direct
+    // transfer long. Retain that monotonic SGPR allocation feedback along with
+    // DBT's entry offset; copying the complete source descriptor would otherwise
+    // publish branch code that names an unallocated pair.
+    if (arch_descriptor_encodes_sgpr_allocation(arch)) {
+      const uint32_t source_sgprs =
+          AMDHSA_BITS_GET(source_descriptor->compute_pgm_rsrc1,
+                          rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+      const uint32_t output_sgprs =
+          AMDHSA_BITS_GET(output_descriptor->compute_pgm_rsrc1,
+                          rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+      if (output_sgprs > source_sgprs) {
+        AMDHSA_BITS_SET(source_descriptor->compute_pgm_rsrc1,
+                        rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                        output_sgprs);
+      }
+    }
     if (!write_kernel_descriptor(std::span<uint8_t>(translated.elf_bytes),
                                  output_kernel->descriptor_file_offset, *source_descriptor)) {
       errors.emplace_back(error_prefix + " could not publish a relocated kernel descriptor");

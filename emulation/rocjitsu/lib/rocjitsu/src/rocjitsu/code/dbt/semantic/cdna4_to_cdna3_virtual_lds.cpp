@@ -626,10 +626,10 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   // at the descriptor total can therefore put DBT temporaries in special SGPR
   // territory. Derive the ordinary floor from decoded operands and reserve a
   // conservative CDNA special-SGPR tail when asking the descriptor to grow.
-  const uint32_t current = std::max(ordinary_floor, context.required_sgpr_count);
+  const uint32_t current = std::max(ordinary_floor, context.required_ordinary_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base + 4 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 4 + kCdnaSpecialSgprTailReserve);
+    context.require_ordinary_sgprs(base + 4, base + 4 + kCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(base + 2)};
   }
@@ -641,7 +641,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
 
   const uint32_t borrowed_temp = (allocated_ordinary - 2u) & ~1u;
   if (base + 2 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 2 + kCdnaSpecialSgprTailReserve);
+    context.require_ordinary_sgprs(base + 2, base + 2 + kCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(borrowed_temp)};
   }
@@ -663,7 +663,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   // scalar registers while advertising a small granulated SGPR count. Borrowed
   // virtual-LDS SADDR pairs must still be inside the target wave allocation or
   // vector memory observes an out-of-range scalar source.
-  context.require_sgprs(allocated_ordinary);
+  context.require_ordinary_sgprs(allocated_ordinary, allocated_ordinary);
   return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(spill_base),
                                        .prologue_temp = static_cast<uint16_t>(temp_base),
                                        .spill_per_use = true};

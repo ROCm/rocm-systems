@@ -140,7 +140,8 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
         std::string(inst.mnemonic()) +
         " v_lshl_add_u64 lowering could not find a free SGPR pair for the add carry");
   const uint8_t carry_sgpr = static_cast<uint8_t>(*carry_sgpr_opt);
-  context.require_sgprs(static_cast<uint32_t>(carry_sgpr) + 2u);
+  context.require_ordinary_sgprs(static_cast<uint32_t>(carry_sgpr) + 2u,
+                                 static_cast<uint32_t>(carry_sgpr) + 2u);
 
   // These generated opcodes currently match on RDNA3 and RDNA4. Keep the
   // architecture-specific selection explicit so an ISA XML change cannot

@@ -607,23 +607,81 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
   return os.str();
 }
 
-[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rj_code_arch_t arch) {
-  // Long direct branches consume their scratch pair at the final
-  // s_setpc_b64/s_swappc_b64 transfer, so DBT may only use a pair that can be
-  // made descriptor-backed for the destination kernel.
-  return arch_descriptor_sgpr_allocation_limit(arch);
+[[nodiscard]] uint32_t max_ordinary_sgprs_for_long_branch(rj_code_arch_t arch) {
+  if (arch_is_cdna_4_or_lower(arch))
+    return amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF;
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+    return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
+  return 0;
 }
 
-/// @brief Find the next even SGPR pair that can be descriptor-backed for a branch thunk.
-[[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
-                                                                 rj_code_arch_t arch) {
-  const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
-  const uint32_t base = (current + 1u) & ~1u;
-  if (base > 126)
-    return std::nullopt;
+[[nodiscard]] uint32_t descriptor_sgprs_for_ordinary_extent(uint32_t ordinary_count,
+                                                            rj_code_arch_t arch) {
+  // CDNA1-4 place FLAT_SCRATCH, XNACK, and VCC in a six-register tail after
+  // the ordinary scalar file. The descriptor count includes that tail; modern
+  // fixed-special-register targets do not encode an SGPR allocation at all.
+  constexpr uint32_t kCdnaDescriptorSpecialTail = 6;
+  return ordinary_count +
+         (arch_descriptor_encodes_sgpr_allocation(arch) ? kCdnaDescriptorSpecialTail : 0u);
+}
 
-  const uint32_t max_descriptor_sgprs = max_descriptor_sgpr_allocation_for_long_branch(arch);
-  if (max_descriptor_sgprs != 0 && base + 2 > max_descriptor_sgprs)
+[[nodiscard]] uint32_t ordinary_extent_from_descriptor_sgprs(uint32_t descriptor_count,
+                                                             rj_code_arch_t arch) {
+  constexpr uint32_t kCdnaDescriptorSpecialTail = 6;
+  const uint32_t limit = max_ordinary_sgprs_for_long_branch(arch);
+  if (!arch_descriptor_encodes_sgpr_allocation(arch))
+    return std::min(descriptor_count, limit);
+  const uint32_t ordinary_count = descriptor_count > kCdnaDescriptorSpecialTail
+                                      ? descriptor_count - kCdnaDescriptorSpecialTail
+                                      : 0u;
+  return std::min(ordinary_count, limit);
+}
+
+/// @brief Highest ordinary SGPR extent that source instructions can address.
+///
+/// Direct operands give an exact whole-scope ceiling. Relative scalar moves
+/// index through M0 and can reach beyond their encoded base, so no append-only
+/// global scratch pair is safe when one is present.
+[[nodiscard]] uint32_t source_ordinary_sgpr_extent(std::span<BasicBlock *const> blocks,
+                                                   const KdTranslation &translation,
+                                                   rj_code_arch_t arch) {
+  const uint32_t limit = max_ordinary_sgprs_for_long_branch(arch);
+  uint32_t extent = std::max<uint32_t>(
+      std::min<uint32_t>(translation.target_user_sgpr_count, limit),
+      ordinary_extent_from_descriptor_sgprs(translation.target_sgpr_count, arch));
+  const auto note_operand = [&](const Operand *operand) {
+    if (operand == nullptr)
+      return;
+    const auto ref = operand->to_register_ref();
+    if (!ref || ref->cls != RegClass::SGPR || ref->index >= limit)
+      return;
+    extent = std::max<uint32_t>(
+        extent, std::min<uint32_t>(limit, static_cast<uint32_t>(ref->index) + ref->width));
+  };
+
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic().starts_with("s_movrel"))
+        return limit;
+      for (int i = 0; i < inst.num_src_operands(); ++i)
+        note_operand(inst.src_operand(i));
+      for (int i = 0; i < inst.num_dst_operands(); ++i)
+        note_operand(inst.dst_operand(i));
+    }
+  }
+  return extent;
+}
+
+/// @brief Find the next even ordinary SGPR pair available to a branch thunk.
+[[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
+                                                                 uint32_t source_ordinary_extent,
+                                                                 rj_code_arch_t arch) {
+  const uint32_t current = std::max(source_ordinary_extent, context.required_ordinary_sgpr_count);
+  const uint32_t base = (current + 1u) & ~1u;
+  const uint32_t ordinary_limit = max_ordinary_sgprs_for_long_branch(arch);
+  if (ordinary_limit == 0 || base + 2 > ordinary_limit)
     return std::nullopt;
   return static_cast<uint16_t>(base);
 }
@@ -2898,6 +2956,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                      translation.entry_text_offset);
         return leave_unchanged();
       }
+      if (rewrite->required_ordinary_sgpr_count > max_ordinary_sgprs_for_long_branch(host_arch_)) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "client kernel-entry rewrite exceeds the target ordinary SGPR file",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
       client_kernel_entry_rewrites.emplace(translation.descriptor_file_offset, std::move(*rewrite));
     }
 
@@ -3377,11 +3441,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     return emit_skipped_kernel(restored_scope, std::move(failure));
   };
 
-  auto reserve_long_branch_sgpr_pair = [&](TranslationContext &context) -> std::optional<uint16_t> {
-    auto base = next_long_branch_sgpr_pair(context, host_arch_);
+  auto reserve_long_branch_sgpr_pair = [&](TranslationContext &context,
+                                           uint32_t source_sgpr_extent) -> std::optional<uint16_t> {
+    auto base = next_long_branch_sgpr_pair(context, source_sgpr_extent, host_arch_);
     if (!base)
       return std::nullopt;
-    context.require_sgprs(static_cast<uint32_t>(*base) + 2);
+    const uint32_t ordinary_requirement = static_cast<uint32_t>(*base) + 2;
+    context.require_ordinary_sgprs(ordinary_requirement, descriptor_sgprs_for_ordinary_extent(
+                                                             ordinary_requirement, host_arch_));
     return base;
   };
 
@@ -3426,6 +3493,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count,
         scope.translation->target_private_size, scope.translation->uses_dynamic_stack);
+    const uint32_t source_sgpr_extent =
+        source_ordinary_sgpr_extent(scope.blocks, *scope.translation, host_arch_);
+    if (const auto entry_rewrite =
+            client_kernel_entry_rewrites.find(scope.translation->descriptor_file_offset);
+        entry_rewrite != client_kernel_entry_rewrites.end()) {
+      const uint32_t ordinary_requirement = entry_rewrite->second.required_ordinary_sgpr_count;
+      kernel_context.require_ordinary_sgprs(
+          ordinary_requirement,
+          descriptor_sgprs_for_ordinary_extent(ordinary_requirement, host_arch_));
+    }
     if (scope.translation->needs_lds_overflow_buf) {
       auto virtual_lds_base =
           reserve_virtual_lds_base_sgpr_pair(kernel_context, KernelBlockScope(scope.blocks),
@@ -3497,7 +3574,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       return leave_unchanged();
     }
     const bool can_use_long_direct_branches =
-        next_long_branch_sgpr_pair(kernel_context, host_arch_).has_value();
+        next_long_branch_sgpr_pair(kernel_context, source_sgpr_extent, host_arch_).has_value();
     const bool is_gfx1250_b0_to_a0_profile = is_gfx1250_b0_to_a0();
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
     std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
@@ -4225,6 +4302,22 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               }
               return leave_unchanged();
             }
+            if (client_rewrite->required_ordinary_sgpr_count >
+                max_ordinary_sgprs_for_long_branch(host_arch_)) {
+              auto failure = make_kernel_failure(
+                  DiagnosticKind::ResourceLimit,
+                  "client instruction rewrite exceeds the target ordinary SGPR file", offset,
+                  std::string(inst.mnemonic()));
+              if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+                skip_scope = true;
+                break;
+              }
+              return leave_unchanged();
+            }
+            const uint32_t ordinary_requirement = client_rewrite->required_ordinary_sgpr_count;
+            kernel_context.require_ordinary_sgprs(
+                ordinary_requirement,
+                descriptor_sgprs_for_ordinary_extent(ordinary_requirement, host_arch_));
             client_rewrite_size_by_source_offset.emplace(offset, client_source_size);
             client_consumed_source_end = offset + client_source_size;
             for (const InstructionRewriteMarker &marker : client_rewrite->markers) {
@@ -4843,7 +4936,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           rebaser.rebase(marker.target_offset);
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
-        auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
+        auto sgpr = reserve_long_branch_sgpr_pair(kernel_context, source_sgpr_extent);
         if (!sgpr) {
           patched_control_flow = {
               .ok = false,

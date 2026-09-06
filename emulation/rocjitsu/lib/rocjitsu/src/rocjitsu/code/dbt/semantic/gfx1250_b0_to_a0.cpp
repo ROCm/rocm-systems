@@ -297,7 +297,8 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
     RegisterSet candidate;
     candidate.expand({RegClass::SGPR, base, static_cast<uint8_t>(request.count)});
     if (!candidate.intersects(live)) {
-      context.require_sgprs(static_cast<uint32_t>(base) + request.count);
+      const uint32_t required = static_cast<uint32_t>(base) + request.count;
+      context.require_ordinary_sgprs(required, required);
       return Gfx1250SgprScratchLease{.base = base,
                                      .count = request.count,
                                      .carrier = std::nullopt,
@@ -333,7 +334,8 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
   if (!carrier)
     return std::nullopt;
 
-  context.require_sgprs(static_cast<uint32_t>(*victim) + request.count);
+  const uint32_t required = static_cast<uint32_t>(*victim) + request.count;
+  context.require_ordinary_sgprs(required, required);
   return Gfx1250SgprScratchLease{.base = *victim,
                                  .count = request.count,
                                  .carrier = *carrier.lease,

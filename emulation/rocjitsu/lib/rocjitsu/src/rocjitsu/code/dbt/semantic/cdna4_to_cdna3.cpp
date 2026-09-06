@@ -390,7 +390,9 @@ void require_cdna3_exec_save_sgpr(TranslationContext &context, uint8_t saved_exe
   // lowering introduces an ordinary SGPR pair for EXEC save/restore, grow the
   // descriptor far enough that the architectural special-register tail moves
   // above that generated pair.
-  context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2u + kCdna3SpecialSgprTailReserve);
+  context.require_ordinary_sgprs(static_cast<uint32_t>(saved_exec) + 2u,
+                                 static_cast<uint32_t>(saved_exec) + 2u +
+                                     kCdna3SpecialSgprTailReserve);
 }
 
 void emit_cdna3_mfma(std::vector<uint32_t> &words, uint16_t op,

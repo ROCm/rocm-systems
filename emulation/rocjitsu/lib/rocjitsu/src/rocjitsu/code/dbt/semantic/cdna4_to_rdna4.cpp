@@ -181,8 +181,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   // Record feedback only after the full scratch allocation succeeds. A failed
   // lowering returns empty and should not grow descriptor resources for code
   // that was never emitted.
-  context.require_sgprs(static_cast<uint32_t>(kExecSave) + 2);
-  context.require_sgprs(static_cast<uint32_t>(kTmpSgpr) + 1);
+  context.require_ordinary_sgprs(static_cast<uint32_t>(kExecSave) + 2,
+                                 static_cast<uint32_t>(kExecSave) + 2);
+  context.require_ordinary_sgprs(static_cast<uint32_t>(kTmpSgpr) + 1,
+                                 static_cast<uint32_t>(kTmpSgpr) + 1);
   context.require_vgprs(static_cast<uint32_t>(vaddr) + 1);
 
   std::vector<uint32_t> words;

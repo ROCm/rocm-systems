@@ -87,6 +87,13 @@ struct KernelResourceRequirements {
   /// plus one.
   uint32_t required_sgpr_count = 0;
 
+  /// @brief Minimum ordinary SGPR extent named by generated instructions.
+  ///
+  /// Unlike @c required_sgpr_count, this excludes descriptor-managed CDNA
+  /// special-register tails. Control-flow relocation uses this value to keep
+  /// branch scratch in the ordinary scalar operand file.
+  uint32_t required_ordinary_sgpr_count = 0;
+
   /// @brief Initial per-lane private segment size from descriptor translation.
   uint32_t private_segment_fixed_size = 0;
 
@@ -144,6 +151,16 @@ struct KernelResourceRequirements {
   void require_sgprs(uint32_t count) {
     if (required_sgpr_count < count)
       required_sgpr_count = count;
+  }
+
+  /// @brief Record both an ordinary SGPR extent and its descriptor requirement.
+  ///
+  /// CDNA callers pass an allocation count that also reserves the architectural
+  /// special-register tail; GFX10+ callers pass the ordinary count unchanged.
+  void require_ordinary_sgprs(uint32_t ordinary_count, uint32_t descriptor_count) {
+    if (required_ordinary_sgpr_count < ordinary_count)
+      required_ordinary_sgpr_count = ordinary_count;
+    require_sgprs(descriptor_count);
   }
 
   /// @brief Record a minimum per-lane private segment size.

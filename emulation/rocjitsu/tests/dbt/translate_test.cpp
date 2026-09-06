@@ -3746,6 +3746,74 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
   EXPECT_EQ(endpgm->target_offset, 2 * sizeof(uint32_t));
 }
 
+TEST(BinaryTranslator, ClientRewriteLongBranchNeverUsesCdnaSpecialSgprs) {
+  using namespace rocr::llvm::amdhsa;
+
+  // A CDNA descriptor allocation of 104 includes the six-register
+  // FLAT_SCRATCH/XNACK/VCC tail, so only s0..s97 are ordinary registers. One
+  // client word makes this maximally encodable conditional branch long. DBT
+  // must grow the descriptor and use the next ordinary pair, s[98:99], rather
+  // than mistaking the raw allocation count for s104 and clobbering XNACK.
+  constexpr size_t kTargetWord = 0x8000;
+  constexpr uint16_t kExpectedBranchScratch = 98;
+  constexpr uint16_t kXnackLo = 104;
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> words(kTargetWord + 1u, nop);
+  words[0] = cdna4::build_sopp(cdna4::kSCbranchScc0Sopp,
+                               {.simm16 = static_cast<uint16_t>(kTargetWord - 1u)})[0];
+  words[kTargetWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const Section *rodata = find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  12);
+  write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), descriptor);
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslatorOptions options;
+  options.preserve_source_descriptor_resources = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4, 0, options);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != sizeof(uint32_t))
+          return std::nullopt;
+        return InstructionRewrite{.prefix_words = {nop},
+                                  .replacement_words = std::nullopt,
+                                  .markers = {},
+                                  .source_size = 0,
+                                  .required_ordinary_sgpr_count = kExpectedBranchScratch};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  EXPECT_NE(std::ranges::find(translated_words,
+                              build_s_getpc_b64(kExpectedBranchScratch, ROCJITSU_CODE_ARCH_CDNA4)),
+            translated_words.end());
+  EXPECT_EQ(
+      std::ranges::find(translated_words, build_s_getpc_b64(kXnackLo, ROCJITSU_CODE_ARCH_CDNA4)),
+      translated_words.end());
+
+  const Section *translated_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  const auto translated_descriptor = read_kernel_descriptor_for_test(translated_rodata->data());
+  EXPECT_EQ(AMDHSA_BITS_GET(translated_descriptor.compute_pgm_rsrc1,
+                            COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+            13u)
+      << "s[98:99] plus the CDNA architectural tail requires a 112-SGPR allocation";
+}
+
 TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMarkers) {
   const uint32_t prefix_nop = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint32_t> words = {

@@ -588,6 +588,18 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(summary["records"][0]["first_lds"], "[0,4)")
         self.assertEqual(summary["records"][0]["second_lds"], "[0,4)")
 
+    def test_coverage_output_accepts_mode_local_record_replay_summary(self) -> None:
+        report = moi_auto_report(7, 1).replace(
+            " sampled_conflicts=0 sampled_immediate_conflicts=0", ""
+        )
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join((report, moi_auto_replay(7, 1, 0))),
+            RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+        )
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["pre_replay_count"], 0)
+
     def test_coverage_output_diagnostic_inventory_rejects_unbounded_output(
         self,
     ) -> None:
@@ -712,7 +724,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "malformed replay diagnostic summary",
             ),
             "malformed pre-replay summary": (
-                fixture.replace("sampled_conflicts=0 ", "", 1),
+                fixture.replace("sampled_conflicts=0", "sampled_conflicts=bad", 1),
                 "malformed pre-replay diagnostic summary",
             ),
             "detail without summary": (

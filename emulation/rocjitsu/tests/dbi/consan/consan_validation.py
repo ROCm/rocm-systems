@@ -4213,8 +4213,13 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
             diagnostic_capacity = _unsigned(fields, "diagnostic_capacity")
             address = _unsigned(fields, "addr")
             byte_count = _unsigned(fields, "bytes")
+            # Older report ABIs emitted every engine's counters in one common
+            # summary.  Current mode-local renderers correctly omit Sampled
+            # counters from Record/Replay reports.  Preserve validation of a
+            # legacy counter when present without requiring another mode's
+            # schema from a Record/Replay producer.
             sampled_counts = tuple(
-                _unsigned(fields, name)
+                _unsigned(fields, name) if name in fields else 0
                 for name in ("sampled_conflicts", "sampled_immediate_conflicts")
             )
             visible_counts = tuple(

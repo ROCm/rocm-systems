@@ -128,6 +128,12 @@ struct InstructionRewrite {
   std::vector<InstructionRewriteMarker> markers;
   /// Number of contiguous source bytes replaced; zero means the first instruction only.
   uint32_t source_size = 0;
+  /// Highest ordinary SGPR named by the supplied words, expressed as a count.
+  ///
+  /// DBT reserves global branch scratch above this extent. Clients must include
+  /// every ordinary SGPR their prefix or replacement may access; architectural
+  /// special registers such as EXEC, VCC, and XNACK are not part of the count.
+  uint32_t required_ordinary_sgpr_count = 0;
 };
 
 /// @brief Optional whole-text rewrite for one source instruction.
@@ -161,6 +167,8 @@ struct KernelEntryRewriteContext {
 struct KernelEntryRewrite {
   std::vector<uint32_t> prefix_words;
   std::vector<InstructionRewriteMarker> markers;
+  /// Highest ordinary SGPR named by the entry words, expressed as a count.
+  uint32_t required_ordinary_sgpr_count = 0;
 };
 
 using KernelEntryRewriteCallback =
