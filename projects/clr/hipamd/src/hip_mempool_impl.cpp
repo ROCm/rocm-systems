@@ -339,7 +339,12 @@ void MemoryPool::ReleaseAllMemory() {
 
 // ================================================================================================
 void MemoryPool::ReleaseFreedMemory() {
-  std::scoped_lock lock(lock_pool_ops_);
+  // Do not block if the lock cannot be acquired, to avoid a deadlock if a different thread holds
+  // the pool lock and tries to acquire the device lock, e.g. hipMallocAsync requesting new memory.
+  std::unique_lock lock(lock_pool_ops_, std::try_to_lock);
+  if (! lock.owns_lock()) {
+    return;
+  }
 
   free_heap_.ReleaseAllMemory();
 }
