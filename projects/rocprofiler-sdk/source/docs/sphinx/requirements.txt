@@ -4,8 +4,6 @@
 #
 #    pip-compile requirements.in
 #
---extra-index-url https://test.pypi.org/simple
-
 accessible-pygments==0.0.5
     # via pydata-sphinx-theme
 alabaster==1.0.0
@@ -66,7 +64,7 @@ fastjsonschema==2.21.2
     #   rocm-docs-core
 gitdb==4.0.12
     # via gitpython
-gitpython==3.1.46
+gitpython==3.1.58
     # via rocm-docs-core
 greenlet==3.3.2
     # via sqlalchemy
@@ -183,7 +181,7 @@ pynacl==1.6.2
     # via pygithub
 pyparsing==3.3.2
     # via doxysphinx
-python-dateutil==3.9.0
+python-dateutil==2.9.0.post0
     # via jupyter-client
 pyyaml==6.0.3
     # via
