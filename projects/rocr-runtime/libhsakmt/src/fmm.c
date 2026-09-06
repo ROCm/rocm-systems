@@ -25,6 +25,7 @@
 
 #define _GNU_SOURCE
 #include "libhsakmt.h"
+#include "drm_version.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
 #include "kfd_ioctl.h"
@@ -2984,12 +2985,19 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
 
-			/* Create timeline syncobj for this GPU device */
+			/* VM timeline output was added in amdgpu DRM 3.64. */
 			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
 			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
-			if (drmSyncobjCreate(fd, 0, &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
-                pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
-                    props.KFDGpuID);
+			drmVersionPtr version = drmGetVersion(fd);
+			if (version &&
+			    hsakmt_drm_supports_vm_timeline(version->version_major,
+							 version->version_minor) &&
+			    drmSyncobjCreate(fd, 0,
+				&gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+				pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+					props.KFDGpuID);
+			if (version)
+				drmFreeVersion(version);
 
 			gpu_mem_count++;
 		}

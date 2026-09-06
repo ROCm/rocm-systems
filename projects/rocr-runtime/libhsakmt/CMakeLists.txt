@@ -38,6 +38,8 @@ else()
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
+  option(BUILD_TESTING "Build libhsakmt tests" OFF)
+
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
   if (ROCM_CCACHE_BUILD)
@@ -549,6 +551,11 @@ else()
       COMPONENT dev)
 
     add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
+  endif()
+
+  if(BUILD_TESTING)
+    include(CTest)
+    add_subdirectory(tests/vm_timeline)
   endif()
 
   ###########################
