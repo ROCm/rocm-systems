@@ -202,7 +202,12 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
   // kernel across the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
+  // AllReduce is the only collective that relaxes the DDA rank floor (low-rank 2..8
+  // IPC AllReduce via RCCL_DDA_NRANKS_RELAX); AllGather/ReduceScatter/AllToAll keep the
+  // default 8-rank floor, so the shared rcclDdaEnabled() gate stays uniform for them.
+  const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
+  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+         rcclDdaEnabled(comm, msgBytes, 8388608, /*gfx950Default=*/0, /*gfx1250Default=*/0, ddaMinRanks);
 }
 
 // Check if symmteric kernels is requested for this collective
@@ -439,7 +444,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 #endif
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
     if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
-                       kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
+                       kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes,
+                       ncclDdaNranksRelaxEnabled() ? 2 : 8)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         const int64_t llThresh = rcclParamDdaLLThreshold();

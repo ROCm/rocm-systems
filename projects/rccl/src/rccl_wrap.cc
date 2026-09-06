@@ -652,7 +652,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
+                    size_t gfx1250Default, int minRanks) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -660,7 +660,11 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Defaul
   if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
+    // minRanks is the participant-count floor supplied by the caller. Shared
+    // collectives (AllGather/ReduceScatter/AllToAll) keep the default 8-rank clique;
+    // only the AllReduce IPC path passes a relaxed floor (2) via RCCL_DDA_NRANKS_RELAX,
+    // so this gate stays uniform for every other collective.
+    if (comm->nRanks < minRanks) return false;
     if (IsArchMatch(comm->archName, "gfx942")) {
       threshold = gfx942Default;
     } else {
@@ -1078,7 +1082,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608, /*gfx950Default=*/0, /*gfx1250Default=*/0,
+                       ncclDdaNranksRelaxEnabled() ? 2 : 8)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
@@ -1254,7 +1259,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
   // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608, /*gfx950Default=*/0, /*gfx1250Default=*/0,
+                       ncclDdaNranksRelaxEnabled() ? 2 : 8)) {
     if (ddaFabricArch) {
       if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {

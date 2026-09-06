@@ -37,9 +37,20 @@ static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSi
   return dda::common::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
 }
 
-template <typename T>
-static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                             cudaStream_t stream) {
+/** True when nRanks is a supported DDA IPC participant count. */
+static bool ddaNranksSupported(int nRanks) {
+  if (nRanks == kDdaNranks) {
+    return true;
+  }
+  if (!ncclDdaNranksRelaxEnabled()) {
+    return false;
+  }
+  return nRanks >= 2 && nRanks <= kDdaNranks;
+}
+
+template <typename T, int NRANKS>
+static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                              cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -51,13 +62,12 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   }
 
   const size_t sizeBytes = count * sizeof(T);
-  const unsigned threads = 512;
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
-  const bool treeOk = wantTree && (count % static_cast<size_t>(kDdaNranks) == 0);
+  const bool treeOk = wantTree && (count % static_cast<size_t>(NRANKS) == 0);
 
   if (wantTree && !treeOk) {
     INFO(NCCL_ALL, "DDA IPC: size %zu B > 256KB but count %zu not divisible by %d; using flat kernel", sizeBytes, count,
-         kDdaNranks);
+         NRANKS);
   }
 
   auto gridBlock = ddaAllReduceIpcGeom(count, sizeof(T));
@@ -72,16 +82,43 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
 
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
+    dda::common::ddaAllReduceTreeIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
   } else {
-    dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
+    dda::common::ddaAllReduceFlatIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
   }
 
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
+}
+
+// Dispatch to the template instantiation for the active participant count.
+// ncclAllReduceDdaIpcEligible() guarantees comm->nRanks is in [2, kDdaNranks]
+// (exactly kDdaNranks when RCCL_DDA_NRANKS_RELAX is off) before we get here.
+template <typename T>
+static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                             cudaStream_t stream) {
+  switch (comm->nRanks) {
+  case 8:
+    return ncclAllReduceDdaIpcLaunch<T, 8>(sendbuff, recvbuff, count, comm, stream);
+  case 7:
+    return ncclAllReduceDdaIpcLaunch<T, 7>(sendbuff, recvbuff, count, comm, stream);
+  case 6:
+    return ncclAllReduceDdaIpcLaunch<T, 6>(sendbuff, recvbuff, count, comm, stream);
+  case 5:
+    return ncclAllReduceDdaIpcLaunch<T, 5>(sendbuff, recvbuff, count, comm, stream);
+  case 4:
+    return ncclAllReduceDdaIpcLaunch<T, 4>(sendbuff, recvbuff, count, comm, stream);
+  case 3:
+    return ncclAllReduceDdaIpcLaunch<T, 3>(sendbuff, recvbuff, count, comm, stream);
+  case 2:
+    return ncclAllReduceDdaIpcLaunch<T, 2>(sendbuff, recvbuff, count, comm, stream);
+  default:
+    WARN("DDA IPC allreduce: unsupported nRanks %d", comm->nRanks);
+    return ncclInvalidUsage;
+  }
 }
 
 } // namespace
@@ -93,16 +130,16 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm == nullptr) {
     return false;
   }
-  // IPC path: requires its own handler + barrier state, a single node, and
-  // exactly kDdaNranks ranks (the IPC kernels fix the rank count at compile
-  // time).
+  // IPC path: requires its own handler + barrier state, a single node, and a
+  // supported participant count (kDdaNranks by default; any 2..kDdaNranks when
+  // RCCL_DDA_NRANKS_RELAX=1). The IPC kernels fix the rank count at compile time.
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != kDdaNranks) {
+  if (!ddaNranksSupported(comm->nRanks)) {
     return false;
   }
   // Checks shared by both DDA all-reduce backends.
