@@ -1995,6 +1995,11 @@ enum ncclImplicitOrder {
   ncclImplicitOrderSerial,
   ncclImplicitOrderLaunch
 };
+
+// When true, NCCL applies internal capture-time serialization of communication kernels (captureStream path).
+static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
+  return comm->config.graphStreamOrdering != 0;
+}
 } // namespace
 
 static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, bool capturing, int driver = -1) {
@@ -2049,36 +2054,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
           nPlans += 1;
         }
       } else if (!ncclIntruQueueEmpty(&planner->collCeTaskQueue)) {
-        struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collCeTaskQueue);
-        plan->isCeColl = true;
-        plan->ceCollArgs = ncclMemoryStackAlloc<struct ncclCeCollArgs>(&comm->memScoped);
-        plan->ceCollArgs->rootRank = task->root;
-        plan->ceCollArgs->datatype = task->datatype;
-        plan->ceCollArgs->nElts = task->count;
-        plan->ceCollArgs->eltSize = ncclTypeSize(task->datatype);
-        plan->ceCollArgs->sendBuff = (uint8_t*)task->sendbuff;
-        plan->ceCollArgs->recvBuff = (uint8_t*)task->recvbuff;
-        plan->ceCollArgs->func = task->func;
-        plan->ceCollArgs->sendWin = task->sendWin;
-        plan->ceCollArgs->recvWin = task->recvWin;
-        plan->ceCollArgs->useDda = task->useDda;
-        plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
-        plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
-        plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
-        plan->ceCollArgs->datatype = task->datatype;
-        plan->ceCollArgs->redOp = task->opHost;
-        plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
-        plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
-
-        if (comm->rank == 0) {
-          const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
-          INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
-               task->count * ncclTypeSize(task->datatype), nvlsSync);
-        }
-
-        ncclIntruQueueEnqueue(&planner->planQueue, plan);
-        ncclIntruQueueDequeue(&planner->collCeTaskQueue);
-        ncclMemoryPoolFree(&comm->memPool_ncclTaskColl, task);
+        NCCLCHECKGOTO(scheduleCeCollTaskToPlan(comm, plan), result, failure);
         nPlans += 1;
       } else {
         if (!ncclIntruQueueEmpty(&planner->collSymTaskQueue)) {
@@ -2123,9 +2099,28 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     cudaStream_t launchStream = planner->streams->stream;
     cudaStream_t deviceStream, launchOrder;
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
-    NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false,
-                                          &deviceStream),
-                  result, failure);
+    bool useLaunchStream = capturing && !ncclGraphStreamOrderingSerialize(comm);
+
+    if (useLaunchStream) {
+      // GRAPH_STREAM_ORDERING=0: run kernels on the graph origin (launchStream) without a
+      // secondary captureStream. Serialize graph launches by waiting on serialEvent via
+      // hipEventWaitExternal, which HIP allows on the origin stream during capture.
+      struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+      bool firstCapture = !COMPILER_ATOMIC_LOAD(&ss->everCaptured, std::memory_order_relaxed);
+      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
+      if (firstCapture) {
+        // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
+        // node can fire immediately. This keeps graph structure identical across all
+        // captures (ExternalWait always present), so hipGraphExecUpdate succeeds.
+        CUDACHECKGOTO(cudaEventRecord(ss->serialEvent, ss->liveStream), result, failure);
+      }
+      CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, ss->serialEvent, hipEventWaitExternal), result, failure);
+      deviceStream = launchStream;
+    } else {
+      NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false,
+                                            &deviceStream),
+                    result, failure);
+    }
 
     if (persistent || planner->numStreams != 1) {
       // userStream[0] waits on each userStream[i]...
@@ -2133,8 +2128,10 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, l->stream), result, failure);
         CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, comm->sharedRes->scratchEvent, 0), result, failure);
       }
-      // userStream[0] waits on deviceStream
-      NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
+      // userStream[0] waits on deviceStream (skip when same to avoid a self-loop in the graph)
+      if (deviceStream != launchStream) {
+        NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
+      }
     } else if (comm->lastStreamTag != 0 &&
                comm->lastStreamTag != ncclStreamTag(launchStream)) {
       // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
@@ -2152,10 +2149,16 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       // required if this is a graph capture, non-captured cannot be concurrent because that would violate
       // deterministic program order of launches.
       bool concurrent = capturing;
-      NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->context->launchOrder, concurrent,
-                                            &launchOrder),
-                    result, failure);
-      NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, launchOrder, comm->sharedRes->scratchEvent), result, failure);
+      if (useLaunchStream) {
+        launchOrder = planner->capturingGraph.origin;
+      } else {
+        NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->context->launchOrder, concurrent,
+                                              &launchOrder),
+                      result, failure);
+      }
+      if (launchOrder != launchStream) {
+        NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, launchOrder, comm->sharedRes->scratchEvent), result, failure);
+      }
     }
 
     if (!persistent && comm->sharedRes->persistentRefs)
@@ -2405,6 +2408,7 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
     ncclIntruQueueConstruct(&planner->planQueue);
 
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
+    bool useLaunchStream = capturing && !ncclGraphStreamOrderingSerialize(comm);
     cudaStream_t launchStream = planner->streams->stream; // First user stream gets launch
     cudaStream_t deviceStream, launchOrder;
     cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
@@ -2425,18 +2429,21 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
 
     if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
       CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
-      // deviceStream waits on userStream[0]
-      NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream,
-                                                   /*concurrent=*/false, &deviceStream));
 
-      // We know that deviceStream is strictly behind the launchStream because launchStream
-      // synced with it before kernel launch. This allows us to to see deviceStream waiting
-      // on launchStream as a fast-forward. When building CUDA graphs fast forwards should
-      // be handled specially so as not to create graphs with a blowup in the number of edges.
-      // So we could do this:
-      //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
-      // But instead we do:
-      NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+      if (!useLaunchStream) {
+        // deviceStream waits on userStream[0]
+        NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream,
+                                                     /*concurrent=*/false, &deviceStream));
+
+        // We know that deviceStream is strictly behind the launchStream because launchStream
+        // synced with it before kernel launch. This allows us to to see deviceStream waiting
+        // on launchStream as a fast-forward. When building CUDA graphs fast forwards should
+        // be handled specially so as not to create graphs with a blowup in the number of edges.
+        // So we could do this:
+        //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
+        // But instead we do:
+        NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+      }
 
       // Each userStream[i] waits on userStream[0]
       for (struct ncclCudaStreamList* l = planner->streams->next; l != nullptr; l = l->next) {
@@ -2449,13 +2456,31 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       // As in ncclLaunchPrepare, strong stream can be non-concurrent when non-captured.
       bool concurrent = capturing;
       // Incorporate launch event into per-device (context) launch order.
-      NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->context->launchOrder, concurrent,
-                                                   &launchOrder));
+      // NOTE: launchOrder cannot be eliminated even when NCCL_GRAPH_STREAM_ORDERING=0.
+      // comm->sharedRes->launchEvent is filled by CUDA via CU_LAUNCH_ATTRIBUTE_LAUNCH_COMPLETION_EVENT
+      // when cuLaunchKernelEx returns. Users cannot query a stream for the launch event of its last
+      // kernel, so this ordering dependency can never be delegated to the user's stream.
+      if (useLaunchStream) {
+        launchOrder = planner->capturingGraph.origin;
+      } else {
+        NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->context->launchOrder, concurrent,
+                                                     &launchOrder));
+      }
       // If we don't have launch events (requires CUDA 12.3) then just use completion event (serialize execution).
       CUDACHECK(cudaStreamWaitEvent(
         launchOrder, implicitOrder == ncclImplicitOrderLaunch ? comm->sharedRes->launchEvent : finishedEvent));
-      // Release launchOrder as acquired in ncclLaunchPrepare()
-      NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->context->launchOrder, concurrent));
+      if (!useLaunchStream) {
+        // Release launchOrder as acquired in ncclLaunchPrepare()
+        NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->context->launchOrder, concurrent));
+      }
+    }
+    if (!useLaunchStream) {
+      if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
+        NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false));
+      }
+    } else {
+      NCCLCHECK(ncclCudaGraphRecordEvent(planner->capturingGraph, comm->sharedRes->deviceStream.serialEvent,
+                                         launchStream));
     }
   }
   return ncclSuccess;

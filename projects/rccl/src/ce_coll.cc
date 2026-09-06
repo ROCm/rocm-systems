@@ -2075,7 +2075,13 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->func = task->func;
   plan->ceCollArgs->sendWin = task->sendWin;
   plan->ceCollArgs->recvWin = task->recvWin;
+  plan->ceCollArgs->useDda = task->useDda;
+  plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
+  plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
+  plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
+  plan->ceCollArgs->redOp = task->opHost;
   plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
+  plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
   if (comm->rank == 0) {
     if (!ncclDevrIsOneLsaTeam(comm)) {

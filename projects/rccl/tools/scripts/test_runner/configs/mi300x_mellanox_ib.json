@@ -1315,6 +1315,37 @@
           "name": "CommMPITests_GinRmaFinalizeWithSplitComm",
           "description": "RMA and GIN hold separate contexts that a shared split child inherits and finalizes without a NULL access",
           "test_filter": "GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_ConfigOverride",
+          "description": "ncclConfig_t graphStreamOrdering stored on comm when NCCL_GRAPH_STREAM_ORDERING is unset",
+          "test_filter": "GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_IncompatibleMixingFallback",
+          "description": "graphStreamOrdering=0 with graphUsageMode=2 falls back to ordering=1",
+          "test_filter": "GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_Zero",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_One",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=1 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "1"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_DisabledOrderingGraphCaptureSmoke",
+          "description": "graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce",
+          "test_filter": "GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke"
         }
       ]
     },
@@ -1868,7 +1899,7 @@
       "timeout": 300,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_GRAPH_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
         "NCCL_LOCAL_REGISTER": "1",
@@ -1884,6 +1915,30 @@
           "name": "GraphCapture_AllReduce_MultiNode",
           "description": "AllReduce graph capture with buffer registration on multi-node",
           "test_filter": "GraphCapture_AllReduce.MultiNode"
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllReduce_MultiNode",
+          "description": "Graph-captured symmetric AllReduce on two nodes; expects legacy fallback (no multi-node AllReduce symmetric kernel)",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllGather_MultiNode",
+          "description": "Graph-captured symmetric AllGather on two nodes; expects fallback on gfx950 (no LSA multimem)",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricReduceScatter_MultiNode",
+          "description": "Graph-captured symmetric ReduceScatter on two nodes; uses GIN RailA2A when available, otherwise fallback",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricReduceScatter",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
         }
       ]
     },
@@ -1898,6 +1953,7 @@
       "timeout": 180,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,TUNING",
         "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
@@ -1970,6 +2026,21 @@
           "name": "SymWin_WindowLifecycle_Repeated",
           "description": "Repeated register/deregister cycles",
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricAllReduce",
+          "description": "Symmetric window registration during HIP graph capture with captured AllReduce replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricAllGather",
+          "description": "Symmetric window registration during HIP graph capture with captured AllGather replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricReduceScatter",
+          "description": "Symmetric window registration during HIP graph capture with captured ReduceScatter replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricReduceScatter"
         }
       ]
     },

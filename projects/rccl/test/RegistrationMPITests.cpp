@@ -11,6 +11,7 @@
  * This file contains tests for:
  * 1. User Buffer Registration (UBR) - explicit buffer registration via ncclCommRegister
  * 2. Graph Capture Registration - automatic buffer registration during HIP graph capture
+ * 3. Symmetric window registration during HIP graph capture (NCCL 2.30.7)
  *
  * REQUIRED Environment Variables:
  *   NCCL_DEBUG=INFO              Enable debug logging
@@ -29,9 +30,11 @@
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "comm.h"
 #include <cstdlib>
 #include <regex>
 #include <sstream>
+#include <string>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -124,6 +127,22 @@ public:
         return hasPattern("RCCL DIRECT ALLGATHER has been disabled") ||
                hasPattern("RCCL DIRECT ALLGATHER disabled") ||
                hasPattern("Direct AllGather disabled");
+    }
+
+    bool usedSymmetricCollective(const std::string& collective) const
+    {
+        return hasPattern(collective + " [Symmetric]:");
+    }
+
+    bool usedLegacyCollective(const std::string& collective) const
+    {
+        const std::regex re(collective + ": [^\\n]*-> Algo ");
+        return std::regex_search(m_content, re);
+    }
+
+    bool usedNonSymmetricWindowRegistration() const
+    {
+        return hasPattern("windowRegisterNonSym:");
     }
 
     std::string getSummary() const
@@ -2298,6 +2317,245 @@ TEST_F(GraphCapture_AllReduce, MultiNode)
     bool resultValid = verifyAllReduceResult<T>(recvBuf, count, nRanks);
     ASSERT_TRUE(resultValid);
     TEST_INFO("AllReduce graph test completed successfully");
+}
+
+// ============================================================================
+// Graph Capture + Symmetric Window Registration
+// ============================================================================
+
+/**
+ * @brief Exercises ncclCommWindowRegister during HIP graph capture.
+ *
+ * NCCL 2.30.7 added support for symmetric window registration while a stream
+ * is capturing. RCCL mirrors this by running host-side registration work in
+ * relaxed capture mode (dev_runtime.cc). These tests register symmetric windows
+ * inside capture, issue each symmetric-kernel-capable collective on those
+ * buffers, and verify correctness after graph replay. The same tests run on
+ * single- and multi-node configurations and validate the selected symmetric or
+ * legacy-fallback scheduler path.
+ *
+ * Requires NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE!=0.
+ */
+class GraphCapture_WindowRegister : public RegistrationTestBase
+{
+protected:
+    enum class Collective
+    {
+        AllReduce,
+        AllGather,
+        ReduceScatter
+    };
+
+    static const char* collectiveName(Collective collective)
+    {
+        switch(collective)
+        {
+        case Collective::AllReduce:     return "AllReduce";
+        case Collective::AllGather:     return "AllGather";
+        case Collective::ReduceScatter: return "ReduceScatter";
+        }
+        return "Unknown";
+    }
+
+    void runSymmetricCollective(Collective collective)
+    {
+        if(!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT))
+        {
+            GTEST_SKIP() << "Requires 2+ ranks";
+        }
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+        ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+
+        using T = RegTestConfig::DefaultType;
+        const size_t count = RegTestConfig::MEDIUM_COUNT;
+
+        int rank = 0;
+        int nRanks = 0;
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        size_t sendCount = count;
+        size_t recvCount = count;
+        if(collective == Collective::AllGather)
+        {
+            recvCount *= static_cast<size_t>(nRanks);
+        }
+        else if(collective == Collective::ReduceScatter)
+        {
+            sendCount *= static_cast<size_t>(nRanks);
+        }
+
+        const size_t sendBytes = sendCount * sizeof(T);
+        const size_t recvBytes = recvCount * sizeof(T);
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&sendBuf, sendBytes));
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recvBuf, recvBytes));
+
+        auto bufCleanup = makeScopeGuard([&]() {
+            if(sendBuf) (void)ncclMemFree(sendBuf);
+            if(recvBuf) (void)ncclMemFree(recvBuf);
+        });
+
+        initSendBuffer<T>(sendBuf, sendCount, rank);
+
+        hipGraph_t graph = nullptr;
+        hipGraphExec_t graphExec = nullptr;
+        ncclWindow_t sendWin = nullptr;
+        ncclWindow_t recvWin = nullptr;
+
+        ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_MPI_NE(sendWin, nullptr);
+        ASSERT_MPI_NE(recvWin, nullptr);
+
+        switch(collective)
+        {
+        case Collective::AllReduce:
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+            break;
+        case Collective::AllGather:
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(sendBuf, recvBuf, count, getNcclDataType<T>(), getActiveCommunicator(), getActiveStream()));
+            break;
+        case Collective::ReduceScatter:
+            ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+            break;
+        }
+
+        ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+        ASSERT_MPI_NE(nullptr, graph);
+
+        size_t numGraphNodes = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numGraphNodes));
+        ASSERT_MPI_GT(numGraphNodes, 0u);
+        TEST_INFO("GraphCapture_WindowRegister %s captured graph with %zu nodes", collectiveName(collective), numGraphNodes);
+
+        ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+        auto graphCleanup = makeScopeGuard([&]() {
+            if(graphExec) (void)hipGraphExecDestroy(graphExec);
+            if(graph) (void)hipGraphDestroy(graph);
+        });
+        auto windowCleanup = makeScopeGuard([&]() {
+            if(sendWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
+            if(recvWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
+        });
+
+        constexpr int kGraphLaunches = 2;
+        for(int launch = 0; launch < kGraphLaunches; ++launch)
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, recvBytes));
+            ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            bool resultValid = false;
+            switch(collective)
+            {
+            case Collective::AllReduce:
+                resultValid = verifyAllReduceResult<T>(recvBuf, count, nRanks);
+                break;
+            case Collective::AllGather:
+                resultValid = verifyAllGatherResult<T>(recvBuf, count, nRanks);
+                break;
+            case Collective::ReduceScatter:
+                resultValid = verifyReduceScatterResult<T>(recvBuf, count, nRanks);
+                break;
+            }
+            ASSERT_MPI_TRUE(resultValid);
+        }
+
+        ncclComm* comm = getActiveCommunicator();
+        const bool ginKernelsEnabled =
+            MPIHelpers::getEnvParam<int>("NCCL_SYM_GIN_KERNELS_ENABLE", 1) != 0;
+        const bool symmetricRuntimeAvailable =
+            comm->symmetricSupport && comm->isAllDirectNvlink;
+
+        bool expectSymmetric = symmetricRuntimeAvailable;
+        if(comm->nNodes > 1)
+        {
+            switch(collective)
+            {
+            case Collective::AllReduce:
+                // No AllReduce kernel is present in kernelMask_Gin.
+                expectSymmetric = false;
+                break;
+            case Collective::AllGather:
+                // The multi-node AllGather kernel requires LSA store multimem.
+                expectSymmetric = symmetricRuntimeAvailable && ginKernelsEnabled &&
+                                  comm->symkState.hasLsaMultimem;
+                break;
+            case Collective::ReduceScatter:
+                // RailA2A_LsaLD does not require LSA multimem.
+                expectSymmetric = symmetricRuntimeAvailable && ginKernelsEnabled;
+                break;
+            }
+        }
+
+        const REGLogChecker checker = getLogChecker();
+        const bool sawSymmetric = checker.usedSymmetricCollective(collectiveName(collective));
+        const bool sawLegacy = checker.usedLegacyCollective(collectiveName(collective));
+        TEST_INFO("%s path: nNodes=%d symmetricSupport=%d isAllDirectNvlink=%d "
+                  "hasLsaMultimem=%d expected=%s observedSymmetric=%d observedLegacy=%d",
+                  collectiveName(collective), comm->nNodes, comm->symmetricSupport,
+                  static_cast<int>(comm->isAllDirectNvlink),
+                  static_cast<int>(comm->symkState.hasLsaMultimem),
+                  expectSymmetric ? "symmetric" : "legacy", static_cast<int>(sawSymmetric),
+                  static_cast<int>(sawLegacy));
+
+        // Both markers come from NCCL_TUNING on communicator rank 0. Seeing
+        // neither means that subsystem is off (or this rank is not rank 0), so
+        // there is nothing to compare against and only correctness is checked.
+        // Non-fatal: only rank 0 reaches this branch, and the collective
+        // assertions that follow must still be executed by every rank.
+        const bool pathMarkerPresent = sawSymmetric || sawLegacy;
+        if(pathMarkerPresent)
+        {
+            EXPECT_EQ(expectSymmetric, sawSymmetric)
+                << collectiveName(collective) << ": expected the "
+                << (expectSymmetric ? "symmetric" : "legacy fallback") << " path";
+            if(!comm->symmetricSupport)
+            {
+                EXPECT_TRUE(checker.usedNonSymmetricWindowRegistration())
+                    << "symmetricSupport is off, so registration must report windowRegisterNonSym";
+            }
+        }
+        else
+        {
+            TEST_INFO("No TUNING path marker for %s; run with NCCL_DEBUG=INFO, "
+                      "NCCL_DEBUG_SUBSYS including TUNING and RCCL_MPI_LOG_ALL_RANKS=1 to also "
+                      "assert the scheduler path",
+                      collectiveName(collective));
+        }
+
+        ASSERT_MPI_EQ(ncclSuccess,ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+        sendWin = nullptr;
+        recvWin = nullptr;
+
+        TEST_INFO("GraphCapture_WindowRegister %s completed via %s path",
+                  collectiveName(collective), expectSymmetric ? "symmetric" : "legacy fallback");
+    }
+};
+
+TEST_F(GraphCapture_WindowRegister, SymmetricAllReduce)
+{
+    runSymmetricCollective(Collective::AllReduce);
+}
+
+TEST_F(GraphCapture_WindowRegister, SymmetricAllGather)
+{
+    runSymmetricCollective(Collective::AllGather);
+}
+
+TEST_F(GraphCapture_WindowRegister, SymmetricReduceScatter)
+{
+    runSymmetricCollective(Collective::ReduceScatter);
 }
 
 // ============================================================================
