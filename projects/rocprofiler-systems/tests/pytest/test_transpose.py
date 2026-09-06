@@ -33,6 +33,7 @@ pytestmark = [
 from rocprofsys import (
     GPUInfo,
 )
+from rocprofsys.gpu import UNSUPPORTED_PERF_COUNTER_GFX
 
 # =============================================================================
 # Transpose fixtures
@@ -361,6 +362,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
 @pytest.mark.timeout(120)
+@pytest.mark.cap_perfmon
+@pytest.mark.disable_archs(UNSUPPORTED_PERF_COUNTER_GFX)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
@@ -369,13 +372,6 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         gpu_info,
         validation_rules_dir,
     ):
-        unsupported = gpu_info.unsupported_perf_counter_archs
-        if unsupported:
-            pytest.skip(
-                "transpose GPU perf counter test skipped on "
-                f"{', '.join(sorted(unsupported))}"
-            )
-
         result = self.run_test(
             "sampling",
             "transpose",
