@@ -1907,11 +1907,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
     },
     "gfx1250": {
         # The unchanged full 151,936-logit Qwen baseline takes about 65
-        # seconds through RocJitsu after rebuilding with the current O3
-        # pipeline. Retain the already established bounded campaign limit in
+        # seconds through RocJitsu. Complete Sampled instrumentation has been
+        # observed to finish in about 129 seconds but can exceed 180 seconds
+        # under emulator load, so retain a bounded twofold-variance margin in
         # the executable manifest instead of requiring an ad hoc CLI override.
         "qwen-prefill": {
-            "run_timeout_seconds": 180,
+            "run_timeout_seconds": 360,
         },
         # The strict Inline Shadow row completes in roughly 31 seconds after
         # transformation under RocJitsu. Keep a bounded twofold margin without
