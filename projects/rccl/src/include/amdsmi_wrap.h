@@ -647,20 +647,21 @@ static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
   const bool wroteV1 =
     !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
-  const bool wrotePast8Gpu =
+  const bool wrote8GpuTail =
     amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricReserved8GpuEnd);
-  const bool wrotePast16Gpu =
+  const bool wrote16GpuTail =
     amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd);
+  const bool nothingBeyond16Gpu =
+    amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize);
 
   if (wroteV1 && amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
     return amdSmiFabricRuntimeLayout::ExtendedUnion;
   }
-  if (wroteV1 && wrotePast8Gpu &&
+  if (wroteV1 && wrote8GpuTail &&
       amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
-  if (wroteV1 && wrotePast8Gpu && wrotePast16Gpu &&
-      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
+  if (wroteV1 && wrote8GpuTail && wrote16GpuTail && nothingBeyond16Gpu) {
     return amdSmiFabricRuntimeLayout::SixteenGpu;
   }
   return amdSmiFabricRuntimeLayout::Unknown;
