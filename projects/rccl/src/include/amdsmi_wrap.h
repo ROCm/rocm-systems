@@ -655,11 +655,11 @@ inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFab
   if (wroteV1 && amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
     return amdSmiFabricRuntimeLayout::ExtendedUnion;
   }
-  if (wrotePast8Gpu &&
+  if (wroteV1 && wrotePast8Gpu &&
       amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
-  if (wrotePast8Gpu && wrotePast16Gpu &&
+  if (wroteV1 && wrotePast8Gpu && wrotePast16Gpu &&
       amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize)) {
     return amdSmiFabricRuntimeLayout::SixteenGpu;
   }

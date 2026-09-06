@@ -212,6 +212,17 @@ TEST(AmdSmiFabricRuntimeLayout, CanaryValueInsideThePayloadIsStillAWrite)
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
 }
 
+// Reserved filled but the payload never touched matches no runtime; every arm requires both.
+TEST(AmdSmiFabricRuntimeLayout, ReservedWithoutPayloadIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes + kAmdSmiFabricV1PayloadEnd, 0,
+           kAmdSmiFabricReserved16GpuEnd - kAmdSmiFabricV1PayloadEnd);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
 // Touches the v1 payload without filling it, so no layout is confirmed. Identifying a layout by
 // elimination classified this as SixteenGpu and authorized the typed path.
 TEST(AmdSmiFabricRuntimeLayout, SparseWriteIsUnknown)
