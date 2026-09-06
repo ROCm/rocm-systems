@@ -11,6 +11,7 @@
 #include "device/rocm/rockernel.hpp"
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
+#include "utils/flags.hpp"
 #include <algorithm>
 #include <map>
 
@@ -2699,7 +2700,9 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
                                          bool entire, const uint32_t blitWg,
                                          amd::CopyMetadata copyMetadata, bool attachSignal) const {
-  constexpr uint32_t kBlitType = BlitCopyBuffer;
+  // Both kernels take the same arguments and the same kMaxAlignment, so the
+  // non-temporal variant reaches its ulong2 path exactly like the default one.
+  const uint32_t kBlitType = DEBUG_CLR_BLIT_NONTEMPORAL ? BlitCopyBufferNT : BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);
 
