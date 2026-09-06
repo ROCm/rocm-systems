@@ -21,6 +21,7 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <cstring>
 #include <chrono>
@@ -1802,6 +1803,19 @@ enum {
   PROXY_ABORT = 2
 };
 
+#ifdef ENABLE_FAULT_INJECTION
+static std::atomic<enum ncclProxyStopFault> proxyStopFault{ncclProxyStopFaultNone};
+
+void ncclProxyTestArmStopFault(enum ncclProxyStopFault fault) {
+  proxyStopFault.store(fault, std::memory_order_release);
+}
+
+static bool ncclProxyTestConsumeStopFault(enum ncclProxyStopFault fault) {
+  enum ncclProxyStopFault expected = fault;
+  return proxyStopFault.compare_exchange_strong(expected, ncclProxyStopFaultNone, std::memory_order_acq_rel);
+}
+#endif
+
 void* ncclProxyService(void* _args) {
   struct ncclProxyState* proxyState = (struct ncclProxyState*)_args;
   // set the thread affinity before setting the cuda context
@@ -1860,11 +1874,21 @@ void* ncclProxyService(void* _args) {
     INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line));
   }
 
+#ifdef ENABLE_FAULT_INJECTION
+  COMPILER_ATOMIC_STORE(&proxyState->testServiceLoopEntered, 1, std::memory_order_release);
+#endif
+
   while (stop == PROXY_RUNNING || npeers > 0) {
     /* Even if local comm aborts, we cannot let proxy thread exit if we still have peer
      * connections. Need to wait until all other related comms call abort and safely exit
      * together, or we could face segmentation fault. */
+    /* Fallback stop path: if loopback stop message is missed, honor atomic stop flag. */
+    if (COMPILER_ATOMIC_LOAD(&proxyState->stop, std::memory_order_acquire)) {
+      stop = PROXY_STOP;
+    }
+
     if (COMPILER_ATOMIC_LOAD(proxyState->abortFlag, std::memory_order_acquire) != 0) stop = PROXY_ABORT;
+
     /* never let proxy service thread blocks in poll, or it cannot receive abortFlag. */
     int ret = 0;
     const int timeout = asyncOpCount ? 0 : 500;
@@ -2210,14 +2234,51 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
     struct ncclProxyState* sharedProxyState = comm->proxyState;
 
     if ((comm->proxyRefCountOld = ncclAtomicRefCountDecrement(&sharedProxyState->refCount)) == 0) {
+      // Cleanup below can return early. Always publish the stop request before leaving this scope.
+      struct ProxyStopSignal {
+        struct ncclProxyState* state;
+        ~ProxyStopSignal() {
+          COMPILER_ATOMIC_STORE(&state->stop, 1, std::memory_order_release);
+        }
+      } stopSignal{sharedProxyState};
+
       if (*comm->abortFlag == 0 && sharedProxyState->peerAddresses) {
         // We need to send a ncclProxyMsgStop message to our own proxy
         struct ncclSocket sock;
         int type = ncclProxyMsgStop;
-        NCCLCHECK(ncclSocketInit(&sock, sharedProxyState->peerAddresses + comm->topParentRanks[comm->rank],
-                                 comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
-        if (ncclSocketConnect(&sock) == ncclSuccess) {
-          (void)ncclSocketSend(&sock, &type, sizeof(int));
+        ncclResult_t stopRes;
+#ifdef ENABLE_FAULT_INJECTION
+        if (ncclProxyTestConsumeStopFault(ncclProxyStopFaultSocketInit)) {
+          stopRes = ncclSystemError;
+        } else
+#endif
+        {
+          stopRes = ncclSocketInit(&sock, sharedProxyState->peerAddresses + comm->topParentRanks[comm->rank],
+                                   comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag);
+        }
+        NCCLCHECK(stopRes);
+#ifdef ENABLE_FAULT_INJECTION
+        if (ncclProxyTestConsumeStopFault(ncclProxyStopFaultSocketConnect)) {
+          stopRes = ncclSystemError;
+        } else
+#endif
+        {
+          stopRes = ncclSocketConnect(&sock);
+        }
+        if (stopRes == ncclSuccess) {
+#ifdef ENABLE_FAULT_INJECTION
+          if (ncclProxyTestConsumeStopFault(ncclProxyStopFaultSocketSend)) {
+            stopRes = ncclSystemError;
+          } else
+#endif
+          {
+            stopRes = ncclSocketSend(&sock, &type, sizeof(int));
+          }
+          if (stopRes != ncclSuccess) {
+            WARN("ncclProxyStop: failed to send stop msg comm %p rank %d res %d", comm, comm->rank, stopRes);
+          }
+        } else {
+          WARN("ncclProxyStop: failed to connect stop socket comm %p rank %d res %d", comm, comm->rank, stopRes);
         }
         (void)ncclSocketClose(&sock);
       }
@@ -2242,8 +2303,6 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
           }
         }
       }
-      // Now we notify proxy service and UDS thread to exit.
-      COMPILER_ATOMIC_STORE(&comm->proxyState->stop, 1, std::memory_order_release);
     }
   }
 
