@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(rocm-kpack VERSION 0.1.0 LANGUAGES CXX)
 
+# Temporary no-op change on kpack to exercise TheRock Multi-arch CI
+
 # Options
 option(BUILD_RUNTIME "Build C++ runtime library" ON)
 option(BUILD_TESTING "Build tests" ON)
