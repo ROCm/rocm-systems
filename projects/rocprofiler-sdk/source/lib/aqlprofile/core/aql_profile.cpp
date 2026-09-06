@@ -42,13 +42,6 @@
 #include <vector>
 #include <mutex>
 
-#ifdef _WIN32
-#    define CONSTRUCTOR_API
-#    define DESTRUCTOR_API
-#else
-#    define CONSTRUCTOR_API __attribute__((constructor))
-#    define DESTRUCTOR_API  __attribute__((destructor))
-#endif
 // Getting SPM data using driver API
 hsa_status_t
 spm_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* profile,
@@ -193,12 +186,6 @@ is_read_api_enabled()
         return std::atoi(value.c_str()) != 0;
     }();
     return enabled;
-}
-
-DESTRUCTOR_API void
-destructor()
-{
-    Pm4Factory::Destroy();
 }
 
 }  // namespace aql_profile
@@ -1016,16 +1003,3 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
 }
 
 }  // extern "C"
-
-#ifdef _WIN32
-#    include <windows.h>
-extern "C" BOOL WINAPI
-DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/)
-{
-    if(fdwReason == DLL_PROCESS_DETACH)
-    {
-        aql_profile::destructor();
-    }
-    return TRUE;
-}
-#endif
