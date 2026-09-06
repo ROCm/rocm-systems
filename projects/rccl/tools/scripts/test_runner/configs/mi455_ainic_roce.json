@@ -194,6 +194,22 @@
         }
       ]
     },
+    "net_plugin_selection": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -281,6 +297,11 @@
           "name": "NetIB_Init_GetDeviceCount",
           "description": "Query and validate InfiniBand device count",
           "test_filter": "NetIbMPITest.GetDeviceCount"
+        },
+        {
+          "name": "NetIB_Init_PluginMatchesEnv",
+          "description": "The plugin the fixture loaded is the one NCCL_NET names; inherited by the ib-cast and rocm-ib variants, which is where the strcmp mismatch used to go unnoticed",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
         }
       ]
     },
@@ -1037,6 +1058,18 @@
       "extends": "net_ib_connection",
       "env_variables": {
         "NCCL_NET": "ib-cast"
+      }
+    },
+    "net_ib_initialization_rocm_ib": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
+      }
+    },
+    "net_ib_connection_rocm_ib": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
       }
     },
     "net_ib_memory_cast": {
@@ -3594,6 +3627,12 @@
       "enabled": true
     },
     {
+      "name": "NET - Plugin selection from NCCL_NET",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC/GPU required)",
+      "config": "net_plugin_selection",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Initialization Tests",
       "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization",
@@ -3771,6 +3810,18 @@
       "name": "NET IB - Connection Setup (ib-cast)",
       "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_connection_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Initialization (rocm-ib)",
+      "description": "InfiniBand plugin initialization via ib-cast plugin (NCCL_NET=ROCM-IB); ROCM-IB selects the same plugin but configures it differently, so this is not a duplicate of the ib-cast suite. AINIC-only: ROCM-IB forces AINIC mode, which makes libionic.so a hard requirement in the cast plugin's init",
+      "config": "net_ib_initialization_rocm_ib",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (rocm-ib)",
+      "description": "InfiniBand listen/connect/accept via ib-cast plugin (NCCL_NET=ROCM-IB)",
+      "config": "net_ib_connection_rocm_ib",
       "enabled": true
     },
     {
