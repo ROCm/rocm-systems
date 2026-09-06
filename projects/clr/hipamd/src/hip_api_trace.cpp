@@ -104,6 +104,9 @@ hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
 hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device);
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
 hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation* operations,
+                                             unsigned int count, int srcDevice, int dstDevice);
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice);
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
@@ -1525,6 +1528,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
+  ptrDispatchTable->hipDeviceGetP2PAtomicCapabilities_fn = hip::hipDeviceGetP2PAtomicCapabilities;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2264,15 +2268,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetLuid_fn, 542);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
 HIP_ENFORCE_ABI(HipDispatchTable, hipInitDevice_fn, 543);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetP2PAtomicCapabilities_fn, 544);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 544)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 545)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 33,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 34,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

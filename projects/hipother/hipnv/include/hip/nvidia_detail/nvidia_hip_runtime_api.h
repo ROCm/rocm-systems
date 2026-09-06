@@ -28,6 +28,7 @@
 #define CUDA_12020 12020
 #define CUDA_12030 12030
 #define CUDA_13000 13000
+#define CUDA_13010 13010
 
 #ifdef __cplusplus
 extern "C" {
@@ -497,6 +498,39 @@ typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
 #define hipDevP2PAttrAccessSupported cudaDevP2PAttrAccessSupported
 #define hipDevP2PAttrNativeAtomicSupported cudaDevP2PAttrNativeAtomicSupported
 #define hipDevP2PAttrHipArrayAccessSupported cudaDevP2PAttrCudaArrayAccessSupported
+/**
+ * Atomic operations that can be queried for native P2P support via
+ * ::hipDeviceGetP2PAtomicCapabilities. Values mirror the AMD backend so the enum is
+ * ABI-identical across platforms and matches CUDA's cudaAtomicOperation order.
+ */
+typedef enum hipAtomicOperation {
+  hipAtomicOperationIntegerAdd = 0,
+  hipAtomicOperationIntegerMin,
+  hipAtomicOperationIntegerMax,
+  hipAtomicOperationIntegerIncrement,
+  hipAtomicOperationIntegerDecrement,
+  hipAtomicOperationAnd,
+  hipAtomicOperationOr,
+  hipAtomicOperationXOR,
+  hipAtomicOperationExchange,
+  hipAtomicOperationCAS,
+  hipAtomicOperationFloatAdd,
+  hipAtomicOperationFloatMin,
+  hipAtomicOperationFloatMax
+} hipAtomicOperation;
+/**
+ * Bitmask flags describing how an atomic operation is natively supported over a link,
+ * as reported per-operation by ::hipDeviceGetP2PAtomicCapabilities.
+ */
+typedef enum hipAtomicOperationCapability {
+  hipAtomicCapabilitySigned     = 1 << 0,
+  hipAtomicCapabilityUnsigned   = 1 << 1,
+  hipAtomicCapabilityReduction  = 1 << 2,
+  hipAtomicCapabilityScalar32   = 1 << 3,
+  hipAtomicCapabilityScalar64   = 1 << 4,
+  hipAtomicCapabilityScalar128  = 1 << 5,
+  hipAtomicCapabilityVector32x4 = 1 << 6
+} hipAtomicOperationCapability;
 #define hipFuncAttributeMaxDynamicSharedMemorySize cudaFuncAttributeMaxDynamicSharedMemorySize
 #define hipFuncAttributePreferredSharedMemoryCarveout cudaFuncAttributePreferredSharedMemoryCarveout
 
@@ -3818,6 +3852,131 @@ inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMa
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
+}
+
+// Returns non-zero if op is a defined hipAtomicOperation enumerator. hipAtomicOperationIntegerAdd
+// is 0, so an unsigned compare against the last enumerator covers both bounds without tripping
+// -Wtype-limits on the lower bound.
+inline static int hipIsValidAtomicOperation(hipAtomicOperation op) {
+  return static_cast<unsigned int>(op) <= static_cast<unsigned int>(hipAtomicOperationFloatMax);
+}
+
+#if CUDA_VERSION >= CUDA_13010
+// Translates a (pre-validated) hipAtomicOperation to its CUDA equivalent. HIP and CUDA enumerate
+// the same operations in the same order, but the numeric values are not contractually equal, so
+// the mapping is explicit rather than a cast.
+inline static cudaAtomicOperation hipToCudaAtomicOperation(hipAtomicOperation op) {
+  switch (op) {
+    case hipAtomicOperationIntegerAdd:       return cudaAtomicOperationIntegerAdd;
+    case hipAtomicOperationIntegerMin:       return cudaAtomicOperationIntegerMin;
+    case hipAtomicOperationIntegerMax:       return cudaAtomicOperationIntegerMax;
+    case hipAtomicOperationIntegerIncrement: return cudaAtomicOperationIntegerIncrement;
+    case hipAtomicOperationIntegerDecrement: return cudaAtomicOperationIntegerDecrement;
+    case hipAtomicOperationAnd:              return cudaAtomicOperationAnd;
+    case hipAtomicOperationOr:               return cudaAtomicOperationOr;
+    case hipAtomicOperationXOR:              return cudaAtomicOperationXOR;
+    case hipAtomicOperationExchange:         return cudaAtomicOperationExchange;
+    case hipAtomicOperationCAS:              return cudaAtomicOperationCAS;
+    case hipAtomicOperationFloatAdd:         return cudaAtomicOperationFloatAdd;
+    case hipAtomicOperationFloatMin:         return cudaAtomicOperationFloatMin;
+    case hipAtomicOperationFloatMax:         return cudaAtomicOperationFloatMax;
+  }
+  return cudaAtomicOperationIntegerAdd;  // Unreachable: callers validate the operation first.
+}
+
+// Translates a bitmask of cudaAtomicOperationCapability flags into hipAtomicOperationCapability
+// flags, bit by bit, since the numeric values are not contractually equal.
+inline static unsigned int hipFromCudaAtomicCapability(unsigned int cudaCaps) {
+  unsigned int hipCaps = 0;
+  if (cudaCaps & cudaAtomicCapabilitySigned)     hipCaps |= hipAtomicCapabilitySigned;
+  if (cudaCaps & cudaAtomicCapabilityUnsigned)   hipCaps |= hipAtomicCapabilityUnsigned;
+  if (cudaCaps & cudaAtomicCapabilityReduction)  hipCaps |= hipAtomicCapabilityReduction;
+  if (cudaCaps & cudaAtomicCapabilityScalar32)   hipCaps |= hipAtomicCapabilityScalar32;
+  if (cudaCaps & cudaAtomicCapabilityScalar64)   hipCaps |= hipAtomicCapabilityScalar64;
+  if (cudaCaps & cudaAtomicCapabilityScalar128)  hipCaps |= hipAtomicCapabilityScalar128;
+  if (cudaCaps & cudaAtomicCapabilityVector32x4) hipCaps |= hipAtomicCapabilityVector32x4;
+  return hipCaps;
+}
+#else
+// Older CUDA toolkits (< 13.1) expose only the coarse cudaDevP2PAttrNativeAtomicSupported boolean
+// for a link, so this best-effort mapping mirrors the ROCm backend: integer ops report
+// signed/unsigned 32/64-bit scalar support, float ops report 32/64-bit scalar support.
+inline static unsigned int hipCoarseAtomicCapabilities(hipAtomicOperation op) {
+  switch (op) {
+    case hipAtomicOperationIntegerAdd:
+    case hipAtomicOperationIntegerMin:
+    case hipAtomicOperationIntegerMax:
+    case hipAtomicOperationIntegerIncrement:
+    case hipAtomicOperationIntegerDecrement:
+    case hipAtomicOperationAnd:
+    case hipAtomicOperationOr:
+    case hipAtomicOperationXOR:
+    case hipAtomicOperationExchange:
+    case hipAtomicOperationCAS:
+      return hipAtomicCapabilitySigned | hipAtomicCapabilityUnsigned |
+             hipAtomicCapabilityScalar32 | hipAtomicCapabilityScalar64;
+    case hipAtomicOperationFloatAdd:
+    case hipAtomicOperationFloatMin:
+    case hipAtomicOperationFloatMax:
+      return hipAtomicCapabilityScalar32 | hipAtomicCapabilityScalar64;
+  }
+  return 0;
+}
+#endif
+
+inline static hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                                           const hipAtomicOperation* operations,
+                                                           unsigned int count, int srcDevice,
+                                                           int dstDevice) {
+  if (capabilities == NULL || operations == NULL || count == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  int deviceCount = 0;
+  hipError_t status = hipCUDAErrorTohipError(cudaGetDeviceCount(&deviceCount));
+  if (status != hipSuccess) {
+    return status;
+  }
+  if (srcDevice == dstDevice || srcDevice < 0 || dstDevice < 0 || srcDevice >= deviceCount ||
+      dstDevice >= deviceCount) {
+    return hipErrorInvalidDevice;
+  }
+
+  // Validate every requested operation before writing any output.
+  for (unsigned int i = 0; i < count; ++i) {
+    if (!hipIsValidAtomicOperation(operations[i])) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+#if CUDA_VERSION >= CUDA_13010
+  // CUDA 13.1+ exposes a native per-operation query. Translate each operation, query it, and
+  // translate the returned capability bitmask back to HIP flags.
+  for (unsigned int i = 0; i < count; ++i) {
+    cudaAtomicOperation cudaOp = hipToCudaAtomicOperation(operations[i]);
+    unsigned int cudaCaps = 0;
+    status = hipCUDAErrorTohipError(
+        cudaDeviceGetP2PAtomicCapabilities(&cudaCaps, &cudaOp, 1, srcDevice, dstDevice));
+    if (status != hipSuccess) {
+      return status;
+    }
+    capabilities[i] = hipFromCudaAtomicCapability(cudaCaps);
+  }
+#else
+  // Older toolkits only expose the coarse native-atomic boolean for the link; apply it to every
+  // requested operation via the best-effort mapping.
+  int nativeAtomic = 0;
+  status = hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(
+      &nativeAtomic, cudaDevP2PAttrNativeAtomicSupported, srcDevice, dstDevice));
+  if (status != hipSuccess) {
+    return status;
+  }
+  for (unsigned int i = 0; i < count; ++i) {
+    capabilities[i] = nativeAtomic ? hipCoarseAtomicCapabilities(operations[i]) : 0u;
+  }
+#endif
+
+  return hipSuccess;
 }
 
 inline static hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, hipDevice_t device) {
