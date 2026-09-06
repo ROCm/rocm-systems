@@ -1290,7 +1290,7 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetUuid(uuid_length, uuid);
+  if (auto* b = gpu_device->backend()) return b->get_uuid(uuid_length, uuid);
 #endif
 
   uint64_t device_uuid = 0;
@@ -1499,7 +1499,7 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
-  if (auto* b = gpu_device->backend()) return b->GetBoardInfo(board_info);
+  if (auto* b = gpu_device->backend()) return b->get_board_info(board_info);
 #endif
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
@@ -1605,7 +1605,7 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetGpuCacheInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_gpu_cache_info(info);
 #endif
 
   if (info == nullptr) {
@@ -1652,7 +1652,7 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetTempMetric(sensor_type, metric, temperature);
+  if (auto* b = gpu_device->backend()) return b->get_temp_metric(sensor_type, metric, temperature);
 #endif
 
   if (temperature == nullptr) {
@@ -1688,7 +1688,7 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   }
 
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) {
+  if (amd::smi::WSLGPUBackend::is_active()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 #endif
@@ -1736,9 +1736,9 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
 #ifdef ENABLE_WSL_BACKEND
   if (gpu_device->backend()) {
     uint64_t used = 0, total = 0;
-    r = gpu_device->backend()->GetMemoryUsage(AMDSMI_MEM_TYPE_VRAM, &used);
+    r = gpu_device->backend()->get_memory_usage(AMDSMI_MEM_TYPE_VRAM, &used);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
-    r = gpu_device->backend()->GetMemoryTotal(AMDSMI_MEM_TYPE_VRAM, &total);
+    r = gpu_device->backend()->get_memory_total(AMDSMI_MEM_TYPE_VRAM, &total);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
     vram_info->vram_used = static_cast<uint32_t>(used / (1024 * 1024));
     vram_info->vram_total = static_cast<uint32_t>(total / (1024 * 1024));
@@ -2288,7 +2288,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
     return r;
   }
   if (auto* b = gpu_device->backend()) {
-    return b->GetFanRpms(sensor_ind, speed);
+    return b->get_fan_rpms(sensor_ind, speed);
   }
 #endif
   return rsmi_wrapper(rsmi_dev_fan_rpms_get, processor_handle, 0, sensor_ind, speed);
@@ -2301,7 +2301,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetFanSpeed(sensor_ind, speed);
+  if (auto* b = gpu_device->backend()) return b->get_fan_speed(sensor_ind, speed);
 #endif
   return rsmi_wrapper(rsmi_dev_fan_speed_get, processor_handle, 0, sensor_ind, speed);
 }
@@ -2313,7 +2313,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetFanSpeedMax(sensor_ind, max_speed);
+  if (auto* b = gpu_device->backend()) return b->get_fan_speed_max(sensor_ind, max_speed);
 #endif
   return rsmi_wrapper(rsmi_dev_fan_speed_max_get, processor_handle, 0, sensor_ind, max_speed);
 }
@@ -2352,7 +2352,7 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
   {
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
     if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS) {
-      if (auto* b = gpu_device->backend()) return b->GetFwInfo(info);
+      if (auto* b = gpu_device->backend()) return b->get_fw_info(info);
     }
   }
 #endif
@@ -2434,7 +2434,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   }
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetAsicInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_asic_info(info);
 #endif
 
   if (info == nullptr) {
@@ -2743,7 +2743,7 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle
     return status;
   }
 #ifdef ENABLE_WSL_BACKEND
-  if (auto* b = gpu_device->backend()) return b->GetKfdInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_kfd_info(info);
 #endif
   (void)gpu_device;  // Only used for handle validation
   info->kfd_id = std::numeric_limits<uint64_t>::max();
@@ -2824,7 +2824,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
     return r;
   }
 #ifdef ENABLE_WSL_BACKEND
-  if (auto* b = gpu_device->backend()) return b->GetVramInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_vram_info(info);
 #endif
 
   std::ostringstream ss;
@@ -4137,7 +4137,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
 
   if (num_items == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
   auto r = rsmi_compute_process_info_get(reinterpret_cast<rsmi_process_info_t*>(procs), num_items);
   return amd::smi::rsmi_to_amdsmi_status(r);
@@ -4149,7 +4149,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
 
   if (proc == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
   auto r = rsmi_compute_process_info_by_pid_get(pid, reinterpret_cast<rsmi_process_info_t*>(proc));
   return amd::smi::rsmi_to_amdsmi_status(r);
@@ -4161,7 +4161,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
 
   if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
   auto r = rsmi_compute_process_gpus_get(pid, dv_indices, num_devices);
   return amd::smi::rsmi_to_amdsmi_status(r);
@@ -4236,7 +4236,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
     amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
     // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-    if (auto* b = gpu_device->backend()) return b->GetGpuMetricsInfo(pgpu_metrics);
+    if (auto* b = gpu_device->backend()) return b->get_gpu_metrics_info(pgpu_metrics);
   }
 #endif
 
@@ -4296,7 +4296,7 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
   }
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpudevice->backend()) return b->GetPowerCapInfo(info);
+  if (auto* b = gpudevice->backend()) return b->get_power_cap_info(info);
 #endif
 
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
@@ -4427,7 +4427,7 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
     if (auto* b = gpu_device->backend()) {
       // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
       amdsmi_clk_info_t clk_info = {};
-      amdsmi_status_t ret = b->GetClockInfo(clk_type, &clk_info);
+      amdsmi_status_t ret = b->get_clock_info(clk_type, &clk_info);
       if (ret != AMDSMI_STATUS_SUCCESS) return ret;
       if (f == nullptr) return AMDSMI_STATUS_INVAL;
       std::memset(f, 0, sizeof(*f));
@@ -4591,7 +4591,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_ha
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetMemoryTotal(mem_type, total);
+  if (auto* b = gpu_device->backend()) return b->get_memory_total(mem_type, total);
 #endif
   return rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), total);
@@ -4603,7 +4603,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_ha
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetMemoryUsage(mem_type, used);
+  if (auto* b = gpu_device->backend()) return b->get_memory_usage(mem_type, used);
 #endif
   return rsmi_wrapper(rsmi_dev_memory_usage_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), used);
@@ -4670,7 +4670,7 @@ amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_han
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetVoltMetric(sensor_type, metric, voltage);
+  if (auto* b = gpu_device->backend()) return b->get_volt_metric(sensor_type, metric, voltage);
 #endif
   return rsmi_wrapper(rsmi_dev_volt_metric_get, processor_handle, 0,
                       static_cast<rsmi_voltage_type_t>(sensor_type),
@@ -4724,7 +4724,7 @@ amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_ha
   }
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = gpudevice->backend()) {
-    return backend->GetVcnBusyPercent(vcn_busy_percent);
+    return backend->get_vcn_busy_percent(vcn_busy_percent);
   }
 #endif
   return smi_amdgpu_get_vcn_busy_percent(gpudevice, vcn_busy_percent);
@@ -4955,7 +4955,7 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
   }
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetVbiosInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_vbios_info(info);
 #endif
 
   if (info == nullptr) {
@@ -5076,7 +5076,7 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetGpuActivity(info);
+  if (auto* b = gpu_device->backend()) return b->get_gpu_activity(info);
 #endif
 
   if (info == nullptr) {
@@ -5130,7 +5130,7 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetClockInfo(clk_type, info);
+  if (auto* b = gpu_device->backend()) return b->get_clock_info(clk_type, info);
 #endif
 
   if (info == nullptr) {
@@ -5585,7 +5585,7 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetPowerInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_power_info(info);
 #endif
 
   if (info == nullptr) {
@@ -5662,7 +5662,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetDriverInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_driver_info(info);
 #endif
 
   if (info == nullptr) {
@@ -5822,7 +5822,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
   // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (auto* b = gpu_device->backend()) return b->GetPcieInfo(info);
+  if (auto* b = gpu_device->backend()) return b->get_pcie_info(info);
 #endif
 
   if (info == nullptr) {
@@ -8708,7 +8708,7 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t* info) {
     return AMDSMI_STATUS_INVAL;
   }
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
   // Read current TTM pages limit from sysfs
@@ -8835,7 +8835,7 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
     return AMDSMI_STATUS_INVAL;
   }
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
   if (is_dry_run()) {
@@ -8882,7 +8882,7 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   AMDSMI_CHECK_INIT();
 #ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (amd::smi::WSLGPUBackend::is_active()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
   // Remove modprobe configuration to reset to default. The active module
