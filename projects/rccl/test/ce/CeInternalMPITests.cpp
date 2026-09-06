@@ -140,6 +140,17 @@ TEST_F(CeInternalMPITest, InitSetsWindowPointers)
     EXPECT_NE(ceComm->ceColl.ceSyncWin, nullptr);
 }
 
+// INIT-01b: ncclCeInit allocates ceSeqNumDev and seeds GRAPH_SYNC_VALUE in slot [1].
+TEST_F(CeInternalMPITest, InitAllocatesCeSeqNumDev)
+{
+    ASSERT_NE(ceComm->ceColl.ceSeqNumDev, nullptr);
+    uint32_t graphSlot = 0;
+    ASSERT_EQ(hipMemcpy(&graphSlot, ceComm->ceColl.ceSeqNumDev + 1, sizeof(uint32_t),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(graphSlot, kCeGraphSyncValue);
+}
+
 // INIT-02: ncclCeFinalize sets sync-window pointers back to null.
 TEST_F(CeInternalMPITest, FiniNullsPointers)
 {
@@ -148,6 +159,7 @@ TEST_F(CeInternalMPITest, FiniNullsPointers)
     EXPECT_EQ(ceComm->ceColl.baseUCSymReadyPtr, nullptr);
     EXPECT_EQ(ceComm->ceColl.baseUCSymComplPtr, nullptr);
     EXPECT_EQ(ceComm->ceColl.ceSyncWin, nullptr);
+    EXPECT_EQ(ceComm->ceColl.ceSeqNumDev, nullptr);
 }
 
 // INIT-03: Calling ncclCeFinalize twice is safe (idempotent).
@@ -156,6 +168,17 @@ TEST_F(CeInternalMPITest, DoubleFiniIsSafe)
     EXPECT_EQ(ncclCeFinalize(ceComm), ncclSuccess);
     EXPECT_EQ(ncclCeFinalize(ceComm), ncclSuccess);
     EXPECT_EQ(ceComm->ceColl.baseUCSymReadyPtr, nullptr);
+    EXPECT_EQ(ceComm->ceColl.ceSeqNumDev, nullptr);
+}
+
+// INIT-03b: Double finalize must not double-free ceSeqNumDev.
+TEST_F(CeInternalMPITest, InitFiniIdempotentCeSeqNumDev)
+{
+    ASSERT_NE(ceComm->ceColl.ceSeqNumDev, nullptr);
+    EXPECT_EQ(ncclCeFinalize(ceComm), ncclSuccess);
+    EXPECT_EQ(ceComm->ceColl.ceSeqNumDev, nullptr);
+    EXPECT_EQ(ncclCeFinalize(ceComm), ncclSuccess);
+    EXPECT_EQ(ceComm->ceColl.ceSeqNumDev, nullptr);
 }
 
 // INIT-04: Two comms have independent CE state; advancing one must not affect the other.
@@ -451,6 +474,171 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
     }
 }
 
+// SYNC-06: Under simulated graph capture, batchParams holds waits only (no fused writes).
+TEST_F(CeInternalMPITest, PrepUCSyncCaptureOpCount)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    const int nRanks = ceComm->nRanks;
+    CeSimulatedCaptureGuard capture(ceComm);
+    auto [batch, opIdx] = callPrepUCSync();
+
+    EXPECT_EQ(opIdx, static_cast<size_t>(nRanks - 1))
+        << "capture path should place only peer waits in batchParams";
+
+    int writeOps = 0;
+    int waitOps  = 0;
+    for(size_t i = 0; i < opIdx; ++i)
+    {
+        if(batch[i].operation == hipStreamMemOpWriteValue32)
+            ++writeOps;
+        if(batch[i].operation == hipStreamMemOpWaitValue32)
+        {
+            ++waitOps;
+            EXPECT_EQ(batch[i].waitValue.value, kCeGraphSyncValue)
+                << "capture waits must use GRAPH_SYNC_VALUE";
+        }
+    }
+    EXPECT_EQ(writeOps, 0) << "peer writes must be issued outside batchParams during capture";
+    EXPECT_EQ(waitOps, nRanks - 1);
+}
+
+// SYNC-07: Non-capture path keeps fused WRITE+WAIT in one batch (latency regression guard).
+TEST_F(CeInternalMPITest, PrepUCSyncNonCaptureStillFused)
+{
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    const int    nRanks     = ceComm->nRanks;
+    const uint32_t seqBefore = ceComm->ceColl.ceSeqNum + 1;
+    auto [batch, opIdx]      = callPrepUCSync();
+
+    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (nRanks - 1)));
+
+    int writeOps = 0;
+    int waitOps  = 0;
+    for(size_t i = 0; i < opIdx; ++i)
+    {
+        if(batch[i].operation == hipStreamMemOpWriteValue32)
+        {
+            ++writeOps;
+            EXPECT_EQ(batch[i].writeValue.value, seqBefore);
+        }
+        if(batch[i].operation == hipStreamMemOpWaitValue32)
+        {
+            ++waitOps;
+            EXPECT_EQ(batch[i].waitValue.value, seqBefore);
+        }
+    }
+    EXPECT_EQ(writeOps, nRanks - 1);
+    EXPECT_EQ(waitOps, nRanks - 1);
+}
+
+// ===========================================================================
+// CeInternal_MemOpSync – capture-time wait/reset batch split
+// ===========================================================================
+
+// MEMOP-01: Capture-time ncclMemOpSync zeros the active ready array after the barrier.
+TEST_F(CeInternalMPITest, MemOpSyncCaptureResetsFlags)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    const int nRanks = ceComm->nRanks;
+    // Warmup AllGather may leave useCompletePtr true; reset targets the active array.
+    ceComm->ceColl.useCompletePtr = false;
+    ASSERT_EQ(ceResetUcSyncWindowOnStream(ceComm, getActiveStream()), hipSuccess);
+    ASSERT_EQ(hipMemsetAsync(ceComm->ceColl.baseUCSymReadyPtr, 0xAB,
+                             static_cast<size_t>(nRanks) * sizeof(uint32_t), getActiveStream()),
+              hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    CeSimulatedCaptureGuard capture(ceComm);
+    const bool useCompleteBefore = ceComm->ceColl.useCompletePtr;
+    ASSERT_EQ(ncclMemOpSync(ceComm, getActiveStream(), nullptr), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+
+    const auto ready = ceReadUcReadyFlags(ceComm);
+    ASSERT_EQ(ready.size(), static_cast<size_t>(nRanks));
+    for(int i = 0; i < nRanks; ++i)
+        EXPECT_EQ(ready[static_cast<size_t>(i)], 0u) << "ready slot " << i << " not reset";
+
+    EXPECT_EQ(ceComm->ceColl.useCompletePtr, !useCompleteBefore);
+}
+
+// MEMOP-02: Capture reset covers all nRanks slots (not lsaSize only).
+TEST_F(CeInternalMPITest, MemOpSyncCaptureResetCoversAllRanks)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    const int nRanks = ceComm->nRanks;
+    ceComm->ceColl.useCompletePtr = false;
+    ASSERT_EQ(ceWriteUcReadyPatternsOnStream(ceComm, getActiveStream()), hipSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    CeSimulatedCaptureGuard capture(ceComm);
+    ASSERT_EQ(ncclMemOpSync(ceComm, getActiveStream(), nullptr), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+
+    const auto ready = ceReadUcReadyFlags(ceComm);
+    for(int i = 0; i < nRanks; ++i)
+        EXPECT_EQ(ready[static_cast<size_t>(i)], 0u) << "rank slot " << i;
+}
+
+// ===========================================================================
+// CeInternal_DevRuntime – graph-safe window registration during capture
+// ===========================================================================
+
+// DEVR-01: Symmetric window registration during HIP capture completes successfully.
+TEST_F(CeInternalMPITest, SymBufAllocDuringCaptureRestoresCaptureMode)
+{
+    hipGraph_t graph = nullptr;
+    ASSERT_EQ(hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal), hipSuccess);
+
+    RCCLTestHelpers::SymBuf extraSym;
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), 4096, extraSym),
+              ncclSuccess)
+        << "window registration during capture should succeed";
+
+    ASSERT_EQ(hipStreamEndCapture(getActiveStream(), &graph), hipSuccess);
+    ASSERT_NE(graph, nullptr);
+    SCOPE_EXIT((void)hipGraphDestroy(graph));
+
+    hipGraphExec_t graphExec = nullptr;
+    ASSERT_EQ(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0), hipSuccess);
+    SCOPE_EXIT(if(graphExec) (void)hipGraphExecDestroy(graphExec));
+
+    ASSERT_EQ(hipGraphLaunch(graphExec, getActiveStream()), hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+}
+
+// DEVR-02: Comm teardown after capture with CE init must not hang (devr finalize path).
+TEST_F(CeInternalMPITest, CommTeardownAfterCaptureWithCeInit)
+{
+    hipGraph_t graph = nullptr;
+    ASSERT_EQ(hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal), hipSuccess);
+
+    RCCLTestHelpers::SymBuf extraSym;
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), 4096, extraSym),
+              ncclSuccess);
+
+    ASSERT_EQ(hipStreamEndCapture(getActiveStream(), &graph), hipSuccess);
+    SCOPE_EXIT((void)hipGraphDestroy(graph));
+
+    ASSERT_EQ(ncclCeFinalize(ceComm), ncclSuccess);
+    EXPECT_EQ(ceComm->ceColl.baseUCSymReadyPtr, nullptr);
+    EXPECT_EQ(ceComm->ceColl.ceSeqNumDev, nullptr);
+}
+
 // ===========================================================================
 // CeInternal_Launch – ncclCeLaunchBatchOps with zero and real ops
 // ===========================================================================
@@ -575,6 +763,152 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
             << "op " << i << " produced wrong data on the null stream";
     }
     // srcGuards, dstGuards, and params freed automatically on scope exit.
+}
+
+// LAUNCH-04: Odd intra-batch sync count under capture appends an extra ncclMemOpSync so
+//            useCompletePtr returns to its pre-launch value (graph replay safety).
+TEST_F(CeInternalMPITest, LaunchBatchOpsEvenSyncCountRestoresUseCompletePtr)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    using namespace RCCLTestGuards;
+    constexpr int    kOps   = 16; // one mid-loop sync + even-count padding → restored toggle
+    constexpr size_t kBytes = sizeof(float);
+
+    std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        srcGuards[i].set(p);
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        dstGuards[i].set(p);
+
+        const float pattern = static_cast<float>(i + 1);
+        ASSERT_EQ(hipMemcpy(srcGuards[i].get(), &pattern, sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = static_cast<float*>(srcGuards[i].get());
+        params.dsts[i]  = static_cast<float*>(dstGuards[i].get());
+        params.sizes[i] = kBytes;
+    }
+    params.numOps         = kOps;
+    params.intraBatchSync = true;
+
+    const bool useCompleteBefore = ceComm->ceColl.useCompletePtr;
+    CeSimulatedCaptureGuard capture(ceComm);
+    ncclCeCollArgs          collArgs{};
+    ASSERT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    EXPECT_EQ(ceComm->ceColl.useCompletePtr, useCompleteBefore)
+        << "even sync count (with padding) must restore useCompletePtr for replay";
+}
+
+// LAUNCH-05: When padding is not needed the internal sync count is already even.
+TEST_F(CeInternalMPITest, LaunchBatchOpsEvenInternalSyncCountRestoresUseCompletePtr)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    using namespace RCCLTestGuards;
+    constexpr int    kOps   = 24; // two mid-loop syncs, no padding
+    constexpr size_t kBytes = sizeof(float);
+
+    std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        srcGuards[i].set(p);
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        dstGuards[i].set(p);
+        const float pattern = static_cast<float>(i + 1);
+        ASSERT_EQ(hipMemcpy(srcGuards[i].get(), &pattern, sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = static_cast<float*>(srcGuards[i].get());
+        params.dsts[i]  = static_cast<float*>(dstGuards[i].get());
+        params.sizes[i] = kBytes;
+    }
+    params.numOps         = kOps;
+    params.intraBatchSync = true;
+
+    const bool useCompleteBefore = ceComm->ceColl.useCompletePtr;
+    CeSimulatedCaptureGuard capture(ceComm);
+    ncclCeCollArgs          collArgs{};
+    ASSERT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    EXPECT_EQ(ceComm->ceColl.useCompletePtr, useCompleteBefore);
+}
+
+// LAUNCH-06: One mid-loop sync (odd) still gets a padding ncclMemOpSync under capture,
+//            restoring useCompletePtr.  numOps=9 → sync at op 8 + padding sync.
+TEST_F(CeInternalMPITest, LaunchBatchOpsOddMidLoopSyncCountGetsPaddingRestoresUseCompletePtr)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    ceSkipIfNvls(ceComm);
+    requireMinRanks(2);
+
+    using namespace RCCLTestGuards;
+    constexpr int    kOps   = 9; // one mid-loop sync; padding makes total sync count even
+    constexpr size_t kBytes = sizeof(float);
+
+    std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        srcGuards[i].set(p);
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        dstGuards[i].set(p);
+        const float pattern = static_cast<float>(i + 1);
+        ASSERT_EQ(hipMemcpy(srcGuards[i].get(), &pattern, sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = static_cast<float*>(srcGuards[i].get());
+        params.dsts[i]  = static_cast<float*>(dstGuards[i].get());
+        params.sizes[i] = kBytes;
+    }
+    params.numOps         = kOps;
+    params.intraBatchSync = true;
+
+    const bool useCompleteBefore = ceComm->ceColl.useCompletePtr;
+    CeSimulatedCaptureGuard capture(ceComm);
+    ncclCeCollArgs          collArgs{};
+    ASSERT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    EXPECT_EQ(ceComm->ceColl.useCompletePtr, useCompleteBefore)
+        << "odd mid-loop sync count must be padded to restore useCompletePtr for replay";
 }
 
 // ===========================================================================

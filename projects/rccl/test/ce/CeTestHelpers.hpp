@@ -15,8 +15,109 @@
 #include "MPIHelpers.hpp"
 
 #include <hip/hip_runtime.h>
+#include <gtest/gtest.h>
+#include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
+#include <vector>
+
+struct ncclComm;
+
+// Mirrors ce_coll.cc GRAPH_SYNC_VALUE (not exported).
+inline constexpr uint32_t kCeGraphSyncValue = 1;
+
+#if ROCM_VERSION >= 60100
+#include <comm.h>
+
+// RAII: mark comm->planner.capturingGraph valid for white-box CE graph-path tests.
+class CeSimulatedCaptureGuard
+{
+public:
+    explicit CeSimulatedCaptureGuard(ncclComm* comm) : comm_(comm)
+    {
+        saved_ = comm_->planner.capturingGraph;
+        comm_->planner.capturingGraph.graphId = 0;
+    }
+
+    ~CeSimulatedCaptureGuard() { comm_->planner.capturingGraph = saved_; }
+
+    CeSimulatedCaptureGuard(const CeSimulatedCaptureGuard&)            = delete;
+    CeSimulatedCaptureGuard& operator=(const CeSimulatedCaptureGuard&) = delete;
+
+private:
+    ncclComm*       comm_;
+    ncclCudaGraph   saved_;
+};
+
+inline bool ceSimulatedCaptureSupported() { return true; }
+
+inline void ceSkipIfNvls(const ncclComm* comm)
+{
+    if(comm != nullptr && comm->nvlsSupport)
+        GTEST_SKIP() << "UC-only test; nvlsSupport MC path not covered here";
+}
+
+inline std::vector<uint32_t> ceReadUcReadyFlags(const ncclComm* comm)
+{
+    std::vector<uint32_t> host(static_cast<size_t>(comm->nRanks));
+    if(comm->ceColl.baseUCSymReadyPtr != nullptr)
+    {
+        EXPECT_EQ(hipMemcpy(host.data(), comm->ceColl.baseUCSymReadyPtr,
+                            host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost),
+                  hipSuccess);
+    }
+    return host;
+}
+
+inline std::vector<uint32_t> ceReadUcCompleteFlags(const ncclComm* comm)
+{
+    std::vector<uint32_t> host(static_cast<size_t>(comm->nRanks));
+    if(comm->ceColl.baseUCSymComplPtr != nullptr)
+    {
+        EXPECT_EQ(hipMemcpy(host.data(), comm->ceColl.baseUCSymComplPtr,
+                            host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost),
+                  hipSuccess);
+    }
+    return host;
+}
+
+// Reset UC ready/complete flag arrays on the same stream used by ncclMemOpSync.
+// Default-stream hipMemset/hipMemcpy races with batch memops on the test stream.
+inline hipError_t ceResetUcSyncWindowOnStream(ncclComm* comm, hipStream_t stream)
+{
+    const size_t nBytes = static_cast<size_t>(comm->nRanks) * sizeof(uint32_t);
+    hipError_t   err    = hipMemsetAsync(comm->ceColl.baseUCSymReadyPtr, 0, nBytes, stream);
+    if(err != hipSuccess)
+        return err;
+    err = hipMemsetAsync(comm->ceColl.baseUCSymComplPtr, 0, nBytes, stream);
+    if(err != hipSuccess)
+        return err;
+    return hipStreamSynchronize(stream);
+}
+
+// Seed distinct per-rank patterns into the ready array on stream.
+inline hipError_t ceWriteUcReadyPatternsOnStream(ncclComm* comm, hipStream_t stream)
+{
+    auto* readyPtrs = reinterpret_cast<uint32_t*>(comm->ceColl.baseUCSymReadyPtr);
+    for(int i = 0; i < comm->nRanks; ++i)
+    {
+        const uint32_t pattern = static_cast<uint32_t>(0x1000 + i);
+        hipError_t err =
+            hipMemcpyAsync(&readyPtrs[i], &pattern, sizeof(uint32_t), hipMemcpyHostToDevice, stream);
+        if(err != hipSuccess)
+            return err;
+    }
+    return hipStreamSynchronize(stream);
+}
+
+#else
+
+inline bool ceSimulatedCaptureSupported() { return false; }
+
+inline void ceSkipIfNvls(const ncclComm*) {}
+
+#endif
 
 // Returns true when compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
 // Gated at build time via check_symbol_exists(hipMemcpyBatchAsync); no runtime query needed.

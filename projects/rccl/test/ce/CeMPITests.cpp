@@ -19,6 +19,10 @@
 #include <hip/hip_runtime.h>
 #include <string>
 
+#include <ce_coll.h>
+#include <comm.h>
+#include <dev_runtime.h>
+
 #ifdef MPI_TESTS_ENABLED
 
 using namespace MPITestConstants;
@@ -816,6 +820,258 @@ TEST_F(CeMPI_Stress, InterleavedCEAllGatherAndSMAllReduce)
     }
 
     assertCEPathTaken("CeMPI_Stress/InterleavedCEAllGatherAndSMAllReduce");
+}
+
+// ===========================================================================
+// CeMPI_GraphBarrier – CE UC barrier replay (direct CE API; bypasses enqueue graph guard)
+// ===========================================================================
+
+namespace CeGraphBarrierHelpers
+{
+constexpr int kGraphReplayIters = 20;
+
+inline bool warmupCeInit(ncclComm_t comm, hipStream_t stream)
+{
+    auto* ceComm = static_cast<ncclComm*>(comm);
+    constexpr size_t kElem = 4;
+    SymBuf           sendSym, recvSym;
+    if(ncclSymBufAlloc(comm, kElem * sizeof(float), sendSym) != ncclSuccess)
+        return false;
+    if(ncclSymBufAlloc(comm, kElem * static_cast<size_t>(ceComm->nRanks) * sizeof(float),
+                       recvSym) != ncclSuccess)
+        return false;
+    if(ncclAllGather(sendSym.ptr, recvSym.ptr, kElem, ncclFloat32, comm, stream) != ncclSuccess)
+        return false;
+    if(hipStreamSynchronize(stream) != hipSuccess)
+        return false;
+    return ceComm->ceColl.baseUCSymReadyPtr != nullptr;
+}
+
+inline ncclResult_t runCeAllGatherDirect(ncclComm* comm, void* send, void* recv, size_t count,
+                                         hipStream_t stream)
+{
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclResult_t           ret     = ncclDevrFindWindow(comm, send, &sendWin);
+    if(ret != ncclSuccess)
+        return ret;
+    ret = ncclDevrFindWindow(comm, recv, &recvWin);
+    if(ret != ncclSuccess)
+        return ret;
+
+    ncclCeCollArgs args{};
+    args.func      = ncclFuncAllGather;
+    args.datatype  = ncclFloat32;
+    args.nElts     = count;
+    args.eltSize   = sizeof(float);
+    args.sendBuff  = static_cast<uint8_t*>(send);
+    args.recvBuff  = static_cast<uint8_t*>(recv);
+    args.sendWin   = sendWin;
+    args.recvWin   = recvWin;
+    return ncclCeAllGather(comm, &args, stream);
+}
+} // namespace CeGraphBarrierHelpers
+
+using namespace CeGraphBarrierHelpers;
+
+class CeMPI_GraphBarrier : public CeMPITest
+{};
+
+// CE-MPI-GRAPH-01: Repeated ncclCeAllGather under simulated capture (replay semantics).
+TEST_F(CeMPI_GraphBarrier, AllGatherDirectCaptureReplay)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    if(!validateTestPrerequisites(kMinRanks2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(createTestCommunicator(), ncclSuccess);
+    auto* ceComm = static_cast<ncclComm*>(getActiveCommunicator());
+    ceSkipIfNvls(ceComm);
+    if(!warmupCeInit(getActiveCommunicator(), getActiveStream()))
+        GTEST_SKIP() << "CE not available on this system";
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t count = kSmallCount;
+    SymBuf       sendSym, recvSym;
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym));
+    fillRankScalar(sendSym.ptr, count, rank);
+
+    for(int iter = 0; iter < kGraphReplayIters; ++iter)
+    {
+        CeSimulatedCaptureGuard capture(ceComm);
+        ASSERT_EQ(runCeAllGatherDirect(ceComm, sendSym.ptr, recvSym.ptr, count, getActiveStream()),
+                  ncclSuccess)
+            << "ncclCeAllGather failed at replay iter " << iter;
+        ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+        ASSERT_TRUE(ceVerifyBlockPatternFloat(recvSym.ptr, count * static_cast<size_t>(nRanks), count))
+            << "data wrong at replay iter " << iter;
+    }
+}
+
+// CE-MPI-GRAPH-02: HIP graph capture/instantiate/launch of ncclCeAllGather (20 replays).
+TEST_F(CeMPI_GraphBarrier, AllGatherHipGraphCaptureReplay)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    if(!validateTestPrerequisites(kMinRanks2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(createTestCommunicator(), ncclSuccess);
+    auto* ceComm = static_cast<ncclComm*>(getActiveCommunicator());
+    ceSkipIfNvls(ceComm);
+    if(!warmupCeInit(getActiveCommunicator(), getActiveStream()))
+        GTEST_SKIP() << "CE not available on this system";
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t count = kSmallCount;
+    SymBuf       sendSym, recvSym;
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym));
+    fillRankScalar(sendSym.ptr, count, rank);
+
+    hipGraph_t     graph     = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    ASSERT_EQ(hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal), hipSuccess);
+    {
+        CeSimulatedCaptureGuard capture(ceComm);
+        ASSERT_EQ(runCeAllGatherDirect(ceComm, sendSym.ptr, recvSym.ptr, count, getActiveStream()),
+                  ncclSuccess);
+    }
+    ASSERT_EQ(hipStreamEndCapture(getActiveStream(), &graph), hipSuccess);
+    ASSERT_NE(graph, nullptr);
+    ASSERT_EQ(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0), hipSuccess);
+    SCOPE_EXIT(
+        if(graphExec) (void)hipGraphExecDestroy(graphExec);
+        if(graph) (void)hipGraphDestroy(graph););
+
+    for(int iter = 0; iter < kGraphReplayIters; ++iter)
+    {
+        ASSERT_EQ(hipGraphLaunch(graphExec, getActiveStream()), hipSuccess)
+            << "graph launch failed at iter " << iter;
+        ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+        ASSERT_TRUE(ceVerifyBlockPatternFloat(recvSym.ptr, count * static_cast<size_t>(nRanks), count))
+            << "data wrong after graph replay iter " << iter;
+    }
+}
+
+// CE-MPI-GRAPH-03: Alternate captured replay with eager direct CE AllGather (mixing).
+TEST_F(CeMPI_GraphBarrier, GraphMixingCaptureAndEagerCeAllGather)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    if(!validateTestPrerequisites(kMinRanks2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    MPIHelpers::MpiEnvGuard mixingGuard("NCCL_GRAPH_MIXING_SUPPORT", "1");
+
+    ASSERT_EQ(createTestCommunicator(), ncclSuccess);
+    auto* ceComm = static_cast<ncclComm*>(getActiveCommunicator());
+    ceSkipIfNvls(ceComm);
+    if(!warmupCeInit(getActiveCommunicator(), getActiveStream()))
+        GTEST_SKIP() << "CE not available on this system";
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t count = kSmallCount;
+    SymBuf       sendSym, recvSym;
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym));
+    fillRankScalar(sendSym.ptr, count, rank);
+
+    hipGraph_t     graph     = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    ASSERT_EQ(hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal), hipSuccess);
+    {
+        CeSimulatedCaptureGuard capture(ceComm);
+        ASSERT_EQ(runCeAllGatherDirect(ceComm, sendSym.ptr, recvSym.ptr, count, getActiveStream()),
+                  ncclSuccess);
+    }
+    ASSERT_EQ(hipStreamEndCapture(getActiveStream(), &graph), hipSuccess);
+    ASSERT_EQ(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0), hipSuccess);
+    SCOPE_EXIT(
+        if(graphExec) (void)hipGraphExecDestroy(graphExec);
+        if(graph) (void)hipGraphDestroy(graph););
+
+    for(int iter = 0; iter < kInterleavedIters; ++iter)
+    {
+        ASSERT_EQ(hipGraphLaunch(graphExec, getActiveStream()), hipSuccess)
+            << "captured launch failed at iter " << iter;
+        ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+        ASSERT_TRUE(ceVerifyBlockPatternFloat(recvSym.ptr, count * static_cast<size_t>(nRanks), count));
+
+        ASSERT_EQ(runCeAllGatherDirect(ceComm, sendSym.ptr, recvSym.ptr, count, getActiveStream()),
+                  ncclSuccess)
+            << "eager CE AllGather failed at iter " << iter;
+        ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+        ASSERT_TRUE(ceVerifyBlockPatternFloat(recvSym.ptr, count * static_cast<size_t>(nRanks), count));
+    }
+}
+
+// CE-MPI-GRAPH-04: Two communicators with independent capture/replay CE state.
+TEST_F(CeMPI_GraphBarrier, IndependentCommsCaptureReplay)
+{
+    if(!ceSimulatedCaptureSupported())
+        GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
+    if(!validateTestPrerequisites(kMinRanks2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(createTestCommunicator(), ncclSuccess);
+    auto* ceComm1 = static_cast<ncclComm*>(getActiveCommunicator());
+    if(!warmupCeInit(getActiveCommunicator(), getActiveStream()))
+        GTEST_SKIP() << "CE not available on comm1";
+    ceSkipIfNvls(ceComm1);
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    ncclUniqueId uid{};
+    if(rank == 0)
+        ASSERT_EQ(ncclGetUniqueId(&uid), ncclSuccess);
+    MPI_Bcast(&uid, sizeof(uid), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    ncclComm_t comm2 = nullptr;
+    ASSERT_EQ(ncclCommInitRank(&comm2, nRanks, uid, rank), ncclSuccess);
+    RCCLTestGuards::NcclCommAutoGuard comm2Guard(comm2);
+    auto* ceComm2 = static_cast<ncclComm*>(comm2);
+    if(!warmupCeInit(comm2, getActiveStream()))
+        GTEST_SKIP() << "CE not available on comm2";
+
+    const size_t count = kSmallCount;
+    SymBuf       s1, r1, s2, r2;
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), s1));
+    ASSERT_EQ(ncclSuccess, allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), r1));
+    ASSERT_EQ(ncclSuccess, ncclSymBufAlloc(comm2, count * sizeof(float), s2));
+    ASSERT_EQ(ncclSuccess,
+              ncclSymBufAlloc(comm2, count * static_cast<size_t>(nRanks) * sizeof(float), r2));
+    fillRankScalar(s1.ptr, count, rank);
+    fillRankScalar(s2.ptr, count, rank);
+
+    const uint32_t seqComm1Before = ceComm1->ceColl.ceSeqNum;
+    for(int iter = 0; iter < 5; ++iter)
+    {
+        CeSimulatedCaptureGuard capture2(ceComm2);
+        ASSERT_EQ(runCeAllGatherDirect(ceComm2, s2.ptr, r2.ptr, count, getActiveStream()), ncclSuccess)
+            << "comm2 replay iter " << iter;
+        ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    }
+
+    CeSimulatedCaptureGuard capture1(ceComm1);
+    ASSERT_EQ(runCeAllGatherDirect(ceComm1, s1.ptr, r1.ptr, count, getActiveStream()), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    EXPECT_GE(ceComm1->ceColl.ceSeqNum, seqComm1Before)
+        << "comm1 CE seq should advance independently of comm2 replay";
+    ASSERT_TRUE(ceVerifyBlockPatternFloat(r1.ptr, count * static_cast<size_t>(nRanks), count));
 }
 
 #endif // MPI_TESTS_ENABLED
