@@ -2316,6 +2316,12 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
           // completion. Also flush caches as we may not need another packet to flush caches.
           kAttachSignal = true;
           gpu().addSystemScope();
+        } else {
+          // The memcpy above fills the staging pool, which the runtime requests from the
+          // coarse-grained host pool: the GPU caches it in L2 and sees no coherence traffic from
+          // CPU stores, so without an invalidate the kernel can read a stale line. Acquire only
+          // because a system release would flush L2 needlessly.
+          gpu().addSystemScopeAcquire();
         }
         result =
             shaderCopyBuffer(currentDstAddr, stagingBuffer, origin, srcOrigin, copySize, entire,

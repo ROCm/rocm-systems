@@ -654,6 +654,7 @@ class VirtualGPU : public device::VirtualDevice {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
+  void addSystemScopeAcquire() override { addSystemScopeAcquire_ = true; }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
 
   HwQueueTracker& Barriers() { return barriers_; }
@@ -883,6 +884,7 @@ class VirtualGPU : public device::VirtualDevice {
       uint32_t profiling_ : 1;              //!< Profiling is enabled
       uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
       uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
+      uint32_t addSystemScopeAcquire_ : 1;  //!< Insert a system scope acquire into the next aql
       uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
       uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
       uint32_t force_irq_ : 1;              //!< Forces interrupt on the signal completion

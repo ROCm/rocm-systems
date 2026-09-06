@@ -1362,8 +1362,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
-  //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
+  //!< Request system-scope acquire and release fences on the next AQL packet (ROCm specific)
   virtual void addSystemScope() {}
+  //!< Request only a system-scope acquire fence on the next AQL packet (ROCm specific)
+  virtual void addSystemScopeAcquire() {}
 
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }

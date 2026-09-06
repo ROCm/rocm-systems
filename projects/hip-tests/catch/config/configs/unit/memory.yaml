@@ -1631,6 +1631,9 @@ memory:
   Unit_hipMemcpyAsync_Capture:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyAsync_Regression_PageableStaging_ConsecutiveSmallCopies:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
     tags: [P1]
