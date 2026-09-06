@@ -19,6 +19,7 @@ from rocm_kpack.artifact_splitter import (
     ExtractedKernel,
     base_arch,
 )
+from elf_test_utils import patch_hip_fatbin_size
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
 from rocm_kpack.coff.kpack_transform import HIPK_MAGIC as COFF_HIPK_MAGIC
@@ -265,6 +266,119 @@ class TestArtifactSplitterIntegration:
         verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
         all_checks_passed = verifier.run_all_checks()
         assert all_checks_passed, "Artifact verification should pass all checks"
+
+    @staticmethod
+    def _make_single_binary_artifact(
+        tmp_path: Path, binary_relpath: str, source: Path
+    ) -> tuple[Path, str]:
+        """Build a one-binary artifact tree and return (artifact_dir, prefix)."""
+        artifact_dir = tmp_path / "input_artifact"
+        prefix = "test/lib/stage"
+        (artifact_dir / prefix).mkdir(parents=True)
+        write_artifact_manifest(artifact_dir, [prefix])
+
+        dest = artifact_dir / prefix / binary_relpath
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        return artifact_dir, prefix
+
+    @staticmethod
+    def _split(toolchain, input_dir: Path, output_dir: Path) -> None:
+        ArtifactSplitter(
+            artifact_prefix="test_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=False,
+        ).split(input_dir, output_dir)
+
+    def test_resplit_of_already_split_elf_artifact_is_a_noop(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Re-driving the splitter over an already-split ELF tree does nothing.
+
+        Populating a build tree from previously split outputs, or simply
+        re-running the split step, feeds the splitter binaries it has already
+        processed. Those keep their .hip_fatbin section header, so the second
+        pass used to re-enter kpack_offload_binary() and abort with
+        "Section '.rocm_kpack_ref' already exists".
+
+        The .hip_fatbin here is patched below one page so that
+        conservative_zero_page() declines and the section stays SHT_PROGBITS.
+        That isolates this from the separated-debug-file case: the SHT_NOBITS
+        guard cannot classify this binary, only the .rocm_kpack_ref marker can.
+        """
+        source = patch_hip_fatbin_size(
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so",
+            tmp_path / "libsmall.so",
+            new_size=3000,
+        )
+        input_dir, prefix = self._make_single_binary_artifact(
+            tmp_path, "lib/libtest.so", source
+        )
+
+        first_output = tmp_path / "output_pass1"
+        self._split(toolchain, input_dir, first_output)
+
+        first_generic = first_output / "test_lib_generic"
+        split_binary = first_generic / prefix / "lib/libtest.so"
+        surgery = ElfSurgery.load(split_binary)
+        assert surgery.find_section(".rocm_kpack_ref") is not None
+        assert not surgery.find_section(".hip_fatbin").header.is_nobits, (
+            "fixture must keep .hip_fatbin PROGBITS so this test covers the "
+            "already-split case rather than the SHT_NOBITS case"
+        )
+        assert list(first_output.glob("test_lib_gfx*")), "pass 1 must split something"
+
+        # Second pass over the already-split generic artifact must not raise.
+        second_output = tmp_path / "output_pass2"
+        self._split(toolchain, first_generic, second_output)
+
+        assert (
+            list(second_output.glob("test_lib_gfx*")) == []
+        ), "re-split must not produce per-arch artifacts; the device code is gone"
+        assert (
+            second_output / "test_lib_generic" / prefix / "lib/libtest.so"
+        ).read_bytes() == split_binary.read_bytes(), (
+            "binary must pass through unchanged"
+        )
+
+    def test_resplit_of_already_split_coff_artifact_is_a_noop(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Same idempotency guarantee for PE/COFF, keyed off .kpackrf.
+
+        No zero-paging happens on the COFF path, so .hip_fat always survives
+        the transform with its contents and every re-split failed.
+        """
+        source = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.dll"
+        )
+        self._require_materialized_binary(source, b"MZ")
+        input_dir, prefix = self._make_single_binary_artifact(
+            tmp_path, "bin/test.dll", source
+        )
+
+        first_output = tmp_path / "output_pass1"
+        self._split(toolchain, input_dir, first_output)
+
+        first_generic = first_output / "test_lib_generic"
+        split_binary = first_generic / prefix / "bin/test.dll"
+        surgery = CoffSurgery.load(split_binary)
+        assert surgery.find_section(".kpackrf") is not None
+        assert surgery.find_section(".hip_fat") is not None
+        assert list(first_output.glob("test_lib_gfx*")), "pass 1 must split something"
+
+        second_output = tmp_path / "output_pass2"
+        self._split(toolchain, first_generic, second_output)
+
+        assert (
+            list(second_output.glob("test_lib_gfx*")) == []
+        ), "re-split must not produce per-arch artifacts; the device code is gone"
+        assert (
+            second_output / "test_lib_generic" / prefix / "bin/test.dll"
+        ).read_bytes() == split_binary.read_bytes(), (
+            "binary must pass through unchanged"
+        )
 
     def test_artifact_with_database_files(
         self, create_test_artifact, toolchain, tmp_path
