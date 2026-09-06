@@ -491,15 +491,19 @@ if(BUILD_TESTS)
       net_ib_header_symlinks rma_header_symlinks)
   endif()
 
-  # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the
-  # segment-math header (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) is
-  # compiled with GIN_SDMA_HOST_ONLY so it needs neither a built librccl nor device
-  # codegen. It exercises the exact ginPutSegmentCount/ginPutSegmentAt the SDMA
-  # backend Put drives on device. Runs under `ctest -L unit`.
-  add_executable(rccl-UnitTestsGinSdmaPolicy gin/gin_sdma_policy_test.cpp)
-  set_source_files_properties(gin/gin_sdma_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  # GIN Anvil-SDMA put-segmentation and AllReduce size-policy host unit tests (no
+  # GPU). Pure host C++: the segment-math header
+  # (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) and
+  # algorithms/gin/gin_all_reduce_policy.h are compiled with GIN_SDMA_HOST_ONLY
+  # so they need neither a built librccl nor device codegen. Runs under
+  # `ctest -L unit`.
+  add_executable(rccl-UnitTestsGinSdmaPolicy
+    gin/gin_sdma_policy_test.cpp
+    gin/gin_all_reduce_policy_test.cpp)
+  set_source_files_properties(gin/gin_sdma_policy_test.cpp gin/gin_all_reduce_policy_test.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsGinSdmaPolicy PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/include)
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(rccl-UnitTestsGinSdmaPolicy PRIVATE GIN_SDMA_HOST_ONLY)
   target_link_libraries(rccl-UnitTestsGinSdmaPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
   set_target_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES
@@ -576,6 +580,7 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
+      GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
@@ -628,6 +633,12 @@ if(BUILD_TESTS)
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # GinAllReduceEligibilityTests.cpp calls ncclAllReduceGinSdmaEligible() only
+    # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE ENABLE_ROCSHMEM_GIN)
+    endif()
 
     # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
     # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
