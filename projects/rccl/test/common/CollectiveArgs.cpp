@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <algorithm>
+
 #include "CollectiveArgs.hpp"
 #include "gtest/gtest.h"
 
@@ -178,6 +180,39 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
+    // Mitigation (AICOMRCCL-2275): zeroing the device buffers at teardown removes the
+    // pooled-worker corruption. Timing, not contents: prep rewrites them before use.
+    // The cap bounds the cost per buffer; smaller buffers are zeroed whole.
+    size_t const cap = 4u << 20;
+    hipError_t errIn = hipSuccess, errOut = hipSuccess;
+    // In-place attaches one buffer as an interior alias of the other, so there is a
+    // single allocation, owned by the lower address. Equal addresses mean the alias
+    // starts at the base (globalRank 0, or the same-pointer case), and then the owner
+    // is whichever side records the longer length.
+    if (this->inPlace)
+    {
+      bool const   same   = this->inputGpu.ptr == this->outputGpu.ptr;
+      bool const   inOwns = this->inputGpu.ptr < this->outputGpu.ptr;
+      void* const  own    = (same || inOwns) ? this->inputGpu.ptr : this->outputGpu.ptr;
+      size_t const bytes  = same ? std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated)
+                                 : (inOwns ? this->numInputBytesAllocated : this->numOutputBytesAllocated);
+      if (own && bytes)
+      {
+        errIn = hipMemset(own, 0, std::min(bytes, cap));
+      }
+    }
+    else
+    {
+      if (this->inputGpu.ptr && this->numInputBytesAllocated)
+      {
+        errIn = hipMemset(this->inputGpu.ptr, 0, std::min(this->numInputBytesAllocated, cap));
+      }
+      if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+      {
+        errOut = hipMemset(this->outputGpu.ptr, 0, std::min(this->numOutputBytesAllocated, cap));
+      }
+    }
+
     // If in-place, either only inputGpu or outputGpu was allocated
     if (this->inPlace)
     {
@@ -214,6 +249,15 @@ namespace RcclUnitTesting
       this->biasRegHandle = nullptr;
     }
 
+    // Report, do not fail. TestBedChild wraps this in CHECK_CALL inside its per-collective
+    // loop, so returning TEST_FAIL would skip the frees of every later collective in the
+    // group and leak them into the next test on a reused pool worker.
+    hipError_t const scrubErr = (errIn != hipSuccess) ? errIn : errOut;
+    if (scrubErr != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(scrubErr));
+    }
     return TEST_SUCCESS;
   }
 
