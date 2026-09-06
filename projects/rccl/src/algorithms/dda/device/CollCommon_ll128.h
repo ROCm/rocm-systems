@@ -71,6 +71,16 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __hip_atomic_load((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
+// Poll the LL128 flag word until it matches, or comm abortFlag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, const uint32_t* abortFlag) {
+  int spins = 0;
+  while (ddaLL128LoadWord(flagAddr) != flag) {
+    if (ddaAbortSpinTick(abortFlag, spins)) return false;
+  }
+  return true;
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
 // word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
 // vecElementAdd<T> (which handles the per-type packing), then recombined.

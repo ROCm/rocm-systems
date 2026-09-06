@@ -59,7 +59,8 @@ __launch_bounds__(1024)
                                    size_t recvcount, // per-rank shard element count
                                    int selfRank, int nRanksRt,
                                    uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                   int epochLen) { // number of cells in epochDev
+                                   int epochLen, // number of cells in epochDev
+                                   const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -117,7 +118,9 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       LLLine128* src = myBase + (size_t)peer * slot;
       // All 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+      if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, abortFlag)) {
+        ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+        return;
       }
       if (hasWord) {
         const uint64_t d = ddaLL128LoadWord(&src[ln].w[lane]);

@@ -5,12 +5,15 @@
  ************************************************************************/
 
 #include "DeviceBufferHelpers.hpp"
+#include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "nccl.h"
 
+#include <memory>
 #include <sched.h>
+#include <string>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -536,6 +539,192 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+/**
+ * DDA fabric LL incomplete AllReduce + revoke. IncompleteCollective_Revoke_Shrink_Collective
+ * uses 1M floats and can take DDA two-shot on gfx1250 by accident, but it does not
+ * assert the COLL path. These two cases require the one-shot / two-shot log needle
+ * so a generic-kernel fallback cannot mask a DDA abortFlag wait regression.
+ */
+namespace
+{
+constexpr size_t kDdaOneShotCount     = 65536; // 256 KiB f32; below the 1 MiB one-shot threshold
+constexpr size_t kDdaTwoShotBaseCount = 262176;
+constexpr char   kDdaOneShotNeedle[]  = "taking DDA fabric LL one-shot path";
+constexpr char   kDdaTwoShotNeedle[]  = "taking DDA fabric LL two-shot path";
+
+bool ddaIsGfx1250Device()
+{
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
+        return false;
+    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
+}
+
+bool ddaAllRanksTrue(bool local)
+{
+    int vote    = local ? 1 : 0;
+    int minVote = 1;
+    MPI_Allreduce(&vote, &minVote, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    return minVote != 0;
+}
+
+bool ddaLLTwoShotShapeOk(size_t count, int nRanks)
+{
+    const size_t bytes = count * sizeof(float);
+    if(bytes % static_cast<size_t>(nRanks) != 0)
+        return false;
+    return (bytes / static_cast<size_t>(nRanks)) % 16 == 0;
+}
+
+size_t ddaTwoShotCountForRanks(int nRanks)
+{
+    size_t count = kDdaTwoShotBaseCount;
+    if(ddaLLTwoShotShapeOk(count, nRanks))
+        return count;
+    count = (count + 3) & ~size_t(3);
+    for(int i = 0; i < 1024; ++i, count += 4)
+    {
+        if(ddaLLTwoShotShapeOk(count, nRanks))
+            return count;
+    }
+    return 0;
+}
+
+std::string ddaSnapshotLogs(const MPIHelpers::TestLogAssertionContext& logCtx)
+{
+    return logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
+}
+
+bool ddaLogsContainNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
+                               const std::string& before, const char* needle)
+{
+    const std::string now = ddaSnapshotLogs(logCtx);
+    const std::string delta =
+        now.size() >= before.size() ? now.substr(before.size()) : now;
+    return delta.find(needle) != std::string::npos;
+}
+} // namespace
+
+class RevokeDdaMPITest : public MPITestBase
+{
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
+    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
+
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        if(!ddaAllRanksTrue(ddaIsGfx1250Device()))
+            GTEST_SKIP() << "DDA fabric LL AllReduce requires gfx1250 on every rank";
+        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
+        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "NET,INIT,COLL,TUNING");
+        logCtx_           = std::make_unique<MPIHelpers::TestLogAssertionContext>(
+            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+    }
+
+    void TearDown() override
+    {
+        MPITestBase::TearDown();
+        logCtx_.reset();
+        debugSubsysGuard_.reset();
+        debugGuard_.reset();
+    }
+
+    void runIncompleteDdaRevokeShrink(size_t count, const char* needle);
+};
+
+void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* needle)
+{
+    ASSERT_TRUE(validateTestPrerequisites(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 4 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  parent     = getActiveCommunicator();
+    hipStream_t stream     = getActiveStream();
+    const int   rank       = MPIEnvironment::world_rank;
+    const int   worldSize  = MPIEnvironment::world_size;
+    const int   skipRank   = worldSize - 1;
+    const size_t bytes     = count * sizeof(float);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, bytes));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, bytes));
+    auto sendGuard = makeScopeGuard([&]() { if(sendBuf) (void)hipFree(sendBuf); });
+    auto recvGuard = makeScopeGuard([&]() { if(recvBuf) (void)hipFree(recvBuf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, count));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, count));
+
+    const std::string beforeParent = ddaSnapshotLogs(*logCtx_);
+    if(rank != skipRank)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, parent, stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_TRUE(rank == skipRank || ddaLogsContainNeedleSince(*logCtx_, beforeParent, needle))
+        << "Rank " << rank << ": incomplete AllReduce did not take expected DDA LL path";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+
+    if(rank != skipRank)
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<int> excludeList;
+    bool             isExcluded = false;
+    computeSymmetricExclude(rank, worldSize, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(), &child, nullptr,
+                                 NCCL_SHRINK_DEFAULT));
+        ASSERT_NE(child, nullptr);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, child, stream));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlTwoShot)
+{
+    const size_t count = ddaTwoShotCountForRanks(MPIEnvironment::world_size);
+    if(count == 0)
+        GTEST_SKIP() << "Could not find a two-shot-aligned element count";
+
+    runIncompleteDdaRevokeShrink(count, kDdaTwoShotNeedle);
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlOneShot)
+{
+    runIncompleteDdaRevokeShrink(kDdaOneShotCount, kDdaOneShotNeedle);
 }
 
 static void computeAsymmetricExclude(int worldRank, int worldSize,
