@@ -1,0 +1,14 @@
+---
+copyEngine:
+  Unit_hipExtCopyEngineGetDeviceHandle_Negative:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [memory]
+  Unit_hipExtCopyEngine_KernelCopies:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [memory]
+  Unit_hipExtCopyEngine_PeerCopiesUseRecommendedEngine:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [memory, multigpu]

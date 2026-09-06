@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 37
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 38
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -189,6 +189,8 @@ typedef hipError_t (*t_hipEventRecord)(hipEvent_t event, hipStream_t stream);
 typedef hipError_t (*t_hipEventSynchronize)(hipEvent_t event);
 typedef hipError_t (*t_hipExtGetLinkTypeAndHopCount)(int device1, int device2, uint32_t* linktype,
                                                      uint32_t* hopcount);
+typedef hipError_t (*t_hipExtCopyEngineGetDeviceHandle)(int device,
+                                                        hipExtCopyEngineDeviceHandle* handle);
 typedef hipError_t (*t_hipExtLaunchKernel)(const void* function_address, dim3 numBlocks,
                                            dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                            hipStream_t stream, hipEvent_t startEvent,
@@ -1858,8 +1860,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
   t_hipKernelSetAttributeForDevice hipKernelSetAttributeForDevice_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
+  t_hipExtCopyEngineGetDeviceHandle hipExtCopyEngineGetDeviceHandle_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
 
   // ******************************************************************************************* //
   //

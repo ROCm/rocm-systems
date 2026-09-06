@@ -510,7 +510,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites = 488,
   HIP_API_ID_hipLibraryGetModule = 489,
   HIP_API_ID_hipKernelSetAttributeForDevice = 490,
-  HIP_API_ID_LAST = 490,
+  HIP_API_ID_hipExtCopyEngineGetDeviceHandle = 491,
+  HIP_API_ID_LAST = 491,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -644,6 +645,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipExecutionCtxStreamCreate: return "hipExecutionCtxStreamCreate";
     case HIP_API_ID_hipExecutionCtxSynchronize: return "hipExecutionCtxSynchronize";
     case HIP_API_ID_hipExecutionCtxWaitEvent: return "hipExecutionCtxWaitEvent";
+    case HIP_API_ID_hipExtCopyEngineGetDeviceHandle: return "hipExtCopyEngineGetDeviceHandle";
     case HIP_API_ID_hipExtDisableLogging: return "hipExtDisableLogging";
     case HIP_API_ID_hipExtEnableLogging: return "hipExtEnableLogging";
     case HIP_API_ID_hipExtGetLastError: return "hipExtGetLastError";
@@ -1128,6 +1130,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipExecutionCtxStreamCreate", name) == 0) return HIP_API_ID_hipExecutionCtxStreamCreate;
   if (strcmp("hipExecutionCtxSynchronize", name) == 0) return HIP_API_ID_hipExecutionCtxSynchronize;
   if (strcmp("hipExecutionCtxWaitEvent", name) == 0) return HIP_API_ID_hipExecutionCtxWaitEvent;
+  if (strcmp("hipExtCopyEngineGetDeviceHandle", name) == 0) return HIP_API_ID_hipExtCopyEngineGetDeviceHandle;
   if (strcmp("hipExtDisableLogging", name) == 0) return HIP_API_ID_hipExtDisableLogging;
   if (strcmp("hipExtEnableLogging", name) == 0) return HIP_API_ID_hipExtEnableLogging;
   if (strcmp("hipExtGetLastError", name) == 0) return HIP_API_ID_hipExtGetLastError;
@@ -2031,6 +2034,11 @@ typedef struct hip_api_data_s {
       hipExecutionCtx_t ctx;
       hipEvent_t event;
     } hipExecutionCtxWaitEvent;
+    struct {
+      int device;
+      hipExtCopyEngineDeviceHandle* handle;
+      hipExtCopyEngineDeviceHandle handle__val;
+    } hipExtCopyEngineGetDeviceHandle;
     struct {
       int device1;
       int device2;
@@ -4973,6 +4981,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExecutionCtxWaitEvent.ctx = (hipExecutionCtx_t)ctx; \
   cb_data.args.hipExecutionCtxWaitEvent.event = (hipEvent_t)event; \
 };
+// hipExtCopyEngineGetDeviceHandle[('int', 'device'), ('hipExtCopyEngineDeviceHandle*', 'handle')]
+#define INIT_hipExtCopyEngineGetDeviceHandle_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExtCopyEngineGetDeviceHandle.device = (int)device; \
+  cb_data.args.hipExtCopyEngineGetDeviceHandle.handle = (hipExtCopyEngineDeviceHandle*)handle; \
+};
 // hipExtDisableLogging[]
 #define INIT_hipExtDisableLogging_CB_ARGS_DATA(cb_data) { \
 };
@@ -7849,6 +7862,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipExecutionCtxWaitEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
     case HIP_API_ID_hipExecutionCtxWaitEvent:
       break;
+// hipExtCopyEngineGetDeviceHandle[('int', 'device'), ('hipExtCopyEngineDeviceHandle*', 'handle')]
+    case HIP_API_ID_hipExtCopyEngineGetDeviceHandle:
+      if (data->args.hipExtCopyEngineGetDeviceHandle.handle) data->args.hipExtCopyEngineGetDeviceHandle.handle__val = *(data->args.hipExtCopyEngineGetDeviceHandle.handle);
+      break;
 // hipExtDisableLogging[]
     case HIP_API_ID_hipExtDisableLogging:
       break;
@@ -10094,6 +10111,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipExecutionCtxWaitEvent(";
       oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxWaitEvent.ctx);
       oss << ", event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxWaitEvent.event);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExtCopyEngineGetDeviceHandle:
+      oss << "hipExtCopyEngineGetDeviceHandle(";
+      oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtCopyEngineGetDeviceHandle.device);
+      if (data->args.hipExtCopyEngineGetDeviceHandle.handle == NULL) oss << ", handle=NULL";
+      else { oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtCopyEngineGetDeviceHandle.handle__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipExtDisableLogging:

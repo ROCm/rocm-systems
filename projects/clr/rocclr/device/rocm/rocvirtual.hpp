@@ -273,6 +273,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   class HwQueueTracker : public amd::EmbeddedObject {
    public:
+    static constexpr uint32_t kInvalidAbceRing = std::numeric_limits<uint32_t>::max();
+
     HwQueueTracker(const VirtualGPU& gpu) : gpu_(gpu) {}
 
     ~HwQueueTracker();
@@ -288,11 +290,15 @@ class VirtualGPU : public device::VirtualDevice {
     bool WaitCurrent();
 
     //! Update current active engine
-    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
+    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) {
+      engine_ = engine;
+      abce_ring_ = kInvalidAbceRing;
+    }
     HwQueueEngine GetActiveEngine() const { return engine_; }
 
     //! Returns the last submitted signal for a wait
-    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
+    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
+                                             uint32_t abce_ring = kInvalidAbceRing);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     void ResetCurrentSignal();
@@ -323,6 +329,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool CpuWaitForSignal(ProfilingSignal* signal);
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
+    uint32_t abce_ring_ = kInvalidAbceRing;  //!< Exact coordinator ring for the last ABCE copy
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing

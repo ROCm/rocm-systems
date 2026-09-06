@@ -19,6 +19,7 @@
 #include "device/comgrctx.hpp"
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
+#include "device/rocm/rocabce.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
@@ -79,8 +80,10 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
+
 std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
 std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::unordered_map<uint64_t, uint32_t> roc::Device::agent_driver_node_ids_;
 
 address Device::mg_sync_ = nullptr;
 
@@ -157,18 +160,9 @@ Device::Device(hsa_agent_t bkendDevice)
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
-int Device::agentGlobalIndex(hsa_agent_t agent) {
-  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
-    if (gpu_agents_[gpu_idx].handle == agent.handle) {
-      return static_cast<int>(gpu_idx);
-    }
-  }
-  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
-    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
-      return static_cast<int>(gpu_agents_.size() + cpu_idx);
-    }
-  }
-  return -1;
+uint32_t Device::agentDriverNodeId(hsa_agent_t agent) {
+  const auto driver_node = agent_driver_node_ids_.find(agent.handle);
+  return driver_node != agent_driver_node_ids_.end() ? driver_node->second : UINT32_MAX;
 }
 
 // Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
@@ -255,6 +249,10 @@ Device::~Device() {
   // because its destructor will call releaseQueue()
   delete xferQueue_;
   xferQueue_ = nullptr;
+
+  // The transfer queue can submit through ABCE, so destroy it before draining
+  // and releasing the copy-engine rings.
+  abce_engine_set_.reset();
 
   // Final drain of deferred destroys on the main thread before hsa_shut_down.
   DrainDeferredQueueDestroys();
@@ -362,6 +360,15 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
     LogPrintfError("HSA_AGENT_INFO_DEVICE failed with %x", stat);
     return stat;
   }
+
+  uint32_t driver_node_id = UINT32_MAX;
+  stat = Hsa::agent_get_info(
+      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &driver_node_id);
+  if (stat != HSA_STATUS_SUCCESS) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_DRIVER_NODE_ID failed with %x", stat);
+    return stat;
+  }
+  agent_driver_node_ids_[agent.handle] = driver_node_id;
 
   if (dev_type == HSA_DEVICE_TYPE_CPU) {
     AgentInfo info = {agent, {0}, {0}, {0}};
@@ -1877,8 +1884,23 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
+AbceEngineSet* Device::getOrCreateAbceEngineSet() {
+  // Device discovery creates every Device in every process. Delay the per-engine
+  // SDMA queues until this process actually reaches ABCE on this device,
+  // avoiding KFD's queue limit in multi-process workloads.
+  if (!DEBUG_CLR_ENABLE_ABCE) {
+    return nullptr;
+  }
+  std::call_once(abce_engine_set_once_,
+                 [this]() { abce_engine_set_ = AbceEngineSet::Create(*this); });
+  return abce_engine_set_.get();
+}
+
+// ================================================================================================
 device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   std::scoped_lock lock(vgpusAccess());
+
+  getOrCreateAbceEngineSet();
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool cooperative = false;

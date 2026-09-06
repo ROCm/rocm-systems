@@ -10581,6 +10581,23 @@ hipError_t hipExtDisableLogging();
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
 /**
+ * @brief Return the device-wide copy-engine handle a kernel submits through.
+ *
+ * The handle is a value passed to a kernel as an ordinary argument, and stays
+ * valid until runtime teardown. Only kernels running on @p device may submit
+ * through it: its rings and their state live in that device's memory. The
+ * rings are created on the first call for @p device, so this may create SDMA
+ * queues there: at most GPU_MAX_SDMA_DEVICE_QUEUES, which is 0 by default, so
+ * kernel-side copies are off unless it is set.
+ *
+ * @param [in]  device  HIP device ordinal owning the copy engines.
+ * @param [out] handle  Receives the handle.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice,
+ * #hipErrorNotSupported when this device cannot submit copies from a kernel.
+ */
+hipError_t hipExtCopyEngineGetDeviceHandle(int device, hipExtCopyEngineDeviceHandle* handle);
+/**
 * @}
 */
 #ifdef __cplusplus

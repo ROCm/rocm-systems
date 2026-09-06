@@ -24,13 +24,13 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
       context_(nullptr) {
 }
 
-inline void DmaBlitManager::synchronize() const {
+void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
     gpu().releaseGpuMemoryFence();
   }
 }
 
-inline Memory& DmaBlitManager::gpuMem(device::Memory& mem) const {
+Memory& DmaBlitManager::gpuMem(device::Memory& mem) const {
   return static_cast<Memory&>(mem);
 }
 
@@ -361,7 +361,7 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
 
   // Memory objects are already validated in HIP API layer
   // All operations here are inter-device; use the unified batch copy path
-  if (!hsaCopyBatch(copyOps)) {
+  if (!submitCopyBatch(copyOps)) {
     LogPrintfError("DmaBlitManager::copyBufferBatch - Batch copy failed");
     return false;
   }
@@ -483,9 +483,9 @@ bool DmaBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMem
 }
 
 // ================================================================================================
-inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
-                                           hsa_agent_t& srcAgent, size_t size,
-                                           amd::CopyMetadata& copyMetadata) const {
+bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
+                                    hsa_agent_t& srcAgent, size_t size,
+                                    amd::CopyMetadata& copyMetadata) const {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
@@ -644,9 +644,9 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
 }
 
 // ================================================================================================
-bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                                  const std::vector<hsa_signal_t>* externalWaitEvents,
-                                  std::vector<ProfilingSignal*>* outBatchSignals) const {
+bool DmaBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                                     const std::vector<hsa_signal_t>* externalWaitEvents,
+                                     std::vector<ProfilingSignal*>* outBatchSignals) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -2995,7 +2995,7 @@ bool KernelBlitManager::WriteBufferBatch(
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
-    if (!hsaCopyBatch(pinned_copy_ops)) {
+    if (!submitCopyBatch(pinned_copy_ops)) {
       LogWarning(
           "KernelBlitManager::WriteBufferBatch: SDMA batch copy failed, falling back to shader "
           "copy");
@@ -3115,7 +3115,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
-    if (!hsaCopyBatch(pinned_copy_ops)) {
+    if (!submitCopyBatch(pinned_copy_ops)) {
       LogWarning(
           "KernelBlitManager::ReadBufferBatch: SDMA batch copy failed, falling back to shader "
           "copy");
@@ -3206,7 +3206,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   ProfilingSignal* lastBatchSignal = nullptr;
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
-    if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+    if (!submitCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
       // Shader copy is linear only; fail the batch if it has swap/indirect ops.
       bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {
