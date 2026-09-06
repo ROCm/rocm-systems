@@ -1171,6 +1171,20 @@ class GraphExecSegmented : public GraphExecBase {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   hipError_t FindStreamsReqPerDevForSegments();
+  //! Depth cap for the child-graph priority walk below. Child graphs are
+  //! deep-cloned, so the hierarchy is a tree, but the walk runs once per
+  //! instantiate on application-controlled structure and stays explicitly finite.
+  static constexpr int kMaxChildGraphPriorityDepth = 16;
+  //! Most urgent priority declared by any kernel node in graph, following nested
+  //! child graph nodes. Priority::Normal when nothing inside declares one.
+  static int CollectDeclaredPriorityInGraph(Graph* graph, int depth,
+                                            std::unordered_set<const Graph*>& visited);
+  //! Priority declared per segment, indexed by segment id, for the stream-slot
+  //! ordering in RoundRobinStreamAssignment(). Empty when the ordering should be
+  //! left exactly as it was: no node carries a priority other than
+  //! Priority::Normal and the graph was not instantiated with
+  //! hipGraphInstantiateFlagUseNodePriority.
+  std::vector<int> CollectDeclaredSegmentPriorities() const;
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
@@ -1429,8 +1443,26 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 class GraphKernelNode : public GraphNode {
   hipKernelNodeParams kernelParams_;   //!< Kernel node parameters
   unsigned int numParams_;             //!< No. of kernel params as part of signature
-  hipKernelNodeAttrValue kernelAttr_;  //!< Kernel node attributes
-  unsigned int kernelAttrInUse_;       //!< Kernel attributes in use
+  //! Kernel node attributes, one independent slot each.
+  //!
+  //! These used to share a single hipKernelNodeAttrValue -- a union, so
+  //! accessPolicyWindow, cooperative and priority all aliased -- plus a
+  //! kernelAttrInUse_ id recording which one was written last. That cannot
+  //! represent a node carrying two attributes at once, which CUDA plainly does:
+  //! cudaGraphKernelNodeCopyAttributes is specified as copying "attributes"
+  //! over the whole of cudaKernelNodeAttrID rather than one of them
+  //! (cuda_runtime_api.h:9670-9689 in CUDA 13.0), and cudaGraphExecUpdate
+  //! constrains a single node's cooperative status and its priority as two
+  //! separate properties in the same list (:12527 and :12529-12530).
+  //!
+  //! hipLaunchAttributeClusterDimension was already stored on its own, in
+  //! clusterDim_ below; this extends that treatment to the rest.
+  hipAccessPolicyWindow accessPolicyWindow_;  //!< hipKernelNodeAttributeAccessPolicyWindow
+  int cooperative_;                           //!< hipKernelNodeAttributeCooperative
+  int priority_;                              //!< hipLaunchAttributePriority
+  bool accessPolicyWindowSet_;                //!< accessPolicyWindow_ was written
+  bool cooperativeSet_;                       //!< cooperative_ was written
+  bool prioritySet_;                          //!< priority_ was written
   ihipExtKernelEvents kernelEvents_;   //!< Events for Ext launch kernel
   bool hasHiddenHeap_;                 //!< Kernel has hidden heap(device side allocation)
   int coopKernel_;                     //!< Launch cooperative kernel
@@ -1456,12 +1488,21 @@ class GraphKernelNode : public GraphNode {
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
     }
-    memset(&kernelAttr_, 0, sizeof(kernelAttr_));
-    kernelAttrInUse_ = 0;
+    ResetAttrs();
     status = CopyAttr(&rhs);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to during copy attrs");
     }
+  }
+
+  //! Put every attribute slot back in its "never written" state.
+  void ResetAttrs() {
+    memset(&accessPolicyWindow_, 0, sizeof(accessPolicyWindow_));
+    cooperative_ = 0;
+    priority_ = hip::Stream::Priority::Normal;
+    accessPolicyWindowSet_ = false;
+    cooperativeSet_ = false;
+    prioritySet_ = false;
   }
 
  public:
@@ -1544,10 +1585,9 @@ class GraphKernelNode : public GraphNode {
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes, this, kernelParams_.func,
-              kernelAttr_.accessPolicyWindow.base_ptr, kernelAttr_.accessPolicyWindow.num_bytes,
-              kernelAttr_.accessPolicyWindow.hitRatio, kernelAttr_.accessPolicyWindow.hitProp,
-              kernelAttr_.accessPolicyWindow.missProp, kernelAttr_.cooperative,
-              kernelAttr_.priority);
+              accessPolicyWindow_.base_ptr, accessPolicyWindow_.num_bytes,
+              accessPolicyWindow_.hitRatio, accessPolicyWindow_.hitProp,
+              accessPolicyWindow_.missProp, cooperative_, priority_);
       label = buffer;
     } else if (flag == hipGraphDebugDotFlagsKernelNodeAttributes) {
       sprintf(buffer,
@@ -1555,10 +1595,9 @@ class GraphKernelNode : public GraphNode {
               "| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} |\n| {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), demangledName.c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
-              kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
-              kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
-              kernelAttr_.cooperative, kernelAttr_.priority);
+              label_, GetID(), demangledName.c_str(), accessPolicyWindow_.base_ptr,
+              accessPolicyWindow_.num_bytes, accessPolicyWindow_.hitRatio,
+              accessPolicyWindow_.hitProp, accessPolicyWindow_.missProp, cooperative_, priority_);
       label = buffer;
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
@@ -1684,8 +1723,7 @@ class GraphKernelNode : public GraphNode {
     if (copyParams(pNodeParams) != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to copy params");
     }
-    memset(&kernelAttr_, 0, sizeof(kernelAttr_));
-    kernelAttrInUse_ = 0;
+    ResetAttrs();
     hasHiddenHeap_ = false;
     coopKernel_ = coopKernel;
     globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
@@ -1730,6 +1768,71 @@ class GraphKernelNode : public GraphNode {
     const dim3& g = kernelParams_.gridDim;
     const dim3& b = kernelParams_.blockDim;
     return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
+  }
+
+  // True when hipLaunchAttributePriority was written on this node, whether by
+  // the application through hipGraphKernelNodeSetAttribute() or by stream
+  // capture copying the capturing stream's priority in.
+  //
+  // This is still a distinct question from "what is the priority", and the
+  // difference is load-bearing for CollectDeclaredSegmentPriorities(): a segment
+  // takes the most urgent priority any of its nodes declares, so a node that
+  // declares nothing must not be allowed to pull a sibling's Priority::Low back
+  // up to Normal. It is no longer a guard against union aliasing -- priority_ and
+  // cooperative_ are separate members now, so a node given
+  // hipKernelNodeAttributeCooperative(1) has prioritySet_ false and reads back
+  // Priority::Normal rather than Priority::Low.
+  bool HasDeclaredPriority() const { return prioritySet_; }
+
+  // Priority declared with hipLaunchAttributePriority, or Priority::Normal when
+  // this node declares none.
+  int GetDeclaredPriority() const {
+    return prioritySet_ ? priority_ : static_cast<int>(hip::Stream::Priority::Normal);
+  }
+
+  // Store the capturing stream's priority as this node's priority. This is what
+  // CUDA specifies stream capture to do -- "Note that priorities are only
+  // available on kernel nodes, and are copied from stream priority during stream
+  // capture", cuda_runtime_api.h:11563, :11635, :11725 and cuda.h:20369, :20457
+  // in CUDA 13.0 -- and it is the whole reason a plain
+  // torch.cuda.Stream(priority=-1) is all a framework user needs there.
+  //
+  // hip::Stream::priority_ is already clamped to [High, Low] by the Stream
+  // constructor, so the clamp here is belt and braces rather than a behaviour.
+  // Note that it reads the *software* priority: DEBUG_HIP_IGNORE_STREAM_PRIORITY
+  // forces HSA_AMD_QUEUE_PRIORITY_NORMAL at HSA queue creation only
+  // (rocdevice.cpp) and never touches priority_, which hipStreamGetPriority()
+  // also returns verbatim. So this copy is unaffected by that flag, and it does
+  // not reintroduce what that flag was turned on to avoid: no queue is requested
+  // and no HSA priority is named here.
+  void SetCapturedPriority(int priority) {
+    priority_ = std::min(std::max(priority, static_cast<int>(hip::Stream::Priority::High)),
+                         static_cast<int>(hip::Stream::Priority::Low));
+    prioritySet_ = true;
+    // Logged only for a non-default priority, so an ordinary capture adds no log
+    // output at all and stays byte-comparable against an unpatched runtime.
+    if (priority_ != hip::Stream::Priority::Normal) {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] capture copied stream priority %d into kernel node %d", priority_,
+              GetID());
+    }
+  }
+
+  // Apply the above to a node just recorded on stream, if it is a kernel node.
+  //
+  // This has to be called from the capture interceptor rather than from
+  // ihipGraphAddKernelNode() or ihipGraphAddNode(), and the reason is the part of
+  // the CUDA contract NVIDIA never writes down. Its wording is "copied from
+  // stream priority", not "from the priority of the stream the node was recorded
+  // on"; for a single-stream capture the two are the same, and for the fork/join
+  // capture this feature exists to serve they are not. Only the interceptor knows
+  // which stream recorded this node: a forked capture has two streams sharing one
+  // hip::Graph, so nothing reachable from the graph can tell them apart.
+  static void CopyCaptureStreamPriority(GraphNode* node, const hip::Stream* stream) {
+    if (node == nullptr || stream == nullptr || node->GetType() != hipGraphNodeTypeKernel) {
+      return;
+    }
+    static_cast<GraphKernelNode*>(node)->SetCapturedPriority(stream->GetPriority());
   }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
@@ -1838,19 +1941,24 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidValue;
       }
 
-      kernelAttr_.accessPolicyWindow.base_ptr = params->accessPolicyWindow.base_ptr;
-      kernelAttr_.accessPolicyWindow.hitProp = params->accessPolicyWindow.hitProp;
-      kernelAttr_.accessPolicyWindow.hitRatio = params->accessPolicyWindow.hitRatio;
-      kernelAttr_.accessPolicyWindow.missProp = params->accessPolicyWindow.missProp;
-      kernelAttr_.accessPolicyWindow.num_bytes = params->accessPolicyWindow.num_bytes;
+      accessPolicyWindow_.base_ptr = params->accessPolicyWindow.base_ptr;
+      accessPolicyWindow_.hitProp = params->accessPolicyWindow.hitProp;
+      accessPolicyWindow_.hitRatio = params->accessPolicyWindow.hitRatio;
+      accessPolicyWindow_.missProp = params->accessPolicyWindow.missProp;
+      accessPolicyWindow_.num_bytes = params->accessPolicyWindow.num_bytes;
+      accessPolicyWindowSet_ = true;
     } else if (attr == hipKernelNodeAttributeCooperative) {
-      kernelAttr_.cooperative = params->cooperative;
+      cooperative_ = params->cooperative;
+      cooperativeSet_ = true;
     } else if (attr == hipLaunchAttributePriority) {
-      if (params->priority < hip::Stream::Priority::Low ||
-          params->priority > hip::Stream::Priority::High) {
+      // Priority::High is the numerically smallest value and Priority::Low the
+      // largest, so the valid range is [High, Low] and not [Low, High].
+      if (params->priority < hip::Stream::Priority::High ||
+          params->priority > hip::Stream::Priority::Low) {
         return hipErrorInvalidValue;
       }
-      kernelAttr_.priority = params->priority;
+      priority_ = params->priority;
+      prioritySet_ = true;
     } else if (attr == hipLaunchAttributeClusterDimension) {
       dim3 clusterDim = {params->clusterDim.x, params->clusterDim.y, params->clusterDim.z};
       if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
@@ -1871,25 +1979,25 @@ class GraphKernelNode : public GraphNode {
       return hipSuccess;
     }
 
-    kernelAttrInUse_ = attr;
     return hipSuccess;
   }
   hipError_t GetAttrParams(hipKernelNodeAttrID attr, hipKernelNodeAttrValue* params) {
-    // Get kernel attr params
-    if (attr != hipLaunchAttributeClusterDimension &&
-        kernelAttrInUse_ != 0 && kernelAttrInUse_ != attr) {
-      return hipErrorInvalidValue;
-    }
+    // Get kernel attr params. An attribute that was never set reads back as its
+    // default rather than as an error: each attribute now has its own slot, so
+    // "which one is in use" is no longer a question this can answer, and CUDA
+    // returns the default too. hip-tests already relies on the default for a
+    // node with nothing set at all -- Unit_hipGraphKernelNodeCopyAttributes_Functional
+    // reads AccessPolicyWindow off a freshly added node before writing anything.
     if (attr == hipKernelNodeAttributeAccessPolicyWindow) {
-      params->accessPolicyWindow.base_ptr = kernelAttr_.accessPolicyWindow.base_ptr;
-      params->accessPolicyWindow.hitProp = kernelAttr_.accessPolicyWindow.hitProp;
-      params->accessPolicyWindow.hitRatio = kernelAttr_.accessPolicyWindow.hitRatio;
-      params->accessPolicyWindow.missProp = kernelAttr_.accessPolicyWindow.missProp;
-      params->accessPolicyWindow.num_bytes = kernelAttr_.accessPolicyWindow.num_bytes;
+      params->accessPolicyWindow.base_ptr = accessPolicyWindow_.base_ptr;
+      params->accessPolicyWindow.hitProp = accessPolicyWindow_.hitProp;
+      params->accessPolicyWindow.hitRatio = accessPolicyWindow_.hitRatio;
+      params->accessPolicyWindow.missProp = accessPolicyWindow_.missProp;
+      params->accessPolicyWindow.num_bytes = accessPolicyWindow_.num_bytes;
     } else if (attr == hipKernelNodeAttributeCooperative) {
-      params->cooperative = kernelAttr_.cooperative;
+      params->cooperative = cooperative_;
     } else if (attr == hipLaunchAttributePriority) {
-      params->priority = kernelAttr_.priority;
+      params->priority = priority_;
     } else if (attr == hipLaunchAttributeClusterDimension) {
       params->clusterDim.x = clusterDim_.x;
       params->clusterDim.y = clusterDim_.y;
@@ -1897,32 +2005,29 @@ class GraphKernelNode : public GraphNode {
     }
     return hipSuccess;
   }
+  //! Copy every attribute the source node carries, which is what
+  //! cudaGraphKernelNodeCopyAttributes is specified to do. This used to copy the
+  //! single attribute named by srcNode->kernelAttrInUse_ and fail with
+  //! hipErrorInvalidContext when the two nodes disagreed about which that was;
+  //! with independent slots there is nothing to disagree about, and a node whose
+  //! attributes were set one at a time no longer loses all but the last.
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
-    if (kernelAttrInUse_ != 0 && srcNode->kernelAttrInUse_ != kernelAttrInUse_) {
-      return hipErrorInvalidContext;
-    }
     clusterDim_ = srcNode->clusterDim_;
-    if (kernelAttrInUse_ == 0 && srcNode->kernelAttrInUse_ == 0) {
-      return hipSuccess;
+    if (srcNode->accessPolicyWindowSet_) {
+      accessPolicyWindow_.base_ptr = srcNode->accessPolicyWindow_.base_ptr;
+      accessPolicyWindow_.hitProp = srcNode->accessPolicyWindow_.hitProp;
+      accessPolicyWindow_.hitRatio = srcNode->accessPolicyWindow_.hitRatio;
+      accessPolicyWindow_.missProp = srcNode->accessPolicyWindow_.missProp;
+      accessPolicyWindow_.num_bytes = srcNode->accessPolicyWindow_.num_bytes;
+      accessPolicyWindowSet_ = true;
     }
-    kernelAttrInUse_ = srcNode->kernelAttrInUse_;
-    switch (srcNode->kernelAttrInUse_) {
-      case hipKernelNodeAttributeAccessPolicyWindow:
-        kernelAttr_.accessPolicyWindow.base_ptr = srcNode->kernelAttr_.accessPolicyWindow.base_ptr;
-        kernelAttr_.accessPolicyWindow.hitProp = srcNode->kernelAttr_.accessPolicyWindow.hitProp;
-        kernelAttr_.accessPolicyWindow.hitRatio = srcNode->kernelAttr_.accessPolicyWindow.hitRatio;
-        kernelAttr_.accessPolicyWindow.missProp = srcNode->kernelAttr_.accessPolicyWindow.missProp;
-        kernelAttr_.accessPolicyWindow.num_bytes =
-            srcNode->kernelAttr_.accessPolicyWindow.num_bytes;
-        break;
-      case hipKernelNodeAttributeCooperative:
-        kernelAttr_.cooperative = srcNode->kernelAttr_.cooperative;
-        break;
-      case hipLaunchAttributePriority:
-        kernelAttr_.priority = srcNode->kernelAttr_.priority;
-        break;
-      default:
-        return hipErrorInvalidValue;
+    if (srcNode->cooperativeSet_) {
+      cooperative_ = srcNode->cooperative_;
+      cooperativeSet_ = true;
+    }
+    if (srcNode->prioritySet_) {
+      priority_ = srcNode->priority_;
+      prioritySet_ = true;
     }
     return hipSuccess;
   }
