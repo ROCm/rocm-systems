@@ -179,6 +179,15 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp8.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_host.hpp
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp6.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp4.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_config.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_types.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/sdma_packets.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_ring_core.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_builder.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_ring_device.h
+${PROJECT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_device.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ext_copy_engine.h
+${HIP_COMMON_INCLUDE_DIR}/hip/hip_ext_copy_engine.h
 )
 
 # Generate required HIPRTC files.
