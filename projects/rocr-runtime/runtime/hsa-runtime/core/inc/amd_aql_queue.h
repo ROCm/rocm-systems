@@ -315,6 +315,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Fill queue properties
   void GetInfoProperties(uint8_t value[8]) const;
 
+  /// @brief Overwrite shader COMPUTE_RESOURCE_LIMITS via PM4 (HSA_NPI_SET_RESOURCE_LIMITS).
+  void SetResourceLimits(uint32_t limit);
+
   // AQL packet ring buffer
   void* ring_buf_;
 

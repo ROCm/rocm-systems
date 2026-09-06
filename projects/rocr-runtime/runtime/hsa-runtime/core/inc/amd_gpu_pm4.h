@@ -56,6 +56,8 @@
 #define PM4_HDR_IT_OPCODE_WAIT_REG_MEM                    0x3CU
 #define PM4_HDR_IT_OPCODE_COPY_DATA                       0x40U
 #define PM4_HDR_IT_OPCODE_DMA_DATA                        0x50U
+// drivers/gpu/drm/amd/amdkfd/kfd_pm4_opcodes.h
+#define PM4_HDR_IT_OPCODE_SET_SH_REG                      0x76U
 
 #define PM4_HDR_SHADER_TYPE(x)                            (((x) & 0x1U) << 1)
 #define PM4_HDR_IT_OPCODE(x)                              (((x) & 0xFFU) << 8)
@@ -141,6 +143,12 @@
 #define PM4_WRITE_DATA_DW2_DST_MEM_ADDR_LO(x)          (((x) & 0xFFFFFFFCU) << 0)
 #define PM4_WRITE_DATA_DW3_DST_MEM_ADDR_HI(x)          (((x) & 0xFFFFFFFFU) << 0)
 #define PM4_WRITE_DATA_DW4_DATA(x)                     (((x) & 0xFFFFFFFFU) << 0)
+
+#define PM4_SET_SH_REG_DW1(x)                          (((x) & 0xFFFFFFFFU) << 0)
+#   define PM4_SET_SH_REG_DW1_REG_OFFSET(x)            (((x) & 0xFFFFU) << 0)
+#   define PM4_SET_SH_REG_DW1_VMID_SHIFT(x)            (((x) & 0x1FU) << 23)
+#   define PM4_SET_SH_REG_DW1_INDEX(x)                 (((x) & 0xFU) << 28)
+#define PM4_SET_SH_REG_DW2_DATA(x)                     (((x) & 0xFFFFFFFFU) << 0)
 
 // clang-format on
 

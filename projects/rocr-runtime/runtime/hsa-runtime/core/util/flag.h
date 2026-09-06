@@ -372,6 +372,11 @@ class Flag {
 
     core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
 
+    // Overwrite the shader COMPUTE_RESOURCE_LIMITS (WAVES_PER_SH) via a PM4
+    // packet at queue init. Valid values are 0..1023. 0/unset = disabled.
+    var = os::GetEnvVar("HSA_NPI_SET_RESOURCE_LIMITS");
+    debug_set_resource_limits_ = var.empty() ? 0 : atoi(var.c_str());
+
     // This enables generation of lightweight gpu coredumps (Scratch & CWSR).
     var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
     lightweight_core_dump_enable_ = (var == "1");
@@ -562,6 +567,10 @@ class Flag {
   }
 
   [[nodiscard]]
+  uint32_t debug_set_resource_limits() const {
+                                        return debug_set_resource_limits_; }
+
+  [[nodiscard]]
   bool lightweight_core_dump_enable() const {
     return lightweight_core_dump_enable_;
   }
@@ -672,6 +681,8 @@ class Flag {
   bool core_dump_disable_ = false;
   bool enable_core_dump_progress_ = false;
   std::string core_dump_pattern_;
+
+  uint32_t debug_set_resource_limits_ = 0;
   bool lightweight_core_dump_enable_ = false;
 
   uint32_t cp_queues_limit_;
