@@ -50,6 +50,7 @@
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
+#include "core/util/utils.h"
 
 namespace rocr {
 namespace AMD {
@@ -58,11 +59,15 @@ static_assert(sizeof(hsa_amd_aie_kernel_dispatch_packet_t) == sizeof(core::AqlPa
               "hsa_amd_aie_kernel_dispatch_packet_t must be the same size as core::AqlPacket");
 
 AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
-                         uint32_t node_id, uint64_t flags)
+                         uint32_t node_id, core::HsaEventCallback callback, void* err_data,
+                         uint64_t flags)
     : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
-      queue_size_bytes_(req_size_pkts * sizeof(hsa_amd_aie_kernel_dispatch_packet_t)) {
+      queue_size_bytes_(req_size_pkts * sizeof(hsa_amd_aie_kernel_dispatch_packet_t)),
+      suspended_(false),
+      errors_callback_(callback),
+      errors_data_(err_data) {
   if (agent->device_type() != core::Agent::DeviceType::kAmdAieDevice) {
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
                         "Attempting to create an AIE queue on a non-AIE agent.");
@@ -205,7 +210,7 @@ uint64_t AieAqlQueue::AddWriteIndexAcqRel(uint64_t value) {
 void AieAqlQueue::StoreRelaxed(hsa_signal_value_t value) { SubmitPackets(); }
 
 void AieAqlQueue::SubmitPackets() {
-  if (!active_.load(std::memory_order_relaxed)) {
+  if (!active_.load(std::memory_order_relaxed) || suspended_) {
     return;
   }
 
@@ -224,7 +229,13 @@ void AieAqlQueue::SubmitPackets() {
   hsa_status_t err = driver.SubmitCmdChain(amd_queue_.hsa_queue, kmq_metadata_, first_pkt_idx,
                                            num_pkts, agent.properties().NumNeuralCores, agent);
   if (err != HSA_STATUS_SUCCESS) {
-    throw hsa_exception(err, "Could not submit packets");
+    // Stop processing further packets on this queue and report the failure through the per-queue
+    // error callback (mirrors the GPU AqlQueue error path). The read index is left unadvanced
+    // because these packets did not complete successfully.
+    debug_print("AIE queue: command submission failed (0x%x)\n", err);
+    suspended_ = true;
+    InvokeErrorCallback(err);
+    return;
   }
 
   atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);

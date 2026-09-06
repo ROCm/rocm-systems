@@ -44,6 +44,7 @@
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
 
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/exceptions.h"
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -67,7 +68,7 @@ class AieAqlQueue : public core::Queue,
   }
 
   AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
-              uint32_t node_id, uint64_t flags);
+              uint32_t node_id, core::HsaEventCallback callback, void* err_data, uint64_t flags);
   ~AieAqlQueue();
 
   hsa_status_t Inactivate() override;
@@ -98,6 +99,13 @@ class AieAqlQueue : public core::Queue,
   void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                   hsa_fence_scope_t releaseFence, hsa_signal_t* signal) override;
 
+  /// @brief Invoke the per-queue error callback if a non-default one is registered.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr && errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -118,6 +126,13 @@ class AieAqlQueue : public core::Queue,
   void* kmq_metadata_ = nullptr;
   /// @brief Indicates if queue is active.
   std::atomic<bool> active_ = false;
+  /// @brief Set when the queue is suspended after an error; no further packets are submitted.
+  /// Only accessed on the packet-submission path, so it does not need to be atomic.
+  bool suspended_ = false;
+  /// @brief Per-queue error callback registered at queue creation.
+  AMD::callback_t<core::HsaEventCallback> errors_callback_;
+  /// @brief User data passed to @ref errors_callback_.
+  void* errors_data_;
 };
 
 } // namespace AMD
