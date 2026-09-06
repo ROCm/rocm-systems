@@ -178,6 +178,22 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
+  // Ordinary dword loads can write through one raw pointer per destination
+  // register. Memory completion is VM bookkeeping, so it deliberately has no
+  // instruction-side register observation to preserve here.
+  if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
+    for (uint32_t i = 0; i < vgpr_count; ++i) {
+      auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
+      uint64_t lanes = d.lane_mask;
+      while (lanes) {
+        const uint32_t lane = std::countr_zero(lanes);
+        lanes &= lanes - 1;
+        std::memcpy(&destination[lane], &d.response_data[lane * stride + i * sizeof(uint32_t)],
+                    sizeof(uint32_t));
+      }
+    }
+    return MemoryAccessCompletion::Complete;
+  }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;

@@ -7922,34 +7922,31 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
+        data_regs = ne if esz == 4 else 1
+        L.append(
+            f'  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec);'
+        )
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz == 4:
+            L.append('  data.copy_dwords_lane_major(d->store_data.data(), exec);')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+        L.append('  const auto data0 = data.lanes(0);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
-            if esz == 4:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
-                )
-                L.append(
-                    f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);'
-                )
-            elif esz == 2:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
-                )
+            if esz == 2:
+                L.append(f'    uint32_t val{i} = data0[lane];')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
-                )
+                L.append(f'    uint32_t val{i} = data0[lane];')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(

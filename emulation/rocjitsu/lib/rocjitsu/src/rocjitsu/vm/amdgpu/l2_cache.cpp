@@ -236,11 +236,31 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
     std::lock_guard set_lock(set_mutex(ea));
 
-    ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
-
     simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag, vmid);
+    // A full-line miss has no old bytes to preserve, so allocate it without a
+    // read-for-ownership from backing memory.
+    if (line_offset == 0 && chunk == LINE_SIZE) {
+      if (!cache_.lookup(ea, &tag, vmid)) {
+        simdojo::CacheTag evicted;
+        uint8_t evicted_data[LINE_SIZE];
+        auto allocated = cache_.allocate_with_data(ea, vmid, &evicted, evicted_data);
+        if (evicted.valid && evicted.dirty) {
+          static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
+          const uint64_t evicted_addr =
+              (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
+              (static_cast<uint64_t>(CacheStore::set_index(ea)) << LINE_SIZE_BITS);
+          publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid);
+        }
+        std::memcpy(allocated.data, src + copied, LINE_SIZE);
+        tag = allocated.tag;
+      } else {
+        cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+      }
+    } else {
+      ensure_line(ea, vmid);
+      cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+      cache_.lookup(ea, &tag, vmid);
+    }
     assert(tag != nullptr && "ensure_line must guarantee hit");
 
     // Write through to backing store for all mtypes. In the simulator, GPU
