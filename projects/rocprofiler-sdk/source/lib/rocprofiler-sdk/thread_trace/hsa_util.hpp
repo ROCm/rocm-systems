@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -66,13 +67,11 @@ make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
 struct att_queue_t
 {
     hsa_queue_t* hsa_queue{nullptr};
-    /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
-    /// in single-buffer (synchronous) mode.
-    std::vector<void*>     cpu_buffers{};
-    rocprofiler_agent_id_t agent_id{};
-    size_t                 buffer_size{0};
-    hsa_agent_t            hsa_agent{};
-    hsa_agent_t            near_cpu{};
+    /// CPU staging buffers, one per slot requested at creation. Empty in
+    /// single-buffer (synchronous) mode.
+    std::vector<void*> cpu_buffers{};
+    hsa_agent_t        hsa_agent{};
+    hsa_agent_t        near_cpu{};
 
     /// Function pointer for submit — allows test injection (replaces virtual dispatch).
     void (*submit_fn)(const att_queue_t&            self,
@@ -80,10 +79,9 @@ struct att_queue_t
                       hsa_signal_t*                 completion){nullptr};
 };
 
-/// @param buffer_size Bytes per CPU staging buffer (0 disables staging).
-/// @param num_buffers Number of CPU staging buffers to allocate (0 if unused).
+/// @param buffer_sizes Bytes to allocate for each CPU staging slot. Empty disables staging.
 att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
+att_queue_create(const hsa::AgentCache& agent, const std::vector<uint64_t>& buffer_sizes);
 
 void
 att_queue_destroy(att_queue_t& q);
@@ -123,15 +121,6 @@ att_queue_submit_and_wait_last(const att_queue_t& q, VecType& vec)
     if(sig) signal_wait(*sig);
     return sig;
 }
-
-struct att_queue_deleter_t
-{
-    void operator()(att_queue_t* q) const;
-};
-using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
-
-att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler

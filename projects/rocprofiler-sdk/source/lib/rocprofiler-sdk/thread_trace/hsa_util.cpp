@@ -152,16 +152,14 @@ default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_s
 }  // namespace
 
 att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
+att_queue_create(const hsa::AgentCache& agent, const std::vector<uint64_t>& buffer_sizes)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
-    auto q        = att_queue_t{};
-    q.agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
-    q.buffer_size = buffer_size;
-    q.hsa_agent   = agent.get_hsa_agent();
-    q.near_cpu    = agent.near_cpu();
-    q.submit_fn   = default_submit;
+    auto q      = att_queue_t{};
+    q.hsa_agent = agent.get_hsa_agent();
+    q.near_cpu  = agent.near_cpu();
+    q.submit_fn = default_submit;
 
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
@@ -185,14 +183,15 @@ att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_bu
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if(buffer_size != 0 && num_buffers != 0)
+    if(!buffer_sizes.empty())
     {
-        q.cpu_buffers.resize(num_buffers, nullptr);
-        for(auto& memory : q.cpu_buffers)
+        q.cpu_buffers.resize(buffer_sizes.size(), nullptr);
+        for(size_t i = 0; i < buffer_sizes.size(); ++i)
         {
-            CHECK_HSA(
-                ext->hsa_amd_memory_pool_allocate_fn(agent.cpu_pool(), buffer_size, 0, &memory),
-                "failed to allocate contiguous memory");
+            auto& memory = q.cpu_buffers.at(i);
+            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
+                          agent.cpu_pool(), buffer_sizes.at(i), 0, &memory),
+                      "failed to allocate contiguous memory");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.near_cpu, nullptr, memory),
                       "failed to allow cpu access");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.hsa_agent, nullptr, memory),
@@ -239,23 +238,6 @@ att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, boo
 
     att_queue_submit(q, packet, sig.get());
     return sig;
-}
-
-void
-att_queue_deleter_t::operator()(att_queue_t* q) const
-{
-    if(q)
-    {
-        att_queue_destroy(*q);
-        delete q;
-    }
-}
-
-att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
-{
-    auto* q = new att_queue_t{att_queue_create(agent, buffer_size, num_buffers)};
-    return att_queue_ptr_t{q};
 }
 
 };  // namespace thread_trace

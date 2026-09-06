@@ -35,6 +35,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace rocprofiler
@@ -65,6 +67,11 @@ namespace aql
 class CounterPacketConstruct;
 class ThreadTraceAQLPacketFactory;
 }  // namespace aql
+
+namespace thread_trace
+{
+class AgentTraceResources;
+}
 
 namespace hsa
 {
@@ -189,12 +196,21 @@ struct TraceMemoryPool
     decltype(hsa_amd_memory_pool_free)*     free_fn;
     decltype(hsa_memory_copy)*              api_copy_fn;
 
-    aqlprofile_handle_t handle;
+    aqlprofile_handle_t                                handle;
+    std::shared_ptr<thread_trace::AgentTraceResources> resources = {};
+
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
+
+    void* allocate_output(size_t requested_size);
 
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
     static void         Free(void* ptr, void* data);
     static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
+
+private:
+    // Packet-local cursor: every context's AQLProfile allocation sequence restarts
+    // at slot zero, mapping slot i onto the same per-agent shared output allocation.
+    uint32_t output_buffer_index = 0;
 };
 
 class CodeobjMarkerAQLPacket : public AQLPacket

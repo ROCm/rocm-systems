@@ -33,6 +33,13 @@ namespace Single
 {
 rocprofiler_client_id_t* client_id = nullptr;
 
+size_t
+context_count()
+{
+    const char* value = std::getenv("ATT_NUM_CONTEXTS");
+    return value ? std::strtoul(value, nullptr, 10) : 1;
+}
+
 rocprofiler_thread_trace_control_flags_t
 dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_queue_id_t /* queue_id */,
@@ -87,17 +94,25 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x3});
 
-    for(auto id : agents)
+    auto configure_context = [&](rocprofiler_context_id_t context) {
+        for(auto id : agents)
+            ROCPROFILER_CALL(
+                rocprofiler_configure_dispatch_thread_trace_service(context,
+                                                                    id,
+                                                                    parameters.data(),
+                                                                    parameters.size(),
+                                                                    dispatch_callback,
+                                                                    Callbacks::shader_data_callback,
+                                                                    nullptr),
+                "thread trace service configure");
+    };
+    configure_context(client_ctx);
+
+    for(size_t i = 1; i < context_count(); ++i)
     {
-        ROCPROFILER_CALL(
-            rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
-                                                                id,
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                dispatch_callback,
-                                                                Callbacks::shader_data_callback,
-                                                                nullptr),
-            "thread trace service configure");
+        auto context = rocprofiler_context_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
+        configure_context(context);
     }
 
     int valid_ctx = 0;

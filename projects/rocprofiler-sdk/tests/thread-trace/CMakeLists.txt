@@ -74,6 +74,27 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})
 
+# Configure hundreds of contexts before HSA initialization, then run one trace to validate
+# data collection. Per-context buffers and queues would exhaust memory or the HSA queue
+# limit while the shared implementation creates one resource set per agent.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-many-contexts-test
+    TARGET thread-trace-test-app
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400"
+    DISABLED ${IS_DISABLED})
+
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-many-contexts-dispatch-test
+    TARGET thread-trace-test-app
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-single-tool>"
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400"
+    DISABLED ${IS_DISABLED})
+
 # Test occupancy mode
 rocprofiler_add_integration_execute_test(
     thread-trace-api-extra-args
