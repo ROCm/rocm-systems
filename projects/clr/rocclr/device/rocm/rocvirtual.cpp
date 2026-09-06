@@ -68,8 +68,9 @@ namespace amd::roc {
 
 static constexpr uint16_t kInvalidAql = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
-// Passed to WaitingSignal() by the two call sites whose result goes straight into an AQL
-// packet executed by this queue's own command processor.  Every other caller hands the same
+// Passed to WaitingSignal() by the three call sites whose result goes straight into an AQL
+// packet executed by this queue's own command processor - a barrier's dep_signal[], or the
+// signal a barrier-value packet watches.  Every other caller hands the same
 // list to ROCr as dep_signals[] of an async copy, an SVM prefetch or an SVM discard, where
 // the runtime reads the value word on the host - the one role in which a device resident
 // word is a pessimisation.  Opting in per call site rather than keying on HwQueueEngine
@@ -2270,7 +2271,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   // Dependent signal and external signal cant be true at the same time
   assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
-    auto wait_signals = Barriers().WaitingSignal();
+    auto wait_signals = Barriers().WaitingSignal(HwQueueEngine::Compute, kAqlBarrierDep);
     if (wait_signals.size() > 0) {
       barrier_value_packet_.signal = wait_signals[0];
       barrier_value_packet_.value = kInitSignalValueOne;
