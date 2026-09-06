@@ -10325,6 +10325,124 @@ class CodeGenerator:
                             'SReg_32_XEXEC destination";'
                         )
 
+                    # LLVM's public gfx1251 profiles define the packed U64
+                    # operations without op_sel.  The profile and corresponding
+                    # MC vectors are permanently linked here:
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L147-L162
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L257-L403
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
+                    # These references establish the operand profile and
+                    # encoding, not execution ordering for combined modifiers.
+                    # The fixed whole-element VOP3P layout therefore lets us
+                    # fail closed instead of accepting field combinations for
+                    # which no operation is defined.  Also reject register
+                    # tuples with alignment or spans outside LLVM's register
+                    # classes; the generic Operand validator only validates the
+                    # tuple's first selector and its width-independent source
+                    # selector set.
+                    if inst_sem is not None and inst_sem.semantic_class in {
+                        'pk_binop_u64',
+                        'pk_lshl_add_u64',
+                    }:
+                        raw_inst = (
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->opsel != 0u || '
+                            f'{raw_inst}->opsel_hi != 3u || '
+                            f'{raw_inst}->opsel_hi_2 != 1u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'packed U64 element layout";'
+                        )
+                        if inst_sem.semantic_class == 'pk_binop_u64':
+                            factory_validation_parts.append(
+                                f'if ({raw_inst}->src2 != 128u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                'unused src2 encoding";'
+                            )
+                        else:
+                            factory_validation_parts.append(
+                                f'if ({raw_inst}->clamp != 0u || '
+                                f'{raw_inst}->neg != 0u || '
+                                f'{raw_inst}->neg_hi != 0u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                'source modifiers or clamp";'
+                            )
+
+                        for opnd in inst.operands:
+                            if (
+                                opnd.fieldless
+                                or opnd.name not in enc_field_names
+                                or opnd.size <= 32
+                            ):
+                                continue
+                            register_count = (opnd.size + 31) // 32
+                            raw_value = f'{raw_inst}->{opnd.name}'
+                            if opnd.operand_type == 'OPR_VGPR':
+                                max_selector = 256 - register_count
+                                invalid_span = f'{raw_value} > {max_selector}u'
+                                invalid_alignment = f'({raw_value} & 1u) != 0u'
+                            elif opnd.operand_type == 'OPR_SRC':
+                                max_sgpr = 106 - register_count
+                                max_vgpr = 512 - register_count
+                                invalid_span = (
+                                    f'({raw_value} <= 105u && {raw_value} > {max_sgpr}u) || '
+                                    f'({raw_value} >= 256u && {raw_value} > {max_vgpr}u)'
+                                )
+                                invalid_alignment = (
+                                    f'({raw_value} <= 105u && '
+                                    f'({raw_value} % {register_count}u) != 0u) || '
+                                    f'({raw_value} >= 108u && {raw_value} <= 123u && '
+                                    f'(({raw_value} - 108u) % {register_count}u) != 0u) || '
+                                    f'({raw_value} >= 256u && ({raw_value} & 1u) != 0u)'
+                                )
+                            else:
+                                continue
+                            factory_validation_parts.append(
+                                f'if ({invalid_span}) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
+                                f'{opnd.name} register tuple that exceeds the selector range";'
+                            )
+                            factory_validation_parts.append(
+                                f'if ({invalid_alignment}) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                f'{opnd.name} register tuple alignment";'
+                            )
+                            if opnd.operand_type == 'OPR_SRC':
+                                if opnd.size == 128:
+                                    valid_width_specific = (
+                                        f'({raw_value} <= 100u && ({raw_value} % 4u) == 0u) || '
+                                        f'({raw_value} >= 108u && {raw_value} <= 120u && '
+                                        f'(({raw_value} - 108u) % 4u) == 0u) || '
+                                        f'{raw_value} == 124u || '
+                                        f'({raw_value} >= 128u && {raw_value} <= 208u) || '
+                                        f'({raw_value} >= 240u && {raw_value} <= 248u) || '
+                                        f'{raw_value} == 255u || '
+                                        f'({raw_value} >= 256u && {raw_value} <= 508u && '
+                                        f'({raw_value} & 1u) == 0u)'
+                                    )
+                                else:
+                                    valid_width_specific = (
+                                        f'({raw_value} <= 104u && ({raw_value} & 1u) == 0u) || '
+                                        f'{raw_value} == 106u || '
+                                        f'({raw_value} >= 108u && {raw_value} <= 122u && '
+                                        f'(({raw_value} - 108u) & 1u) == 0u) || '
+                                        f'{raw_value} == 124u || {raw_value} == 126u || '
+                                        f'({raw_value} >= 128u && {raw_value} <= 208u) || '
+                                        f'{raw_value} == 230u || '
+                                        f'({raw_value} >= 235u && {raw_value} <= 236u) || '
+                                        f'({raw_value} >= 240u && {raw_value} <= 248u) || '
+                                        f'{raw_value} == 253u || {raw_value} == 255u || '
+                                        f'({raw_value} >= 256u && {raw_value} <= 510u && '
+                                        f'({raw_value} & 1u) == 0u)'
+                                    )
+                                factory_validation_parts.append(
+                                    f'if (!({valid_width_specific})) '
+                                    f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                    f'{opnd.name} packed U64 source selector";'
+                                )
+
                     # Flat segment-aware operands: adjust addr width and add
                     # saddr for SCRATCH (seg==1) and GLOBAL (seg==2) segments.
                     if rule.use_flat_mnemonic:
@@ -12259,6 +12377,11 @@ class CodeGenerator:
                         ]
                     )
                     if any(
+                        'util::int128_t' in str(impl)
+                        for impl in class_func_impls.model + class_func_impls.execution
+                    ):
+                        cpp_includes.append(('util/big_int.h', False))
+                    if any(
                         'std::optional' in str(impl)
                         for impl in class_func_impls.model + class_func_impls.execution
                     ):
@@ -13702,7 +13825,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
-
         switch_cases = []
         ref_switch_cases = []
         opnd_types_with_selectors = set()

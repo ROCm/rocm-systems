@@ -191,7 +191,9 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 247)
     return 0xC010000000000000ULL; // -4.0
   if (ev == 248)
-    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)
+    // LLVM defines the 64-bit inline value at this permanent revision:
+    // https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L1856-L1876
+    return 0x3FC45F306DC9C882ULL; // 1/(2*pi)
   if (ev == 235)
     return wf.shared_aperture_base(); // SRC_SHARED_BASE
   if (ev == 236)
@@ -200,6 +202,8 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     return wf.private_aperture_base(); // SRC_PRIVATE_BASE
   if (ev == 238)
     return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
+  if (ev == 253)
+    return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
 }
 
