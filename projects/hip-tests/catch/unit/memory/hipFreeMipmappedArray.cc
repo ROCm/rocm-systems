@@ -83,6 +83,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayMultiTArray, char, int) {
   std::vector<hipMipmappedArray_t> ptrs(numAllocs);
   hipExtent extent{};
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
+  hipDeviceProp_t props;
 
   const unsigned int numLevels = GENERATE(1, 5, 7);
 
@@ -96,11 +97,23 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayMultiTArray, char, int) {
   extent.height = GENERATE(64, 256, 1024);
   extent.depth = GENERATE(0, 64, 256, 1024);
 
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+
+  if (extent.width * extent.height * extent.depth * numLevels * sizeof(TestType) * numAllocs >
+      props.totalGlobalMem / 2) {
+    SUCCEED("Device might not have enough global memory to allocate mipmapped arrays using this "
+            "extent; test will not be run. Total global memory: "
+            << props.totalGlobalMem);
+    return;
+  }
+
   int i = 0;
   for (; i < ptrs.size(); i++) {
-    if (hipErrorOutOfMemory == hipMallocMipmappedArray(&ptrs[i], &desc, extent, numLevels, flags)) {
+    auto err = hipMallocMipmappedArray(&ptrs[i], &desc, extent, numLevels, flags);
+    if (err == hipErrorOutOfMemory) {
       break;
     }
+    HIP_CHECK(err);
   }
 
   for (int j = 0; j < i; j++) {
