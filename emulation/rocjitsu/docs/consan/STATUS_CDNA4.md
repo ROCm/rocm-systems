@@ -2,6 +2,8 @@
 
 Status snapshot: 2026-08-26. All rows execute on the physical gfx950. This balanced clean-tree refresh used source `e355d1479e` and artifacts under `/home/ossci/xx/consan-validation/production-design-revalidation-20260826-*`; the full physical device-test suite passed 587/587. Retained green cells keep their previously accepted paired-overhead and reviewed-fault evidence unless stated otherwise.
 
+Post-snapshot gfx950 emulation revalidation is identified explicitly in the affected cells. Source `1274082957a` on the gfx1201 host completed the `pytorch-torch-mode` SuperCollider clean contract with 24,179/24,179 eligible non-atomic LDS accesses; artifacts are under `/tmp/consan-validation-gfx950-sc-subword-complete-20260905-f`.
+
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
 | Set | Priority | Workload / validation ID | SuperCollider | Record/Replay | Sampled | Inline Shadow |
@@ -25,7 +27,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟨 exact; 80/80 accesses; overhead/fault missing | 🟩 exact; 80/80 accesses and 5/5 barriers | 🟩 exact; 80/80 accesses, 5/5 barriers, 2/2 atomics | 🟨 static exact at 80/80, 5/5, and 2/2, but dynamic analysis is incomplete |
 | Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟨 exact; 49,435/49,435 accesses; overhead/fault missing | 🟩 exact; 49,435/49,435 accesses and 4,997/4,997 barriers | 🟨 exact at standard cadence; 49,435/49,435 accesses and 4,995/4,995 barriers; overhead/fault missing | 🟨 exact and complete; overhead/fault missing |
 | Tensile | P0 | gfx950 Stream-K SGEMM (`tensile-gfx950-lds-positive`) | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟧 exact/dynamic; only 199/23,298 accesses supported | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟨 exact/complete at 60 s; 30-s bound, overhead, and fault missing |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 gfx950 emulation exact/complete; 24,179/24,179 eligible non-atomic LDS accesses | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟨 exact/complete at 60 s; 30-s bound, overhead, and fault missing |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟧 exact/dynamic; only 3,056/230,438 accesses supported | 🟨 exact; 239,557/251,145 aggregate sites supported | 🟨 exact; at least 239,557/251,145 aggregate sites supported | 🟧 exact; only 133,843/251,145 aggregate sites supported; 171 s |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟧 exact; 45,340/56,884 accesses and over 30 s | 🟨 timeout-only at 60 s; retained prior exact 56,884/56,884 accesses and 6,032/6,032 barriers | 🟨 exact/complete; overhead and fault missing | 🟨 exact/complete at 60 s; 30-s bound, overhead, and fault missing |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟧 exact/dynamic; only 102/179 accesses supported | 🟩 FP32/FP64 exact; 179/179 accesses and 84/84 barriers | 🟩 FP32/FP64 exact; 179/179 accesses and 84/84 barriers | 🟨 exact/complete; overhead and fault missing |
