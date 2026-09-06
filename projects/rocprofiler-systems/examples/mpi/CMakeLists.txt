@@ -73,9 +73,32 @@ target_link_libraries(
 add_executable(mpi-example mpi.cpp)
 target_link_libraries(mpi-example PRIVATE mpi-cxx-interface-library)
 
+find_library(
+    ROCTX_LIBRARY
+    NAMES rocprofiler-sdk-roctx
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib
+)
+find_path(
+    ROCTX_INCLUDE_DIR
+    NAMES rocprofiler-sdk-roctx/roctx.h
+    PATHS ${ROCM_PATH}/include /opt/rocm/include
+)
+
+if(ROCTX_LIBRARY AND ROCTX_INCLUDE_DIR)
+    add_executable(mpi-roctx-regions roctx-regions.cpp)
+    target_include_directories(mpi-roctx-regions PRIVATE ${ROCTX_INCLUDE_DIR})
+    target_link_libraries(
+        mpi-roctx-regions
+        PRIVATE mpi-cxx-interface-library ${ROCTX_LIBRARY}
+    )
+else()
+    message(STATUS "roctx could not be found. Cannot build the mpi-roctx-regions target")
+endif()
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     set(MPI_EXAMPLES
         mpi-example
+        mpi-roctx-regions
         mpi-allgather
         mpi-bcast
         mpi-all2all
