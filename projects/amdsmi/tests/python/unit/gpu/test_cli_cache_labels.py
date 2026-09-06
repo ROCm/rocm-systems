@@ -25,9 +25,9 @@ import sys
 import types
 import unittest
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+from common.common import REPO_ROOT, ModuleIsolationMixin
+
+STATIC_PATH = os.path.join(REPO_ROOT, "amdsmi_cli", "subcommands", "static.py") if REPO_ROOT else ""
 
 # gfx950 (MI350) cache layout captured live: four L1 variants plus L2 and L3.
 # Mirrors the per-entry dict shape returned by ``amdsmi_get_gpu_cache_info``.
@@ -207,11 +207,21 @@ def _build_args():
     )
 
 
-class TestCliCacheLabels(unittest.TestCase):
+class TestCliCacheLabels(ModuleIsolationMixin, unittest.TestCase):
+    # Everything ``static.py`` imports at load time.
+    ISOLATED_MODULES = (
+        "amdsmi",
+        "amdsmi.amdsmi_interface",
+        "amdsmi.amdsmi_exception",
+        "amdsmi_helpers",
+        "amdsmi_cli_exceptions",
+    )
+
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest("amd-smi CLI static.py not found in the source tree")
+        super().setUpClass()
         cls.interface = _install_fake_modules()
         cls.static_module = _load_static_module()
 

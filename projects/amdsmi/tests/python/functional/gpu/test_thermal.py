@@ -127,25 +127,3 @@ class TestGpuThermal(unittest.TestCase):
         return
 
     # integration
-
-    def test_get_gpu_fan_rpms(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_fan_rpms=amdsmi.amdsmi_get_gpu_fan_rpms, index=0
-        )
-        return
-
-    def test_get_temp_metric(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_temp_metric as it fails (Invalid param)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_temp_metric=amdsmi.amdsmi_get_temp_metric,
-            temperature_type=common.TEMPERATURE_TYPES,
-            temperature_metric=common.TEMPERATURE_METRICS,
-        )
-        return

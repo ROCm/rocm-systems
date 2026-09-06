@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added per-API Python test coverage under `tests/python/integration/`**.
+  - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
+  - A coverage guard (`tests/python/integration/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section (`--vbios` remains available as a legacy alias).
 
@@ -61,6 +65,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for a sensor the device does not expose**.  
+  - `Monitor::getTempSensorIndex()` resolved the sensor with `std::map::at`, which threw `std::out_of_range` before the caller could test the result for `RSMI_TEMP_TYPE_INVALID`. The intended `AMDSMI_STATUS_NOT_SUPPORTED` path was therefore unreachable, and the throw surfaced as `Exception caught: map::at` on stderr.
+  - `getVoltSensorIndex()` carried the same unguarded lookup and now returns its invalid sentinel instead of throwing.
+  - Both getters now reject an unrecognized `metric` with `AMDSMI_STATUS_INVAL` up front. The support check happened to catch it first, but the invalid monitor type it left behind has no `Monitor::MakeMonitorPath()` entry, so the rejection no longer depends on that ordering.
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.

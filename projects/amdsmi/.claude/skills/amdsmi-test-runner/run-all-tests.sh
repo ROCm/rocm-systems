@@ -50,8 +50,9 @@ fi
 # Python suites — run the file runners directly (each sys.exit(0/1)).
 if [[ "$RUN_PY" == 1 ]]; then
   for pair in "Python unit:unit_tests.py" \
-              "Python integration:integration_test.py" \
-              "Python CLI:cli_unit_test.py"; do
+              "Python integration:integration_tests.py" \
+              "Python functional:functional_tests.py" \
+              "Python CLI:cli_tests.py"; do
     name="${pair%%:*}"; file="${pair##*:}"
     if [[ -f "$ROOT/tests/python/$file" ]]; then
       echo "=== $name ===" >&2

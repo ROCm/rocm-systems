@@ -29,7 +29,7 @@ import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import ModuleIsolationMixin, amdsmi_path
 
 # The amd-smi CLI ships alongside the amdsmi package: ``common`` resolves
 # ``amdsmi_path`` to ``<rocm>/share/amd_smi`` and the CLI installs to the sibling
@@ -115,6 +115,10 @@ def _install_fake_amdsmi():
     sys.modules["amdsmi.amdsmi_interface"] = interface
     sys.modules["amdsmi.amdsmi_exception"] = exception
     return interface
+
+
+# Everything ``metric.py`` imports at load time.
+_STUBBED_MODULES = ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception")
 
 
 def _load_metric_module():
@@ -263,11 +267,14 @@ def _build_virtual_os_args(**overrides):
     return argparse.Namespace(**defaults)
 
 
-class TestCliMetricPartitionClock(unittest.TestCase):
+class TestCliMetricPartitionClock(ModuleIsolationMixin, unittest.TestCase):
+    ISOLATED_MODULES = _STUBBED_MODULES
+
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        super().setUpClass()
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
 
@@ -450,14 +457,17 @@ class TestCliMetricPartitionClock(unittest.TestCase):
         self.assertIn("xcp_0", captured["temperature"]["xcd"])
 
 
-class TestCliMetricPartitionVirtualOS(unittest.TestCase):
+class TestCliMetricPartitionVirtualOS(ModuleIsolationMixin, unittest.TestCase):
     """``amd-smi metric`` must not crash on a virtual OS where ``--partition``
     is never registered, so ``args`` has no ``partition`` attribute."""
+
+    ISOLATED_MODULES = _STUBBED_MODULES
 
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        super().setUpClass()
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
         # fclk is unavailable so the non-partition clock exception handler fires.
