@@ -1140,7 +1140,7 @@ WORKLOADS = (
         # The reviewed family fault lives in the prefill specialization. This
         # row preserves the independent decode oracle and coverage denominator.
         fault_families=(),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
         run_timeout_seconds=180,
     ),
     Workload(
@@ -1160,7 +1160,7 @@ WORKLOADS = (
         # As above, this is an exact supporting mode of the one TP2 family
         # cell, not a second independently fault-qualified family.
         fault_families=(),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
         run_timeout_seconds=180,
     ),
     Workload(
@@ -1538,6 +1538,10 @@ def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     ):
         return ("barrier-move",)
     families = workload.fault_families
+    if not families:
+        # Supporting rows may deliberately carry only an exact oracle and
+        # coverage denominator while the family fault remains on a sibling.
+        return ()
     if target in NATIVE_CDNA_TARGETS:
         # CDNA compiler atomics encode ordering through surrounding cache and
         # wait operations, but have no RDNA4/CDNA5-style instruction scope field.
@@ -1841,9 +1845,23 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # Complete SuperCollider coverage of all three TP2 oracles takes
         # roughly 253 seconds through RocJitsu. The former generic 30-second
         # bound expired during normal execution before the workload or hook
-        # could publish a verdict.
+        # could publish a verdict. Instrumented modes retain large report
+        # buffers across the three model lifecycles, so give each unchanged
+        # exact oracle an independent bounded process, as on gfx1250.
         "tp2-family": {
+            "sharktank_mode": "prefill",
+            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
+        },
+        "tp2-decode": {
+            "record_replay_runtime_sample_stride": 1,
+            "sharktank_skip_warmup": True,
+            "run_timeout_seconds": 600,
+        },
+        "tp2-combined": {
+            "record_replay_runtime_sample_stride": 256,
+            "sharktank_skip_warmup": True,
+            "run_timeout_seconds": 600,
         },
         "clip-bf16": {
             "record_replay_runtime_sample_stride": 256,

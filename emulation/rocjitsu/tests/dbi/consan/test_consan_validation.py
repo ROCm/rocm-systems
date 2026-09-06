@@ -2597,9 +2597,11 @@ class ConSanValidationTest(unittest.TestCase):
             workload["id"]: workload
             for workload in validation._manifest("gfx950")["workloads"]
         }
-        self.assertEqual(gfx950_workloads["tp2-family"]["sharktank_mode"], "all")
-        self.assertNotIn("tp2-decode", gfx950_workloads)
-        self.assertNotIn("tp2-combined", gfx950_workloads)
+        self.assertEqual(gfx950_workloads["tp2-family"]["sharktank_mode"], "prefill")
+        self.assertEqual(gfx950_workloads["tp2-decode"]["sharktank_mode"], "decode")
+        self.assertEqual(gfx950_workloads["tp2-combined"]["sharktank_mode"], "combined")
+        self.assertTrue(gfx950_workloads["tp2-decode"]["sharktank_skip_warmup"])
+        self.assertTrue(gfx950_workloads["tp2-combined"]["sharktank_skip_warmup"])
         self.assertEqual(
             workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1260
         )
@@ -2637,6 +2639,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-decode-combined", 360),
                 ("gfx1250", "qwen-prefill", 360),
                 ("gfx950", "tp2-family", 300),
+                ("gfx950", "tp2-decode", 600),
+                ("gfx950", "tp2-combined", 600),
                 ("gfx1250", "tp2-family", 180),
                 ("gfx1250", "tp2-decode", 600),
                 ("gfx1250", "tp2-combined", 360),
@@ -3287,9 +3291,11 @@ class ConSanValidationTest(unittest.TestCase):
             ("tp1-prefill", "gfx950", "256"),
             ("tp1-prefill", "gfx1201", None),
             ("tp1-prefill", "gfx1250", "256"),
-            ("tp2-family", "gfx950", None),
+            ("tp2-family", "gfx950", "256"),
             ("tp2-family", "gfx1250", "256"),
+            ("tp2-decode", "gfx950", "1"),
             ("tp2-decode", "gfx1250", "1"),
+            ("tp2-combined", "gfx950", "256"),
             ("tp2-combined", "gfx1250", "256"),
             ("tp1-decode-combined", "gfx942", None),
             ("tp1-decode-combined", "gfx950", "256"),
