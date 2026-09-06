@@ -294,3 +294,36 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;openmp-host"
     FIXTURES_REQUIRED rocprofv3-test-ompt-sys-trace
     DISABLED "${IS_HOST_DISABLED}")
+
+# Regression test for the OMPT-init deadlock, exercised through rocprofv3. rocprofv3 loads
+# the tool library (which provides the ompt_start_tool symbol), so libomp engages OMPT and
+# rocprofiler-sdk performs client discovery. The openmp-init-deadlock workload links a
+# library whose DT_INIT constructor calls into libomp, reproducing the conditions under
+# which discovery previously self-deadlocked. Reaching main means discovery completed
+# without re-entering libomp's init lock.
+#
+# The assertion is twofold: TIMEOUT guards against the deadlock (a hang fails the test),
+# and PASS_REGULAR_EXPRESSION ensures the workload actually reached main (so an unrelated
+# early exit cannot pass silently). This is a host-only OpenMP workload, so it is gated on
+# OMP_TARGET_COMPILER and the workload target rather than on target-offload support.
+set(IS_INIT_DEADLOCK_DISABLED OFF)
+if(NOT TARGET openmp-init-deadlock
+   OR NOT OMP_TARGET_COMPILER
+   OR (ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES))
+    set(IS_INIT_DEADLOCK_DISABLED ON)
+endif()
+
+set(ompt-init-deadlock-output-dir ${CMAKE_CURRENT_BINARY_DIR}/openmp-init-deadlock-trace)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-ompt-init-deadlock
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
+        ${ompt-init-deadlock-output-dir} -o out --output-format rocpd --log-level env --
+        $<IF:$<TARGET_EXISTS:openmp-init-deadlock>,$<TARGET_FILE:openmp-init-deadlock>,openmp-init-deadlock>
+    DEPENDS openmp-init-deadlock
+    TIMEOUT 20
+    LABELS "integration-tests;openmp-host"
+    ENVIRONMENT "${ompt-host-env}"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "reached main: no OMPT-init deadlock"
+    DISABLED "${IS_INIT_DEADLOCK_DISABLED}")

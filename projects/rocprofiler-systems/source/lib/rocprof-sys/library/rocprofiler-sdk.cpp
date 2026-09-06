@@ -6,6 +6,7 @@
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
+#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
@@ -55,6 +56,11 @@
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>
+#endif
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#    include <rocprofiler-sdk/ompt.h>
+#    include <timemory/components/ompt/backends.hpp>
 #endif
 
 #include <rocprofiler-sdk/fwd.h>
@@ -2918,7 +2924,19 @@ reset_sdk_session_guards()
 
 void
 setup()
-{}
+{
+    // rocprofiler-register initializes the SDK when HSA or HIP loads; a host-only OpenMP
+    // process loads neither, and OMPT discovery is honored only when the SDK is already
+    // initialized. Bring it up here instead of waiting for that registration.
+    int initialized = 0;
+    if(rocprofiler_is_initialized(&initialized) == ROCPROFILER_STATUS_SUCCESS &&
+       initialized != 0)
+    {
+        return;
+    }
+
+    ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
+}
 
 void
 shutdown()
@@ -3171,4 +3189,19 @@ extern "C"
         return &cfg;
     }
 #endif  // ROCPROFILER_VERSION >= 10200
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+    ompt_start_tool_result_t* ompt_start_tool(
+        unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
+
+    // rocprofiler-sdk does not export ompt_start_tool; a tool provides its own and
+    // forwards. The forward is honored only once the SDK is initialized. Read and load
+    // nothing here: the OpenMP runtime holds its init lock across the call and offloading
+    // binaries make it from a static initializer, so re-entry deadlocks.
+    ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
+                                              const char*  runtime_version)
+    {
+        return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    }
+#endif
 }

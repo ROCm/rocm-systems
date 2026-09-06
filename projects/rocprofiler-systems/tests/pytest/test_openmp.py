@@ -96,6 +96,12 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+@pytest.fixture
+def openmp_cg_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for OpenMP CG tests."""
+    return [validation_rules_dir / "openmp-cg" / "sdk-metrics-rules.json"]
+
+
 # ============================================================================
 # Test Class: OpenMP CG Tests
 # ============================================================================
@@ -119,8 +125,14 @@ class TestOpenMPCG(RocprofsysTest):
     ]
 
     @pytest.mark.timeout(180)
-    @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
-    def test(self, mode, ompt_base_env):
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("sampling", marks=pytest.mark.rocpd("ompt_base_env")),
+            "binary_rewrite",
+        ],
+    )
+    def test(self, mode, ompt_base_env, openmp_cg_rules):
         env = ompt_base_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
@@ -132,6 +144,9 @@ class TestOpenMPCG(RocprofsysTest):
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
+
+        if mode == "sampling":
+            self.assert_rocpd(result, rules_files=openmp_cg_rules)
 
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
