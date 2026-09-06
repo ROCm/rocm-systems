@@ -1847,14 +1847,16 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # bound expired during normal execution before the workload or hook
         # could publish a verdict. Instrumented modes retain large report
         # buffers across the three model lifecycles, so give each unchanged
-        # exact oracle an independent bounded process, as on gfx1250. Even a
-        # measured-only Inline Shadow prefill exceeds 300 seconds in emulation,
-        # so each split process retains a bounded 600-second margin.
+        # exact oracle an independent bounded process, as on gfx1250. The
+        # measured-only Inline Shadow prefill takes roughly 1,091 seconds in
+        # emulation, so retain a bounded 1,800-second margin for that row. The
+        # independently resolved decode and combined rows retain their current
+        # bounds until their own measurements establish otherwise.
         "tp2-family": {
             "sharktank_mode": "prefill",
             "record_replay_runtime_sample_stride": 256,
             "sharktank_skip_warmup": True,
-            "run_timeout_seconds": 600,
+            "run_timeout_seconds": 1800,
         },
         "tp2-decode": {
             "record_replay_runtime_sample_stride": 1,
