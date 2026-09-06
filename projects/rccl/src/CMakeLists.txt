@@ -1057,10 +1057,14 @@ if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
+if (ROCM_VERSION VERSION_GREATER_EQUAL "60200" AND ENABLE_COMPRESS)
+  if(NOT ENABLE_DEVICE_LINKER)
+    target_compile_options(rccl PRIVATE --offload-compress)  # Compress GPU code at compile time.
+  endif()
   target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+elseif(ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+  message(STATUS "--offload-compress disabled - ENABLE_COMPRESS=OFF")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
 endif()

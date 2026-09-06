@@ -60,9 +60,11 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 # Dropped here: flags selecting the compilation model (each command sets its
 # own -x hip / --offload-arch, and --offload-host-only would suppress the very
 # device code these commands exist to produce), -parallel-jobs (would
-# oversubscribe an already parallel build), --offload-compress (packaging, see
-# ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
-# quietly by design, and some need -w).
+# oversubscribe an already parallel build), and diagnostics (generated sources
+# are compiled quietly by design, and some need -w).  --offload-compress is
+# also filtered out of the rccl target copy below and re-appended when
+# ENABLE_COMPRESS is on, so every command using ${DL_INHERITED_FLAGS} picks it
+# up consistently.
 #
 # Also dropped are options that are only meaningful to something other than the
 # amdclang++ invocations below: SHELL: is an escaping prefix CMake expands only
@@ -82,6 +84,9 @@ if(_rccl_copts)
     endif()
     list(APPEND DL_INHERITED_FLAGS "${_opt}")
   endforeach()
+endif()
+if(ENABLE_COMPRESS AND ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+  list(APPEND DL_INHERITED_FLAGS "--offload-compress")
 endif()
 message(STATUS "Device Linker: inherited compile options: ${DL_INHERITED_FLAGS}")
 
@@ -461,11 +466,6 @@ add_custom_command(
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 
-set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
-endif()
-
 # Gather include flags for host compile (same paths as device)
 set(_host_inc_flags "")
 if(_dev_includes)
@@ -494,7 +494,6 @@ add_custom_command(
     ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_HOST_COMPRESS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
   DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
@@ -770,6 +769,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -790,6 +790,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -860,6 +861,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -880,6 +882,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -920,6 +923,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -940,6 +944,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -960,6 +965,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -980,6 +986,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_INHERITED_FLAGS}
@@ -1019,6 +1026,7 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
       -std=c++17
       -fPIC
       ${DL_INHERITED_FLAGS}
