@@ -22,7 +22,8 @@ if(UNIX)
   set(TEST_SRC
       ${TEST_SRC}
       hipMemExportToShareableHandle.cc
-      hipMemImportFromShareableHandle.cc)
+      hipMemImportFromShareableHandle.cc
+      hipMemSetAccessImportedHandle.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")

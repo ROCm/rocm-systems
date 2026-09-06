@@ -1110,6 +1110,11 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flag;
     core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
                              // memory/imported handles
+
+    // Imported handles: the GPU that exported the dmabuf, the only DRM context that can CPU map
+    // it. Filled lazily by ImportedHandleCpuMmapAgent(); the flag marks "already looked up".
+    core::Agent* cpu_mmap_agent = nullptr;
+    bool cpu_mmap_agent_resolved = false;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1118,6 +1123,10 @@ class Runtime {
 
   MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
   void ReleaseMemoryHandle(MemoryHandle* handle);
+
+  /// @brief GPU that exported @p memHandle's BO, to use as the DRM context of its CPU mapping.
+  /// Call with memory_lock_ held. Returns nullptr if unknown, i.e. no CPU mapping is possible.
+  Agent* ImportedHandleCpuMmapAgent(MemoryHandle* memHandle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
@@ -1136,6 +1145,11 @@ class Runtime {
     DriverMemoryHandle driver_handle;
     // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
     bool owns_driver_handle = true;
+    // CPU targetAgent over an imported handle: MemoryHandle::cpu_mmap_agent, whose DRM context
+    // holds driver_handle's BO and whose fd the mmap uses. nullptr in every other case.
+    Agent* cpu_mmap_drm_agent = nullptr;
+    // Whether EnableAccess established the CPU mmap the destructor has to undo.
+    bool cpu_mapped = false;
   };
 
   struct MappedHandle {

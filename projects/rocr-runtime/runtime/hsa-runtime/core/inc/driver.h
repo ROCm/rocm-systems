@@ -79,7 +79,12 @@ struct DriverMemoryHandle {
   /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
   int dmabuf_fd{-1};
+  /// DRM "fake" mmap offset for this BO, usable only on the DRM fd of the context that
+  /// produced it, and only when @ref mmap_offset_valid is set.
   uint64_t mmap_offset{0};
+  /// Whether a driver filled @ref mmap_offset. 0 is a legal DRM offset, so it cannot double as
+  /// a "not set" sentinel; mmap()ing offset 0 on a real DRM fd can map an unrelated BO.
+  bool mmap_offset_valid{false};
   size_t size{0};
   hsa_fabric_handle_t fabric_handle{};
 
