@@ -398,6 +398,13 @@ resolve_schema_config(const nlohmann::json& config)
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
             resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
+            if(hw.contains("spm"))
+            {
+                const auto& spm = hw["spm"];
+                resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
+                resolve_value(result, spm, "sample_interval",
+                              env_vars::ROCM_SPM_SAMPLE_INTERVAL);
+            }
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
@@ -599,6 +606,23 @@ safe_stoi(const std::string& s)
     return value;
 }
 
+std::optional<std::uint64_t>
+safe_stou64(const std::string& value)
+{
+    if(value.empty())
+    {
+        return std::nullopt;
+    }
+    std::uint64_t parsed_value = 0;
+    const auto    result =
+        std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if(result.ec != std::errc{} || result.ptr != value.data() + value.size())
+    {
+        return std::nullopt;
+    }
+    return parsed_value;
+}
+
 std::optional<double>
 safe_stod(const std::string& s)
 {
@@ -631,6 +655,19 @@ set_json_int(nlohmann::json& target, const std::string& value)
         target = *n;
     else
         target = value;
+}
+
+void
+set_json_uint64(nlohmann::json& target, const std::string& value)
+{
+    if(auto number = safe_stou64(value))
+    {
+        target = *number;
+    }
+    else
+    {
+        target = value;
+    }
 }
 
 void
@@ -859,6 +896,16 @@ export_hardware_counters(nlohmann::json&                           config,
     {
         hw["enabled"]                    = true;
         hw["gpu_perf_counters"]["value"] = *v;
+    }
+    if(auto events = lookup(env_map, env_vars::ROCM_SPM_EVENTS))
+    {
+        hw["enabled"]                = true;
+        hw["spm"]["events"]["value"] = *events;
+    }
+    if(auto interval = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL))
+    {
+        hw["enabled"] = true;
+        set_json_uint64(hw["spm"]["sample_interval"]["value"], *interval);
     }
     export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
                    "hardware_counters", "papi_multiplexing");

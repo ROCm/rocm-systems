@@ -267,6 +267,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "spm_available",
     ]
 
     # Informational markers, only used for test labeling
@@ -329,6 +330,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip",
         "scratch_memory",
         "rocm",
+        "spm",
         "kfd",
         "unified_memory",
         "validation_usm",
@@ -468,6 +470,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             )
         if "gpu" in item.keywords:
             _msg = gpu_unavailable_reason()
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "spm_available" in item.keywords:
+            _msg = spm_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "ucx" in item.keywords and not rocprof_config.capabilities.ucx_availability:
@@ -767,6 +773,13 @@ def gpu_unavailable_reason() -> Optional[str]:
     if gpu_info is not None and gpu_info.available:
         return None
     return "No valid GPU available"
+
+
+def spm_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    available, reason = rocprof_config.capabilities.spm_sq_waves_available
+    if available:
+        return None
+    return reason
 
 
 def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1627,6 +1640,8 @@ def _build_rocprofsys_config_header() -> list[str]:
         if cap.rocprofiler_sdk_version
         else "Not found"
     )
+    spm_available, spm_reason = cap.spm_sq_waves_available
+    spm_sq_waves_str = "Available" if spm_available else f"Unavailable ({spm_reason})"
 
     # capabilities.max_threads reports 0 when rocprof-sys-avail could not be queried
     max_threads_str = cap.max_threads if cap.max_threads else "Not found"
@@ -1685,11 +1700,14 @@ def _build_rocprofsys_config_header() -> list[str]:
         _subrow("Strips '--':", oshrun_strips_str),
         _row("Offload tool:", offload_msg),
         _row("Rocminfo:", rocminfo_path if rocminfo_path else rocminfo_err_msg),
+        _row("rocprofv3-avail:", cap.rocprofv3_avail_exec),
         "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
         _row("Max threads:", max_threads_str),
+        _row("SPM SQ_WAVES:", spm_sq_waves_str),
         _row("UCX available:", cap.ucx_availability),
+        _row("CI environment:", cap.is_ci),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),

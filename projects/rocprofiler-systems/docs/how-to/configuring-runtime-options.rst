@@ -265,6 +265,168 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+ROCm SPM sampling (beta)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports beta collection of ROCm Streaming Performance
+Monitor (SPM) counters through ROCprofiler-SDK. SPM collection samples selected
+GPU counters while dispatches are running and exports the samples to Perfetto
+counter tracks.
+
+.. warning::
+
+   SPM collection is a beta feature. It is under development and might not be
+   completely stable. It can affect system stability and performance, and in
+   some cases can cause the GPU to reset or the system to restart unexpectedly.
+   Enable SPM only when you accept that risk.
+
+   ROCprofiler-SDK documents SPM support for AMD Instinct MI300, MI325, MI350,
+   and MI355 accelerators. Support also depends on the installed SDK and
+   driver/KFD stack.
+
+   For stable SPM collection, use AMD GPU driver version ``6.19.14.31400000`` or
+   later. Earlier drivers can work on bare-metal systems, but might show
+   instability across repeated SPM runs, and lack fixes required for
+   passthrough-virtualized environments. To check the loaded driver version, run
+   ``cat /sys/module/amdgpu/version``, or use ``amd-smi version`` on DKMS-built
+   systems.
+
+   SPM also requires explicit ROCprofiler-SDK beta opt-in. Set
+   ``ROCPROFILER_SPM_BETA_ENABLED=ON`` when you want to acknowledge the beta
+   risk and enable SPM collection. If SPM is requested without this opt-in,
+   ROCm Systems Profiler warns and continues without SPM samples.
+
+.. note::
+
+   Kernel dispatches are serialized while SPM collection is active, so
+   application timing in the trace may differ from normal execution.
+
+SPM is configured with the following settings:
+
+* ``ROCPROFSYS_ROCM_SPM_EVENTS`` specifies the SPM counter list. SPM currently
+  supports basic counters. Use the ``:device=N`` suffix to restrict collection
+  to one GPU device, for example ``SQ_WAVES:device=0``. Setting this option
+  requests SPM collection; a positive sample interval is also required.
+* ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL`` specifies the sampling interval for
+  SPM counter collection in GPU shader-clock cycles. The beta implementation
+  rounds the interval to the nearest multiple of 32. Supported intervals are
+  hardware-limited and can be queried with ``rocprofv3-avail info --spm-config``.
+  The examples use ``8192``, an exact multiple of the 32-cycle granularity.
+
+The equivalent command-line options are:
+
+* ``--spm-events``
+* ``--spm-sample-interval``
+
+SPM collection is mutually exclusive with the existing ROCm GPU counter paths in
+this beta. Do not combine ``ROCPROFSYS_ROCM_SPM_EVENTS`` with either
+``ROCPROFSYS_ROCM_EVENTS`` or ``ROCPROFSYS_GPU_PERF_COUNTERS`` in the same run.
+
+In this beta, SPM Perfetto output is single-process. SPM counter-name metadata is
+kept in memory for the collecting process and is not yet written to the
+per-process metadata files, so SPM tracks from forked or MPI child processes might
+not resolve during post-processing. A warning is logged for each counter whose
+metadata cannot be resolved.
+
+The following example collects ``SQ_WAVES`` SPM samples from device 0 while
+running the ``transpose`` example and writes a Perfetto trace:
+
+.. code-block:: shell
+
+   ROCPROFSYS_TRACE=ON \
+   ROCPROFSYS_PROFILE=OFF \
+   ROCPROFSYS_USE_SAMPLING=OFF \
+   ROCPROFSYS_USE_PROCESS_SAMPLING=OFF \
+   ROCPROFSYS_USE_KOKKOSP=OFF \
+   ROCPROFILER_SPM_BETA_ENABLED=ON \
+   ROCPROFSYS_OUTPUT_PATH=/tmp/rocprofsys-spm \
+   ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES:device=0 \
+   ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL=8192 \
+   rocprof-sys-run -- ./transpose
+
+You can configure the same run with command-line options:
+
+.. code-block:: shell
+
+   ROCPROFILER_SPM_BETA_ENABLED=ON \
+   ROCPROFSYS_TRACE=ON \
+   ROCPROFSYS_OUTPUT_PATH=/tmp/rocprofsys-spm \
+   rocprof-sys-run \
+      --spm-events SQ_WAVES:device=0 \
+      --spm-sample-interval 8192 \
+      -- ./transpose
+
+Open the generated ``perfetto-trace-<pid>.proto`` file in the Perfetto UI and
+search for tracks named ``GPU SPM ...``. Track names follow the shape
+``GPU SPM <counter>[<dimension>=<index>,...] [<device>]``. Dimension names and
+ordering come from ROCprofiler-SDK counter metadata and vary by counter and GPU;
+counters with no dimensions appear as ``GPU SPM <counter> [<device>]``. Each
+track is a sampled counter stream for one hardware partition. In the selected
+counter details, use the ``Value`` field as the sampled counter value; ``Delta``
+and ``Rate`` are derived by Perfetto from adjacent samples.
+
+SPM samples are currently emitted only through Perfetto output. Running SPM
+collection with ``ROCPROFSYS_USE_ROCPD=ON`` does not add SPM samples to the
+RocPD database. RocPD output for SPM samples is planned as follow-up work.
+
+To check which counters support SPM collection on the installed
+ROCprofiler-SDK, use the SDK tool:
+
+.. code-block:: shell
+
+   rocprofv3-avail list --spm
+
+Sample output (excerpt):
+
+.. code-block:: text
+
+   GPU                           : 0
+   Name                          : gfx942
+   spm                           :
+
+   ...
+   SQ_WAVES                            SQ_WAVES_EQ_64                      SQ_WAVES_LT_16
+   SQ_WAVES_LT_32                      SQ_WAVES_LT_48                      SQ_WAVES_LT_64
+   SQ_WAVES_RESTORED                   SQ_WAVES_SAVED                      SQ_WAVE_CYCLES
+
+To inspect SPM metadata for a specific counter, use:
+
+.. code-block:: shell
+
+   rocprofv3-avail info --spm SQ_WAVES
+
+Sample output (truncated to one GPU):
+
+.. code-block:: text
+
+   GPU:0
+   Name:gfx942
+   Counter_Name        : SQ_WAVES
+   Description         : Count number of waves sent to distributed sequencers (SQs).
+   Block               : SQ
+   SPM                 : Supported
+   Dimensions          : DIMENSION_INSTANCE[0:0] DIMENSION_SHADER_ENGINE[0:3] DIMENSION_XCC[0:7]
+
+To check the supported SPM interval range, use the SDK tool:
+
+.. code-block:: shell
+
+   rocprofv3-avail info --spm-config
+
+Sample output (truncated to one GPU):
+
+.. code-block:: text
+
+   GPU     : 0
+   Name    : gfx942
+   configs :
+      Type                : SAMPLE_INTERVAL_SCLK_CYCLES
+      Minimum_Interval    : 32
+      Maximum_Interval    : 65504
+
+The exact counter list, dimensions, and interval ranges depend on the installed
+ROCprofiler-SDK and GPU architecture.
+
 ROCPROFSYS_ROCM_GROUP_BY_QUEUE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

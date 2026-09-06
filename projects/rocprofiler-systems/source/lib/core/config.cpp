@@ -582,6 +582,20 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
                               "collected on every available device",
                               std::string{}, "rocm", "hardware_counters");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_SPM_EVENTS,
+        "ROCm SPM hardware counters to collect. Comma-separated list of SPM-capable "
+        "counter names",
+        std::string{}, "rocm", "hardware_counters", "spm", "beta");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::uint64_t, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
+        "ROCm SPM sampling interval in GPU shader-clock cycles. Required when SPM "
+        "events are set; the default of 0 means unset and is rejected. The interval "
+        "is rounded to the nearest multiple of 32. Supported intervals are "
+        "hardware-limited and can be queried with 'rocprofv3-avail info --spm-config'",
+        std::uint64_t{ 0 }, "rocm", "hardware_counters", "spm", "beta");
+
     register_rocm_operation_settings(_config, tracing_config_t::get_operation_settings());
 
     register_rocm_group_by_queue_setting(_config, rocm_domain_choices);

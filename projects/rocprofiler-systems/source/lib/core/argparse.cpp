@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "argparse.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
@@ -1213,6 +1214,39 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
         _data.reg.processed_environs.emplace("gpu_events");
         _data.reg.processed_environs.emplace("rocm_events");
+    }
+
+    if(_data.reg.environ_filter("spm_events", _data))
+    {
+        _parser
+            .add_argument({ "--spm-events" },
+                          "Set beta SPM GPU hardware counter events to record")
+            .min_count(1)
+            .dtype("[EVENT ...]")
+            .action([&](parser_t& parser) {
+                auto events =
+                    fmt::format("{}", fmt::join(parser.get<strvec_t>("spm-events"), ","));
+                update_env(_data, env_vars::ROCM_SPM_EVENTS, events);
+            });
+
+        _data.reg.processed_environs.emplace("spm_events");
+        _data.reg.processed_environs.emplace("rocm_spm_events");
+    }
+
+    if(_data.reg.environ_filter("spm_sample_interval", _data))
+    {
+        _parser
+            .add_argument({ "--spm-sample-interval" },
+                          "Set beta SPM counter sampling interval")
+            .count(1)
+            .dtype("integral")
+            .action([&](parser_t& parser) {
+                update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
+                           parser.get<std::uint64_t>("spm-sample-interval"));
+            });
+
+        _data.reg.processed_environs.emplace("spm_sample_interval");
+        _data.reg.processed_environs.emplace("rocm_spm_sample_interval");
     }
 
     add_group_arguments(_parser, "category", _data, true);

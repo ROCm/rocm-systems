@@ -11,10 +11,12 @@
 #include <cstdint>
 
 #include <fstream>
+#include <functional>
 
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -615,30 +617,64 @@ metadata_registry::get_string_list() const
 }
 
 void
+metadata_registry::set_counter_names(
+    counter_name_map_t& map, std::uint32_t device_id,
+    std::vector<info::gpu_perf_counter_name_entry> entries)
+{
+    auto& device_entries = map[device_id];
+    device_entries.clear();
+    device_entries.reserve(entries.size());
+    for(auto& entry : entries)
+    {
+        device_entries.emplace(entry.counter_id, std::move(entry));
+    }
+}
+
+std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+metadata_registry::find_counter_by_id(const counter_name_map_t& map,
+                                      std::uint32_t device_id, std::uint64_t counter_id)
+{
+    const auto device_itr = map.find(device_id);
+    if(device_itr == map.end())
+    {
+        return std::nullopt;
+    }
+
+    const auto counter_itr = device_itr->second.find(counter_id);
+    if(counter_itr == device_itr->second.end())
+    {
+        return std::nullopt;
+    }
+
+    return std::cref(counter_itr->second);
+}
+
+void
 metadata_registry::set_gpu_perf_counter_counter_names(
     std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
 {
-    auto& index = m_gpu_perf_counter_index[device_id];
-    index.clear();
-    index.reserve(entries.size());
-    for(std::size_t i = 0; i < entries.size(); ++i)
-    {
-        index.emplace(entries[i].counter_id, i);
-    }
-    m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
+    set_counter_names(m_gpu_perf_counter_names, device_id, std::move(entries));
 }
 
 std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
 metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
                                                std::uint64_t counter_id) const
 {
-    auto idx_it = m_gpu_perf_counter_index.find(device_id);
-    if(idx_it == m_gpu_perf_counter_index.end()) return std::nullopt;
+    return find_counter_by_id(m_gpu_perf_counter_names, device_id, counter_id);
+}
 
-    auto entry_it = idx_it->second.find(counter_id);
-    if(entry_it == idx_it->second.end()) return std::nullopt;
+void
+metadata_registry::set_spm_counter_names(
+    std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
+{
+    set_counter_names(m_spm_counter_names, device_id, std::move(entries));
+}
 
-    return std::cref(m_gpu_perf_counter_counter_names.at(device_id)[entry_it->second]);
+std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+metadata_registry::find_spm_counter_by_id(std::uint32_t device_id,
+                                          std::uint64_t counter_id) const
+{
+    return find_counter_by_id(m_spm_counter_names, device_id, counter_id);
 }
 
 void

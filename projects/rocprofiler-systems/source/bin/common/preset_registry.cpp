@@ -4,6 +4,7 @@
 #include "common/preset_registry.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "embedded_presets.hpp"
 
@@ -488,21 +489,40 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Hardware counters
-    if(preset_json.contains("hardware_counters") &&
-       preset_json["hardware_counters"].value("enabled", false))
+    if(preset_json.contains("hardware_counters"))
     {
         const auto& counters = preset_json["hardware_counters"];
-        if(counters.contains("papi_events"))
+        if(counters.value("enabled", false))
         {
-            auto events =
-                json_config::json_value_to_string(counters["papi_events"]["value"]);
-            lines.push_back("PAPI Events:     " + events);
-        }
-        if(counters.contains("rocm_events"))
-        {
-            auto events =
-                json_config::json_value_to_string(counters["rocm_events"]["value"]);
-            lines.push_back("ROCm Events:     " + events);
+            if(counters.contains("papi_events"))
+            {
+                auto events =
+                    json_config::json_value_to_string(counters["papi_events"]["value"]);
+                lines.push_back("PAPI Events:     " + events);
+            }
+            if(counters.contains("rocm_events"))
+            {
+                auto events =
+                    json_config::json_value_to_string(counters["rocm_events"]["value"]);
+                lines.push_back("ROCm Events:     " + events);
+            }
+            if(counters.contains("spm"))
+            {
+                const auto& spm = counters["spm"];
+                if(spm.contains("events"))
+                {
+                    auto events =
+                        json_config::json_value_to_string(spm["events"]["value"]);
+                    lines.emplace_back("ROCm SPM:        ON");
+                    lines.push_back("ROCm SPM Events: " + events);
+                }
+                if(spm.contains("sample_interval"))
+                {
+                    auto interval = json_config::json_value_to_string(
+                        spm["sample_interval"]["value"]);
+                    lines.push_back("SPM Interval:    " + interval);
+                }
+            }
         }
     }
 

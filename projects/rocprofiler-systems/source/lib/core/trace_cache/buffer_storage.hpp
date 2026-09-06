@@ -20,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <type_traits>
 
@@ -143,8 +144,27 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        const size_t sample_size      = get_size(value);
+        const size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+
+        // Variable-size samples (SPM batches scale with record count) can in
+        // principle exceed the whole buffer. Without this guard such a sample
+        // would fragment to offset 0 in reserve_memory_space() and then still
+        // write past the end of the fixed buffer.
+        //
+        // Usable capacity is one header short of buffer_size, because
+        // reserve_memory_space() tests `number_of_bytes + header_size` even
+        // when starting from m_head == 0.
+        constexpr size_t k_max_record_bytes =
+            buffer_size - header_size<TypeIdentifierEnum>;
+        if(bytes_to_reserve > k_max_record_bytes)
+        {
+            throw std::runtime_error{ "Trace-cache record of " +
+                                      std::to_string(bytes_to_reserve) +
+                                      " bytes exceeds the " +
+                                      std::to_string(k_max_record_bytes) +
+                                      " byte usable trace-cache buffer capacity" };
+        }
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -153,7 +173,7 @@ public:
         // actual memcpy closes the window that TSan (correctly) flags.
         //
         auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard scope{ m_mutex };
+        const std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
         size_t position = 0;

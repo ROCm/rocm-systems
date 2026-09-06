@@ -9,6 +9,7 @@
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 
 namespace rocprofsys::trace_cache
 {
@@ -19,6 +20,6 @@ using storage_parser_t =
                    pmc_event_with_sample, pmc::collectors::gpu::sample,
                    pmc::collectors::nic::sample, pmc::collectors::cpu::sample,
                    pmc::collectors::gpu_perf_counter::sample, backtrace_region_sample,
-                   scratch_memory_sample, kfd_sample>;
+                   scratch_memory_sample, kfd_sample, spm_sample>;
 
 }  // namespace rocprofsys::trace_cache

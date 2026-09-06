@@ -4,13 +4,24 @@
 set(rocprofiler_sdk_components_unit_tests_sources
     test_rccl_unit.cpp
     test_roctx_client.cpp
+    test_spm.cpp
     ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
+    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/spm.cpp
 )
 
 add_library(
     rocprofiler-sdk-components-unit-tests
     OBJECT
     ${rocprofiler_sdk_components_unit_tests_sources}
+)
+
+# Unit tests intentionally compile only the SPM configuration validation and no-SDK
+# runtime fallback path here.
+# The SDK runtime helpers are compile-checked by the normal SPM-enabled
+# rocprofiler-systems-object-library target.
+set_source_files_properties(
+    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/spm.cpp
+    PROPERTIES COMPILE_DEFINITIONS ROCPROFSYS_DISABLE_SPM_RUNTIME=1
 )
 
 target_link_libraries(

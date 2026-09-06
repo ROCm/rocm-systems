@@ -17,6 +17,7 @@
 #include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 #include "core/utility.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 #include "library/thread_info.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
@@ -29,12 +30,15 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <rocprofiler-sdk/context.h>
 
@@ -456,6 +460,126 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
                                       beg_ts, _flow, annotate);
         core::perfetto::pop_perfetto(category::rocm_hip_stream{}, pop_name, _track,
                                      end_ts);
+    }
+}
+
+using spm_counter_collection_track =
+    core::perfetto::counter_track<category::rocm_counter_collection>;
+
+struct spm_track_info
+{
+    bool   valid     = false;
+    size_t track_key = 0;
+};
+
+void
+report_missing_spm_counter_metadata(
+    std::uint32_t device_id, std::uint64_t counter_instance_id,
+    std::set<std::pair<std::uint32_t, std::uint64_t>>& missing_counter_metadata)
+{
+    // Warn rather than debug: the usual cause is a child/MPI process, whose metadata
+    // file does not carry SPM counter names yet, and the only other symptom is an SPM
+    // track that never appears. Deduplicate per processor instance and counter.
+    const auto should_report =
+        missing_counter_metadata.emplace(device_id, counter_instance_id).second;
+    if(should_report)
+    {
+        LOG_WARNING("No SPM counter metadata for device {} counter instance {}; "
+                    "dropping samples for this counter. SPM counter names are not "
+                    "serialized into per-process metadata yet, so SPM tracks from "
+                    "forked/MPI child processes may not resolve.",
+                    device_id, counter_instance_id);
+    }
+}
+
+spm_track_info
+make_spm_track(
+    const spm_counter_info& counter, std::uint32_t device_id,
+    const metadata_registry&                           metadata,
+    std::set<std::pair<std::uint32_t, std::uint64_t>>& missing_counter_metadata)
+{
+    const auto name_info =
+        metadata.find_spm_counter_by_id(device_id, counter.counter_instance_id);
+    if(!name_info)
+    {
+        report_missing_spm_counter_metadata(device_id, counter.counter_instance_id,
+                                            missing_counter_metadata);
+        return {};
+    }
+
+    const auto& track_name = name_info->get().track_name;
+    const auto  track_key  = std::hash<std::string>{}(track_name);
+    if(!spm_counter_collection_track::exists(track_key))
+    {
+        spm_counter_collection_track::emplace(track_key, track_name, ROCM_COUNTER_UNIT);
+    }
+    return { .valid = true, .track_key = track_key };
+}
+
+std::vector<spm_track_info>
+make_spm_tracks(
+    const spm_sample& sample, std::uint32_t device_id, const metadata_registry& metadata,
+    std::set<std::pair<std::uint32_t, std::uint64_t>>& missing_counter_metadata)
+{
+    auto tracks = std::vector<spm_track_info>{};
+    tracks.reserve(sample.counters.size());
+    for(const auto& counter : sample.counters)
+    {
+        tracks.emplace_back(
+            make_spm_track(counter, device_id, metadata, missing_counter_metadata));
+    }
+    return tracks;
+}
+
+std::optional<std::uint32_t>
+get_spm_device_id(const spm_sample& sample, const agent_manager& agents)
+{
+    try
+    {
+        return static_cast<std::uint32_t>(
+            agents.get_agent_by_handle(sample.agent_id_handle).device_type_index);
+    } catch(const std::exception& error)
+    {
+        LOG_WARNING("Dropping SPM sample: no agent metadata for handle {} ({})",
+                    sample.agent_id_handle, error.what());
+        return std::nullopt;
+    }
+}
+
+// TRACE_COUNTER expands to nested control flow that inflates this helper's metric.
+// NOLINTBEGIN(readability-function-size)
+void
+emit_spm_value(const spm_counter_value& value, std::uint64_t timestamp,
+               const std::vector<spm_track_info>& tracks)
+{
+    if(value.counter_info_index >= tracks.size())
+    {
+        LOG_WARNING("Skipping SPM sample with invalid counter info index {}",
+                    value.counter_info_index);
+        return;
+    }
+
+    const auto& track = tracks[value.counter_info_index];
+    if(!track.valid)
+    {
+        return;
+    }
+
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                  spm_counter_collection_track::at(track.track_key, 0), timestamp,
+                  value.value);
+}
+// NOLINTEND(readability-function-size)
+
+void
+emit_spm_samples(const spm_sample& spm_data, const std::vector<spm_track_info>& tracks)
+{
+    for(const auto& timestamp_sample : spm_data.samples)
+    {
+        for(const auto& value : timestamp_sample.values)
+        {
+            emit_spm_value(value, timestamp_sample.timestamp, tracks);
+        }
     }
 }
 }  // namespace
@@ -1426,6 +1550,20 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
             amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
             static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
     }
+}
+
+void
+perfetto_processor_t::handle(const spm_sample& spm_data)
+{
+    const auto device_id = get_spm_device_id(spm_data, m_agent_manager);
+    if(!device_id)
+    {
+        return;
+    }
+
+    const auto tracks =
+        make_spm_tracks(spm_data, *device_id, m_metadata, m_missing_spm_counter_metadata);
+    emit_spm_samples(spm_data, tracks);
 }
 
 void

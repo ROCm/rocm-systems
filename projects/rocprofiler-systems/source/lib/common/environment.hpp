@@ -769,10 +769,13 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_PAPI_EVENTS: uses perf::EVENT_NAME or net:::interface:metric syntax
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
+    /// - ROCPROFSYS_ROCM_SPM_EVENTS: accepts comma-separated counter names
     auto get_delimiter = [](std::string_view key) -> char {
         if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
-           key == env_vars::ROCM_EVENTS)
+           key == env_vars::ROCM_EVENTS || key == env_vars::ROCM_SPM_EVENTS)
+        {
             return ',';
+        }
         return ':';
     };
 
