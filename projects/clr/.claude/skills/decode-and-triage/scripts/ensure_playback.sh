@@ -204,7 +204,12 @@ export_playback_env() {
   [[ -n "$rocr_lib" ]] && ld_parts+=("$rocr_lib")
   ld_parts+=("$ROCM_PATH/lib")
   export LD_LIBRARY_PATH="$(IFS=:; echo "${ld_parts[*]}")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-  [[ -n "$rocr_lib" ]] && export ROCR_LIB="$rocr_lib"
+  # Not a trailing `&&`: under `set -e` this is the last statement of the
+  # function, so an unresolved ROCR lib dir would make the function return 1
+  # and abort the script before it prints the playback path.
+  if [[ -n "$rocr_lib" ]]; then
+    export ROCR_LIB="$rocr_lib"
+  fi
 }
 
 fail_not_found() {
