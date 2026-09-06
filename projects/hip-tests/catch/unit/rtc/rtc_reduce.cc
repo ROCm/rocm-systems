@@ -114,7 +114,10 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
   size_t logSize;
   std::string scalarName, intrinsicName;
   hiprtcResult compileResult;
-  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
+  // NOTE: -O0 is passed only for now. But ideally this should be tested both with -O2/-O3 too;
+  // but at time of this writing the loop in reduceRtcKernel() might be optimized incorrectly
+  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES",
+                           "-O0"};
 
   reduceOpToString<int, Op>(scalarName, intrinsicName);
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
