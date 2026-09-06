@@ -38,6 +38,12 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16")
 ]
 
 
@@ -54,9 +60,9 @@ def put_api_x(GRAN, T, TNAME):
 def generate_put_api_x():
     expanded_code = """
 /**
- * @brief Writes contiguous data of \p nelems elements from \p source on the
- * calling PE to \p dest at \p pe. The caller will block until the operation
- * completes locally (it is safe to reuse \p source). The caller must
+ * @brief Writes contiguous data of \\p nelems elements from \\p source on the
+ * calling PE to \\p dest at \\p pe. The caller will block until the operation
+ * completes locally (it is safe to reuse \\p source). The caller must
  * call into rocshmem_quiet() if remote completion is required.
  *
  * This function can be called from divergent control paths at per-wave
@@ -74,12 +80,12 @@ def generate_put_api_x():
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_api_x("wave", type_, tname_)
-    
+
     expanded_code += """
 /**
- * @brief Writes contiguous data of \p nelems elements from \p source on the
- * calling PE to \p dest at \p pe. The caller will block until the operation
- * completes locally (it is safe to reuse \p source). The caller must
+ * @brief Writes contiguous data of \\p nelems elements from \\p source on the
+ * calling PE to \\p dest at \\p pe. The caller will block until the operation
+ * completes locally (it is safe to reuse \\p source). The caller must
  * call into rocshmem_quiet() if remote completion is required.
  *
  * This function can be called from divergent control paths at per-workgroup
@@ -97,6 +103,63 @@ def generate_put_api_x():
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_api_x("wg", type_, tname_)
+    expanded_code += """
+/**
+ * @brief Writes contiguous data of \\p nelems bytes from \\p source on the
+ * calling PE to \\p dest at \\p pe. The caller will block until the operation
+ * completes locally (it is safe to reuse \\p source). The caller must
+ * call into rocshmem_quiet() if remote completion is required.
+ *
+ * This function can be called from divergent control paths at per-wave
+ * granularity. However, all threads in a wave must participate in the
+ * call using the same parameters.
+ *
+ * @param[in] ctx    Context with which to perform this operation.
+ * @param[in] dest   Destination address. Must be an address on the symmetric
+ *                   heap.
+ * @param[in] source Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems Size of the transfer in number of elements.
+ * @param[in] pe     PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wave(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_wave(void *dest,
+                                                     const void *source,
+                                                     size_t nelems, int pe);
+
+/**
+ * @brief Writes contiguous data of \\p nelems bytes from \\p source on the
+ * calling PE to \\p dest at \\p pe. The caller will block until the operation
+ * completes locally (it is safe to reuse \\p source). The caller must
+ * call into rocshmem_quiet() if remote completion is required.
+ *
+ * This function can be called from divergent control paths at per-workgroup
+ * (WG) granularity. However, all threads in the workgroup must participate in
+ * the call using the same parameters.
+ *
+ * @param[in] ctx    Context with which to perform this operation.
+ * @param[in] dest   Destination address. Must be an address on the symmetric
+ *                   heap.
+ * @param[in] source Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems Size of the transfer in number of elements.
+ * @param[in] pe     PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx,
+                                                       void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_wg(void *dest,
+                                                   const void *source,
+                                                   size_t nelems, int pe);
+
+"""
+    
 
     return expanded_code
 
@@ -114,9 +177,9 @@ def get_api_x(GRAN, T, TNAME):
 def generate_get_api_x():
     expanded_code = """
 /**
- * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
- * to \p dest on the calling PE. The calling work-group will block until the
- * operation completes (data has been placed in \p dest).
+ * @brief Reads contiguous data of \\p nelems elements from \\p source on \\p pe
+ * to \\p dest on the calling PE. The calling work-group will block until the
+ * operation completes (data has been placed in \\p dest).
  *
  * This function can be called from divergent control paths at per-wave
  * granularity. However,  all threads in the wave must participate in the
@@ -136,9 +199,9 @@ def generate_get_api_x():
     
     expanded_code += """
 /**
- * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
- * to \p dest on the calling PE. The calling work-group will block until the
- * operation completes (data has been placed in \p dest).
+ * @brief Reads contiguous data of \\p nelems elements from \\p source on \\p pe
+ * to \\p dest on the calling PE. The calling work-group will block until the
+ * operation completes (data has been placed in \\p dest).
  *
  * This function can be called from divergent control paths at per-workgroup
  * granularity. However,  all threads in the workgroup must participate in
@@ -156,6 +219,60 @@ def generate_get_api_x():
     for type_, tname_ in types:
         expanded_code += get_api_x("wg", type_, tname_)
 
+    expanded_code += """
+/**
+ * @brief Reads contiguous data of \\p nelems bytes from \\p source on \\p pe
+ * to \\p dest on the calling PE. The calling work-group will block until the
+ * operation completes (data has been placed in \\p dest).
+ *
+ * This function can be called from divergent control paths at per-wave
+ * granularity. However, all threads in a the wave must participate in the
+ * call using the same parameters
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wave(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_getmem_wave(void *dest,
+                                                     const void *source,
+                                                     size_t nelems, int pe);
+
+/**
+ * @brief Reads contiguous data of \\p nelems bytes from \\p source on \\p pe
+ * to \\p dest on the calling PE. The calling work-group will block until the
+ * operation completes (data has been placed in \\p dest).
+ *
+ * This function can be called from divergent control paths at per-workgroup
+ * (WG) granularity. However, all threads in the workgroup must participate
+ * in the call using the same parameters
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx,
+                                                       void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_getmem_wg(void *dest,
+                                                   const void *source,
+                                                   size_t nelems, int pe);
+
+"""
     return expanded_code
 
 
@@ -172,8 +289,8 @@ def put_nbi_api_x(GRAN, T, TNAME):
 def generate_put_nbi_api_x():
     expanded_code = """
 /**
- * @brief Writes contiguous data of \p nelems elements from \p source on the
- * calling PE to \p dest on \p pe. The operation is not blocking. The caller
+ * @brief Writes contiguous data of \\p nelems elements from \\p source on the
+ * calling PE to \\p dest on \\p pe. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
  * rocshmem_quiet() on the same context if completion notification is
  * required.
@@ -196,8 +313,8 @@ def generate_put_nbi_api_x():
 
     expanded_code += """
 /**
- * @brief Writes contiguous data of \p nelems elements from \p source on the
- * calling PE to \p dest on \p pe. The operation is not blocking. The caller
+ * @brief Writes contiguous data of \\p nelems elements from \\p source on the
+ * calling PE to \\p dest on \\p pe. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
  * rocshmem_quiet() on the same context if completion notification is
  * required.
@@ -218,6 +335,64 @@ def generate_put_nbi_api_x():
     for type_, tname_ in types:
         expanded_code += put_nbi_api_x("wg", type_, tname_)
 
+    expanded_code += """
+/**
+ * @brief Writes contiguous data of \\p nelems bytes from \\p source on the
+ * calling PE to \\p dest on \\p pe. The operation is not blocking. The caller
+ * will return as soon as the request is posted. The caller must call
+ * rocshmem_quiet() on the same context if completion notification is
+ * required.
+ *
+ * This function can be called from divergent control paths at per-wave
+ * granularity. However, all threads in a wave must call in with the same
+ * parameters
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+                      heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wave(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_wave(void *dest,
+                                                         const void *source,
+                                                         size_t nelems,
+                                                         int pe);
+
+/**
+ * @brief Writes contiguous data of \\p nelems bytes from \\p source on the
+ * calling PE to \\p dest on \\p pe. The operation is not blocking. The caller
+ * will return as soon as the request is posted. The caller must call
+ * rocshmem_quiet() on the same context if completion notification is
+ * required.
+ *
+ * This function can be called from divergent control paths at per-workgroup
+ * granularity. However, all threads in a WG must call in with the same
+ * parameters
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+                      heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wg(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_wg(void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+"""
+
     return expanded_code
 
 
@@ -234,8 +409,8 @@ def get_nbi_api_x(GRAN, T, TNAME):
 def generate_get_nbi_api_x():
     expanded_code = """
 /**
- * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
- * to \p dest on the calling PE. The operation is not blocking. The caller
+ * @brief Reads contiguous data of \\p nelems elements from \\p source on \\p pe
+ * to \\p dest on the calling PE. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
  * rocshmem_quiet() on the same context if completion notification is
  * required.
@@ -258,8 +433,8 @@ def generate_get_nbi_api_x():
 
     expanded_code += """
 /**
- * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
- * to \p dest on the calling PE. The operation is not blocking. The caller
+ * @brief Reads contiguous data of \\p nelems elements from \\p source on \\p pe
+ * to \\p dest on the calling PE. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
  * rocshmem_quiet() on the same context if completion notification is
  * required.
@@ -279,6 +454,64 @@ def generate_get_nbi_api_x():
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_nbi_api_x("wg", type_, tname_)
+
+    expanded_code += """
+/**
+ * @brief Reads contiguous data of \\p nelems bytes from \\p source on \\p pe
+ * to \\p dest on the calling PE. The operation is not blocking. The caller
+ * will return as soon as the request is posted. The caller must call
+ * rocshmem_quiet() on the same context if completion notification is
+ * required.
+ *
+ * This function can be called from divergent control paths at per-wave
+ * granularity. However, all threads in the wave must call in with the same
+ * arguments.
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wave(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_getmem_nbi_wave(void *dest,
+                                                         const void *source,
+                                                         size_t nelems,
+                                                         int pe);
+
+/**
+ * @brief Reads contiguous data of \\p nelems bytes from \\p source on \\p pe
+ * to \\p dest on the calling PE. The operation is not blocking. The caller
+ * will return as soon as the request is posted. The caller must call
+ * rocshmem_quiet() on the same context if completion notification is
+ * required.
+ *
+ * This function can be called from divergent control paths at per-workgroup
+ * granularity. However, all threads in the WG must call in with the same
+ * arguments.
+ *
+ * @param[in] ctx     Context with which to perform this operation.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] nelems  Size of the transfer in bytes.
+ * @param[in] pe      PE of the remote process.
+ *
+ * @return void.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wg(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_getmem_nbi_wg(void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+"""
 
     return expanded_code
 
