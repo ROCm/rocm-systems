@@ -518,3 +518,110 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions, memcpy]
+  Unit_HRR_ApiMatrix_ManifestWellFormed:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_ReplayClassMarkers:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_InfoBreakdownParse:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_T0_Roundtrip:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T1_Roundtrip:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T2_Roundtrip:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, api-matrix]
+  # T3 and T4 declare hipMemGetHandleForAddressRange, hipKernelNameRefByPtr and
+  # hipPointerSetAttribute, which amdhip.def.in does not export; the workloads
+  # compile those calls out on Windows, so the tier coverage floors cannot be met.
+  Unit_HRR_ApiMatrix_T3_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+    disabled: [amd_windows, amd_linux, amd_wsl]
+  Unit_HRR_ApiMatrix_T4_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+    disabled: [amd_windows, amd_linux, amd_wsl]
+  Unit_HRR_ApiMatrix_T5_Roundtrip:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_Breadth_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Breadth2_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Deprioritised_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_GraphNodes_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacyCtx_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacyLaunch_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacySurface_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_MemPoolShare_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_MultiGpu_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix, multigpu]
+  Unit_HRR_ApiMatrix_PayloadLoss_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_ProcAddress_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Reset_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_ShareableHandle_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SilentFailure_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SptCoopLaunch_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SptKernelLaunch_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_UC1Dense_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, api-matrix]

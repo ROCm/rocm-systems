@@ -26,6 +26,14 @@
 #                          Unit_HRR_GpuWorkload_Direct / Unit_HRR_GraphWorkload_Direct
 #                          as subprocesses, then runs hrr-playback to validate
 #                          replayed D2H buffers byte-for-byte against captured blobs.
+#   hrr_api_matrix_workload_test.cc — Hidden ([.][hrr-direct]) family workloads
+#                          for the per-API replay matrix: one call site per API
+#                          family, including APIs whose replay is known to be
+#                          wrong (a captured no-op is what the matrix needs to
+#                          observe).
+#   hrr_api_matrix_test.cc — Unit_HRR_ApiMatrix_T*_Roundtrip: captures each
+#                          tier's workloads and asserts every API's replay
+#                          class still matches what HRR's generator declares.
 #   hrr_regions_test.cc  — External region annotations (hrr_regions.h): CPU-only
 #                          sidecar framing tests, plus a GPU workload that carves
 #                          blocks out of one hipMalloc by pointer arithmetic and
@@ -34,8 +42,13 @@
 #
 # hrr_test_common.h is the shared capture/replay harness (ScopedDir,
 # hrr_run_roundtrip, hrr_playback_env, hrr_playback_watchdog,
-# hrr_expect_replay_class, ...) extracted from hrr_roundtrip_test.cc.
-# Header-only, so it needs no entry in TEST_SRC.
+# hrr_expect_replay_class, ...) used by both hrr_roundtrip_test.cc and the
+# API-matrix tests.  Header-only, so it needs no entry in TEST_SRC.
+#
+# hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
+# api_matrix.yaml.  Regenerate after an upstream classification change with:
+#   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
+#       <this dir>/hrr_api_matrix_expectations.h
 #
 # hrr_reader.cpp is compiled directly into the test executable so the format
 # tests can exercise the reader without a separate install step.
@@ -60,6 +73,8 @@ set(TEST_SRC
     hrr_spt_workload_test.cc
     hrr_roundtrip_test.cc
     hrr_regions_test.cc
+    hrr_api_matrix_workload_test.cc
+    hrr_api_matrix_test.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
 
