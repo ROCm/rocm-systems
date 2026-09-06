@@ -3891,6 +3891,11 @@ inline static hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModul
   return hipCUResultTohipError(cuModuleGetFunctionCount(count, mod));
 }
 
+inline static hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions,
+                                                     unsigned int numFunctions, hipModule_t mod) {
+  return hipCUResultTohipError(cuModuleEnumerateFunctions(functions, numFunctions, mod));
+}
+
 inline static hipError_t hipModuleGetTexRef(hipTexRef* pTexRef, hipModule_t hmod,
                                             const char* name) {
   return hipCUResultTohipError(cuModuleGetTexRef(pTexRef, hmod, name));

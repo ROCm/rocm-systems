@@ -13,20 +13,20 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 608
+contract_tests: 612
 contract_domains: 118
-declared_apis: 497
-covered_apis: 486
+declared_apis: 498
+covered_apis: 487
 uncovered_allowlisted: 11
 coverage_pct: 97.8
 -->
 
 - Snapshot date: 2026-08-26
 - Snapshot commit: `920418c484`
-- Contract tests: 608
+- Contract tests: 612
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 497
-- Declared HIP runtime APIs directly exercised by contract tests: 486
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 498
+- Declared HIP runtime APIs directly exercised by contract tests: 487
 - Intentionally uncovered, allowlisted APIs: 11
 - Approximate declared API-name coverage: 97.8%
 - Additional public macro exercised: `hipLaunchKernelGGL`
@@ -180,7 +180,7 @@ binaries instead of exposing portable state to assert.
 | `memset` | 6 |
 | `mipmapped_array` | 4 |
 | `module` | 7 |
-| `module_exec` | 8 |
+| `module_exec` | 12 |
 | `module_load_ex` | 4 |
 | `module_load_file` | 6 |
 | `multi_device_launch` | 4 |

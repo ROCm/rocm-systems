@@ -19,6 +19,7 @@ set(TEST_SRC
     hipGetFuncBySymbol.cc
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
+    hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
 )
 

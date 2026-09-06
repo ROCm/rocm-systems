@@ -156,6 +156,31 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
   return hipSuccess;
 }
 
+hipError_t DynCO::enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions) {
+  std::scoped_lock lock(dclock_);
+
+  if (functions == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  if (numFunctions == 0) {
+    return hipSuccess;
+  }
+
+  unsigned int count = 0;
+  for (const auto& kv : functions_) {
+    if (count >= numFunctions) {
+      break;
+    }
+    hipFunction_t hfunc = nullptr;
+    auto ret = kv.second->GetDynFunc(&hfunc, module_);
+    if (ret != hipSuccess) {
+      return ret;
+    }
+    functions[count++] = hfunc;
+  }
+  return hipSuccess;
+}
+
 bool DynCO::isValidDynFunc(const void* hfunc) {
   std::scoped_lock lock(dclock_);
   return std::any_of(functions_.begin(), functions_.end(),

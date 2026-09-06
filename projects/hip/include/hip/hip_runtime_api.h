@@ -6986,6 +6986,19 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Returns the function handles within a module.
+ *
+ * @param [out] functions Buffer where the function handles are returned
+ * @param [in] numFunctions Maximum number of function handles to return to the buffer
+ * @param [in] mod Module to query from
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ * #hipErrorInvalidContext, #hipErrorNotInitialized, #hipErrorNotFound
+ */
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                     hipModule_t mod);
+
+/**
  * @brief Returns information about a kernel.
  *
  * @param[out] pi Returned attribute value
