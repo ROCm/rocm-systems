@@ -35,10 +35,24 @@ struct TextOffsetRelocation {
   uint32_t client_rewrite_source_size = 0;
 };
 
-/// @brief One relocated literal64 PC builder whose target is outside `.text`.
+/// @brief Encoding used by one relocated PC builder whose target is outside `.text`.
+enum class PcRelativeDataRelocationEncoding {
+  Literal64,
+  SplitLiteral32,
+};
+
+/// @brief One relocated PC builder whose target is outside `.text`.
 struct PcRelativeDataRelocation {
   uint64_t target_getpc_offset = 0;
   uint64_t target_literal_offset = 0;
+  PcRelativeDataRelocationEncoding encoding = PcRelativeDataRelocationEncoding::Literal64;
+  /// Separate high literal for legacy `s_add_u32`/`s_addc_u32` builders.
+  /// Present only for a split builder whose high add uses a literal operand.
+  std::optional<uint64_t> target_high_literal_offset;
+  /// Expected high word when the split high add uses an inline 0 or -1.
+  /// Such an instruction has no literal field to rewrite, so relocation is
+  /// valid only while the recomputed delta retains this word.
+  std::optional<uint32_t> split_inline_high_word;
   uint64_t source_target_vaddr = 0;
 };
 

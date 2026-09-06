@@ -54,6 +54,10 @@ struct PairValue {
   uint64_t value = 0;
   uint64_t source_getpc_offset = 0;
   uint64_t source_address_add_offset = 0;
+  std::optional<uint64_t> source_address_high_add_offset;
+  std::optional<uint32_t> source_address_high_inline_word;
+  std::optional<uint32_t> pending_low_word;
+  uint64_t pending_high_offset = 0;
   uint64_t source_table_address_vaddr = 0;
 
   friend bool operator==(const PairValue &, const PairValue &) = default;
@@ -70,6 +74,28 @@ using PairState = std::unordered_map<uint16_t, PairValue>;
     return std::nullopt;
   }
   return ref->index;
+}
+
+[[nodiscard]] std::optional<uint16_t> scalar_sgpr(const Operand *operand) {
+  if (operand == nullptr)
+    return std::nullopt;
+  const auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != RegClass::SGPR || ref->width != 1)
+    return std::nullopt;
+  return ref->index;
+}
+
+[[nodiscard]] std::optional<uint32_t> scalar_u32_constant(const Operand *operand) {
+  if (operand == nullptr)
+    return std::nullopt;
+  const auto value = operand->const_value();
+  if (!value)
+    return std::nullopt;
+  if (*value <= std::numeric_limits<uint32_t>::max())
+    return static_cast<uint32_t>(*value);
+  if (*value == std::numeric_limits<uint64_t>::max())
+    return std::numeric_limits<uint32_t>::max();
+  return std::nullopt;
 }
 
 void kill_defined_pairs(PairState &state, const Instruction &inst) {
@@ -123,14 +149,23 @@ void transfer_instruction(PairState &state, const Instruction &inst,
   // operand register classes or constructing a full def/use set for them.
   if (state.empty() && mnemonic != "s_get_pc_i64" && mnemonic != "s_getpc_b64")
     return;
+  // A split low add communicates its carry to the immediately following high
+  // add through SCC. Do not retain a half-built value across any intervening
+  // instruction or CFG placement.
+  std::erase_if(state, [&](const auto &item) {
+    return item.second.pending_low_word && item.second.pending_high_offset != inst.src_loc();
+  });
   // Report the completed address before the table check below can reclassify the pair, so a
   // builder is described the same way whether or not its target happens to be a known table.
   const auto report_address_builder = [&](const PairValue &value) {
     if (address_builders == nullptr || value.source_address_add_offset == 0)
       return;
-    address_builders->push_back({.source_getpc_offset = value.source_getpc_offset,
-                                 .source_address_add_offset = value.source_address_add_offset,
-                                 .target_vaddr = value.value});
+    address_builders->push_back(
+        {.source_getpc_offset = value.source_getpc_offset,
+         .source_address_add_offset = value.source_address_add_offset,
+         .source_address_high_add_offset = value.source_address_high_add_offset,
+         .source_address_high_inline_word = value.source_address_high_inline_word,
+         .target_vaddr = value.value});
   };
   const auto dst_pair = sgpr_pair(inst.dst_operand(0));
   const auto src0_pair = sgpr_pair(inst.src_operand(0));
@@ -145,6 +180,8 @@ void transfer_instruction(PairState &state, const Instruction &inst,
              .return_sreg = *dst_pair,
              .source_getpc_offset = value->second.source_getpc_offset,
              .source_address_add_offset = value->second.source_address_add_offset,
+             .source_address_high_add_offset = value->second.source_address_high_add_offset,
+             .source_address_high_inline_word = value->second.source_address_high_inline_word,
              .source_table_address_vaddr = value->second.source_table_address_vaddr});
       }
     }
@@ -153,13 +190,21 @@ void transfer_instruction(PairState &state, const Instruction &inst,
   }
 
   std::optional<PairValue> result;
+  std::optional<uint16_t> result_pair;
   if ((mnemonic == "s_get_pc_i64" || mnemonic == "s_getpc_b64") && dst_pair) {
     if (inst.src_loc() <= std::numeric_limits<uint64_t>::max() - text_vaddr &&
         static_cast<uint64_t>(inst.size()) <=
             std::numeric_limits<uint64_t>::max() - text_vaddr - inst.src_loc()) {
       result = PairValue{.kind = PairValueKind::Address,
                          .value = text_vaddr + inst.src_loc() + static_cast<uint64_t>(inst.size()),
-                         .source_getpc_offset = inst.src_loc()};
+                         .source_getpc_offset = inst.src_loc(),
+                         .source_address_add_offset = 0,
+                         .source_address_high_add_offset = std::nullopt,
+                         .source_address_high_inline_word = std::nullopt,
+                         .pending_low_word = std::nullopt,
+                         .pending_high_offset = 0,
+                         .source_table_address_vaddr = 0};
+      result_pair = dst_pair;
     }
   } else if (mnemonic == "s_add_nc_u64" && dst_pair) {
     const auto src1_pair = sgpr_pair(inst.src_operand(1));
@@ -200,6 +245,55 @@ void transfer_instruction(PairState &state, const Instruction &inst,
           result->value = *table;
           result->source_table_address_vaddr = tables[*table].table_vaddr;
         }
+        result_pair = dst_pair;
+      }
+    }
+  } else if ((mnemonic == "s_add_u32" || mnemonic == "s_add_i32") &&
+             inst.size() == 2 * sizeof(uint32_t)) {
+    const auto dst = scalar_sgpr(inst.dst_operand(0));
+    const auto src0 = scalar_sgpr(inst.src_operand(0));
+    const auto low = scalar_u32_constant(inst.src_operand(1));
+    if (dst && src0 && *dst == *src0 && low) {
+      const auto address = state.find(*dst);
+      if (address != state.end() && address->second.kind == PairValueKind::Address &&
+          address->second.source_address_add_offset == 0 && !address->second.pending_low_word) {
+        result = address->second;
+        result->source_address_add_offset = inst.src_loc();
+        result->pending_low_word = *low;
+        result->pending_high_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+        result_pair = *dst;
+      }
+    }
+  } else if (mnemonic == "s_addc_u32") {
+    const auto dst = scalar_sgpr(inst.dst_operand(0));
+    const auto src0 = scalar_sgpr(inst.src_operand(0));
+    const auto high = scalar_u32_constant(inst.src_operand(1));
+    if (dst && *dst != 0 && src0 && *dst == *src0 && high) {
+      const uint16_t pair = static_cast<uint16_t>(*dst - 1);
+      const auto address = state.find(pair);
+      if (address != state.end() && address->second.kind == PairValueKind::Address &&
+          address->second.pending_low_word &&
+          address->second.pending_high_offset == inst.src_loc()) {
+        result = address->second;
+        const uint64_t delta = (static_cast<uint64_t>(*high) << 32u) |
+                               static_cast<uint64_t>(*result->pending_low_word);
+        result->value += delta;
+        result->source_address_high_add_offset = inst.src_loc();
+        if (inst.size() == sizeof(uint32_t))
+          result->source_address_high_inline_word = *high;
+        else if (inst.size() != 2 * sizeof(uint32_t))
+          result.reset();
+        if (result) {
+          result->pending_low_word.reset();
+          result->pending_high_offset = 0;
+          report_address_builder(*result);
+          if (const auto table = table_at_address(tables, result->value)) {
+            result->kind = PairValueKind::TableBase;
+            result->value = *table;
+            result->source_table_address_vaddr = tables[*table].table_vaddr;
+          }
+          result_pair = pair;
+        }
       }
     }
   } else if (mnemonic == "s_load_b64" && dst_pair && src0_pair) {
@@ -208,22 +302,29 @@ void transfer_instruction(PairState &state, const Instruction &inst,
       if (base->second.kind == PairValueKind::Address && inst.num_src_operands() >= 2 &&
           inst.src_operand(1) != nullptr && inst.src_operand(1)->encoding_value() == 0) {
         if (const auto table = table_for_got_slot(tables, base->second.value)) {
-          result = PairValue{.kind = PairValueKind::TableBase,
-                             .value = table->first,
-                             .source_getpc_offset = base->second.source_getpc_offset,
-                             .source_address_add_offset = base->second.source_address_add_offset,
-                             .source_table_address_vaddr = table->second};
+          result = PairValue{
+              .kind = PairValueKind::TableBase,
+              .value = table->first,
+              .source_getpc_offset = base->second.source_getpc_offset,
+              .source_address_add_offset = base->second.source_address_add_offset,
+              .source_address_high_add_offset = base->second.source_address_high_add_offset,
+              .source_address_high_inline_word = base->second.source_address_high_inline_word,
+              .pending_low_word = std::nullopt,
+              .pending_high_offset = 0,
+              .source_table_address_vaddr = table->second};
         }
       } else if (base->second.kind == PairValueKind::TableBase) {
         result = base->second;
         result->kind = PairValueKind::TableEntry;
       }
+      if (result)
+        result_pair = dst_pair;
     }
   }
 
   kill_defined_pairs(state, inst);
-  if (dst_pair && result)
-    state[*dst_pair] = *result;
+  if (result_pair && result)
+    state[*result_pair] = *result;
 }
 
 [[nodiscard]] PairState

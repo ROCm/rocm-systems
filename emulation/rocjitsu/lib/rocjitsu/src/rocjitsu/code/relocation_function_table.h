@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -76,8 +77,15 @@ struct RelocationTableDispatch {
   /// Original `.text`-relative offset of the address builder's `s_get_pc_i64`.
   uint64_t source_getpc_offset = 0;
 
-  /// Original `.text`-relative offset of the in-place literal64 address add.
+  /// Original `.text`-relative offset of the literal64 add or split low-half add.
   uint64_t source_address_add_offset = 0;
+
+  /// High-half add for the legacy split-literal form, when present.
+  std::optional<uint64_t> source_address_high_add_offset;
+
+  /// High word encoded inline by the split high-half add, or absent when that
+  /// add carries its own 32-bit literal.
+  std::optional<uint32_t> source_address_high_inline_word;
 
   /// Original non-executable virtual address materialized by getpc plus the literal.
   ///
@@ -87,19 +95,27 @@ struct RelocationTableDispatch {
   uint64_t source_table_address_vaddr = 0;
 };
 
-/// @brief One `s_get_pc_i64` plus literal add that materializes an address.
+/// @brief One `s_get_pc_i64` plus literal add sequence that materializes an address.
 ///
-/// @details The pair is the only way AMDGPU names a non-`.text` address from code, and it is
-/// position-dependent: the literal is the distance from the instruction after the getpc to the
-/// target. DBT relocates bodies, so the getpc observes a different PC and the same literal reaches
-/// a different address. Recording both halves lets the patcher recompute the literal from the
-/// getpc's final placement, which is what keeps the target fixed.
+/// @details Linked AMDGPU code commonly names a non-`.text` address with either a literal64 add or
+/// a legacy low-add/high-add-with-carry pair. Both forms are position-dependent: their literal
+/// value is the distance from the instruction after the getpc to the target. DBT relocates bodies,
+/// so the getpc observes a different PC and unchanged literals reach a different address. Recording
+/// every literal-bearing instruction lets the patcher recompute the delta from the getpc's final
+/// placement, which is what keeps the target fixed.
 struct PcRelativeAddressBuilder {
   /// `.text`-relative offset of the `s_get_pc_i64`.
   uint64_t source_getpc_offset = 0;
 
-  /// `.text`-relative offset of the in-place literal64 address add.
+  /// `.text`-relative offset of the literal64 add or split low-half add.
   uint64_t source_address_add_offset = 0;
+
+  /// `.text`-relative offset of the split high-half add, when present.
+  std::optional<uint64_t> source_address_high_add_offset;
+
+  /// High word encoded inline by the split high-half add, or absent when that
+  /// add carries its own 32-bit literal.
+  std::optional<uint32_t> source_address_high_inline_word;
 
   /// Virtual address the pair produces in the source object.
   uint64_t target_vaddr = 0;

@@ -2739,10 +2739,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   //
   // Relocation addends are discharged by relocate_relative_text_addends(), which already fails
   // closed on an addend it cannot map. What remains is the getpc side, and the denominator has to
-  // be the discovery pass rather than the lattice: the lattice only models the 64-bit-literal add,
-  // while a long-branch expansion builds its address from a split 32-bit pair the lattice never
-  // sees. Requiring the lattice to have matched every discovered builder is what keeps that form
-  // from silently falling outside the claim.
+  // be the independent producer-discovery pass rather than whichever encodings the relocation
+  // lattice happens to recognize. The lattice covers linked-code literal64 and legacy split-add
+  // data builders, but recovery can also encounter compact subtract builders and other forms that
+  // it rewrites as a whole range. Requiring every discovered builder to be discharged by one path
+  // is what keeps an unmodeled form from silently falling outside the claim.
   // The claim below is "every code address THIS OBJECT PRODUCES is relocated", so it is worth
   // nothing unless the object produces some. An object holding no function-pointer table and
   // computing no code address can still reach an indirect transfer -- through a kernarg, or a
@@ -2768,12 +2769,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // Getpc producers whose builder range the recovered-indirect path rewrites.
   //
   // The rewrite lattice is not the only thing that relocates a PC-derived value. A long-branch
-  // expansion -- getpc, split 32-bit add pair, setpc -- is recovered as an indirect transfer, and
-  // the translator rewrites that consumer's whole builder range through pending_builder_fixups and
-  // patch_recovered_builder_fixups. The lattice models only the 64-bit-literal add and deliberately
-  // does not see the split pair, so crediting the lattice alone reports such a producer unaccounted
-  // even though the recovery path leaves nothing stale in it. Teaching the lattice the split form
-  // instead would put two rewriters on one range, which patch_recovered_builder_fixups forbids.
+  // expansion -- getpc, scalar delta arithmetic, setpc -- is recovered as an indirect transfer,
+  // and the translator rewrites that consumer's whole builder range through
+  // pending_builder_fixups and patch_recovered_builder_fixups. The lattice may independently
+  // recognize an add-form builder, but this range still belongs to recovery; the relocation
+  // emission below explicitly excludes it so two rewriters never claim the same bytes.
   std::unordered_set<uint64_t> recovery_rewritten_getpc_offsets;
   for (const auto &block : blocks) {
     if (block == nullptr)
@@ -5100,8 +5100,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         continue;
       const auto getpc = target_offset_by_source_offset.find(dispatch.source_getpc_offset);
       const auto add = target_offset_by_source_offset.find(dispatch.source_address_add_offset);
+      const auto high_add =
+          dispatch.source_address_high_add_offset
+              ? target_offset_by_source_offset.find(*dispatch.source_address_high_add_offset)
+              : target_offset_by_source_offset.end();
       if (getpc == target_offset_by_source_offset.end() ||
-          add == target_offset_by_source_offset.end()) {
+          add == target_offset_by_source_offset.end() ||
+          (dispatch.source_address_high_add_offset &&
+           high_add == target_offset_by_source_offset.end())) {
         append_error(result.diagnostics, DiagnosticKind::Legalization,
                      "relocation-table GOT address builder is not fully present in the relocated "
                      "body",
@@ -5111,6 +5117,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       data_relocations.push_back(
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+           .encoding = dispatch.source_address_high_add_offset
+                           ? PcRelativeDataRelocationEncoding::SplitLiteral32
+                           : PcRelativeDataRelocationEncoding::Literal64,
+           .target_high_literal_offset =
+               dispatch.source_address_high_add_offset && !dispatch.source_address_high_inline_word
+                   ? std::optional<uint64_t>{high_add->second + target_delta + sizeof(uint32_t)}
+                   : std::nullopt,
+           .split_inline_high_word = dispatch.source_address_high_inline_word,
            .source_target_vaddr = dispatch.source_table_address_vaddr});
       patched_address_add_offsets.insert(dispatch.source_address_add_offset);
     }
@@ -5128,11 +5142,22 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         continue;
       const auto getpc = target_offset_by_source_offset.find(builder.source_getpc_offset);
       const auto add = target_offset_by_source_offset.find(builder.source_address_add_offset);
+      const auto high_add =
+          builder.source_address_high_add_offset
+              ? target_offset_by_source_offset.find(*builder.source_address_high_add_offset)
+              : target_offset_by_source_offset.end();
       // A builder outside this scope's emitted blocks belongs to another scope's copy and is
       // rewritten when that scope emits it.
       if (getpc == target_offset_by_source_offset.end() ||
           add == target_offset_by_source_offset.end()) {
         continue;
+      }
+      if (builder.source_address_high_add_offset &&
+          high_add == target_offset_by_source_offset.end()) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "split PC-relative data builder is not fully present in the relocated body",
+                     builder.source_address_add_offset);
+        return leave_unchanged();
       }
       const bool target_is_in_text =
           builder.target_vaddr >= text_vaddr && builder.target_vaddr - text_vaddr < text.size();
@@ -5143,6 +5168,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         data_relocations.push_back(
             {.target_getpc_offset = getpc->second + target_delta,
              .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+             .encoding = builder.source_address_high_add_offset
+                             ? PcRelativeDataRelocationEncoding::SplitLiteral32
+                             : PcRelativeDataRelocationEncoding::Literal64,
+             .target_high_literal_offset =
+                 builder.source_address_high_add_offset && !builder.source_address_high_inline_word
+                     ? std::optional<uint64_t>{high_add->second + target_delta + sizeof(uint32_t)}
+                     : std::nullopt,
+             .split_inline_high_word = builder.source_address_high_inline_word,
              .source_target_vaddr = builder.target_vaddr});
         continue;
       }

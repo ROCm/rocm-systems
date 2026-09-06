@@ -1203,10 +1203,10 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
       }
       replacement_words.push_back(*drain);
     }
-    // Emit the literal64 add form. This builder survives into the output, so a later translation
-    // pass has to be able to account for it, and the relocation lattice models only that encoding
-    // -- it cannot be widened to the compact one, because the patcher writes an eight-byte delta
-    // into the literal slot.
+    // On CDNA5, prefer the literal64 add form. This builder survives into the output, so a later
+    // translation pass has to be able to account for it. Literal64 keeps the full delta writable
+    // in one field; the compact literal32 form cannot be widened in place if relocation later makes
+    // the high half nonzero.
     //
     // Every rewritten builder gets the wide form, not just the ones whose consumer became a
     // window. Which builders still have a consumer on the NEXT pass is not knowable here -- a
@@ -1230,10 +1230,9 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
           TextLayoutFailureCategory::ResourceLimit);
     }
     // The wide form does not always fit a range sized for the compact one. Falling back keeps the
-    // builder correct and keeps objects that translate today translating; what it gives up is
-    // visibility to the lattice, which only matters if an unrecovered indirect transfer also
-    // survives into this object -- and in that case the next pass refuses rather than accepting
-    // something wrong. Widening the range is not available here: the patcher writes in place.
+    // builder correct and keeps objects that translate today translating; what it gives up is the
+    // ability to absorb an arbitrary future high-half change in place. Widening the range is not
+    // available here: the patcher writes in place.
     if ((replacement_words.size() * sizeof(uint32_t)) > recovery_size) {
       replacement_words.resize(replacement_begin);
       if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta)) {

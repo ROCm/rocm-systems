@@ -1088,6 +1088,106 @@ TEST(CodeObjectPatcher, ResolvesAllocatedDataPayloadsAndEndpoints) {
       << "source text takes precedence over a data section ending at the same address";
 }
 
+TEST(BinaryTranslatorE2E, Cdna4RepointsSplitPcRelativeDataBuilderAfterRelocation) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kPair = 8;
+  constexpr uint16_t kLiteral = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+  constexpr size_t kGetpcWord = 8;
+  std::vector<uint32_t> words = {
+      build_s_branch(7, kArch),
+      build_s_endpgm(kArch),
+      build_s_nop(0, kArch),
+      build_s_nop(0, kArch),
+      build_s_nop(0, kArch),
+      build_s_nop(0, kArch),
+      build_s_nop(0, kArch),
+      build_s_nop(0, kArch),
+      build_s_getpc_b64(kPair, kArch),
+      build_s_add_u32(kPair, kPair, kLiteral, kArch),
+      0u, // low literal, filled after locating .rodata.
+      build_s_addc_u32(kPair + 1, kPair + 1, kInlineInt0, kArch),
+      build_s_endpgm(kArch),
+  };
+  const auto section_headers = [](std::span<const uint8_t> image) {
+    Elf64_Ehdr header{};
+    std::memcpy(&header, image.data(), sizeof(header));
+    std::vector<Elf64_Shdr> sections(header.e_shnum);
+    std::memcpy(sections.data(), image.data() + header.e_shoff,
+                sections.size() * sizeof(Elf64_Shdr));
+    return sections;
+  };
+
+  auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto *header = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  header->e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  auto source_sections = section_headers(image);
+  const auto source_text = std::ranges::find_if(source_sections, [](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_EXECINSTR) != 0;
+  });
+  const auto source_data = std::ranges::find_if(source_sections, [](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0 &&
+           section.sh_size != 0;
+  });
+  ASSERT_NE(source_text, source_sections.end());
+  ASSERT_NE(source_data, source_sections.end());
+  const uint64_t source_getpc_result = source_text->sh_addr + (kGetpcWord + 1) * sizeof(uint32_t);
+  const uint64_t source_delta = source_data->sh_addr - source_getpc_result;
+  const uint32_t source_low = static_cast<uint32_t>(source_delta);
+  const uint32_t source_high = static_cast<uint32_t>(source_delta >> 32u);
+  ASSERT_EQ(source_high, 0u) << "the inline high-half operand must represent this delta";
+  std::memcpy(image.data() + source_text->sh_offset + (kGetpcWord + 2) * sizeof(uint32_t),
+              &source_low, sizeof(source_low));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(kArch, kArch, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.dispatchable())
+      << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+
+  auto output_sections = section_headers(result.elf_bytes);
+  const auto output_text = std::ranges::find_if(output_sections, [](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_EXECINSTR) != 0;
+  });
+  const auto output_data = std::ranges::find_if(output_sections, [](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0 &&
+           section.sh_size != 0;
+  });
+  ASSERT_NE(output_text, output_sections.end());
+  ASSERT_NE(output_data, output_sections.end());
+
+  const uint32_t getpc_encoding = build_s_getpc_b64(kPair, kArch);
+  std::optional<size_t> output_getpc_word;
+  for (size_t index = 0; index < output_text->sh_size / sizeof(uint32_t); ++index) {
+    uint32_t word = 0;
+    std::memcpy(&word, result.elf_bytes.data() + output_text->sh_offset + index * sizeof(uint32_t),
+                sizeof(word));
+    if (word == getpc_encoding) {
+      output_getpc_word = index;
+      break;
+    }
+  }
+  ASSERT_TRUE(output_getpc_word.has_value());
+  ASSERT_NE(*output_getpc_word, kGetpcWord) << "the builder must move for this regression test";
+  uint32_t output_low = 0;
+  std::memcpy(&output_low,
+              result.elf_bytes.data() + output_text->sh_offset +
+                  (*output_getpc_word + 2) * sizeof(uint32_t),
+              sizeof(output_low));
+  uint32_t output_high_add = 0;
+  std::memcpy(&output_high_add,
+              result.elf_bytes.data() + output_text->sh_offset +
+                  (*output_getpc_word + 3) * sizeof(uint32_t),
+              sizeof(output_high_add));
+  EXPECT_EQ(output_high_add, build_s_addc_u32(kPair + 1, kPair + 1, kInlineInt0, kArch));
+  const uint64_t output_delta = output_low;
+  const uint64_t output_getpc_result =
+      output_text->sh_addr + (*output_getpc_word + 1) * sizeof(uint32_t);
+  EXPECT_EQ(output_getpc_result + output_delta, output_data->sh_addr);
+  EXPECT_NE(output_low, source_low) << "moving the builder must change its PC-relative delta";
+}
+
 class RewriteDischargeBoundTestInstruction final : public Instruction {
 public:
   explicit RewriteDischargeBoundTestInstruction(size_t word_count)

@@ -1744,10 +1744,18 @@ bool CodeObjectPatcher::replace_text(
   std::vector<ResolvedDataRelocation> resolved_data_relocations;
   resolved_data_relocations.reserve(data_relocations.size());
   for (const PcRelativeDataRelocation &relocation : data_relocations) {
+    const bool split = relocation.encoding == PcRelativeDataRelocationEncoding::SplitLiteral32;
+    const uint64_t low_literal_size = split ? sizeof(uint32_t) : sizeof(uint64_t);
     if (relocation.target_getpc_offset > new_text.size() ||
         sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
         relocation.target_literal_offset > new_text.size() ||
-        sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
+        low_literal_size > new_text.size() - relocation.target_literal_offset ||
+        (!split && (relocation.target_high_literal_offset || relocation.split_inline_high_word)) ||
+        (split && (relocation.target_high_literal_offset.has_value() ==
+                   relocation.split_inline_high_word.has_value())) ||
+        (relocation.target_high_literal_offset &&
+         (*relocation.target_high_literal_offset > new_text.size() ||
+          sizeof(uint32_t) > new_text.size() - *relocation.target_high_literal_offset))) {
       return false;
     }
     const auto target =
@@ -1863,8 +1871,21 @@ bool CodeObjectPatcher::replace_text(
     const uint64_t getpc_result =
         text_header.sh_addr + resolved.relocation.target_getpc_offset + sizeof(uint32_t);
     const uint64_t delta = target_vaddr - getpc_result;
-    std::memcpy(image.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
-                sizeof(delta));
+    if (resolved.relocation.encoding == PcRelativeDataRelocationEncoding::Literal64) {
+      std::memcpy(image.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
+                  sizeof(delta));
+      continue;
+    }
+    const uint32_t low = static_cast<uint32_t>(delta);
+    const uint32_t high = static_cast<uint32_t>(delta >> 32u);
+    std::memcpy(image.data() + text_offset_ + resolved.relocation.target_literal_offset, &low,
+                sizeof(low));
+    if (resolved.relocation.target_high_literal_offset) {
+      std::memcpy(image.data() + text_offset_ + *resolved.relocation.target_high_literal_offset,
+                  &high, sizeof(high));
+    } else if (high != *resolved.relocation.split_inline_high_word) {
+      return false;
+    }
   }
 
   // A code target needs no section lookup: both ends are offsets in the text just written, so the

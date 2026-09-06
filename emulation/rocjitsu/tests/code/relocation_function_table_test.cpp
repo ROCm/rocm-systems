@@ -5,6 +5,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
@@ -458,8 +459,12 @@ TEST(RelocationFunctionTable, PatcherRetargetsRelativeTextAddends) {
       TextOffsetRelocation{.source_offset = 12, .target_offset = 20},
   };
   constexpr std::array<PcRelativeDataRelocation, 1> data_mappings = {
-      PcRelativeDataRelocation{
-          .target_getpc_offset = 0, .target_literal_offset = 8, .source_target_vaddr = 0x3000},
+      PcRelativeDataRelocation{.target_getpc_offset = 0,
+                               .target_literal_offset = 8,
+                               .encoding = PcRelativeDataRelocationEncoding::Literal64,
+                               .target_high_literal_offset = std::nullopt,
+                               .split_inline_high_word = std::nullopt,
+                               .source_target_vaddr = 0x3000},
   };
   const auto bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
@@ -483,6 +488,39 @@ TEST(RelocationFunctionTable, PatcherRetargetsRelativeTextAddends) {
   std::memcpy(&relocated_got_delta, patched.data() + patcher.text_offset() + 8,
               sizeof(relocated_got_delta));
   EXPECT_EQ(relocated_got_delta, 0x2004u);
+}
+
+TEST(RelocationFunctionTable, PatcherRetargetsSplitPcRelativeDataAdd) {
+  const auto image = make_relocation_function_table_elf();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+
+  const std::array<uint32_t, 6> expanded_text = {0xbf800000u, 0u,          0xbf800000u,
+                                                 0u,          0xbf800000u, 0xbf800000u};
+  constexpr std::array<TextOffsetRelocation, 2> mappings = {
+      TextOffsetRelocation{.source_offset = 4, .target_offset = 8},
+      TextOffsetRelocation{.source_offset = 12, .target_offset = 20},
+  };
+  constexpr std::array<PcRelativeDataRelocation, 1> data_mappings = {
+      PcRelativeDataRelocation{.target_getpc_offset = 0,
+                               .target_literal_offset = sizeof(uint32_t),
+                               .encoding = PcRelativeDataRelocationEncoding::SplitLiteral32,
+                               .target_high_literal_offset = 3 * sizeof(uint32_t),
+                               .split_inline_high_word = std::nullopt,
+                               .source_target_vaddr = 0x3000},
+  };
+  const auto bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
+  ASSERT_TRUE(patcher.replace_text(bytes, mappings, data_mappings));
+
+  const auto patched = patcher.emit();
+  uint32_t low = 0;
+  uint32_t high = 0;
+  std::memcpy(&low, patched.data() + patcher.text_offset() + sizeof(uint32_t), sizeof(low));
+  std::memcpy(&high, patched.data() + patcher.text_offset() + 3 * sizeof(uint32_t), sizeof(high));
+  EXPECT_EQ(low, 0x2004u);
+  EXPECT_EQ(high, 0u);
 }
 
 TEST(RelocationFunctionTable, PatcherRejectsRelativeTextAddendWithoutExactOffsetMap) {
@@ -588,6 +626,39 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
             analysis.address_builders[0].source_address_add_offset);
   EXPECT_EQ(table_free_analysis.address_builders[0].target_vaddr,
             analysis.address_builders[0].target_vaddr);
+}
+
+TEST(RelocationFunctionTable, DiscoversLegacySplitPcRelativeDataBuilder) {
+  constexpr uint16_t kPair = 8;
+  constexpr uint16_t kLiteral = 255;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::array<uint32_t, 6> words = {
+      build_s_getpc_b64(kPair, kArch),
+      build_s_add_u32(kPair, kPair, kLiteral, kArch),
+      0xfffff7fcu,
+      build_s_addc_u32(kPair + 1, kPair + 1, kLiteral, kArch),
+      0xffffffffu,
+      build_s_endpgm(kArch),
+  };
+  auto image = make_relocation_function_table_elf(words);
+  auto *header = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  header->e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 0> leaders{};
+  const auto blocks = build_valid_blocks(object, *decoder, kArch, leaders);
+  const auto analysis = analyze_relocation_pairs(blocks, {}, 0x1000);
+
+  ASSERT_EQ(analysis.address_builders.size(), 1u);
+  const PcRelativeAddressBuilder &builder = analysis.address_builders.front();
+  EXPECT_EQ(builder.source_getpc_offset, 0u);
+  EXPECT_EQ(builder.source_address_add_offset, sizeof(uint32_t));
+  EXPECT_EQ(builder.source_address_high_add_offset, 3 * sizeof(uint32_t));
+  EXPECT_FALSE(builder.source_address_high_inline_word.has_value());
+  EXPECT_EQ(builder.target_vaddr, 0x800u);
 }
 
 TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
