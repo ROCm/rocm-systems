@@ -240,10 +240,21 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         ROCPROFILER_CALL(rocprofiler_stop_context(agent_ctx), "stopping context");
 
+        struct parse_state_t
+        {
+            uint32_t current_sdata          = 0;
+            size_t   realtime_count         = 0;
+            int64_t  prev_shader_clock      = 0;
+            uint64_t prev_realtime_clock    = 0;
+            bool     monotonicity_violation = false;
+        };
+
         auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                         void*                                          events,
                         uint64_t                                       num_events,
                         void*                                          userdata) {
+            auto& state = *static_cast<parse_state_t*>(userdata);
+
             if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
             {
                 auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
@@ -253,41 +264,63 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
             {
-                auto& current_sdata = *static_cast<uint32_t*>(userdata);
-
                 auto* sdata = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
                 for(size_t i = 0; i < num_events; i++)
                 {
                     // Ignoring the last token because it may have been cutoff
-                    if(i != num_events - 1 && sdata[i].value < current_sdata)
+                    if(i != num_events - 1 && sdata[i].value < state.current_sdata)
                     {
                         std::cerr << i << " Error: Invalid sdata value " << sdata[i].value << " vs "
-                                  << current_sdata << std::endl;
+                                  << state.current_sdata << std::endl;
                         abort();
                     }
-                    current_sdata = sdata[i].value;
+                    state.current_sdata = sdata[i].value;
                 }
+            }
+            else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME)
+            {
+                auto* realtime = static_cast<rocprofiler_thread_trace_decoder_realtime_t*>(events);
+                for(size_t i = 0; i < num_events; ++i)
+                {
+                    if(realtime[i].shader_clock < state.prev_shader_clock ||
+                       realtime[i].realtime_clock < state.prev_realtime_clock)
+                        state.monotonicity_violation = true;
+
+                    state.prev_shader_clock   = realtime[i].shader_clock;
+                    state.prev_realtime_clock = realtime[i].realtime_clock;
+                }
+                state.realtime_count += num_events;
             }
         };
 
-        size_t total_size = 0;
+        auto*  expect_periodic_realtime = std::getenv("EXPECT_PERIODIC_REALTIME");
+        size_t total_size               = 0;
         for(auto& output_buffer : *agent_buffers)
         {
             auto   lk          = std::unique_lock{output_buffer.reorder_mut};
             auto&  buffer      = output_buffer.output_buffer;
             size_t output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
 
-            size_t current_byte = 0;
+            size_t current_byte          = 0;
+            size_t realtime_max_per_pass = 0;
             for(auto& end_byte : output_buffer.end_chunks)
             {
-                uint32_t current_sdata = 0;
-                char*    ptr           = buffer.data() + current_byte;
-                size_t   cur_size      = std::min(end_byte, output_size) - current_byte;
+                parse_state_t state{};
+                char*         ptr      = buffer.data() + current_byte;
+                size_t        cur_size = std::min(end_byte, output_size) - current_byte;
 
-                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata);
-                current_byte = end_byte;
+                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &state);
+                if(state.monotonicity_violation)
+                    throw std::runtime_error("Realtime records were not monotonic");
+
+                current_byte          = end_byte;
+                realtime_max_per_pass = std::max(realtime_max_per_pass, state.realtime_count);
             }
             total_size += output_size;
+
+            if(expect_periodic_realtime && atoi(expect_periodic_realtime) != 0 &&
+               output_buffer.next_expected_chunk >= 2 && realtime_max_per_pass <= 2)
+                throw std::runtime_error("Expected periodic realtime records");
 
             output_buffer.next_expected_chunk = 0;
             output_buffer.end_chunks          = {};
