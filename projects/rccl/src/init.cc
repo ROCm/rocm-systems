@@ -715,6 +715,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->nRanks = ndev;
   comm->pxnDisable = RCCL_VALUE_UNSET;
   comm->p2pNetChunkSize = RCCL_VALUE_UNSET;
+  comm->p2pAlltoAllNetChunkSize = RCCL_VALUE_UNSET;
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
@@ -1316,7 +1317,17 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     comm->sharedRes->tpP2pChunkSize = comm->p2pChunkSize;
   }
 
-  INFO(NCCL_INIT, "P2P Chunksize set to %d", comm->p2pChunkSize);
+  // AllToAll tracks p2pChunkSize by default (every comm gets a valid value), and is only
+  // capped to a smaller *net* chunk size multi-node on specific hardware (e.g. AINIC/gfx950).
+  comm->p2pAlltoAllChunkSize = comm->p2pChunkSize;
+  if (comm->nNodes > 1) {
+    int a2a = RCCL_VALUE_UNSET;
+    rcclSetP2pAlltoAllChunkSize(comm, a2a);
+    if (a2a > RCCL_VALUE_INVALID) comm->p2pAlltoAllChunkSize = a2a;
+  }
+
+  INFO(NCCL_INIT, "P2P Chunksize set to %d, AllToAll P2P Chunksize set to %d",
+       comm->p2pChunkSize, comm->p2pAlltoAllChunkSize);
   return ncclSuccess;
 }
 

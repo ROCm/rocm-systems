@@ -752,6 +752,7 @@ struct ncclComm {
   // Buffer sizes
   int buffSizes[NCCL_NUM_PROTOCOLS];
   int p2pChunkSize;
+  int p2pAlltoAllChunkSize;
   int nvlsChunkSize;
 
   // Cross-clique P2P: when true, use global rank for IPC buffer indexing
@@ -958,9 +959,9 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
-  int
-    pxnDisable; // per-comm PXN-disable cache: RCCL_VALUE_UNSET uninit, RCCL_VALUE_INVALID = arch/env override, otherwise 0/1
-  int p2pNetChunkSize; // per-comm P2P NET chunk size cache: RCCL_VALUE_UNSET uninit
+  int pxnDisable;  // per-comm PXN-disable cache: RCCL_VALUE_UNSET uninit, RCCL_VALUE_INVALID = arch/env override, otherwise 0/1
+  int p2pNetChunkSize;  // per-comm P2P NET chunk size cache: RCCL_VALUE_UNSET uninit
+  int p2pAlltoAllNetChunkSize;  // per-comm AllToAll P2P net chunk size cache: RCCL_VALUE_UNSET uninit, RCCL_VALUE_INVALID = no override
   // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]

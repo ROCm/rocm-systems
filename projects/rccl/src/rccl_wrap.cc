@@ -1411,7 +1411,10 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
     return;
   }
-  const int ranksThreshold = (archGfx942) ? 64 : 32;
+  // On gfx950 the default PXN-on threshold is 32 ranks, but on the AINIC RoCE path
+  // enabling PXN at 32 ranks collapses AllToAll BW at >=256MB (net proxy contention).
+  // Match the gfx942 threshold (64) for AINIC/gfx950 so PXN stays off at 32 ranks.
+  const int ranksThreshold = (archGfx942 || (archGfx950 && rcclUseAinic())) ? 64 : 32;
   int pxnDisable = (comm->nRanks >= ranksThreshold) ? 0 : 1;
   INFO(NCCL_INIT, "RCCL PXN set as %s (nRanks=%d threshold=%d)", !pxnDisable ? "enabled" : "disabled", comm->nRanks,
        ranksThreshold);
@@ -1443,6 +1446,27 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+void rcclSetP2pAlltoAllChunkSize(struct ncclComm* comm, int& rcclP2pAlltoAllChunkSize) {
+  if (comm->p2pAlltoAllNetChunkSize != RCCL_VALUE_UNSET) {
+    rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize;
+    return;
+  }
+
+  // Auto-tune only on AINIC/gfx950, and only when the user has not pinned the global P2P
+  // net chunk size via NCCL_P2P_NET_CHUNKSIZE (which then takes precedence).
+  const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if (!archGfx950 || !rcclUseAinic() || inputStr) {
+    rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize = RCCL_VALUE_INVALID;
+    return;
+  }
+
+  comm->p2pAlltoAllNetChunkSize = (1 << 17);
+  rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize;
+  INFO(NCCL_INIT, "RCCL AllToAll P2P net chunk size set to %d for AINIC/gfx950",
+       comm->p2pAlltoAllNetChunkSize);
+}
+
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
