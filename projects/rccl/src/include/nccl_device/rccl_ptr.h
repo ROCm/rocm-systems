@@ -56,11 +56,14 @@ typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
 
-// Observed on gfx1250: with a cuMem/VMM comm FIFO the LL/LL128 flag poll does not
-// observe peer writes under a non-temporal load, but does under scope:SCOPE_SYS.
-// Restricted to gfx1250, the only arch measured. Following up with HIP/compilers.
+// Observed on gfx1250: sibling DPX P2P into a cacheable comm FIFO is not
+// coherent under plain/nontemporal load or store. Default hipMalloc and
+// cuMem/VMM hung; uncached (hipDeviceMallocUncached) did not. System-scope
+// b128 load *and* store both observe the peer. Restricted to gfx1250, the
+// only arch measured. Following up with HIP/compilers.
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && defined(__gfx1250__)
-#define RCCL_LL_FIFO_SYS_SCOPE_LOAD 1
+#define RCCL_LL_FIFO_SYS_SCOPE 1
 #else
-#define RCCL_LL_FIFO_SYS_SCOPE_LOAD 0
+#define RCCL_LL_FIFO_SYS_SCOPE 0
 #endif
+#define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE
