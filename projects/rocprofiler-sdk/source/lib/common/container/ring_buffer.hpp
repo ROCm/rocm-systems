@@ -133,7 +133,7 @@ struct ring_buffer
     std::string as_string() const;
 
     /// save the entire buffer to a filestream
-    void save(std::fstream& _fs);
+    bool save(std::fstream& _fs);
 
     /// load the entire buffer from a filestream
     void load(std::fstream& _fs);

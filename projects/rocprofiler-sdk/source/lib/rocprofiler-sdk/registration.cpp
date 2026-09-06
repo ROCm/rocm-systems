@@ -876,7 +876,9 @@ invoke_client_attaches()
         return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
-    auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto ret              = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto attached_clients = std::vector<client_library*>{};
+
     for(auto& itr : *get_clients())
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_attach)
@@ -886,11 +888,43 @@ invoke_client_attaches()
             ROCP_INFO << fmt::format(
                 "Client {} is attaching... Number of contexts: {}", itr->name, _contexts.size());
 
-            itr->configure_attach_result->tool_attach(nullptr,
-                                                      _contexts.data(),
-                                                      _contexts.size(),
-                                                      itr->configure_attach_result->tool_data);
+            auto attach_status = itr->configure_attach_result->tool_attach(
+                nullptr,
+                _contexts.data(),
+                _contexts.size(),
+                itr->configure_attach_result->tool_data);
 
+            if(attach_status != 0)
+            {
+                ROCP_ERROR << fmt::format(
+                    "Client {} failed to attach with status {}", itr->name, attach_status);
+
+                for(auto* prev : attached_clients)
+                {
+                    if(!prev || !prev->configure_attach_result ||
+                       !prev->configure_attach_result->tool_detach)
+                        continue;
+
+                    context::stop_client_contexts(prev->internal_client_id);
+                    hsa::async_copy_sync();
+                    hsa::queue_controller_sync();
+                    pc_sampling::service_sync(prev->internal_client_id);
+
+                    auto _fini_status = get_fini_status();
+                    if(_fini_status == 0) set_fini_status(-1);
+                    prev->configure_attach_result->tool_detach(
+                        prev->configure_attach_result->tool_data);
+                    if(_fini_status == 0) set_fini_status(_fini_status);
+                    context::deactivate_client_contexts(prev->internal_client_id);
+                }
+
+                if(get_attach_status())
+                    get_attach_status()->is_attached.store(false, std::memory_order_release);
+
+                return ROCPROFILER_STATUS_ERROR;
+            }
+
+            attached_clients.emplace_back(&(*itr));
             ret = ROCPROFILER_STATUS_SUCCESS;
         }
         else if(itr)

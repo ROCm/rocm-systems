@@ -2112,9 +2112,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
     }
 
-    if(!serialized_records.empty())
+    if(!serialized_records.empty() && counter_record.write(serialized_records))
     {
-        counter_record.write(serialized_records);
         tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
     }
 }
@@ -2262,9 +2261,8 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                 _counter_id, records[count]->value, records[count]->timestamp, records[count]->id});
         }
 
-        if(!serialized_records.empty())
+        if(!serialized_records.empty() && counter_record.write(serialized_records))
         {
-            counter_record.write(serialized_records);
             tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
         }
     }
@@ -2826,6 +2824,12 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "support changing the set of enabled tracing services between initial load and attach. "
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
+
+    if(auto err = tool::prepare_required_storage(tool::get_config()))
+    {
+        ROCP_ERROR << "Attach aborted: required profiling storage is unavailable: " << *err;
+        return -1;
+    }
 
     assign_attach_output_session_suffix();
 
