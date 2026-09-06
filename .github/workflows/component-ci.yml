@@ -1,0 +1,84 @@
+name: Component CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        type: string
+        description: "Space-separated list of jobs to run, or 'all'. ex: 'nvidia wsl hip-contract-tests'"
+        default: "all"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches:
+      - develop
+      - release/therock-*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: "Configure CI"
+    runs-on: ubuntu-24.04
+    env:
+      BASE_REF: HEAD^
+    outputs:
+      nvidia: ${{ steps.configure.outputs.nvidia }}
+      wsl: ${{ steps.configure.outputs.wsl }}
+      hip-contract-tests: ${{ steps.configure.outputs.hip-contract-tests }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed components
+        id: configure
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_DISPATCH_JOBS: ${{ inputs.jobs }}
+        run: python .github/scripts/configure_component_ci.py
+
+  nvidia-build:
+    name: "NVIDIA"
+    needs: changes
+    if: ${{ needs.changes.outputs.nvidia == 'true' }}
+    uses: ./.github/workflows/hip-nvidia-ci.yml
+
+  wsl:
+    name: "WSL"
+    needs: changes
+    if: ${{ needs.changes.outputs.wsl == 'true' }}
+    uses: ./.github/workflows/rocr-runtime-wsl.yml
+
+  hip-contract-tests:
+    name: "HIP contract tests"
+    needs: changes
+    if: ${{ needs.changes.outputs.hip-contract-tests == 'true' }}
+    uses: ./.github/workflows/hip-contract-coverage.yml
+
+  component-ci-summary:
+    name: "Component CI Summary"
+    if: always()
+    needs: [changes, nvidia, wsl, hip-contract-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result != "success" and .result != "skipped")) | keys | join(",")'
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi
