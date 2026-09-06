@@ -53,7 +53,9 @@ include(GoogleTest)
 # would abort the process before main(); keeping these tests out of that library
 # lets them run on GPU-less CI and satisfy the unit-test gate anywhere. Uses
 # gtest_main since it needs no custom setup.
-add_executable(${RDC_CODEC_TESTS} ${SRC_DIR}/test_entity_codec.cc ${SRC_DIR}/test_afid_field.cc)
+add_executable(
+    ${RDC_CODEC_TESTS} ${SRC_DIR}/test_entity_codec.cc ${SRC_DIR}/test_afid_field.cc
+                       ${SRC_DIR}/test_cu_occupancy_field.cc)
 target_include_directories(
     ${RDC_CODEC_TESTS}
     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include
