@@ -93,13 +93,15 @@ static inline bool rcclIsGfx120x(char const* arch) {
   return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
 }
 
-int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+int32_t rcclGetProtoForGfx12(char const* arch, ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
+  // gfx1200/gfx1201 use a tuned AllReduce cutoff; all other gfx12 variants use the generic value
+  int allReduceCutoff = rcclIsGfx120x(arch) ? 16384 : 913532;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
                                /*ncclFuncReduce*/ 8192,
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
-                               /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncAllReduce*/ allReduceCutoff,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -135,9 +137,9 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && rcclIsGfx120x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12")) {
     if (comm->nNodes == 1) {
-      info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
+      info->protocol = rcclGetProtoForGfx12(comm->topo->nodes[GPU].nodes[0].gpu.gcn, info->func, sizePerRank);
     }
     const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
     if (str) {
