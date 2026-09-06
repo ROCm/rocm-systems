@@ -2273,6 +2273,18 @@ static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq
     return false;
 }
 
+// Translate, and if nothing in the archive covers the address, back a
+// sidecar-declared segment and translate into that — what the whole-pointer
+// kernel-argument path already does. A copy can be the first touch of an
+// allocation HIP never saw, and dispatch_event advances the region timeline
+// before every handler precisely so that memcpys see the same view as a launch.
+static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
+    void* live = ctx.translate_ptr(rec_addr);
+    if (!live && rec_addr != 0 && ctx.regions_enabled)
+        live = ctx.regions.materialize_for(ctx, rec_addr);
+    return live;
+}
+
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
@@ -2280,7 +2292,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    void*      dst = ctx.translate_ptr(dst_rec);
+    void*      dst = translate_or_materialize(ctx, dst_rec);
     hipError_t r   = hipSuccess;
 
 
@@ -2314,7 +2326,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             r = hrr_sync_after_replayed_h2d(ctx, "replayed H2D memcpy");
         }
     } else if (kind == hipMemcpyDeviceToDevice) {
-        void* src = ctx.translate_ptr(src_rec);
+        void* src = translate_or_materialize(ctx, src_rec);
         if (!dst) fprintf(stderr, "[HRR] D2D dst 0x%llx not mapped\n", (unsigned long long)dst_rec);
         if (!src) fprintf(stderr, "[HRR] D2D src 0x%llx not mapped\n", (unsigned long long)src_rec);
         if (dst && src) {
@@ -2341,7 +2353,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
         // D2H validation: copy from live device src into a local host buffer,
         // then compare against the expected data blob captured at record time.
         ctx.d2h_attempted++;
-        void* src_dev = ctx.translate_ptr(src_rec);
+        void* src_dev = translate_or_materialize(ctx, src_rec);
         if (!src_dev) {
             fprintf(stderr, "[HRR] D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);

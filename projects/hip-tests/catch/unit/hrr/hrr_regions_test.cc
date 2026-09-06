@@ -35,6 +35,11 @@
 #include "hrr_regions.h"
 #include "hrr_reader.h"
 
+#if defined(HRR_HAVE_HSA)
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#endif
+
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -270,6 +275,158 @@ TEST_CASE("Unit_HRR_Regions_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipFree(probe));
   HIP_CHECK(hipFree(seg));
 }
+
+// ===========================================================================
+// A memcpy whose destination HIP never saw.
+//
+// Every other bypassed-allocation case in this file fakes the address: the
+// workload passes `probe + kProbeFarOff`, which nothing allocated, and no
+// thread dereferences it. That trick cannot be reused for a memcpy, because a
+// memcpy has to *succeed at capture* for the event to be recorded at all. The
+// memory therefore has to genuinely exist while genuinely being invisible to
+// HRR, which means a real allocation made below the HIP API.
+//
+// HSA is that allocator. A coarse-grained device pool gives a buffer the GPU
+// can reach, allocated through a path the HIP dispatch table never sees, so
+// nothing in the archive can explain the address — exactly the property the
+// assertion needs.
+// ===========================================================================
+
+#if defined(HRR_HAVE_HSA)
+namespace {
+
+constexpr size_t kHsaSegBytes = 256 * 1024;
+
+// The coarse-grained global pool of the first GPU agent, plus every agent in
+// the system. Access has to be granted to all of them, not just the owning GPU:
+// the copy HIP issues is serviced by a DMA engine, and on an unshared coarse
+// grained allocation that engine faults exactly like a stray kernel would.
+struct HsaTarget {
+  hsa_agent_t gpu{};
+  hsa_amd_memory_pool_t pool{};
+  std::vector<hsa_agent_t> all_agents;
+  bool ok = false;
+};
+
+hsa_status_t hrr_find_pool(hsa_amd_memory_pool_t pool, void* data) {
+  hsa_amd_segment_t segment{};
+  if (hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
+                                   &segment) != HSA_STATUS_SUCCESS ||
+      segment != HSA_AMD_SEGMENT_GLOBAL)
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t flags = 0;
+  if (hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+                                   &flags) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  bool alloc_allowed = false;
+  if (hsa_amd_memory_pool_get_info(
+          pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
+          &alloc_allowed) != HSA_STATUS_SUCCESS ||
+      !alloc_allowed)
+    return HSA_STATUS_SUCCESS;
+
+  // Coarse-grained: device-local, not host-coherent. What hipMalloc would give
+  // us, had it been asked.
+  if (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) {
+    *static_cast<hsa_amd_memory_pool_t*>(data) = pool;
+    return HSA_STATUS_INFO_BREAK;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t hrr_visit_agent(hsa_agent_t agent, void* data) {
+  auto* target = static_cast<HsaTarget*>(data);
+  target->all_agents.push_back(agent);
+
+  hsa_device_type_t type{};
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) !=
+          HSA_STATUS_SUCCESS ||
+      type != HSA_DEVICE_TYPE_GPU)
+    return HSA_STATUS_SUCCESS;
+  if (target->ok) return HSA_STATUS_SUCCESS;  // keep collecting agents
+
+  hsa_amd_memory_pool_t pool{};
+  hsa_amd_agent_iterate_memory_pools(agent, hrr_find_pool, &pool);
+  if (pool.handle == 0) return HSA_STATUS_SUCCESS;
+
+  target->gpu  = agent;
+  target->pool = pool;
+  target->ok   = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+// hsa_init is reference counted and HIP has already initialised HSA in this
+// process, so this attaches to the running runtime rather than starting one.
+HsaTarget hrr_hsa_target() {
+  HsaTarget target;
+  if (hsa_init() != HSA_STATUS_SUCCESS) return target;
+  hsa_iterate_agents(hrr_visit_agent, &target);
+  return target;
+}
+
+}  // namespace
+
+// The marker the parent parses out of the child's stdout. An HSA address
+// appears in no hipMalloc record, so find_alloc_base cannot recover it and the
+// child has to say where it put the buffer.
+#define HRR_HSA_SEG_MARKER "HRR_HSA_SEG"
+
+TEST_CASE("Unit_HRR_Regions_MemcpyDirect", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  HsaTarget target = hrr_hsa_target();
+  if (!target.ok) {
+    printf("%s none 0\n", HRR_HSA_SEG_MARKER);
+    fflush(stdout);
+    return;
+  }
+
+  void* seg = nullptr;
+  if (hsa_amd_memory_pool_allocate(target.pool, kHsaSegBytes, 0, &seg) !=
+          HSA_STATUS_SUCCESS ||
+      seg == nullptr) {
+    printf("%s none 0\n", HRR_HSA_SEG_MARKER);
+    fflush(stdout);
+    return;
+  }
+  // Without this the copy faults at capture instead of being recorded, and the
+  // test would then be measuring a broken workload rather than the replay.
+  REQUIRE(hsa_amd_agents_allow_access(
+              static_cast<uint32_t>(target.all_agents.size()),
+              target.all_agents.data(), nullptr, seg) == HSA_STATUS_SUCCESS);
+
+  printf("%s 0x%llx %zu\n", HRR_HSA_SEG_MARKER,
+         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(seg)),
+         kHsaSegBytes);
+  fflush(stdout);
+
+  std::vector<uint8_t> host(kHsaSegBytes);
+  for (size_t i = 0; i < host.size(); ++i)
+    host[i] = static_cast<uint8_t>(i * 7 + 1);
+
+  // The first and only touch of `seg`. Deliberately not passed to any kernel:
+  // a kernel argument would let the existing whole-pointer materialisation
+  // resolve it, and the test would then pass with or without the memcpy fix.
+  HIP_CHECK(hipMemcpy(seg, host.data(), kHsaSegBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // A companion hipMalloc plus a D2H copy back, so the roundtrip has something
+  // the replay can compare byte for byte.
+  char* known = nullptr;
+  HIP_CHECK(hipMalloc(&known, kHsaSegBytes));
+  HIP_CHECK(hipMemcpy(known, seg, kHsaSegBytes, hipMemcpyDeviceToDevice));
+  std::vector<uint8_t> back(kHsaSegBytes, 0);
+  HIP_CHECK(hipMemcpy(back.data(), known, kHsaSegBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(back[0] == host[0]);
+  REQUIRE(back[kHsaSegBytes - 1] == host[kHsaSegBytes - 1]);
+
+  HIP_CHECK(hipFree(known));
+  REQUIRE(hsa_amd_memory_pool_free(seg) == HSA_STATUS_SUCCESS);
+}
+#endif  // HRR_HAVE_HSA
 
 // ---------------------------------------------------------------------------
 // Synthetic producer
@@ -628,6 +785,93 @@ TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
   CHECK(rc == 0);
   CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// A memcpy is the first touch of a bypassed segment.
+//
+// Region materialisation used to be wired into kernel-argument translation
+// only, so a sidecar-declared allocation whose first touch was a captured copy
+// failed as unmapped in the memcpy handler before materialisation could run.
+// That contradicted the promise made above `advance_to` in `dispatch_event`,
+// which says the region timeline is advanced there so that memcpys and every
+// other handler see the same view: the advance was shared, the materialisation
+// was not.
+//
+// The destination here is HSA memory, so unlike the other bypass tests the
+// address is not a fabricated one — it is a real buffer the dispatch table
+// genuinely never saw, and the sidecar is the only thing that can explain it.
+// ---------------------------------------------------------------------------
+#if defined(HRR_HAVE_HSA)
+namespace {
+
+// Capture a hidden workload, keeping the child's stdout. The HSA base cannot be
+// recovered from the archive the way find_alloc_base recovers a hipMalloc, so
+// the child reports it and the parent reads it here.
+inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
+    const std::string& direct_case, const fs::path& cap_path) {
+  std::string out;
+  { hip::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"" + direct_case + "\"");
+    out = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << out);
+    REQUIRE(ret == 0); }
+
+  const size_t at = out.find(HRR_HSA_SEG_MARKER);
+  if (at == std::string::npos) return {0, 0};
+  unsigned long long base = 0, size = 0;
+  if (sscanf(out.c_str() + at, HRR_HSA_SEG_MARKER " 0x%llx %llu", &base,
+             &size) != 2)
+    return {0, 0};
+  return {base, size};
+}
+
+}  // namespace
+
+TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[.][hrr]") {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_regions_memcpy.hrr");
+  auto [hsa_base, hsa_size] =
+      hrr_capture_direct_hsa("Unit_HRR_Regions_MemcpyDirect", cap.path);
+
+  if (hsa_base == 0 || hsa_size == 0) {
+    WARN("No HSA agent with a coarse-grained pool on this platform; "
+         "skipping the memcpy-first-touch assertions for this run");
+    return;
+  }
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  // The whole test rests on this address being unexplainable from the archive.
+  if (covered_by_recorded_alloc(archive, hsa_base)) {
+    WARN("A recorded allocation covers the HSA segment; "
+         "skipping the memcpy-first-touch assertions for this run");
+    return;
+  }
+
+  SECTION("without an annotation the copy destination is unmapped") {
+    auto [rc, out] = hrr_playback_merged(archive);
+    INFO("Unannotated replay:\n" << out);
+    CHECK(out.find("not mapped") != std::string::npos);
+    CHECK(out.find("Region segs") == std::string::npos);
+  }
+
+  SECTION("a SEGMENT annotation is materialised on the memcpy path") {
+    install_sidecar(archive, {
+        region_rec(HRR_REGION_ADD, HRR_REGION_SEGMENT, hsa_base, hsa_size),
+    });
+
+    auto [rc, out] = hrr_playback_merged(archive);
+    INFO("Annotated replay:\n" << out);
+    CHECK(rc == 0);
+    // Before the memcpy path learned to materialise, this line was absent
+    // entirely: translate_ptr failed and the handler gave up before the
+    // sidecar was ever consulted.
+    CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
+    CHECK(out.find("not mapped") == std::string::npos);
+  }
+}
+#endif  // HRR_HAVE_HSA
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
 
