@@ -651,9 +651,10 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
         useSysfs = true;
       } else if (runtimeLayout == amdSmiFabricRuntimeLayout::ExtendedUnion) {
-        // Classified by write extent, not by any version field; RCCL does not read the v2 payload.
-        WARN("AMD SMI fabric: the loaded library uses the extended fabric union, which RCCL does not read yet; "
-             "falling back to sysfs");
+        // A 256-byte extent is what amd_smi 27.x produces, but the probe measures the extent, not
+        // the library, so the warning reports what was seen rather than asserting an identity.
+        WARN("AMD SMI fabric: the loaded library wrote only the v1 payload and left reserved untouched; "
+             "RCCL does not read that layout directly, falling back to sysfs");
         useSysfs = true;
       } else if (!layoutsAgree) {
         WARN("AMD SMI fabric: ABI mismatch, RCCL was built for the %s layout, but the loaded library uses the %s "
