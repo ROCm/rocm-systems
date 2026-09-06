@@ -1968,6 +1968,20 @@ struct PendingCodeRelocation {
   return true;
 }
 
+/// @brief Descriptor resource floor required by canonical address-taken bodies.
+///
+/// @details A canonical body can be entered by any kernel in the object. Its hosting scope
+/// discovers semantic resource requirements while lowering, after the other kernel descriptors may
+/// already have been translated. Retaining the largest absolute requirement lets the object-level
+/// commit reconcile every possible caller before materialization.
+struct CanonicalDescriptorResourceFloor {
+  uint32_t vgprs = 0;
+  uint32_t sgprs = 0;
+  uint32_t private_bytes = 0;
+
+  [[nodiscard]] bool empty() const { return vgprs == 0 && sgprs == 0 && private_bytes == 0; }
+};
+
 /// @brief What one scope added to the three code-address containers, so a skipped scope can take
 /// it back.
 ///
@@ -1983,10 +1997,10 @@ struct ScopeRelocationCheckpoint {
   // contributes nothing. The companion is_sidecar entry is restored with it so a later scope
   // compares against the variant that really nominated the canonical copy.
   std::vector<uint64_t> canonical_variant_conflicts_added;
-  // The resource verdict is set before descriptor recomputation, which can still skip the scope.
-  // Rolling the placements back without also restoring this would leave a skipped host's verdict
-  // standing and refuse the object over a scope that no longer contributes anything.
-  bool canonical_host_outgrew_its_descriptor = false;
+  // The resource floor is raised before descriptor recomputation, which can still skip the scope.
+  // Rolling the placements back without also restoring it would grow descriptors for a canonical
+  // body whose host no longer contributes anything.
+  CanonicalDescriptorResourceFloor canonical_resource_floor;
 };
 
 /// @brief The object-level state a scope appends to, gathered so capture and rollback name one
@@ -2001,7 +2015,7 @@ struct ObjectRollbackState {
   std::unordered_map<uint64_t, uint64_t> &canonical_placement;
   std::unordered_map<uint64_t, bool> &canonical_placement_is_sidecar;
   std::unordered_set<uint64_t> &canonical_placement_variant_conflict;
-  bool &canonical_host_outgrew_its_descriptor;
+  CanonicalDescriptorResourceFloor &canonical_resource_floor;
   std::vector<KdTranslation> &descriptor_translations;
 };
 
@@ -2034,8 +2048,7 @@ struct ScopeTransaction {
                         .pending_code_relocations_begin = state.pending_code_relocations.size(),
                         .canonical_placements_added = {},
                         .canonical_variant_conflicts_added = {},
-                        .canonical_host_outgrew_its_descriptor =
-                            state.canonical_host_outgrew_its_descriptor}};
+                        .canonical_resource_floor = state.canonical_resource_floor}};
   }
 
   /// @brief Return every container to its captured state.
@@ -2059,7 +2072,7 @@ struct ScopeTransaction {
     }
     for (const uint64_t conflicted : relocations.canonical_variant_conflicts_added)
       state.canonical_placement_variant_conflict.erase(conflicted);
-    state.canonical_host_outgrew_its_descriptor = relocations.canonical_host_outgrew_its_descriptor;
+    state.canonical_resource_floor = relocations.canonical_resource_floor;
     for (const DescriptorVariantCheckpoint &saved : descriptors) {
       if (saved.index >= state.descriptor_translations.size())
         return false;
@@ -3383,9 +3396,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   std::unordered_map<uint64_t, bool> canonical_placement_is_sidecar;
   std::unordered_set<uint64_t> canonical_placement_variant_conflict;
 
-  // Set when a scope hosting a canonical copy had to grow its own descriptor to lower it. See the
-  // assignment for why that combination cannot be made safe from inside the scope loop.
-  bool canonical_host_outgrew_its_descriptor = false;
+  // Resource growth discovered while lowering canonical address-taken bodies. It is reconciled
+  // across every possible caller after all scopes have finished.
+  CanonicalDescriptorResourceFloor canonical_resource_floor;
   // Set when an unresolved indirect transfer was admitted only because every code address this
   // object produces is relocated. That argument also covers addresses arriving from outside, which
   // reach `.text` through a symbol, so while it is in force no `.text` symbol may keep its source
@@ -3405,7 +3418,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       .canonical_placement = canonical_placement,
       .canonical_placement_is_sidecar = canonical_placement_is_sidecar,
       .canonical_placement_variant_conflict = canonical_placement_variant_conflict,
-      .canonical_host_outgrew_its_descriptor = canonical_host_outgrew_its_descriptor,
+      .canonical_resource_floor = canonical_resource_floor,
       .descriptor_translations = descriptor_translations};
 
   auto fail_or_skip_kernel = [&](const KernelTranslationScope &scope, KernelFailure failure,
@@ -4223,8 +4236,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // expansion with no reachable island even though the fallback was
         // planned before emission.
         if (needs_branch_island_fallback() && !preserve_generated_branch_island_pools &&
-            it != block->instructions().begin() &&
-            std::next(it) != block->instructions().end() &&
+            it != block->instructions().begin() && std::next(it) != block->instructions().end() &&
             kernel_text.size() >= next_branch_island_pool_offset) {
           append_direct_branch_island_pool(kernel_text, layout, host_arch_);
           next_branch_island_pool_offset =
@@ -5392,23 +5404,30 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
 
     // Only this scope's descriptor is grown from the values above, but a canonical copy this scope
-    // hosts is entered through a pointer any kernel can dereference. If lowering that copy needed
-    // resources beyond what this descriptor started with, another kernel would enter it under a
-    // budget that was never raised. Nothing here can raise that kernel's descriptor -- it may
-    // already be translated, and its own recompute happens inside its own scope -- so record the
-    // condition and refuse below rather than emit a descriptor that under-provisions a real caller.
+    // hosts is entered through a pointer any kernel can dereference. Retain each resource that grew
+    // as an absolute object-wide floor; after every scope is placed, all possible callers are
+    // recomputed against those floors.
     //
     // Only a resource the target descriptor actually encodes can under-provision a caller. On
     // GFX10+ the wavefront SGPR count is a reserved field, so the decoded 8 is the granule-0
     // artifact rather than a budget, and a long-branch thunk needing an SGPR pair above it raises
     // nothing and starves nobody. VGPR and private are encoded on every target and still count.
-    if (!transaction.relocations.canonical_placements_added.empty() &&
-        (kernel_context.required_vgpr_count > kernel_context.num_vgprs ||
-         (arch_descriptor_encodes_sgpr_allocation(host_arch_) &&
-          kernel_context.required_sgpr_count > kernel_context.num_sgprs) ||
-         kernel_context.required_private_segment_fixed_size >
-             kernel_context.private_segment_fixed_size)) {
-      canonical_host_outgrew_its_descriptor = true;
+    if (!transaction.relocations.canonical_placements_added.empty()) {
+      if (kernel_context.required_vgpr_count > kernel_context.num_vgprs) {
+        canonical_resource_floor.vgprs =
+            std::max(canonical_resource_floor.vgprs, kernel_context.required_vgpr_count);
+      }
+      if (arch_descriptor_encodes_sgpr_allocation(host_arch_) &&
+          kernel_context.required_sgpr_count > kernel_context.num_sgprs) {
+        canonical_resource_floor.sgprs =
+            std::max(canonical_resource_floor.sgprs, kernel_context.required_sgpr_count);
+      }
+      if (kernel_context.required_private_segment_fixed_size >
+          kernel_context.private_segment_fixed_size) {
+        canonical_resource_floor.private_bytes =
+            std::max(canonical_resource_floor.private_bytes,
+                     kernel_context.required_private_segment_fixed_size);
+      }
     }
 
     if (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
@@ -5536,15 +5555,73 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }
   }
 
-  // A canonical copy is reached through a pointer, so any kernel in the object is a possible
-  // caller, but only the hosting scope's descriptor was grown to cover it. One kernel scope means
-  // the host is the only caller and the grown descriptor already covers it.
-  if (canonical_host_outgrew_its_descriptor && scopes.size() > 1) {
-    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                 "a body reached through a code address needs resources beyond its hosting "
-                 "kernel's descriptor, which would under-provision every other kernel that can "
-                 "reach it");
-    return leave_unchanged();
+  // A canonical copy is reached through a pointer, so every non-skipped kernel in the object is a
+  // possible caller. Recompute their descriptors now that lowering has exposed the canonical
+  // body's complete resource floor. This turns the former fail-closed gap into the same monotonic
+  // descriptor feedback used for an ordinary kernel-local body.
+  if (!canonical_resource_floor.empty() && scopes.size() > 1) {
+    for (KdTranslation &translation : descriptor_translations) {
+      if (translation.skipped)
+        continue;
+      const uint32_t required_vgprs =
+          std::max(translation.target_vgpr_count, canonical_resource_floor.vgprs);
+      const uint32_t required_sgprs =
+          std::max(translation.target_sgpr_count, canonical_resource_floor.sgprs);
+      const uint32_t required_private =
+          std::max(translation.target_private_size, canonical_resource_floor.private_bytes);
+      if (required_vgprs == translation.target_vgpr_count &&
+          required_sgprs == translation.target_sgpr_count &&
+          required_private == translation.target_private_size) {
+        continue;
+      }
+
+      rocr::llvm::amdhsa::kernel_descriptor_t source_descriptor{};
+      static_assert(sizeof(source_descriptor) == 64, "kernel descriptor snapshot size mismatch");
+      std::memcpy(&source_descriptor, translation.source_descriptor_bytes.data(),
+                  sizeof(source_descriptor));
+      const uint32_t source_private = source_descriptor.private_segment_fixed_size;
+      KernelDescriptorTranslationOptions descriptor_options;
+      descriptor_options.minimum_vgprs = required_vgprs;
+      descriptor_options.minimum_sgprs = required_sgprs;
+      descriptor_options.private_segment_fixed_size_addend = required_private - source_private;
+      descriptor_options.virtualize_lds = translation.needs_lds_overflow_buf;
+      descriptor_options.allow_oversized_lds =
+          can_emit_sidecar_descriptors && !translation.needs_lds_overflow_buf;
+      descriptor_options.allow_oversized_register_allocation =
+          options_.preserve_source_descriptor_resources && guest_arch_ == host_arch_;
+
+      auto updated = descriptor_translator.translate_descriptor(
+          patcher.image_bytes(), translation.descriptor_file_offset, translation.entry_text_offset,
+          descriptor_options);
+      if (!updated) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical-body resource propagation could not recompute a caller "
+                     "descriptor",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
+      updated->kernel_name = translation.kernel_name;
+      updated->sidecar_descriptor = translation.sidecar_descriptor;
+      updated->virtual_lds_lowering = translation.virtual_lds_lowering;
+      if (!updated->supported) {
+        append_diagnostics(result.diagnostics, updated->diagnostics);
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical-body resource propagation exceeds a caller descriptor's "
+                     "representable resources",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
+      append_diagnostics(result.diagnostics, updated->diagnostics);
+      if (updated->prologue_words != translation.prologue_words) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical-body resource propagation changed an emitted kernel prologue",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
+      updated->target_entry_text_offset = translation.target_entry_text_offset;
+      updated->target_body_entry_text_offset = translation.target_body_entry_text_offset;
+      translation = std::move(*updated);
+    }
   }
 
   if (!resolve_pending_code_relocations(pending_code_relocations, text_relocations,

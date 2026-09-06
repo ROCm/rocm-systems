@@ -4823,13 +4823,15 @@ constexpr uint32_t kOversizedGroupSegmentBytes = 105600u;
 /// @param oversized_kernel0_lds Give kernel 0 more static LDS than the host can dispatch, so its
 /// scope gains a sidecar variant and the two variants disagree about the helper they both emit.
 [[nodiscard]] std::vector<uint8_t>
-make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
+make_shared_address_taken_helper_image(bool oversized_kernel0_lds, bool called_by_kernels = true) {
   const std::vector<uint32_t> words = {
       // word 0: kernel 0 entry, calls the helper at word 4.
-      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4),
+      called_by_kernels ? build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4)
+                        : build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // word 1
       // word 2: kernel 1 entry, calls the same helper.
-      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4),
+      called_by_kernels ? build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4)
+                        : build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                             // word 3
       build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                             // word 4: helper entry
       build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // word 5: helper return
@@ -4926,6 +4928,48 @@ TEST(BinaryTranslatorE2E, AgreeingScopesResolveAnAddressTakenCloneThroughCanonic
   ASSERT_GE(*addend, text_vaddr);
   EXPECT_EQ(*addend - text_vaddr, clones.front())
       << "the stored pointer names the canonical clone, not the caller-local one";
+}
+
+TEST(BinaryTranslatorE2E, CanonicalBodyResourceGrowthPropagatesToEveryPossibleCaller) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto image = make_shared_address_taken_helper_image(
+      /*oversized_kernel0_lds=*/false, /*called_by_kernels=*/false);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  constexpr uint32_t kRequiredOrdinarySgprs = 32;
+  const uint32_t target_nop = build_s_nop(1, ROCJITSU_CODE_ARCH_CDNA3);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != kSharedHelperEntryWord * sizeof(uint32_t))
+          return std::nullopt;
+        return InstructionRewrite{.prefix_words = {target_nop},
+                                  .replacement_words = std::nullopt,
+                                  .markers = {},
+                                  .source_size = 0,
+                                  .required_ordinary_sgpr_count = kRequiredOrdinarySgprs,
+                                  .preserved_source_span_byte_offset = std::nullopt};
+      });
+
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *rodata = find_section(translated, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), 2u * kKernelDescriptorSize);
+  const auto first = read_kernel_descriptor_for_test(rodata->data());
+  const auto second = read_kernel_descriptor_for_test(rodata->data() + kKernelDescriptorSize);
+  const uint32_t first_sgpr_granule =
+      AMDHSA_BITS_GET(first.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  const uint32_t second_sgpr_granule =
+      AMDHSA_BITS_GET(second.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  EXPECT_GT(first_sgpr_granule, 0u);
+  EXPECT_EQ(second_sgpr_granule, first_sgpr_granule)
+      << "the kernel that did not host the adopted body must still provision its code";
 }
 
 TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
