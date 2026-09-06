@@ -651,7 +651,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
         useSysfs = true;
       } else if (runtimeLayout == amdSmiFabricRuntimeLayout::ExtendedUnion) {
-        // RCCL does not read v2, and this library reports v1 through a version we do not yet accept.
+        // Classified by write extent, not by any version field; RCCL does not read the v2 payload.
         WARN("AMD SMI fabric: the loaded library uses the extended fabric union, which RCCL does not read yet; "
              "falling back to sysfs");
         useSysfs = true;

@@ -589,6 +589,7 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
 // Must cover the declared struct: amdSmiFabricInfoBufferAsInfo casts the array to amdsmi_fabric_info_t*.
+// No slack past that, so on a non-extended header the detector's top window is empty and sees no over-write.
 constexpr size_t kAmdSmiFabricInfoBufferSize =
   kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
 
@@ -603,7 +604,7 @@ enum class amdSmiFabricRuntimeLayout {
   Unknown,
 };
 
-// Zero the request header so the probe asks what the per-device call asks; a canary fabric_version selects nothing.
+// Zero the request header so the probe sends the same bytes the per-device call sends.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
   memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
