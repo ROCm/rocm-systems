@@ -12,6 +12,26 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
 
+/**
+ * \brief Describes FP8 interpretation
+ */
+typedef enum __hip_fp8_interpretation_t {
+  __HIP_E4M3 = 0,      /**< OCP E4M3 */
+  __HIP_E5M2 = 1,      /**< OCP E5M2 */
+  __HIP_E4M3_FNUZ = 2, /**< Standard FP8 */
+  __HIP_E5M2_FNUZ = 3, /**< BF8 */
+} __hip_fp8_interpretation_t;
+typedef enum __hip_saturation_t {
+  __HIP_NOSAT = 0,     /**< No saturation */
+  __HIP_SATFINITE = 1, /**< Saturate to finite */
+} __hip_saturation_t;
+
+typedef unsigned char __hip_fp8_storage_t;      /**< type to store single fp8 number */
+typedef unsigned short int __hip_fp8x2_storage_t; /**< type to store two fp8 numbers */
+typedef unsigned int __hip_fp8x4_storage_t;     /**< type to store four fp8 numbers */
+
+#if defined(__cplusplus)
+
 #if (defined(__gfx942__) || defined(__gfx1200__) || defined(__gfx1201__) ||                        \
      defined(__gfx950__) || defined (__gfx1250__)) &&                                              \
     __HIP_DEVICE_COMPILE__
@@ -99,45 +119,6 @@ static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 static_assert(sizeof(unsigned char) == 1, "");
 static_assert(sizeof(unsigned short int) == 2, "");
 static_assert(sizeof(unsigned int) == 4, "");
-
-/**
- * \brief Describes FP8 interpretation
- */
-enum __hip_fp8_interpretation_t {
-  __HIP_E4M3 = 0,      /**< OCP E4M3 */
-  __HIP_E5M2 = 1,      /**< OCP E5M2 */
-  __HIP_E4M3_FNUZ = 2, /**< Standard FP8*/
-  __HIP_E5M2_FNUZ = 3, /**< BF8 */
-};
-
-/**
- * \brief Describes saturation behavior
- */
-enum __hip_saturation_t {
-  __HIP_NOSAT = 0,     /**< No saturation */
-  __HIP_SATFINITE = 1, /**< Saturate to finite */
-};
-
-/** \typedef __hip_fp8_storage_t
- *
- * \brief type to store single fp8 number
- */
-typedef unsigned char __hip_fp8_storage_t;
-
-
-/** \typedef __hip_fp8x2_storage_t
- *
- * \brief type to store two fp8 numbers
- */
-typedef unsigned short int __hip_fp8x2_storage_t;
-
-
-/** \typedef __hip_fp8x4_storage_t
- *
- * \brief type to store four fp8 numbers
- */
-typedef unsigned int __hip_fp8x4_storage_t;
-
 
 namespace internal {
 
@@ -3506,4 +3487,5 @@ struct __hip_fp8x4_e5m2 {
 }
 ;
 #endif  // ENABLE_OCP_HIPRTC
+#endif  // defined(__cplusplus)
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_

@@ -90,6 +90,30 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_
 
+#if defined(__cplusplus)
+#define __HIP_BF16_RAW_ALIGN(x) alignas(x)
+#else
+#define __HIP_BF16_RAW_ALIGN(x) __attribute__((aligned(x)))
+#endif
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_RAW
+ * \brief represents raw bfloat16 type
+ */
+typedef struct __HIP_BF16_RAW_ALIGN(2) {
+  unsigned short x;
+} __hip_bfloat16_raw;
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_RAW
+ * \brief represents raw bfloat16x2 vector type
+ */
+typedef struct __HIP_BF16_RAW_ALIGN(4) {
+  unsigned short x;
+  unsigned short y;
+} __hip_bfloat162_raw;
+#undef __HIP_BF16_RAW_ALIGN
+
+#if defined(__cplusplus)
+
 #if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include "amd_hip_vector_types.h"  // float2 etc
@@ -135,23 +159,6 @@ static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
 static_assert(sizeof(unsigned short) == 2, "size of unsigned short should be 2 bytes");
 static_assert(sizeof(__bf16) == sizeof(unsigned short));
-
-/**
- * \ingroup HIP_INTRINSIC_BFLOAT16_RAW
- * \brief represents raw bfloat16 type
- */
-typedef struct __attribute__((aligned(2))) {
-  unsigned short x;
-} __hip_bfloat16_raw;
-
-/**
- * \ingroup HIP_INTRINSIC_BFLOAT162_RAW
- * \brief represents raw bfloat16x2 vector type
- */
-typedef struct __attribute__((aligned(4))) {
-  unsigned short x;
-  unsigned short y;
-} __hip_bfloat162_raw;
 
 /**
  * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT
@@ -1992,4 +1999,5 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
 #endif
 #endif
 #pragma pop_macro("MAYBE_UNDEF")
+#endif  // defined(__cplusplus)
 #endif

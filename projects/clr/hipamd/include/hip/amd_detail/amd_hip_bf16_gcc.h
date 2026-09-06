@@ -25,14 +25,8 @@
 
 static_assert(sizeof(unsigned short) == 2);
 
-typedef struct ALIGN_IT(2) {
-  unsigned short x;
-} __hip_bfloat16_raw;
-
-typedef struct ALIGN_IT(4) {
-  unsigned short x;
-  unsigned short y;
-} __hip_bfloat162_raw;
+// __hip_bfloat16_raw / __hip_bfloat162_raw are defined by the including
+// amd_hip_bf16.h (this header is only included from there).
 
 static inline __hip_bfloat16_raw __hip_float_to_bfloat_cvt(float in) {
 #if HIP_GNUC_BF16_TYPE
