@@ -20,18 +20,9 @@ find_package(
     PATHS "${ROCM_PATH}"
     PATH_SUFFIXES "llvm/lib/cmake/clang")
 
-# Set the HIP language runtime link flags as FindHIP does not set them.
 set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
-set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
-
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
-set(CMAKE_HIP_ARCHITECTURES OFF)
-if(NOT DEFINED HIP_ROOT_DIR)
-    set(HIP_ROOT_DIR "${CMAKE_INSTALL_PREFIX}")
-endif()
-find_package(HIP REQUIRED MODULE)
+find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+enable_language(HIP)
 
 # Enable CLANG-TIDY for static analysis search for clang-tidy
 find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
@@ -57,7 +48,8 @@ function(rocprofiler_featuretests_profiler_add_test _TARGET)
 endfunction()
 
 function(rocprofiler_featuretests_profiler_add_executable _TARGET)
-    hip_add_executable(${_TARGET} ${ARGN})
+    add_executable(${_TARGET} ${ARGN})
+    target_link_libraries(${_TARGET} PRIVATE hip::device)
     rocprofiler_featuretests_profiler_add_test(${_TARGET})
 endfunction()
 
@@ -76,8 +68,7 @@ foreach(file ${files})
 endforeach()
 
 # Compile Applications hip_helloworld
-set_source_files_properties(apps/hello_world_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
-                                                                1)
+set_source_files_properties(apps/hello_world_hip.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(hip_helloworld apps/hello_world_hip.cpp)
 set_target_properties(
     hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -91,8 +82,7 @@ install(
         COMPONENT tests)
 
 # hip_vectoradd
-set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
-                                                               1)
+set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
 set_target_properties(
     hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -119,7 +109,7 @@ endif()
 
 if(USE_MPI)
     set_source_files_properties(apps/vector_add_mpi.cpp
-                                PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                                PROPERTIES LANGUAGE HIP)
     rocprofiler_featuretests_profiler_add_executable(mpi_vectoradd
                                                      apps/vector_add_mpi.cpp)
     set_target_properties(
@@ -153,7 +143,7 @@ endif()
 
 # if(USE_OpenMP)
 #     set_source_files_properties(apps/hello_world_omp.cpp
-#                                 PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+#                                 PROPERTIES LANGUAGE HIP)
 #     rocprofiler_featuretests_profiler_add_executable(openmp_helloworld
 #                                                      apps/hello_world_omp.cpp)
 #     set_target_properties(
@@ -173,7 +163,7 @@ endif()
 # endif()
 
 # pmc correctness vectoradd
-set_source_files_properties(apps/vectoradd.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(apps/vectoradd.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(pmc_vectoradd apps/vectoradd.cpp)
 set_target_properties(
     pmc_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -187,7 +177,7 @@ install(
         COMPONENT tests)
 
 # pmc correctness hstogram
-set_source_files_properties(apps/histogram.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(apps/histogram.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(pmc_histogram apps/histogram.cpp)
 set_target_properties(
     pmc_histogram PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -201,7 +191,7 @@ install(
         COMPONENT tests)
 
 # pmc correctness transpose
-set_source_files_properties(apps/transpose.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(apps/transpose.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(pmc_transpose apps/transpose.cpp)
 set_target_properties(
     pmc_transpose PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -215,7 +205,7 @@ install(
         COMPONENT tests)
 
 # ATT correctness vectoradd
-set_source_files_properties(apps/att_vectoradd.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(apps/att_vectoradd.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(att_vectoradd apps/att_vectoradd.cpp)
 set_target_properties(
     att_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -229,8 +219,7 @@ install(
         COMPONENT tests)
 
 # hsa-mem_async_copy -- Not Enabled for Now
-set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
-                                                               1)
+set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(hsa_async_mem_copy
                                                  apps/async_mem_copy.cpp)
 set_target_properties(
@@ -263,7 +252,7 @@ set(GTEST_MAIN_DIR ${PROJECT_SOURCE_DIR}/tests-v2/featuretests)
 file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/gtests_main.cpp)
 
 set_source_files_properties(apps/multithreaded_testapp.cpp
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                            PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_profiler_add_executable(
     multithreaded_testapp apps/multithreaded_testapp.cpp ../utils/test_utils.cpp)
 target_include_directories(
@@ -347,8 +336,9 @@ set(runFeatureTests_SOURCES
     profiler_gtest.cpp apps/hip_kernels.cpp ${GTEST_MAIN_SRC_FILE} ${CORE_HSA_SRC_FILES}
     ${CORE_HW_SRC_FILES} ${CORE_UTILS_SRC_FILES} ${TEST_UTILS_SRC_FILES})
 
-set_source_files_properties(apps/hip_kernels.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(runFeatureTests ${runFeatureTests_SOURCES})
+set_source_files_properties(apps/hip_kernels.cpp PROPERTIES LANGUAGE HIP)
+add_executable(runFeatureTests ${runFeatureTests_SOURCES})
+target_link_libraries(runFeatureTests PRIVATE hip::device)
 
 # link MPI and OpenMP to runFeatureTests for visibility
 if(USE_MPI)
