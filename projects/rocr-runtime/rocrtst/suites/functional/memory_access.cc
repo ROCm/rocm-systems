@@ -225,10 +225,25 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
+    // Create the executable, get symbol by name and load the code object.
+    // This must happen before the kernarg buffer is allocated so that the
+    // kernel's kernarg segment size is known.
+    set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+    set_kernel_name("gpuReadWrite");
+    err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
     // Allocate the kernel argument buffer from the kernarg_pool.
-    err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+    // The kernel's kernarg segment is larger than the explicit arguments: it
+    // also holds the hidden arguments (global offsets, printf buffer, ...).
+    // Allocate the full segment reported by the code object and zero it, so
+    // the hidden arguments are not read back as stale kernarg pool contents.
+    const size_t kernarg_buf_size =
+        std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+    err = hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                         reinterpret_cast<void **>(&kernArgs));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    memset(kernArgs, 0, kernarg_buf_size);
 
     // initialize the host buffers
     for (int i = 0; i < kMemoryAllocSize; ++i) {
@@ -268,12 +283,6 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     kernArgs->b = cpuResult;  // system memory passed to gpu for write
     kernArgs->c = gpuResult;  // gpu memory to verify that gpu read system data
 
-
-    // Create the executable, get symbol by name and load the code object
-    set_kernel_file_name("gpuReadWrite_kernels.hsaco");
-    set_kernel_name("gpuReadWrite");
-    err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // Fill the dispatch packet with
     // workgroup_size, grid_size, kernelArgs and completion signal
@@ -604,10 +613,24 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
                                             &kernarg_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
+  // - create kernel object for dispatch.  This must happen before the kernarg
+  // buffer is allocated so that the kernel's kernarg segment size is known.
+  set_kernel_file_name("vector_copy_kernels.hsaco");
+  set_kernel_name("vector_copy");
+  err = rocrtst::LoadKernelFromObjFile(this, &gpus[0]);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
   // Allocate the kernel argument buffer from the kernarg_pool.
-  err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  // The kernel's kernarg segment is larger than the explicit arguments: it
+  // also holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment reported by the code object and zero it, so
+  // the hidden arguments are not read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+  err = hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                       reinterpret_cast<void **>(&k_Args));
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);  
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  memset(k_Args, 0, kernarg_buf_size);
 
   err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, k_Args);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
@@ -638,12 +661,6 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   // - Place Dispatch packet into the queue
   hsa_kernel_dispatch_packet_t dispatch_pkt;
   memset(&dispatch_pkt, 0, sizeof(dispatch_pkt));
-
-  // - create kernel object for dispatch
-  set_kernel_file_name("vector_copy_kernels.hsaco");
-  set_kernel_name("vector_copy");
-  err = rocrtst::LoadKernelFromObjFile(this, &gpus[0]);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // initialize aql packet
   dispatch_pkt.workgroup_size_x = 256;

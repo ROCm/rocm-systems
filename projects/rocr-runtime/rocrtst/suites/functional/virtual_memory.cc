@@ -854,9 +854,23 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
 
   ASSERT_SUCCESS(hsa_amd_vmem_set_access(dev_data, sizeof(*dev_data), permsAccess, 2));
 
+  // Create the executable, get symbol by name and load the code object.
+  // This must happen before the kernarg buffer is allocated so that the
+  // kernel's kernarg segment size is known.
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
+
   // Allocate the kernel argument buffer from the kernarg_pool.
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  // The kernel's kernarg segment is larger than the explicit arguments: it
+  // also holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment reported by the code object and zero it, so
+  // the hidden arguments are not read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                               reinterpret_cast<void**>(&kernArgsVirt)));
+  memset(kernArgsVirt, 0, kernarg_buf_size);
 
   // initialize the host buffers
   for (int i = 0; i < kMemoryAllocSize; ++i) {
@@ -873,11 +887,6 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
   kernArgsVirt->a = host_data->data;
   kernArgsVirt->b = host_data->result;  // system memory passed to gpu for write
   kernArgsVirt->c = dev_data->result;   // gpu memory to verify that gpu read system data
-
-  // Create the executable, get symbol by name and load the code object
-  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
-  set_kernel_name("gpuReadWrite");
-  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
 
   // Fill the dispatch packet with
   // workgroup_size, grid_size, kernelArgs and completion signal
@@ -1097,9 +1106,23 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
   ASSERT_SUCCESS(
       hsa_amd_vmem_set_access(dev_data, sizeof(*dev_data), permsAccess, ARRAY_SIZE(permsAccess)));
 
+  // Create the executable, get symbol by name and load the code object.
+  // This must happen before the kernarg buffer is allocated so that the
+  // kernel's kernarg segment size is known.
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
+
   // Allocate the kernel argument buffer from the kernarg_pool.
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  // The kernel's kernarg segment is larger than the explicit arguments: it
+  // also holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment reported by the code object and zero it, so
+  // the hidden arguments are not read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                               reinterpret_cast<void**>(&kernArgsVirt)));
+  memset(kernArgsVirt, 0, kernarg_buf_size);
 
   // create completion signal
   ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
@@ -1126,11 +1149,6 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
   kernArgsVirt->a = dev_data->data;
   kernArgsVirt->b = host_data->gpuWrite;  // system memory passed to gpu for write
   kernArgsVirt->c = dev_data->result;     // gpu memory to verify that gpu read system data
-
-  // Create the executable, get symbol by name and load the code object
-  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
-  set_kernel_name("gpuReadWrite");
-  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
 
   // Fill the dispatch packet with
   // workgroup_size, grid_size, kernelArgs and completion signal
@@ -1597,19 +1615,27 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
     host_data[i] = i;
   }
 
-  // Allocate kernel arguments
+  // Load kernel.  This must happen before the kernarg buffer is allocated so
+  // that the kernel's kernarg segment size is known.
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
+
+  // Allocate kernel arguments.
+  // The kernel's kernarg segment is larger than the explicit arguments: it
+  // also holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment reported by the code object and zero it, so
+  // the hidden arguments are not read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
   args_t* kernArgs = nullptr;
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                               reinterpret_cast<void**>(&kernArgs)));
+  memset(kernArgs, 0, kernarg_buf_size);
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArgs));
 
   // Create completion signal
   ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
-
-  // Load kernel
-  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
-  set_kernel_name("gpuReadWrite");
-  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
 
   // Setup kernel args to write to addr1
   kernArgs->a = host_data;
@@ -2414,10 +2440,23 @@ void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_ag
   memset(vmem_data->output, 0, sizeof(vmem_data->output));
   memset(host_data->result, 0, sizeof(host_data->result));
 
-  // Allocate kernel arguments
+  // Load the kernel.  This must happen before the kernarg buffer is allocated
+  // so that the kernel's kernarg segment size is known.
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpu_agent));
+
+  // Allocate kernel arguments.
+  // The kernel's kernarg segment is larger than the explicit arguments: it
+  // also holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment reported by the code object and zero it, so
+  // the hidden arguments are not read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
   args_t* kernArgs = nullptr;
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
                                               reinterpret_cast<void**>(&kernArgs)));
+  memset(kernArgs, 0, kernarg_buf_size);
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpu_agent, NULL, kernArgs));
 
   // Kernel: c[i] = a[i]; b[i] = i;
@@ -2427,11 +2466,6 @@ void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_ag
   kernArgs->a = vmem_data->input;
   kernArgs->b = vmem_data->output;
   kernArgs->c = host_data->result;
-
-  // Load the kernel
-  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
-  set_kernel_name("gpuReadWrite");
-  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpu_agent));
 
   // Create completion signal
   hsa_signal_t signal = {0};
