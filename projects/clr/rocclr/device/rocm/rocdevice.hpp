@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 /*! \addtogroup HSA
@@ -57,6 +58,7 @@ class Memory;
 class Resource;
 class VirtualDevice;
 class PrintfDbg;
+class AbceEngineSet;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
@@ -444,10 +446,9 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
-  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
-  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
-  //! Returns -1 if the agent is not one of the enumerated agents.
-  static int agentGlobalIndex(hsa_agent_t agent);
+  //! Returns the KFD topology node ID cached when the HSA agents were enumerated.
+  //! Returns UINT32_MAX if the agent was not enumerated.
+  static uint32_t agentDriverNodeId(hsa_agent_t agent);
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
@@ -628,6 +629,9 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! Host stores to this device's memory come over PCIe through HDP and must be flushed before
+  //! the device can observe them (HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH)
+  bool PcieStoresNeedFlush() const { return pcie_stores_need_flush_; }
   //! AQL completion signal handles carry hints the CP firmware decodes
   bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
@@ -793,6 +797,12 @@ class Device : public NullDevice {
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
   }
+  //! Lazily created device-owned ABCE engine set, or nullptr when disabled/unsupported.
+  AbceEngineSet* abceEngineSet() const { return abce_engine_set_.get(); }
+  //! As above, but brings the engine set up if this is the first caller. Needed
+  //! by clients that reach ABCE without going through a stream, which is what
+  //! otherwise triggers creation.
+  AbceEngineSet* getOrCreateAbceEngineSet();
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
   //! Adds a kernel to the kernel map
@@ -850,6 +860,7 @@ class Device : public NullDevice {
   static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
+  static std::unordered_map<uint64_t, uint32_t> agent_driver_node_ids_;
   uint32_t preferred_numa_node_;
   std::vector<hsa_agent_t> p2p_agents_;   //!< List of P2P agents available for this device
   mutable std::mutex lock_allow_access_;  //!< To serialize allow_access calls
@@ -980,6 +991,11 @@ class Device : public NullDevice {
     void ReleaseEngine(VirtualGPU* vgpu);
   };
   mutable SdmaEngineAllocator sdma_engine_allocator_;
+
+  //! Device-owned ABCE engine set (host SDMA rings + shared orchestrator).
+  //! Null unless DEBUG_CLR_ENABLE_ABCE is set and the runtime supports it.
+  std::once_flag abce_engine_set_once_;
+  std::unique_ptr<AbceEngineSet> abce_engine_set_;
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

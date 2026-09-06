@@ -67,6 +67,7 @@ target_sources(amdhip64 PRIVATE
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
+  hip_copy_engine.cpp
   hip_device_runtime.cpp
   hip_device.cpp
   hip_error.cpp
@@ -101,6 +102,11 @@ target_sources(amdhip64 PRIVATE
   hip_library.cpp
   profiler/hip_clr_profiler.cpp
   profiler/hip_clr_dispatch_wrappers.cpp)
+
+# hip_copy_engine.cpp reaches ABCE's device-view types through rocabce.hpp.
+target_include_directories(
+  amdhip64 PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../runtimes/api-headers/include/abce)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
