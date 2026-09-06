@@ -581,54 +581,68 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto first_load_segment = std::min_element(
-        elf.load_segments.begin(), elf.load_segments.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.p_vaddr < rhs.p_vaddr;
-        });
-    if(first_load_segment == elf.load_segments.end())
+    // Derive a bias from every (mapping, PT_LOAD segment) pair instead of
+    // assuming mappings.front() corresponds to the lowest-p_vaddr segment, and
+    // keep a candidate only if it accounts for every file-backed PT_LOAD
+    // segment rather than just the one it came from. Each such segment is still
+    // required to have its own maps entry whose start and file offset match the
+    // candidate exactly; segments sharing one merged VMA are not handled.
+    auto segment_is_mapped_at_bias = [&](const Elf64_Phdr& segment, uint64_t bias) {
+        if(segment.p_filesz == 0) return true;
+
+        auto segment_file_page    = align_down(segment.p_offset, page_size);
+        auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
+        if(!segment_file_page || !segment_virtual_page) return false;
+
+        auto expected_start = checked_add(bias, *segment_virtual_page);
+        if(!expected_start) return false;
+
+        return std::any_of(
+            object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
+                return mapping.start == *expected_start &&
+                       mapping.file_offset == *segment_file_page;
+            });
+    };
+
+    auto candidates = std::vector<uint64_t>{};
+    for(const auto& mapping : object.mappings)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF has no PT_LOAD segments: "
-                   << object.path;
-        return std::nullopt;
+        for(const auto& segment : elf.load_segments)
+        {
+            if(segment.p_filesz == 0) continue;
+
+            auto segment_file_page = align_down(segment.p_offset, page_size);
+            if(!segment_file_page || mapping.file_offset != *segment_file_page) continue;
+
+            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
+            if(!segment_virtual_page) continue;
+
+            auto candidate =
+                checked_sub(static_cast<uint64_t>(mapping.start), *segment_virtual_page);
+            if(!candidate) continue;
+
+            auto all_segments_mapped = std::all_of(
+                elf.load_segments.begin(), elf.load_segments.end(), [&](const auto& other) {
+                    return segment_is_mapped_at_bias(other, *candidate);
+                });
+            if(all_segments_mapped &&
+               std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
+            {
+                candidates.emplace_back(*candidate);
+            }
+        }
     }
 
-    // Mappings are sorted by start address, so front() is the object's lowest
-    // mapping. That is the loader's first PT_LOAD as long as the object is
-    // mapped once; a second independent mapping of the same inode placed below
-    // it would produce a bias for the wrong instance.
-    auto first_mapping        = object.mappings.front();
-    auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
-    auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);
-    if(!segment_file_page || !segment_virtual_page)
+    if(candidates.size() != 1)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid page size " << page_size
-                   << " while calculating load bias for " << object.path;
-        return std::nullopt;
-    }
-    // Match the maps entry to the PT_LOAD segment by file page before using it
-    // to derive the ET_DYN load bias.
-    if(first_mapping.file_offset != *segment_file_page)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] First target mapping for " << object.path
-                   << " has file offset 0x" << std::hex << first_mapping.file_offset
-                   << ", but the first PT_LOAD segment starts at file page 0x" << *segment_file_page
-                   << std::dec;
-        return std::nullopt;
-    }
-
-    // For ET_DYN shared objects, load bias is runtime start minus page-aligned
-    // segment virtual address.
-    auto bias = checked_sub(static_cast<uint64_t>(first_mapping.start), *segment_virtual_page);
-    if(!bias)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
-                   << object.path << ": mapping start is below segment virtual page";
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not calculate a unique load bias for "
+                   << object.path << " from its PT_LOAD segments and mappings";
         return std::nullopt;
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
-               << " as 0x" << std::hex << *bias << std::dec;
-    return bias;
+               << " as 0x" << std::hex << candidates.front() << std::dec;
+    return candidates.front();
 }
 
 std::optional<std::vector<uint8_t>>
