@@ -264,12 +264,12 @@ public:
     : MemoryManager(agent, alloc, dealloc, data)
     {}
 
-    void* AddExtraOutputBuf()
+    void* AddSqttOutputBuf(uint64_t size)
     {
         aqlprofile_buffer_desc_flags_t flags{};
         flags.device_access = true;
         flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
-        extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
+        extra_output_buffers.emplace_back(AllocMemory(size, flags));
         return extra_output_buffers.back().get();
     }
 
@@ -335,7 +335,7 @@ public:
     }
 
     pm4_builder::TraceConfig config{};
-    std::atomic<size_t>      buffer_swaps{0};
+    std::vector<size_t>      buffer_swaps{};
 
 protected:
     int                                             target_cu = -1;

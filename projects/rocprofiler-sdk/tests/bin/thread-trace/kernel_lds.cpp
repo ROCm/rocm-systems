@@ -30,6 +30,49 @@
 
 #define SHM_SIZE 64
 
+namespace
+{
+constexpr uint32_t SHADER_ENGINE_ID_SHIFT = 20;
+constexpr uint32_t SHADER_DATA_MASK       = (uint32_t{1} << SHADER_ENGINE_ID_SHIFT) - 1;
+constexpr uint32_t DEFAULT_SHADER_DATA    = 0xDEADBEEF;
+
+__device__ uint32_t
+get_shader_engine_id()
+{
+#if defined(__GFX12__)
+    const auto value = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_sendmsg_rtn)
+                           ? __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID)
+                           : 0u;
+    const auto se_id = (value >> SE_HW_ID_SE_ID_OFFSET) & ((1u << SE_HW_ID_SE_ID_SIZE) - 1);
+#    if defined(__gfx1250__)
+    constexpr uint32_t XCC_ID_OFFSET = 16;
+    constexpr uint32_t XCC_ID_SIZE   = 4;
+    constexpr uint32_t SE_PER_XCC    = 2;
+    const auto         xcc_id        = (value >> XCC_ID_OFFSET) & ((1u << XCC_ID_SIZE) - 1);
+    return xcc_id * SE_PER_XCC + se_id;
+#    else
+    return se_id;
+#    endif
+#else
+    const auto se_id  = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+                            ? __builtin_amdgcn_s_getreg(
+                                 GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID))
+                            : 0u;
+
+#    if defined(__gfx942__) || defined(__gfx950__)
+    const auto xcc_id = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+                            ? __builtin_amdgcn_s_getreg(GETREG_IMMED(
+                                  XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID))
+                            : 0u;
+    return (xcc_id << HW_ID_SE_ID_SIZE) | se_id;
+#    else
+    return se_id;
+#    endif
+#endif
+}
+
+}  // namespace
+
 __global__ void
 looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
@@ -55,7 +98,11 @@ looping_lds_kernel(float* __restrict__ a,
 
     a[index] = interm[threadIdx.x % SHM_SIZE] + c[index];
 
+    if(ttracedata != DEFAULT_SHADER_DATA)
+        ttracedata =
+            (get_shader_engine_id() << SHADER_ENGINE_ID_SHIFT) | (ttracedata & SHADER_DATA_MASK);
+
     asm volatile("s_mov_b32 m0, %0" : : "r"(ttracedata));
-    asm volatile("s_nop 1");
+    asm volatile("s_nop 4");
     asm volatile("s_ttracedata");
 }

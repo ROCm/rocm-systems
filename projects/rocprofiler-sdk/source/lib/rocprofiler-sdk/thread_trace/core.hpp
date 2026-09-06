@@ -128,6 +128,7 @@ private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
+    uint32_t        num_shader_engines = 0;
     att_queue_ptr_t queue{};
 
     std::atomic<int> active_traces{0};

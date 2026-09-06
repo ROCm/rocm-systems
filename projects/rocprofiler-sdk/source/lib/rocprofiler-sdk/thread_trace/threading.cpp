@@ -59,22 +59,22 @@ struct scoped_signal_t
 
 struct trace_callback_data_t
 {
-    void*        data{};
-    uint64_t     size{};
-    hsa_status_t status{};
+    void*    data{};
+    uint64_t size{};
+    uint32_t se_id{};
 };
 
-trace_callback_data_t
+std::vector<trace_callback_data_t>
 iterate_data(aqlprofile_handle_t handle)
 {
-    auto thread_trace_callback = [](uint32_t, void* buffer, uint64_t size, void* userdata) {
-        auto& data = *static_cast<trace_callback_data_t*>(userdata);
-        data.data  = buffer;
-        data.size  = size;
+    auto thread_trace_callback = [](uint32_t se_id, void* buffer, uint64_t size, void* userdata) {
+        auto& data = *static_cast<std::vector<trace_callback_data_t>*>(userdata);
+        data.emplace_back(trace_callback_data_t{buffer, size, se_id});
         return HSA_STATUS_SUCCESS;
     };
-    trace_callback_data_t data{};
-    data.status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &data);
+    std::vector<trace_callback_data_t> data{};
+    auto status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &data);
+    ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Iterate data returned " << status;
     return data;
 }
 };  // namespace
@@ -178,14 +178,15 @@ producer_loop(
         std::max(1.0, common::get_env("ROCPROFILER_SQTT_BANDWIDTH", SQTT_BANDWIDTH_DEFAULT));
     const auto interval_microseconds = static_cast<size_t>(1E6 * buffer_size / sqtt_bandwidth);
 
-    auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
+    auto buffer_packets = std::move(parameters.buffer_packets);
+    for(auto& packet : buffer_packets)
+        CHECK_NOTNULL(packet);
 
     auto submit_signal = scoped_signal_t{};
 
-    auto     start_t0 = std::chrono::system_clock::now();
-    bool     do_sleep{false};
-    uint64_t next_chunk_index = 0;
-    int64_t  shader_engine_id = parameters.shader_engine_id;
+    auto                  start_t0 = std::chrono::system_clock::now();
+    bool                  do_sleep{false};
+    std::vector<uint64_t> next_chunk_indices(parameters.num_shader_engines);
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -213,6 +214,7 @@ producer_loop(
                                 size_t   size,
                                 int      flags,
                                 size_t   slot_idx,
+                                int      shader_engine_id,
                                 bool     isHeader    = false,
                                 uint64_t read_offset = 0) {
         auto t0 = std::chrono::system_clock::now();
@@ -223,7 +225,7 @@ producer_loop(
         buffer.flags            = flags;
         buffer.size             = size;
         buffer.se_id            = shader_engine_id;
-        buffer.chunk_index      = next_chunk_index++;
+        buffer.chunk_index      = next_chunk_indices[shader_engine_id]++;
         buffer.read_offset      = read_offset;
 
         if(!isHeader)
@@ -245,6 +247,7 @@ producer_loop(
     };
 
     auto submit_wait_timeout = [&]() {
+        if(worker_flag == WORKER_FLAG_ERROR) return false;
         if(signal_wait(submit_signal.sig, 1 << 28)) return true;
 
         worker_flag.store(WORKER_FLAG_ERROR);
@@ -255,6 +258,7 @@ producer_loop(
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
         if(!submit_wait_timeout()) return false;
+
         att_queue_submit(
             queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal.sig);
         return submit_wait_timeout();
@@ -262,29 +266,42 @@ producer_loop(
 
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
     auto iterate_trace = [&]() {
-        size_t idx  = wait_for_free_slot();
-        auto   wptr = iterate_data(parameters.control_packet->GetHandle());
-        buffer_packet.reset_current_buffer();
-        ROCP_INFO << "Iterate data with size: " << wptr.size;
-        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
+        constexpr auto FLAG_END = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+
+        for(auto& wptr : iterate_data(parameters.control_packet->GetHandle()))
+        {
+            ROCP_INFO << "Iterate data for " << wptr.se_id << " with size: " << wptr.size;
+            send_to_consumer(wptr.data, wptr.size, FLAG_END, wait_for_free_slot(), wptr.se_id);
+        }
+
+        for(auto& packet : buffer_packets)
+            packet->reset_current_buffer();
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
-    header_plus_zeros.at(0) = buffer_packet.header;
 
     auto send_header = [&] {
         ROCP_INFO << "Restarting the trace!";
-        if(buffer_packet.header == 0) return;
 
-        size_t hidx = wait_for_free_slot();
-        send_to_consumer(header_plus_zeros.data(),
-                         sizeof(header_plus_zeros),
-                         ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
-                         hidx,
-                         true);
+        for(auto& packet : buffer_packets)
+        {
+            if(packet->header == 0) continue;
+
+            header_plus_zeros.at(0) = packet->header;
+            size_t hidx             = wait_for_free_slot();
+
+            send_to_consumer(header_plus_zeros.data(),
+                             sizeof(header_plus_zeros),
+                             ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
+                             hidx,
+                             packet->shader_engine_id,
+                             true);
+        }
     };
 
     send_header();
+    std::vector<hsa::sqtt_buffer_status_t> buffers_requiring_swap{};
+    buffers_requiring_swap.reserve(buffer_packets.size());
 
     // Wait until ATT start packets have been executed
     signal_wait(*parameters.start_pkt_signal);
@@ -295,49 +312,70 @@ producer_loop(
         do_sleep = true;  // Reset value
 
         // PHASE 1: Poll SQTT buffer status
-        att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
+        att_queue_submit(queue, &buffer_packets.at(0)->query_status, &submit_signal.sig);
         if(!submit_wait_timeout()) break;
 
-        if(auto status = buffer_packet.query_buffer_status())
+        bool any_full = false;
+        for(auto& packet : buffer_packets)
         {
-            ROCP_TRACE << "Sending buffer swap";
-            // PHASE 2: trigger GPU buffer swap and stage the data into a CPU slot
-            att_queue_submit(queue, &status->packet, &submit_signal.sig);
-            ROCP_FATAL_IF(status->size != buffer_size)
-                << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
+            if(auto status = packet->query_buffer_status())
+            {
+                // The status_query test verifies we immediately poll again after consuming a
+                // buffer, so skip the backoff when a flip just occurred.
+                do_sleep = false;
+                any_full |= status->gpu_full;
+                ROCP_WARNING_IF(status->gpu_full) << "GPU full for SE " << packet->shader_engine_id;
 
-            // Try to claim a free CPU slot. If none free, the consumers haven't
-            // kept up and we have to stop the trace.
+                ROCP_TRACE << "Sending buffer swap for SE " << packet->shader_engine_id;
+                att_queue_submit(queue, &status->packet, nullptr);
+                buffers_requiring_swap.emplace_back(std::move(*status));
+
+                ROCP_FATAL_IF(status->size > buffer_size)
+                    << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
+            }
+        }
+
+        if(any_full) stop_trace();
+
+        for(auto& status : buffers_requiring_swap)
+        {
+            // Try to claim a free CPU slot. If none free, the consumers haven't kept up
             size_t     slot_idx = try_claim_slot();
-            const bool cpu_full = (slot_idx == num_buffers);
+            const bool cpu_full = slot_idx == num_buffers;
 
-            if(cpu_full || status->gpu_full) stop_trace();
+            ROCP_WARNING_IF(cpu_full) << "CPU full for SE " << status.shader_engine_id;
+
+            if(cpu_full && !any_full) stop_trace();
+            any_full |= cpu_full;
 
             int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+            if(status.gpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
             if(cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
-            if(status->gpu_full)
-                flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
 
             // If CPU was full we must wait for a slot before we can publish.
             if(cpu_full) slot_idx = wait_for_free_slot();
-            send_to_consumer(
-                status->data, buffer_size, flags, slot_idx, false, status->read_offset);
 
-            if(cpu_full || status->gpu_full)
-            {
-                iterate_trace();
-                send_header();
+            send_to_consumer(status.data,
+                             status.size,
+                             flags,
+                             slot_idx,
+                             status.shader_engine_id,
+                             false,
+                             status.read_offset);
+        }
 
-                att_queue_submit_and_wait_last(queue, parameters.control_packet->before_krn_pkt);
-            }
-            // The status_query test verifies we immediately poll again after consuming a
-            // buffer, so skip the backoff when a flip just occurred.
-            do_sleep = false;
-            submit_wait_timeout();
+        buffers_requiring_swap.clear();
+
+        if(any_full)
+        {
+            iterate_trace();
+            send_header();
+
+            att_queue_submit_and_wait_last(queue, parameters.control_packet->before_krn_pkt);
         }
     }
 
-    if(worker_flag.load() != WORKER_FLAG_ERROR && stop_trace()) iterate_trace();
+    if(stop_trace()) iterate_trace();
 
     // Signal all consumers to exit. Setting `stopping` under each slot's
     // mutex ensures consumers about to enter cv.wait() observe it; the
