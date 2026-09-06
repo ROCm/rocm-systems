@@ -2395,7 +2395,7 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExpansion) {
+TEST(BinaryTranslatorE2E, Gfx1250LongBranchUsesIslandsAfterSemanticExpansionExhaustsSgprs) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr size_t kTargetWord = 0x8000;
@@ -2435,18 +2435,17 @@ TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExp
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   const auto result = translator.translate(source);
 
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
-      result, rocjitsu::DiagnosticKind::ResourceLimit,
-      "long direct branch requires an additional descriptor-backed SGPR pair after semantic "
-      "expansion"));
-  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
-    return item.kind == rocjitsu::DiagnosticKind::ResourceLimit;
-  });
-  ASSERT_NE(diagnostic, result.diagnostics.end());
-  EXPECT_EQ(diagnostic->guest_offset, std::optional<uint64_t>(0))
-      << "the resource diagnostic must identify the branch that could not be expanded";
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                                                ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_NE(std::ranges::find(translated_words, marker), translated_words.end());
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CompactConditionalLayoutIsIdempotent) {

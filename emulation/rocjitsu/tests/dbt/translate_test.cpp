@@ -3916,6 +3916,58 @@ TEST(BinaryTranslator, ClientRewriteLongBranchNeverUsesCdnaSpecialSgprs) {
       << "s[98:99] plus the CDNA architectural tail requires a 112-SGPR allocation";
 }
 
+TEST(BinaryTranslator, ClientRewriteExhaustedSgprsFallsBackToLongBranchIslands) {
+  // The source branch is at the positive SOPP limit. A client prefix both moves
+  // its target out of range and consumes every ordinary SGPR after DBT's
+  // initial resource snapshot. The large straight-line block verifies that
+  // DBT lays skipped island pools at ordinary instruction boundaries rather
+  // than relying on a nearby CFG boundary.
+  constexpr size_t kTargetWord = 0x8000;
+  constexpr uint32_t kCdna4OrdinarySgprLimit = 102;
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> words(kTargetWord + 1u, nop);
+  words[0] = cdna4::build_sopp(cdna4::kSCbranchScc0Sopp,
+                               {.simm16 = static_cast<uint16_t>(kTargetWord - 1u)})[0];
+  words[kTargetWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != sizeof(uint32_t))
+          return std::nullopt;
+        return InstructionRewrite{
+            .prefix_words = {nop},
+            .replacement_words = std::nullopt,
+            .markers = {},
+            .source_size = 0,
+            .required_ordinary_sgpr_count = kCdna4OrdinarySgprLimit,
+            .preserved_source_span_byte_offset = std::nullopt,
+        };
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  const uint32_t marker =
+      build_s_nop(kBranchIslandPoolMarkerNopImmediate, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(std::ranges::find(translated_words, marker), translated_words.end());
+  for (uint16_t pair = 0; pair + 1 < kCdna4OrdinarySgprLimit; pair += 2) {
+    EXPECT_EQ(
+        std::ranges::find(translated_words, build_s_getpc_b64(pair, ROCJITSU_CODE_ARCH_CDNA4)),
+        translated_words.end());
+  }
+}
+
 TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMarkers) {
   const uint32_t prefix_nop = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint32_t> words = {

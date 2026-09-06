@@ -3573,8 +3573,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         continue;
       return leave_unchanged();
     }
-    const bool can_use_long_direct_branches =
-        next_long_branch_sgpr_pair(kernel_context, source_sgpr_extent, host_arch_).has_value();
+    // Client and semantic rewrites can raise the descriptor-backed SGPR extent
+    // while the body is emitted. Recheck dynamically when deciding whether to
+    // lay the SGPR-free fallback grid; an initial resource snapshot can become
+    // stale after the rewrite consumes the only long-transfer pair.
+    const auto needs_branch_island_fallback = [&] {
+      return !next_long_branch_sgpr_pair(kernel_context, source_sgpr_extent, host_arch_)
+                  .has_value();
+    };
     const bool is_gfx1250_b0_to_a0_profile = is_gfx1250_b0_to_a0();
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
     std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
@@ -4209,6 +4215,22 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           continue;
         }
         active_marked_long_transfer.reset();
+
+        // A source basic block can itself be much larger than the island
+        // spacing. Pools are safe at any ordinary instruction boundary: the
+        // marker is a no-op and the following branch skips every private slot.
+        // Waiting for a CFG boundary can therefore leave a large straight-line
+        // expansion with no reachable island even though the fallback was
+        // planned before emission.
+        if (needs_branch_island_fallback() && !preserve_generated_branch_island_pools &&
+            it != block->instructions().begin() &&
+            std::next(it) != block->instructions().end() &&
+            kernel_text.size() >= next_branch_island_pool_offset) {
+          append_direct_branch_island_pool(kernel_text, layout, host_arch_);
+          next_branch_island_pool_offset =
+              next_direct_branch_island_pool_offset(kernel_text.size());
+          target_offset = kernel_text.size();
+        }
 
         if (const auto marked = marked_long_transfer_by_start.find(offset);
             marked != marked_long_transfer_by_start.end()) {
@@ -4874,7 +4896,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               : kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
-      if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
+      if (needs_branch_island_fallback() && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
