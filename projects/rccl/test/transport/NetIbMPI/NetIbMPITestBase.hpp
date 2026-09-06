@@ -367,59 +367,87 @@ protected:
         ncclNetHandle_t handle{};
     };
 
+    // Both ranks leave this together, or neither does.
+    //
+    // Every failure here used to return early, and each early return stranded the
+    // peer: a listen failure never sent the handle, so the connector sat in
+    // MPI_Recv until the suite timeout, and a failure after that skipped the
+    // closing barrier, so the other side sat there instead. A caller cannot fix
+    // that from outside, however carefully it checks the return value, because by
+    // then its peer is already blocked. So the handle message carries a status
+    // word, and the closing barrier became a reduction of it.
     ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
         // Cap the accept/connect handshake so a dead fabric fails fast instead
         // of spinning forever (AICOMRCCL-1577).
         const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
+        struct SetupHandshake {
+            int status;  // 1 when the listener is ready and the handle is valid
+            ncclNetHandle_t handle;
+        } handshake = {};
+        ncclResult_t local = ncclSuccess;
+
         if (rank == 0) {
-            // Rank 0: Listen
-            RCCL_TEST_CHECK(CreateListenComm(dev, &pair.handle, &pair.listenComm));
+            local = CreateListenComm(dev, &pair.handle, &pair.listenComm);
+            handshake.status = (local == ncclSuccess) ? 1 : 0;
+            if (local == ncclSuccess) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
+            // Sent even on failure: the peer is waiting for this message.
+            MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
 
-            // Send handle to peer
-            MPI_Send(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
-
-            // Accept connection
             int done = 0;
             int attempts = 0;
-            while (!done) {
-                ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (result != ncclSuccess) {
-                    return result;
-                }
+            while (local == ncclSuccess && !done) {
+                local = AcceptConnection(pair.listenComm, &pair.recvComm);
+                if (local != ncclSuccess) break;
                 if (pair.recvComm != nullptr) {
                     done = 1;
                     break;
                 }
                 if (++attempts >= maxAttempts) {
-                    return ncclInternalError;
+                    local = ncclInternalError;
+                    break;
                 }
                 usleep(kPollIntervalUs);
             }
         } else {
-            // Rank 1: Connect
-            MPI_Recv(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            // Connect to peer
-            int done = 0;
-            int attempts = 0;
-            while (!done) {
-                ncclResult_t result = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                if (result != ncclSuccess) {
-                    return result;
+            MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD,
+                     MPI_STATUS_IGNORE);
+            if (!handshake.status) {
+                local = ncclRemoteError;  // the peer could not listen
+            } else {
+                memcpy(pair.handle, handshake.handle, sizeof(pair.handle));
+                int done = 0;
+                int attempts = 0;
+                while (!done) {
+                    local = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
+                    if (local != ncclSuccess) break;
+                    if (pair.sendComm != nullptr) {
+                        done = 1;
+                        break;
+                    }
+                    if (++attempts >= maxAttempts) {
+                        local = ncclInternalError;
+                        break;
+                    }
+                    usleep(kPollIntervalUs);
                 }
-                if (pair.sendComm != nullptr) {
-                    done = 1;
-                    break;
-                }
-                if (++attempts >= maxAttempts) {
-                    return ncclInternalError;
-                }
-                usleep(kPollIntervalUs);
             }
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        return ncclSuccess;
+        // Replaces the closing barrier, so a one-sided failure ends the setup on
+        // both ranks instead of leaving one of them in the barrier.
+        int ok = (local == ncclSuccess) ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        if (local == ncclSuccess && ok) return ncclSuccess;
+
+        // Now that the failure is recoverable rather than fatal, whatever this
+        // rank did create has to be closed here: every caller asserts on this
+        // result before it constructs its NetConnectionGuard, so nothing else
+        // will. A leaked listener or QP would outlive the test and contaminate
+        // the rest of the process. Data comms first, then the listener.
+        if (pair.sendComm) { CloseSendComm(pair.sendComm); pair.sendComm = nullptr; }
+        if (pair.recvComm) { CloseRecvComm(pair.recvComm); pair.recvComm = nullptr; }
+        if (pair.listenComm) { CloseListenComm(pair.listenComm); pair.listenComm = nullptr; }
+        return (local != ncclSuccess) ? local : ncclRemoteError;
     }
 
     // Helper: Retry until the receiver's FIFO slot is ready.
@@ -758,37 +786,80 @@ protected:
 
     // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
     // Caller is responsible for closing all comms.
+    // Same contract as SetupConnection: the ranks agree before anyone asserts, so
+    // a one-sided failure cannot leave the peer waiting for a handle or a barrier.
+    // The assertion at the end is reached by both ranks with the same verdict,
+    // which is what makes a fatal failure safe here.
     void SetupCastConnection(int dev,
                              void** listenComm, void** sendComm, void** recvComm) {
         const int rank = MPIEnvironment::world_rank;
         const int peer = 1 - rank;
-        ncclNetHandle_t handle;
-        memset(&handle, 0, sizeof(handle));
+        struct SetupHandshake {
+            int status;
+            ncclNetHandle_t handle;
+        } handshake = {};
+        // ncclIbListen writes a uint64_t magic through the handle pointer it's
+        // given, so listen()/connect() need an 8-byte-aligned buffer rather
+        // than &handshake.handle (which sits at a 4-byte offset after status).
+        // This local is aligned; the handshake only ever carries a byte-copy
+        // of it, same as SetupConnection's pair.handle.
+        alignas(8) ncclNetHandle_t handle{};
+        // Tracks this rank's own outcome, kept separate from the peer's status
+        // in the handshake so the assertion message below can tell "my own
+        // accept/connect failed" apart from "the peer's listen failed", instead
+        // of both ranks reporting the same generic verdict.
+        bool localOk = true;
+        const char* localReason = "ok";
 
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(dev, &handle, listenComm), ncclSuccess);
-            ASSERT_NE(*listenComm, nullptr);
+            localOk = (CreateListenComm(dev, &handle, listenComm) == ncclSuccess)
+                      && *listenComm != nullptr;
+            handshake.status = localOk ? 1 : 0;
+            if (!localOk) localReason = "listen failed";
+            if (localOk) memcpy(handshake.handle, handle, sizeof(handle));
+            // Sent even on failure: the peer is waiting for this message.
+            MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
-
-            for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
-                ASSERT_EQ(AcceptConnection(*listenComm, recvComm), ncclSuccess);
-                if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            for (int i = 0; localOk && i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
+                    localOk = false;
+                    localReason = "accept failed";
+                }
+                if (localOk && *recvComm == nullptr) usleep(kPollIntervalUs);
             }
-            ASSERT_NE(*recvComm, nullptr);
+            if (localOk && *recvComm == nullptr) { localOk = false; localReason = "accept timed out"; }
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
+            MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
-
-            for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
-                ncclResult_t r = ConnectToRemote(dev, &handle, sendComm);
-                ASSERT_EQ(r, ncclSuccess);
-                if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            if (handshake.status != 1) {
+                localOk = false;
+                localReason = "peer's listen failed";
+            } else {
+                memcpy(handle, handshake.handle, sizeof(handle));
+                for (int i = 0; localOk && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
+                        localOk = false;
+                        localReason = "connect failed";
+                    }
+                    if (localOk && *sendComm == nullptr) usleep(kPollIntervalUs);
+                }
+                if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
             }
-            ASSERT_NE(*sendComm, nullptr);
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        int ok = localOk ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        if (!ok) {
+            // The assertion below is fatal and unwinds through the caller's
+            // ASSERT_NO_FATAL_FAILURE before its teardown runs, so anything this
+            // rank created must be released here or it stays open for the rest
+            // of the process. Data comms first, then the listener.
+            if (*sendComm) { CloseSendComm(*sendComm); *sendComm = nullptr; }
+            if (*recvComm) { CloseRecvComm(*recvComm); *recvComm = nullptr; }
+            if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+        }
+        ASSERT_EQ(ok, 1) << "IB-CAST connection setup failed on at least one rank (this rank: "
+                         << localReason << ")";
     }
 
     // Composite block: Warmup send + read real nqps from sendComm on rank 1.

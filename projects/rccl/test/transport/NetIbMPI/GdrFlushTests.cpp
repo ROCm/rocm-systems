@@ -65,7 +65,7 @@ protected:
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -152,8 +152,8 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                      /*forceWrite=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              /*forceWrite=*/false, &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "read-only flush over dma-buf scratchpad must not fault";
 }
@@ -168,8 +168,8 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                      /*forceWrite=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              /*forceWrite=*/false, &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -185,8 +185,8 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                      /*forceWrite=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              /*forceWrite=*/false, &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -200,8 +200,8 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
-                      /*forceWrite=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
+                                              /*forceWrite=*/false, &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
@@ -220,8 +220,8 @@ TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t forced = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/1, /*verifyData=*/false,
-                      /*forceWrite=*/true, &forced);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/1, /*verifyData=*/false,
+                                              /*forceWrite=*/true, &forced));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_NE(forced, ncclSuccess)
             << "forced scratchpad RDMA_WRITE on a dma-buf buffer should fault the flush QP";

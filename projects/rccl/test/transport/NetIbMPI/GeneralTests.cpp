@@ -94,7 +94,7 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     if (rank == 0) {
         EXPECT_NE(pair.recvComm, nullptr) << "Recv comm should be established";
@@ -134,7 +134,7 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -162,7 +162,7 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = nullptr;
@@ -190,7 +190,7 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -211,7 +211,7 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -240,7 +240,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         const int tag = 42;
@@ -365,7 +365,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     // Test various sizes
     std::vector<size_t> testSizes = {1, 64, 256, 1024, 4096, 16384, 65536};
@@ -426,7 +426,7 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 50;
@@ -592,7 +592,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         void* sendBuffer = nullptr;
         void* recvBuffer = nullptr;
@@ -754,7 +754,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kLargeBufferSize; // 16 MB
     const int tag = 400;
@@ -807,7 +807,7 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
@@ -826,52 +826,94 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
     }
 
     for (int iter = 0; iter < 3; iter++) {
-        // Iteration 3: abandoned listen-close
+        // Iteration 3: abandoned listen-close. Self-contained on rank 0 and
+        // nothing on rank 1 waits on it, so a failure here is recorded rather
+        // than made fatal: a fatal exit would skip this iteration's handshake
+        // below and strand rank 1 in its MPI_Recv.
         if (iter == 2) {
             if (rank == 0) {
                 void* abandonedListen = nullptr;
                 ncclNetHandle_t abandonedHandle;
-                ASSERT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
+                EXPECT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
                           ncclSuccess)
                     << "Iter 3: abandoned listen failed";
-                ASSERT_NE(abandonedListen, nullptr);
-                ASSERT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
+                EXPECT_NE(abandonedListen, nullptr);
+                EXPECT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
                     << "Iter 3: close abandoned listen failed";
             }
         }
 
         ConnectionPair pair;
-        ncclNetHandle_t handle;
+        // A failed listen on rank 0 must still reach rank 1: a fatal ASSERT_EQ
+        // here would return before the handle is ever sent, and rank 1's
+        // MPI_Recv below has no timeout, so it would block until the suite
+        // timeout instead of failing with this test. The status word makes the
+        // failure observable to both ranks instead.
+        //
+        // handshake.handle sits at a 4-byte offset (after `status`), but
+        // ncclIbListen writes a uint64_t magic through the pointer it's given,
+        // so listen()/connect() must see pair.handle (8-byte aligned, same
+        // layout SetupConnection relies on) rather than &handshake.handle
+        // directly; the handshake only carries a byte-copy of it.
+        struct ListenHandshake {
+            int status;  // 1 when rank 0's listener is ready and the handle is valid
+            ncclNetHandle_t handle;
+        } handshake = {};
 
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess)
-                << "Listen failed iter " << iter;
-            ASSERT_NE(pair.listenComm, nullptr);
-        }
-
-        if (rank == 0) {
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+            ncclResult_t local = CreateListenComm(mergedDev, &pair.handle, &pair.listenComm);
+            handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            if (handshake.status) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
+            // Sent even on failure: the peer is waiting for this message.
+            MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0,
+            MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (handshake.status) memcpy(pair.handle, handshake.handle, sizeof(pair.handle));
         }
 
         int connectFailed = 0;
         if (rank == 0) {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.recvComm && r == ncclSuccess)
-                r = AcceptConnection(pair.listenComm, &pair.recvComm);
-            if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;
+            } else {
+                // Bounded and paced. Accept is asynchronous, so it can keep
+                // returning ncclSuccess with a null comm -- the state the shared
+                // setup helper guards against -- and an unbounded spin here would
+                // hang this rank while the peer waits in the reduction below, which
+                // is the failure this test exists to have reported instead.
+                ncclResult_t r = ncclSuccess;
+                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.recvComm
+                                      && r == ncclSuccess; attempt++) {
+                    r = AcceptConnection(pair.listenComm, &pair.recvComm);
+                    if (!pair.recvComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
+                if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            }
         } else {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.sendComm && r == ncclSuccess)
-                r = ConnectToRemote(mergedDev, &handle, &pair.sendComm);
-            if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;  // rank 0's listen failed
+            } else {
+                // Bounded and paced, for the same reason as the accept side.
+                ncclResult_t r = ncclSuccess;
+                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.sendComm
+                                      && r == ncclSuccess; attempt++) {
+                    r = ConnectToRemote(mergedDev, &pair.handle, &pair.sendComm);
+                    if (!pair.sendComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
+                if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            }
         }
         MPI_Allreduce(MPI_IN_PLACE, &connectFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (connectFailed) {
-            if (rank == 0 && pair.listenComm) CloseListenComm(pair.listenComm);
-            FAIL() << "IB QP connect/accept failed (cross-subnet node pair)";
+            // Either side may have completed its own comm before the peer failed,
+            // and FAIL() ends the test before the loop's normal close path, so
+            // every local handle is released here. Data comms first, then listen.
+            if (pair.sendComm) CloseSendComm(pair.sendComm);
+            if (pair.recvComm) CloseRecvComm(pair.recvComm);
+            if (pair.listenComm) CloseListenComm(pair.listenComm);
+            FAIL() << "IB QP listen/connect/accept failed iter " << iter
+                   << " (cross-subnet node pair, or rank 0's listen failed)";
         }
 
         // Close: data comms first, then listen

@@ -70,7 +70,15 @@ static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void*
 ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  assert(size > 0);
+  // A caller that lost its connection reaches here with a null comm, and reading
+  // the device list off it segfaults inside the plugin instead of telling the
+  // caller what was wrong. size == 0 hit the same fate below via the page-count
+  // math, so it is reported the same way rather than left as a release-build
+  // assert.
+  if (comm == NULL || mhandle == NULL || size == 0) {
+    WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
+    return ncclInvalidArgument;
+  }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
   if (mhandleWrapper == nullptr) {
@@ -122,6 +130,10 @@ ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
 
 ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
+  if (comm == NULL) {
+    WARN("NET/IB-CAST: deregMr called with a null comm");
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
