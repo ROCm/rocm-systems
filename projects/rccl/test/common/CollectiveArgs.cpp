@@ -180,17 +180,22 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // Mitigation (AICOMRCCL-2275): 4 MiB of device writes at teardown clears the
-    // pooled-worker corruption. Timing, not contents: prep rewrites these buffers.
+    // Mitigation (AICOMRCCL-2275): zeroing the device buffers at teardown removes the
+    // pooled-worker corruption. Timing, not contents: prep rewrites them before use.
+    // The cap bounds the cost per buffer; smaller buffers are zeroed whole.
     size_t const cap = 4u << 20;
     hipError_t errIn = hipSuccess, errOut = hipSuccess;
-    // In-place Attaches one buffer as an interior alias of the other, so there is a
-    // single allocation and its owner is the lower address; its own length fits inside.
+    // In-place attaches one buffer as an interior alias of the other, so there is a
+    // single allocation, owned by the lower address. Equal addresses mean the alias
+    // starts at the base (globalRank 0, or the same-pointer case), and then the owner
+    // is whichever side records the longer length.
     if (this->inPlace)
     {
-      bool const inLower = this->inputGpu.ptr <= this->outputGpu.ptr;
-      void* const  own   = inLower ? this->inputGpu.ptr : this->outputGpu.ptr;
-      size_t const bytes = inLower ? this->numInputBytesAllocated : this->numOutputBytesAllocated;
+      bool const   same   = this->inputGpu.ptr == this->outputGpu.ptr;
+      bool const   inOwns = this->inputGpu.ptr < this->outputGpu.ptr;
+      void* const  own    = (same || inOwns) ? this->inputGpu.ptr : this->outputGpu.ptr;
+      size_t const bytes  = same ? std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated)
+                                 : (inOwns ? this->numInputBytesAllocated : this->numOutputBytesAllocated);
       if (own && bytes)
       {
         errIn = hipMemset(own, 0, std::min(bytes, cap));
@@ -244,7 +249,15 @@ namespace RcclUnitTesting
       this->biasRegHandle = nullptr;
     }
 
-    CHECK_HIP(errIn != hipSuccess ? errIn : errOut);
+    // Report, do not fail. TestBedChild wraps this in CHECK_CALL inside its per-collective
+    // loop, so returning TEST_FAIL would skip the frees of every later collective in the
+    // group and leak them into the next test on a reused pool worker.
+    hipError_t const scrubErr = (errIn != hipSuccess) ? errIn : errOut;
+    if (scrubErr != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(scrubErr));
+    }
     return TEST_SUCCESS;
   }
 
