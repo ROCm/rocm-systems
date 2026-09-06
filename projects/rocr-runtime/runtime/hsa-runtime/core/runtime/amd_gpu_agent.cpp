@@ -48,6 +48,7 @@
 #include <climits>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -322,6 +323,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
 GpuAgent::~GpuAgent() {
   for (auto& blit : blits_) blit.reset();
+
+  // Must run before any region teardown below: the slab's blocks came from one
+  // of this agent's regions and have to be returned while it is still alive.
+  DestroyOrderingEdgeSlab();
 
   regions_.clear();
 }
@@ -2728,6 +2733,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
+    case HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED:
+      *((bool*)value) = SupportsOrderingEdgeSignal();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -3648,6 +3656,159 @@ void GpuAgent::InitAllocators() {
   }
   assert(finegrain_allocator_ && "GPU agent does not have a fine-grain allocator");
   assert(coarsegrain_allocator_ && "GPU agent does not have a coarse-grain allocator");
+}
+
+// The region an ordering edge signal's ABI block -- and so its value word -- is
+// placed in.  Named by property, never by position in regions():
+// InitRegionList() pushes up to three regions per frame buffer heap and that
+// order has already changed once (the extended scope fine grain region is
+// skipped on gfx12.0), so "the first local region" is not a stable statement
+// and a reorder would silently move every ordering edge signal.
+//
+//  IsLocalMemory()              device memory rather than host memory.
+//  IsPublic()                   FRAME_BUFFER_PUBLIC and not _PRIVATE.
+//                               IsLocalMemory() is true of both and
+//                               InitRegionList() builds them under the same
+//                               case label, so without this clause a walk can
+//                               hand out VRAM the CPU cannot see.  It is also
+//                               the portable form of the large BAR question:
+//                               it asks the topology whether the frame buffer
+//                               is host visible, instead of consulting a flag
+//                               whose meaning differs between releases.
+//  !fine_grain()                the coarse grain local region, which is what
+//  !extended_scope_fine_grain() InitAllocators() binds coarsegrain_allocator_
+//                               to.  The fine grain one is declared
+//                               NEVER_ALLOWED to a CPU by
+//                               MemoryRegion::GetAccessInfo(), is
+//                               conditionally hidden from the region list, and
+//                               is the more expensive of the two to read from
+//                               the host.
+//
+// Grain and host visibility are orthogonal: both local regions come from the
+// same HsaMemoryProperties entry and share a HeapType, so IsPublic() does not
+// discriminate grain.  Cacheability is a third axis, set on the allocation --
+// see AllocateDeviceSignalBlock() in core/runtime/signal.cpp.
+//
+// Do not add a HSA_AMD_REGION_INFO_HOST_ACCESSIBLE clause here.  That attribute
+// reads 0 for every device local region on parts where the host can in fact
+// map, read and atomically update them.
+static bool IsOrderingEdgeSignalRegion(const AMD::MemoryRegion* region) {
+  return region->IsLocalMemory() && region->IsPublic() && !region->fine_grain() &&
+      !region->extended_scope_fine_grain();
+}
+
+const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
+  // DO NOT ADD A HsaNodeProperties::LocalMemSize CLAUSE HERE.  It is the obvious
+  // extra guard to reach for and it is WRONG in this runtime: the field is not
+  // populated for discrete GPUs.  On gfx950, KFD topology reports
+  // local_mem_size = 0 on every GPU node while the same nodes report a
+  // FRAME_BUFFER_PUBLIC bank of 309,220,868,096 bytes.  A build carrying the
+  // clause refused every agent with HSA_STATUS_ERROR_INVALID_AGENT, on hardware
+  // holding 288 GiB of local memory each.
+  //
+  // The condition it reaches for is already expressed in a field the driver
+  // does fill: IsLocalMemory() && IsPublic() selects a
+  // HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC bank, and InitRegionList() never constructs
+  // a MemoryRegion for a bank reporting SizeInBytes == 0.  So an agent with no
+  // host visible local memory has no region here to return, and the gate, the
+  // capability attribute and the allocator all answer "not this agent" together.
+  for (const auto& region : regions()) {
+    const core::MemoryRegion* r = &*region;
+    if (IsOrderingEdgeSignalRegion(static_cast<const AMD::MemoryRegion*>(r))) return r;
+  }
+  return nullptr;
+}
+
+// ---- Ordering edge signal slab ---------------------------------------------
+// One AllocateDirect | AllocateUncached allocation per (process x device),
+// carved into fixed stride slots addressed by index, with a free index list.
+
+hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
+  // Two failures, two answers.  "No region on this agent" is a clean opt out and
+  // the same answer the gate and the capability attribute give, since all three
+  // ask OrderingEdgeSignalRegion().  A bool would force the caller to re-derive
+  // the predicate to tell them apart.
+  const core::MemoryRegion* local = OrderingEdgeSignalRegion();
+  if (local == nullptr) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  void* ptr = nullptr;
+  if (core::Runtime::runtime_singleton_->AllocateMemory(
+          local, kOrderingEdgeBlockSize,
+          core::MemoryRegion::AllocateDirect | core::MemoryRegion::AllocateUncached,
+          &ptr) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Deliberately NOT constructed here: the block is mapped but nothing is
+  // written to it until a slot is handed out, so the pages a process touches
+  // track the edges it uses rather than the configured pool size.
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  const size_t base_index = edge_slab_.blocks.size() * slots;
+  edge_slab_.blocks.push_back(static_cast<char*>(ptr));
+
+  edge_slab_.free_slots.reserve(edge_slab_.free_slots.size() + slots);
+  // Descending, so the first hand-outs walk the block forwards.  Nothing depends
+  // on it; it only makes a dump of a lightly used pool readable.
+  for (size_t i = slots; i-- > 0;)
+    edge_slab_.free_slots.push_back(static_cast<uint32_t>(base_index + i));
+
+  return HSA_STATUS_SUCCESS;
+}
+
+void* GpuAgent::AcquireOrderingEdgeSlot(hsa_status_t* why) {
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  if (edge_slab_.free_slots.empty()) {
+    const hsa_status_t st = GrowOrderingEdgeSlab();
+    if (st != HSA_STATUS_SUCCESS) {
+      if (why != nullptr) *why = st;
+      return nullptr;
+    }
+  }
+  if (edge_slab_.free_slots.empty()) {
+    if (why != nullptr) *why = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    return nullptr;
+  }
+
+  const uint32_t idx = edge_slab_.free_slots.back();
+  edge_slab_.free_slots.pop_back();
+
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  char* base = edge_slab_.blocks[idx / slots];
+
+  if (why != nullptr) *why = HSA_STATUS_SUCCESS;
+  return base + (idx % slots) * kOrderingEdgeDefaultStride;
+}
+
+void GpuAgent::ReleaseOrderingEdgeSlot(void* slot) {
+  if (slot == nullptr) return;
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  char* p = static_cast<char*>(slot);
+
+  for (size_t b = 0; b < edge_slab_.blocks.size(); ++b) {
+    char* base = edge_slab_.blocks[b];
+    if (p < base || p >= base + kOrderingEdgeBlockSize) continue;
+    const size_t off = static_cast<size_t>(p - base);
+    assert((off % kOrderingEdgeDefaultStride) == 0 &&
+           "Ordering edge slot pointer is not slot aligned.");
+    edge_slab_.free_slots.push_back(
+        static_cast<uint32_t>(b * slots + off / kOrderingEdgeDefaultStride));
+    return;
+  }
+  assert(false && "Ordering edge slot released to an agent that does not own it.");
+}
+
+void GpuAgent::DestroyOrderingEdgeSlab() {
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  // Safe from ~GpuAgent's body: MemoryRegion::Free() reaches
+  // owner()->agent_memory_lock_ on the base core::Agent and owner()->driver(),
+  // which is non-virtual, and regions_ is not torn down yet.
+  for (char* base : edge_slab_.blocks)
+    core::Runtime::runtime_singleton_->FreeMemory(base);
+  edge_slab_.blocks.clear();
+  edge_slab_.free_slots.clear();
 }
 
 core::Agent* GpuAgent::GetNearestCpuAgent() const {
