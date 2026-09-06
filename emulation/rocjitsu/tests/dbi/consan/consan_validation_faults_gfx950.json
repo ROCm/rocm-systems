@@ -4,6 +4,32 @@
   "evidence_model": "reviewed against fresh target-specific inventories",
   "review_required": false,
   "workloads": {
+    "qwen-prefill": {
+      "faults": [
+        {
+          "id": "barrier-drop-matmul-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected s_barrier is the unconditional publication edge in the executed main$async_dispatch_14_matmul_like_5x1024x2048_f32 stage loop. Replacement-tile LDS stores at .text+0x7d44 through .text+0x7dac precede it, and peer LDS reads begin at .text+0x7dc0 immediately after it. Dropping this exact barrier therefore exposes the intended cross-wave write/read hazard."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:aef252021cc529ba|kernel=main$async_dispatch_14_matmul_like_5x1024x2048_f32|kind=barrier|pc=0x0000000000007dbc|mnemonic=s_barrier|occurrence=2"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "main$async_dispatch_14_matmul_like_5x1024x2048_f32"
+              }
+            }
+          }
+        }
+      ]
+    },
     "d128-pressure": {
       "faults": [
         {
