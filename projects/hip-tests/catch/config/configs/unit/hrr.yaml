@@ -76,6 +76,10 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_ImplausiblePayloadLength:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [format, recovery, cpu]
   Unit_HRR_Recovery_NoTrailer:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
@@ -486,3 +490,23 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, repro]
+  Unit_HRR_Regions_StreamFraming:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [format, regions, cpu]
+  Unit_HRR_Regions_Roundtrip:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_SegmentMaterialization:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_EmbeddedPointerMaterialization:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, regions]

@@ -102,6 +102,37 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
+| `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-regions` | Ignore any external region annotations in the archive |
+| `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
+| `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
+| `--guard-blocks` | Relocate each annotated block behind a guard page for one launch (diagnostic; needs region annotations) |
+| `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
+| `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
+| `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### External region annotations
+
+HRR interposes the HIP dispatch table, so it records the memory that crosses a
+HIP API and nothing else. A framework allocator that carves per-object blocks out
+of one large `hipMalloc` (PyTorch's HIP caching allocator) and a library that
+allocates below HIP entirely (direct HSA, a foreign VMM pool, imported memory)
+both leave HRR with a device VA range it cannot account for. A **producer**
+outside the runtime writes those ranges down as
+`pid-<pid>/regions/<name>.hrrr`; `hrr-playback` loads them automatically. See
+[`producers/README.md`](producers/README.md) for the format and
+[`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
+for the reference PyTorch producer.
+
+**Fidelity.** With annotations present and no guard flag, replay's memory layout
+is exactly what it would have been without them; the annotations are read, not
+acted on, except that a segment HIP never saw now gets allocated, so pointers
+into it resolve instead of reaching the GPU as an address from another process.
+Fidelity therefore only increases. The two `--guard-*` flags are the deliberate
+exception: they move memory so that an out-of-bounds access faults instead of
+landing in a live neighbour, and are off by default for that reason.
+`--guard-blocks` restores every guarded block and releases the relocation before
+the next event, so the divergence is confined to the launch under examination.
 
 ### Replay environment
 
@@ -140,10 +171,14 @@ capture.hrr/
   pid-<pid>/
     events.bin
     blobs/
+    regions/          (optional)
     manifest.json
 ```
 
 - **events.bin** — HIP API event stream
+- **regions/** — external region annotations, if a producer ran: memory the HIP
+  dispatch table never saw. Written by code outside the runtime, never by
+  capture itself
 - **blobs/** — host payloads referenced by the trace
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 

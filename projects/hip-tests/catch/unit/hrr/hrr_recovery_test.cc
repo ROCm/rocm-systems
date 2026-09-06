@@ -240,6 +240,28 @@ HIP_TEST_CASE(Unit_HRR_Recovery_TornPayload) {
 /**
  * Test Description
  * ----------------
+ *   - N complete records followed by a header whose payload_length is a
+ *     file-supplied ~4 GiB claim. The reader must refuse to allocate that and
+ *     treat the record as torn, keeping the complete records already parsed.
+ */
+HIP_TEST_CASE(Unit_HRR_Recovery_ImplausiblePayloadLength) {
+  TmpArchive arc("huge_payload");
+  arc.write_records(2);
+  hrr_event_header h = make_min_record(2);
+  h.payload_length = 0xFFFFFFF0u;
+  arc.write_bytes(&h, sizeof(h));
+  arc.finish();
+
+  hrr::Archive a;
+  REQUIRE(hrr::load_archive(arc.path(), a));
+  CHECK(a.events.size() == 2);
+  CHECK_FALSE(a.complete);
+  CHECK(a.truncated);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - N complete records, no trailer, clean EOF exactly at a record boundary
  *     (e.g. a crash between records, after a checkpoint but before atexit). The
  *     reader recovers all N records, marks not-complete but NOT truncated (the

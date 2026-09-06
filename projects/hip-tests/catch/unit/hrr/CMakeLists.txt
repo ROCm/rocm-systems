@@ -26,6 +26,11 @@
 #                          Unit_HRR_GpuWorkload_Direct / Unit_HRR_GraphWorkload_Direct
 #                          as subprocesses, then runs hrr-playback to validate
 #                          replayed D2H buffers byte-for-byte against captured blobs.
+#   hrr_regions_test.cc  — External region annotations (hrr_regions.h): CPU-only
+#                          sidecar framing tests, plus a GPU workload that carves
+#                          blocks out of one hipMalloc by pointer arithmetic and
+#                          is replayed against a synthetic sidecar. Contains its
+#                          own hidden [.][hrr-direct] workload.
 #
 # hrr_reader.cpp is compiled directly into the test executable so the format
 # tests can exercise the reader without a separate install step.
@@ -49,6 +54,7 @@ set(TEST_SRC
     hrr_repro_workload_test.cc
     hrr_spt_workload_test.cc
     hrr_roundtrip_test.cc
+    hrr_regions_test.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
 

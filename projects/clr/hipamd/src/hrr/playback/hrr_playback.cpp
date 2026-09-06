@@ -313,6 +313,15 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("Blobs:        %zu\n", archive.blob_count);
   printf("Code Objects: %zu\n", archive.code_object_count);
   printf("Threads:      %zu\n", archive.threads.size());
+  // External region annotations, if a producer wrote any alongside the events.
+  // Worth reporting here because their absence is the usual explanation for a
+  // replay that passes while the recorded run faulted.
+  {
+    hrr::RegionMap regions;
+    const size_t n = regions.load(archive.path);
+    if (n > 0)
+      printf("Regions:      %zu records from %zu stream(s)\n", n, regions.streams());
+  }
   printf("\n");
 
   // Event type breakdown
@@ -654,6 +663,15 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
         ctx.next_seq.store(next, std::memory_order_release);
     }
   } seq_guard{ctx, ev.header().sequence_id + 1, order};
+
+  // Advance the external region annotations to this event's capture timestamp,
+  // so a handler that translates a pointer sees the regions that were live at
+  // the corresponding instant of the recorded run. Done here rather than inside
+  // the kernel-launch path so that memcpys and every other handler get the same
+  // view, and so a segment the producer declared is materialised at the point
+  // in the stream where the recorded program created it.
+  if (ctx.regions_enabled)
+    ctx.regions.advance_to(ctx, static_cast<int64_t>(ev.header().timestamp_ns));
 
   if (is_special(etype)) {
     hipError_t r = handle_special(ctx, ev);
@@ -1207,6 +1225,40 @@ static void print_usage(const char* argv0) {
     "  --progress-seconds S  Print heartbeat at most every S seconds\n"
     "  --version             Print the archive format version this build reads and\n"
     "                        the revision it was built from, then exit\n"
+    "  --warn-untranslated-args\n"
+    "                        Report kernel-argument pointers that resolve in no\n"
+    "                        allocation, VMM reservation or annotated region.\n"
+    "                        Those reach the GPU as null, so a non-zero count\n"
+    "                        means the capture lost allocations below the HIP\n"
+    "                        API — see regions below.\n"
+    "\n"
+    "External region annotations (regions/*.hrrr in the archive; see hrr_regions.h):\n"
+    "  What a producer outside the HIP runtime knew and the dispatch table could\n"
+    "  not: the per-object block layout a framework allocator carves inside its\n"
+    "  hipMalloc segments, and segments that never crossed a HIP API at all.\n"
+    "  Loaded automatically when present. Single-threaded replay only.\n"
+    "  --no-regions          Ignore any region sidecar in the archive\n"
+    "  --regions-strict      Count intra-segment out-of-bounds findings toward the\n"
+    "                        exit code (default: report only)\n"
+    "\n"
+    "Guard pages (diagnostic; both move memory the replay otherwise places exactly\n"
+    "where the recording had it, so they are off by default):\n"
+    "  --guard-segments      Back every device allocation with VMM and leave an\n"
+    "                        unmapped span after it. Catches a run off the end of a\n"
+    "                        whole segment; layout inside the segment is untouched.\n"
+    "  --guard-blocks        Needs region annotations. For the duration of one\n"
+    "                        launch, hand each argument that resolves into a live\n"
+    "                        block a copy of that block placed against an unmapped\n"
+    "                        guard, so an overrun past the object itself faults.\n"
+    "                        Results are written back and the copy released before\n"
+    "                        the next event. Narrow it with --kernel-filter.\n"
+    "  --guard-min-bytes N   Skip blocks smaller than N bytes (default 0)\n"
+    "  --guard-max-bytes N   Skip blocks larger than N bytes (default: no limit)\n"
+    "  --guard-budget-mb N   Cap guarded memory per launch (default 4096)\n"
+    "  --guard-exact-align   Reproduce each pointer's offset within an allocation\n"
+    "                        granule bit for bit instead of only its alignment.\n"
+    "                        Tighter fidelity, but the guard then sits up to one\n"
+    "                        granule past the block's end.\n"
     "  --help                Show this message\n"
     "\n"
     "Environment (replay device allocation padding — see hip_playback.cpp):\n"
@@ -1236,6 +1288,7 @@ int main(int argc, char** argv) {
   bool show_info     = false;
   bool show_events   = false;
   bool do_repair     = false;
+  bool no_regions    = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1259,6 +1312,27 @@ int main(int argc, char** argv) {
     }
     else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
     else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
+    else if (!strcmp(argv[i], "--no-regions"))        no_regions             = true;
+    else if (!strcmp(argv[i], "--regions-strict"))    ctx.regions_strict     = true;
+    else if (!strcmp(argv[i], "--warn-untranslated-args"))
+      ctx.warn_untranslated_args = true;
+    else if (!strcmp(argv[i], "--guard-segments"))    ctx.guard_segments     = true;
+    else if (!strcmp(argv[i], "--guard-blocks"))      ctx.guard_blocks       = true;
+    else if (!strcmp(argv[i], "--guard-exact-align")) ctx.guard_exact_align  = true;
+    else if ((!strcmp(argv[i], "--guard-min-bytes") ||
+              !strcmp(argv[i], "--guard-max-bytes") ||
+              !strcmp(argv[i], "--guard-budget-mb")) && i + 1 < argc) {
+      const char* flag = argv[i];
+      char* end = nullptr;
+      unsigned long long n = std::strtoull(argv[++i], &end, 0);
+      if (!end || *end != '\0') {
+        fprintf(stderr, "[HRR] %s expects an integer\n", flag);
+        return 1;
+      }
+      if      (!strcmp(flag, "--guard-min-bytes")) ctx.guard_min_bytes = n;
+      else if (!strcmp(flag, "--guard-max-bytes")) ctx.guard_max_bytes = n;
+      else ctx.guard_budget_bytes = static_cast<size_t>(n) << 20;
+    }
     else if (!strcmp(argv[i], "--progress-kernels") && i + 1 < argc) {
       char* end = nullptr;
       unsigned long long n = std::strtoull(argv[++i], &end, 10);
@@ -1369,6 +1443,44 @@ int main(int argc, char** argv) {
   const bool use_mt = !single_thread && archive.threads.size() > 1;
   printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
 
+  // External region annotations. Loaded up front, whole: a producer records a
+  // batch after the events it describes, and the batches of several producers
+  // interleave, so the live set at a given instant only exists once every
+  // stream has been merged.
+  if (!no_regions) {
+    const size_t n = ctx.regions.load(archive.path);
+    if (n > 0) {
+      // The classification walks one totally ordered stream, which a
+      // multi-threaded replay does not have: two threads dispatch events whose
+      // timestamps interleave, and the cursor cannot be in two places at once.
+      if (use_mt) {
+        printf("[HRR] Regions : %zu records ignored (--multi-thread; region "
+               "tracking needs a single ordered stream)\n", n);
+      } else {
+        ctx.regions_enabled = true;
+        uint64_t first_ns = UINT64_MAX, last_ns = 0;
+        for (const auto& ev : archive.events) {
+          const uint64_t t = ev.header().timestamp_ns;
+          if (t == 0) continue;
+          if (t < first_ns) first_ns = t;
+          if (t > last_ns)  last_ns  = t;
+        }
+        if (first_ns != UINT64_MAX)
+          ctx.regions.check_clock_against(first_ns, last_ns);
+        printf("[HRR] Regions : %zu records from %zu stream(s)\n",
+               n, ctx.regions.streams());
+      }
+    }
+  }
+  if (ctx.guard_blocks && !ctx.regions_enabled) {
+    fprintf(stderr,
+            "[HRR] --guard-blocks needs region annotations to know where one "
+            "object ends and the next begins, and this archive has none. Use "
+            "--guard-segments to guard whole allocations, or capture with a "
+            "region producer (see hrr/producers/README.md).\n");
+    return 1;
+  }
+
   // Module pre-pass: process fat binary and explicit module load events in
   // global sequence order, single-threaded, before the parallel replay begins.
   // Without this, a timing delay on one thread (e.g. hipEventSynchronize) can
@@ -1418,6 +1530,14 @@ int main(int argc, char** argv) {
     ctx.total_kernel_ms  = 0.0;
     ctx.events_failed.store(0, std::memory_order_relaxed);
     ctx.code_objects_failed.store(0, std::memory_order_relaxed);
+    // Warm-up drained the region cursor. advance_to is monotonic and would
+    // leave the timed pass classifying against an empty live-set (--regions-strict
+    // phantom failures, --guard-blocks guarding nothing).
+    ctx.regions.rewind();
+    ctx.region_ptrs_checked.store(0, std::memory_order_relaxed);
+    ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
+    ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
+    ctx.guard_blind_max.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1446,7 +1566,7 @@ int main(int argc, char** argv) {
     //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
-        case AllocKind::Device:        (void)hipFree(entry.live_ptr);     break;
+        case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
@@ -1533,6 +1653,46 @@ int main(int argc, char** argv) {
     printf("[HRR]   Code objects   : %zu unloadable (continued)\n",
            ctx.code_objects_failed.load());
     ok = false;
+  }
+
+  if (ctx.regions_enabled) {
+    printf("[HRR]   Regions        : %zu applied of %zu, %zu blocks / %zu segments live\n",
+           ctx.regions.applied(), ctx.regions.records(),
+           ctx.regions.blocks_live(), ctx.regions.segments_live());
+    if (ctx.regions.segments_materialized() > 0)
+      printf("[HRR]   Region segs    : %zu materialised (HIP bypassed; contents "
+             "not in the archive)\n",
+             ctx.regions.segments_materialized());
+    const uint64_t oob = ctx.region_oob_ptrs.load();
+    printf("[HRR]   Region check   : %llu pointer(s) checked, %llu intra-segment "
+           "out-of-bounds/stale\n",
+           (unsigned long long)ctx.region_ptrs_checked.load(),
+           (unsigned long long)oob);
+    // Reporting by default. The finding describes the recorded program, not a
+    // failure of the replay to reproduce it, so it only decides the exit code
+    // when the caller asked for that.
+    if (oob > 0 && ctx.regions_strict) ok = false;
+  }
+
+  if (ctx.guard_blocks || ctx.guard_segments) {
+    printf("[HRR]   Guard          : %s%s%llu block relocation(s), largest "
+           "unguarded tail %llu bytes\n",
+           ctx.guard_segments ? "segments " : "",
+           ctx.guard_blocks   ? "blocks "   : "",
+           (unsigned long long)ctx.guard_blocks_relocated.load(),
+           (unsigned long long)ctx.guard_blind_max.load());
+  }
+
+  {
+    // Printed unconditionally under the flag, zero included: "no pointer was
+    // lost below the HIP API" is the answer the flag exists to establish, and
+    // it is only credible if the line appears either way.
+    const uint64_t untranslated = ctx.untranslated_ptr_args.load();
+    if (ctx.warn_untranslated_args || untranslated > 0)
+      printf("[HRR]   Untranslated   : %llu kernel-arg pointer(s) resolved in no "
+             "allocation, VMM reservation or region%s\n",
+             (unsigned long long)untranslated,
+             untranslated > 0 ? " — they reached the GPU as null" : "");
   }
 
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {
