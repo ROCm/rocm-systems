@@ -4,11 +4,22 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import os
 import re
 import sys
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
+
+# TEST ONLY (revert before merge): force this build to identify as an old
+# release so rocm-docs-core renders the "old version" banner. PR preview builds
+# are otherwise classified as "external" and never show the banner, which is
+# what we want to test here. Format is "<repo_url>,<branch>"; a docs-X.Y.Z
+# branch matches the OLD_RELEASE pattern in rocm_docs.projects.
+os.environ.setdefault(
+    "ROCM_DOCS_REMOTE_DETAILS",
+    "https://github.com/ROCm/rocm-systems,docs-6.2.2",
+)
 
 from rocm_docs import ROCmDocs
 
