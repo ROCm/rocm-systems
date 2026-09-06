@@ -617,6 +617,9 @@ TEST(ConSanObservationPlan, PendingIntentQueryJoinsKindSiteAndCurrentLoweringSta
 
   EXPECT_EQ(ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, site),
             (std::vector<ConSanProbeIntentId>{{0}, {1}}));
+  ASSERT_NE(ledger.intent({0}), nullptr);
+  EXPECT_EQ(ledger.intent_ids_covering(ledger.intent({0})->covered_semantic_sites.front()),
+            (std::vector<ConSanProbeIntentId>{{0}, {1}}));
   EXPECT_TRUE(ledger.pending_intent_ids(ConSanProbeIntentKind::BarrierRecord, site).empty());
   PhysicalSiteId other_site = site;
   other_site.original_text_offset += 4u;
@@ -629,6 +632,43 @@ TEST(ConSanObservationPlan, PendingIntentQueryJoinsKindSiteAndCurrentLoweringSta
       rejected, ConSanLoweringOutcomeKind::PlacementRejected, "test rejection"));
   EXPECT_EQ(ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, site),
             (std::vector<ConSanProbeIntentId>{{0}}));
+}
+
+TEST(ConSanObservationPlan, PendingIntentQueriesScaleWithAddressedSites) {
+  ConSanObservationPlan plan =
+      plan_consan_access_observation(one_native_access_inventory(),
+                                     policy_request(ConSanCapabilityEngine::SuperCollider))
+          .plan;
+  ASSERT_TRUE(plan.valid());
+  ASSERT_EQ(plan.probe_intents.size(), 1u);
+
+  constexpr uint32_t kSiteCount = 16384;
+  const ConSanProbeIntent prototype = plan.probe_intents.front();
+  plan.probe_intents.reserve(kSiteCount);
+  for (uint32_t ordinal = 1; ordinal < kSiteCount; ++ordinal) {
+    ConSanProbeIntent intent = prototype;
+    intent.id = {ordinal};
+    intent.source_site = {ordinal};
+    intent.physical_site.original_text_offset += 4u * ordinal;
+    for (SemanticSiteId &semantic_site : intent.covered_semantic_sites) {
+      semantic_site.physical = intent.physical_site;
+      semantic_site.member_ordinal = ordinal;
+    }
+    plan.probe_intents.push_back(std::move(intent));
+  }
+  ASSERT_TRUE(plan.valid());
+
+  ConSanCoverageLedger ledger(std::move(plan));
+  for (uint32_t ordinal = 0; ordinal < kSiteCount; ++ordinal) {
+    const ConSanProbeIntentId expected{ordinal};
+    const ConSanProbeIntent *intent = ledger.intent(expected);
+    ASSERT_NE(intent, nullptr);
+    EXPECT_EQ(ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
+                                        intent->physical_site),
+              (std::vector<ConSanProbeIntentId>{expected}));
+    EXPECT_EQ(ledger.intent_ids_covering(intent->covered_semantic_sites.front()),
+              (std::vector<ConSanProbeIntentId>{expected}));
+  }
 }
 
 TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {

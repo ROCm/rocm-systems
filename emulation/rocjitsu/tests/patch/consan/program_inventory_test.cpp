@@ -635,6 +635,36 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_EQ(stale_site_id.view().program_site({0}), nullptr);
 }
 
+TEST(ConSanProgramInventory, LargeAccessBatchRetainsContiguousStableSiteHandles) {
+  constexpr size_t kAccessCount = 16384;
+  ProgramInventoryBuilder builder;
+  ConSanProgramSite leading_semantic;
+  leading_semantic.physical_id.original_text_offset = 8;
+  leading_semantic.decoded_site().text_offset = 8;
+  leading_semantic.decoded_site().size = 4;
+  leading_semantic.decoded_site().mnemonic = "s_barrier";
+  ConSanBarrierSite barrier;
+  static_cast<ConSanDecodedSite &>(barrier) = leading_semantic.decoded_site();
+  leading_semantic.payload = std::move(barrier);
+  builder.add_semantic_site(std::move(leading_semantic));
+
+  ConSanProgramSiteArena batch;
+  for (size_t index = 0; index < kAccessCount; ++index)
+    batch.add_access(make_inventory_lds_site("ds_load_b32", 16 + index * 8));
+  builder.add_sites(std::move(batch));
+
+  const ProgramInventory inventory = builder.view();
+  ASSERT_EQ(inventory.access_sites().size(), kAccessCount);
+  ASSERT_EQ(inventory.program_sites().size(), kAccessCount + 1);
+  for (size_t index = 0; index < inventory.program_sites().size(); ++index) {
+    const ConSanProgramSite &site = inventory.program_sites()[index];
+    EXPECT_EQ(site.id, ConSanProgramSiteId{static_cast<uint32_t>(index)});
+    EXPECT_EQ(inventory.program_site(site.id), &site);
+  }
+  EXPECT_EQ(inventory.program_sites().back().mnemonic_view(), "s_barrier");
+  EXPECT_TRUE(inventory.program_site_ids_well_formed());
+}
+
 TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberIdentities) {
   const std::array<uint32_t, 6> text_words = {
       0xBE805181u, // s_barrier_init 1

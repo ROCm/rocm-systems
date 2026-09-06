@@ -13,9 +13,9 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_registry_lifecycle.h"
 
-#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
@@ -53,6 +53,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <sys/stat.h>
@@ -334,14 +335,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 [[nodiscard]] std::vector<rocjitsu::ConSanProbeIntentId>
 intent_ids_covering(const rocjitsu::TransformResult &result,
                     const rocjitsu::SemanticSiteId &semantic_site) {
-  std::vector<rocjitsu::ConSanProbeIntentId> ids;
-  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
-    if (std::ranges::find(intent.covered_semantic_sites, semantic_site) !=
-        intent.covered_semantic_sites.end()) {
-      ids.push_back(intent.id);
-    }
-  }
-  return ids;
+  return result.coverage_ledger.intent_ids_covering(semantic_site);
 }
 
 [[nodiscard]] bool require_patch_applies_to(const rocjitsu::TransformResult &result,
@@ -443,34 +437,34 @@ compute_consan_static_coverage(const rocjitsu::ConSanCoverageLedger &ledger,
     std::vector<rocjitsu::ConSanProbeIntentId> intents;
   };
   std::vector<TypedSiteCoverage> sites;
+  constexpr size_t kResourceKindCount = 4u;
+  std::array<std::unordered_map<uint64_t, size_t>, kResourceKindCount> site_indices;
   const auto append_decisions = [&](const auto &decisions, rocjitsu::ConSanResourceSiteKind kind) {
+    const size_t kind_index = static_cast<size_t>(kind);
+    if (kind_index >= site_indices.size())
+      return;
     for (const auto &decision : decisions) {
       if (decision.kind == rocjitsu::ConSanSiteDecisionKind::NotApplicable)
         continue;
       const uint64_t text_offset = decision.semantic_site.physical.original_text_offset;
-      auto site = std::ranges::find_if(sites, [&](const TypedSiteCoverage &candidate) {
-        return candidate.kind == kind && candidate.text_offset == text_offset;
-      });
-      if (site == sites.end()) {
+      const auto [indexed, inserted] =
+          site_indices[kind_index].try_emplace(text_offset, sites.size());
+      if (inserted) {
         sites.push_back({
             .kind = kind,
             .text_offset = text_offset,
             .supported = false,
             .intents = {},
         });
-        site = std::prev(sites.end());
       }
+      TypedSiteCoverage &site = sites[indexed->second];
       if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
         continue;
-      site->supported = true;
-      for (const rocjitsu::ConSanProbeIntent &intent : ledger.observation_plan().probe_intents) {
-        if (std::ranges::find(intent.covered_semantic_sites, decision.semantic_site) ==
-            intent.covered_semantic_sites.end())
-          continue;
-        const rocjitsu::ConSanProbeIntentId id = intent.id;
-        if (std::ranges::find(site->intents, id) == site->intents.end())
-          site->intents.push_back(id);
-      }
+      site.supported = true;
+      for (const rocjitsu::ConSanProbeIntentId id :
+           ledger.intent_ids_covering(decision.semantic_site))
+        if (std::ranges::find(site.intents, id) == site.intents.end())
+          site.intents.push_back(id);
     }
   };
   append_decisions(ledger.site_decisions(), rocjitsu::ConSanResourceSiteKind::Access);
@@ -4509,9 +4503,26 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(static_coverage.fence.placement_or_lowering_failed),
         static_cast<unsigned long long>(static_coverage.fence.expert_limit_omitted),
         static_cast<unsigned long long>(load_id));
+    std::unordered_map<uint64_t, std::vector<std::string_view>> source_containers_by_text_offset;
+    if (g_log_level.load(std::memory_order_relaxed) >= kLogDebug) {
+      for (const rocjitsu::ConSanProgramSite &site :
+           transform_result.program_inventory.program_sites()) {
+        const rocjitsu::ConSanProgramContainer *container =
+            transform_result.program_inventory.container(site.container);
+        if (container == nullptr)
+          continue;
+        auto &names = source_containers_by_text_offset[site.text_offset()];
+        if (std::ranges::find(names, container->name) == names.end())
+          names.push_back(container->name);
+      }
+      for (auto &entry : source_containers_by_text_offset)
+        std::ranges::sort(entry.second);
+    }
     const auto log_typed_coverage_sites = [&](const auto &decisions,
                                               rocjitsu::ConSanResourceSiteKind kind,
                                               const auto &reason_name) {
+      if (g_log_level.load(std::memory_order_relaxed) < kLogDebug)
+        return;
       for (const auto &decision : decisions) {
         std::string_view disposition = "not_applicable";
         std::string_view outcome = "not_applicable";
@@ -4564,11 +4575,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             lowering_reason = "none";
           }
         }
-        const std::vector<std::string> source_containers =
-            transform_result.program_inventory.source_container_names(
-                decision.semantic_site.physical);
+        const auto source_containers = source_containers_by_text_offset.find(
+            decision.semantic_site.physical.original_text_offset);
         const std::string_view source =
-            source_containers.empty() ? std::string_view{"<none>"} : source_containers.front();
+            source_containers == source_containers_by_text_offset.end() ||
+                    source_containers->second.empty()
+                ? std::string_view{"<none>"}
+                : source_containers->second.front();
         std::string reason(reason_name(decision.reason));
         std::ranges::replace(reason, '-', '_');
         log_message(
@@ -4605,6 +4618,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
     for (const rocjitsu::ConSanPatchDiagnostic &patch : transform_diagnostics.patches) {
+      if (g_log_level.load(std::memory_order_relaxed) < kLogDebug)
+        break;
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
       const std::string private_epoch_offset =

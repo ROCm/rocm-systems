@@ -83,9 +83,22 @@ namespace {
                      *reason <= ConSanRegisterPlanReason::DynamicStack);
 }
 
-[[nodiscard]] bool contains_physical_site(std::span<const PhysicalSiteId> sites,
+using PhysicalSitesByOffset = std::unordered_multimap<uint64_t, const PhysicalSiteId *>;
+
+[[nodiscard]] PhysicalSitesByOffset
+index_physical_sites_by_offset(std::span<const PhysicalSiteId> sites) {
+  PhysicalSitesByOffset index;
+  index.reserve(sites.size());
+  for (const PhysicalSiteId &site : sites)
+    index.emplace(site.original_text_offset, &site);
+  return index;
+}
+
+[[nodiscard]] bool contains_physical_site(const PhysicalSitesByOffset &sites,
                                           const PhysicalSiteId &site) {
-  return std::ranges::find(sites, site) != sites.end();
+  const auto [begin, end] = sites.equal_range(site.original_text_offset);
+  return std::ranges::any_of(std::ranges::subrange(begin, end),
+                             [&](const auto &candidate) { return *candidate.second == site; });
 }
 
 [[nodiscard]] bool contains_substring(const ProgramInventory &inventory,
@@ -95,6 +108,21 @@ namespace {
            const ConSanProgramContainer *container = inventory.container(access->container);
            return container != nullptr && container->name.find(filter) != std::string::npos;
          });
+}
+
+[[nodiscard]] std::vector<std::string>
+source_container_names(const ProgramInventory &inventory,
+                       std::span<const ConSanProgramSite *const> aliases) {
+  std::vector<std::string> names;
+  names.reserve(aliases.size());
+  for (const ConSanProgramSite *alias : aliases) {
+    const ConSanProgramContainer *container = inventory.container(alias->container);
+    if (container != nullptr)
+      names.push_back(container->name);
+  }
+  std::ranges::sort(names);
+  names.erase(std::ranges::unique(names).begin(), names.end());
+  return names;
 }
 
 [[nodiscard]] bool access_alias_semantics_equal(const ProgramInventory &inventory,
@@ -309,13 +337,24 @@ bool ConSanObservationPlan::append(const ConSanObservationPlan &fragment) {
 ConSanCoverageLedger::ConSanCoverageLedger(ConSanObservationPlan plan)
     : observation_plan_(std::move(plan)) {
   intent_entries_.reserve(observation_plan_.probe_intents.size());
-  for (const ConSanProbeIntent &intent : observation_plan_.probe_intents)
+  for (const ConSanProbeIntent &intent : observation_plan_.probe_intents) {
     intent_entries_.push_back({
         .intent_id = intent.id,
         .lowering = ConSanLoweringOutcomeKind::Pending,
         .resource_rejection_reason = std::nullopt,
         .detail = {},
     });
+    const size_t kind_index = static_cast<size_t>(intent.kind);
+    if (kind_index < intent_ids_by_kind_and_text_offset_.size()) {
+      intent_ids_by_kind_and_text_offset_[kind_index][intent.physical_site.original_text_offset]
+          .push_back(intent.id);
+    }
+    for (const SemanticSiteId &semantic_site : intent.covered_semantic_sites) {
+      auto &ids = intent_ids_by_semantic_text_offset_[semantic_site.physical.original_text_offset];
+      if (ids.empty() || ids.back() != intent.id)
+        ids.push_back(intent.id);
+    }
+  }
 }
 
 const ConSanIntentCoverageEntry *ConSanCoverageLedger::intent_entry(ConSanProbeIntentId id) const {
@@ -466,8 +505,7 @@ bool committed_lowering_is_valid(const ConSanCommittedLowering &commit,
   for (ConSanProbeIntentId id : commit.intent_ids) {
     const ConSanProbeIntent *intent = resolve_intent(id);
     if (intent == nullptr || std::ranges::count(commit.intent_ids, id) != 1 ||
-        (instrumented &&
-         std::ranges::none_of(commit.locations, [&](const auto &location) {
+        (instrumented && std::ranges::none_of(commit.locations, [&](const auto &location) {
            return location.original_site == intent->physical_site;
          }))) {
       return false;
@@ -643,12 +681,17 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
   std::map<uint64_t, std::vector<const ConSanProgramSite *>> aliases_by_offset;
   for (const ConSanProgramSite &access : inventory.access_sites())
     aliases_by_offset[access.physical_id.original_text_offset].push_back(&access);
+  const PhysicalSitesByOffset synchronization_reservations =
+      index_physical_sites_by_offset(request.reserved_for_synchronization);
 
   for (const auto &[offset, aliases] : aliases_by_offset) {
     (void)offset;
     const ConSanProgramSite &access = *aliases.front();
     const std::vector<SemanticSiteId> ids = semantic_ids(access);
-    const std::vector<std::string> names = inventory.source_container_names(access.physical_id);
+    // The aliases were already grouped by physical offset above. Derive their
+    // presentation names from that group instead of rescanning the complete
+    // program-site arena once per access.
+    const std::vector<std::string> names = source_container_names(inventory, aliases);
     ConSanSiteDecisionKind decision_kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
 
@@ -665,7 +708,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
         !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
                                               request.kernel_name_allowlist)) {
       reason = ConSanAccessPolicyReason::ContainerFilterExcluded;
-    } else if (contains_physical_site(request.reserved_for_synchronization, access.physical_id)) {
+    } else if (contains_physical_site(synchronization_reservations, access.physical_id)) {
       reason = ConSanAccessPolicyReason::ReservedForSynchronizationPolicy;
     } else if (!enabled) {
       reason = ConSanAccessPolicyReason::AccessFamilyDisabled;

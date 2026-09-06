@@ -982,15 +982,41 @@ public:
   /// Resolve one admitted intent entry by its plan-local identifier.
   [[nodiscard]] const ConSanIntentCoverageEntry *intent_entry(ConSanProbeIntentId id) const;
 
+  /// Return intents that explicitly cover one original semantic site.
+  [[nodiscard]] std::vector<ConSanProbeIntentId>
+  intent_ids_covering(const SemanticSiteId &site) const {
+    std::vector<ConSanProbeIntentId> ids;
+    const auto candidates =
+        intent_ids_by_semantic_text_offset_.find(site.physical.original_text_offset);
+    if (candidates == intent_ids_by_semantic_text_offset_.end())
+      return ids;
+    for (ConSanProbeIntentId id : candidates->second) {
+      const ConSanProbeIntent *candidate = intent(id);
+      if (candidate != nullptr && std::ranges::find(candidate->covered_semantic_sites, site) !=
+                                      candidate->covered_semantic_sites.end()) {
+        ids.push_back(id);
+      }
+    }
+    return ids;
+  }
+
   /// Return pending intents of one semantic kind at one physical site.
   [[nodiscard]] std::vector<ConSanProbeIntentId>
   pending_intent_ids(ConSanProbeIntentKind kind, const PhysicalSiteId &site) const {
     std::vector<ConSanProbeIntentId> ids;
-    for (const ConSanProbeIntent &intent : observation_plan_.probe_intents) {
-      if (const ConSanIntentCoverageEntry *entry = intent_entry(intent.id);
-          intent.kind == kind && intent.physical_site == site && entry != nullptr &&
+    const size_t kind_index = static_cast<size_t>(kind);
+    if (kind_index >= intent_ids_by_kind_and_text_offset_.size())
+      return ids;
+    const auto &by_offset = intent_ids_by_kind_and_text_offset_[kind_index];
+    const auto candidates = by_offset.find(site.original_text_offset);
+    if (candidates == by_offset.end())
+      return ids;
+    for (ConSanProbeIntentId id : candidates->second) {
+      const ConSanProbeIntent *candidate = intent(id);
+      const ConSanIntentCoverageEntry *entry = intent_entry(id);
+      if (candidate != nullptr && candidate->physical_site == site && entry != nullptr &&
           entry->lowering == ConSanLoweringOutcomeKind::Pending)
-        ids.push_back(intent.id);
+        ids.push_back(id);
     }
     return ids;
   }
@@ -1047,6 +1073,11 @@ private:
   ConSanObservationPlan observation_plan_;
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
   std::vector<ConSanCommittedLowering> lowering_commits_;
+  std::array<std::unordered_map<uint64_t, std::vector<ConSanProbeIntentId>>,
+             static_cast<size_t>(ConSanProbeIntentKind::Count)>
+      intent_ids_by_kind_and_text_offset_;
+  std::unordered_map<uint64_t, std::vector<ConSanProbeIntentId>>
+      intent_ids_by_semantic_text_offset_;
 };
 
 /// Complete engine-policy request consumed by observation assembly.

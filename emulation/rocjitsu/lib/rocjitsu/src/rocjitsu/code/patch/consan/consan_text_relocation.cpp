@@ -21,6 +21,7 @@
 #include <iterator>
 #include <limits>
 #include <string>
+#include <unordered_map>
 
 namespace rocjitsu {
 
@@ -59,15 +60,14 @@ enum class FragmentMarkerRole : uint64_t {
 }
 
 [[nodiscard]] std::optional<InstructionRewrite> compose_consan_text_fragments(
-    std::span<const ConSanTextFragment> fragments, const InstructionRewriteContext &context,
+    std::span<const ConSanTextFragment *const> candidates, const InstructionRewriteContext &context,
     const ProgramInventory &inventory, std::span<const uint8_t> source_text, rj_code_arch_t arch,
     std::vector<std::string> &errors) {
   std::vector<const ConSanTextFragment *> applicable;
-  for (const ConSanTextFragment &fragment : fragments) {
-    if (fragment.kind != ConSanTextFragmentKind::EntryPrefix &&
-        fragment.patch.anchor_offset == context.source_offset &&
-        fragment_applies_to_owner(fragment, inventory, context.owner_entry_source_offset)) {
-      applicable.push_back(&fragment);
+  for (const ConSanTextFragment *fragment : candidates) {
+    if (fragment != nullptr && fragment->kind != ConSanTextFragmentKind::EntryPrefix &&
+        fragment_applies_to_owner(*fragment, inventory, context.owner_entry_source_offset)) {
+      applicable.push_back(fragment);
     }
   }
   if (applicable.empty())
@@ -571,26 +571,37 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     return std::nullopt;
   }
   const auto *header = reinterpret_cast<const Elf64_Ehdr *>(descriptor_patched_image.data());
+  std::unordered_map<uint64_t, std::vector<const ConSanTextFragment *>>
+      instruction_fragments_by_offset;
+  std::unordered_map<uint64_t, std::vector<const ConSanTextFragment *>> entry_fragments_by_offset;
+  instruction_fragments_by_offset.reserve(fragments.size());
+  for (const ConSanTextFragment &fragment : fragments) {
+    auto &index = fragment.kind == ConSanTextFragmentKind::EntryPrefix
+                      ? entry_fragments_by_offset
+                      : instruction_fragments_by_offset;
+    index[fragment.patch.anchor_offset].push_back(&fragment);
+  }
   BinaryTranslator translator(arch, arch, header->e_flags & EF_AMDGPU_MACH, translator_options);
   translator.set_kernel_entry_rewrite_callback([&](const KernelEntryRewriteContext &context)
                                                    -> std::optional<KernelEntryRewrite> {
     KernelEntryRewrite rewrite;
-    for (const ConSanTextFragment &fragment : fragments) {
-      if (fragment.kind != ConSanTextFragmentKind::EntryPrefix ||
-          fragment.patch.anchor_offset != context.source_entry_offset ||
-          !fragment_applies_to_owner(fragment, result.program_inventory,
+    const auto candidates = entry_fragments_by_offset.find(context.source_entry_offset);
+    if (candidates == entry_fragments_by_offset.end())
+      return std::nullopt;
+    for (const ConSanTextFragment *fragment : candidates->second) {
+      if (!fragment_applies_to_owner(*fragment, result.program_inventory,
                                      context.source_entry_offset)) {
         continue;
       }
       const uint32_t begin = static_cast<uint32_t>(rewrite.prefix_words.size() * sizeof(uint32_t));
-      rewrite.markers.push_back(
-          {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::Begin), .byte_offset = begin});
-      rewrite.prefix_words.insert(rewrite.prefix_words.end(), fragment.before_words.begin(),
-                                  fragment.before_words.end());
+      rewrite.markers.push_back({.id = fragment_marker_id(fragment->id, FragmentMarkerRole::Begin),
+                                 .byte_offset = begin});
+      rewrite.prefix_words.insert(rewrite.prefix_words.end(), fragment->before_words.begin(),
+                                  fragment->before_words.end());
       rewrite.required_ordinary_sgpr_count = std::max<uint32_t>(
-          rewrite.required_ordinary_sgpr_count, fragment.patch.required_sgpr_count);
+          rewrite.required_ordinary_sgpr_count, fragment->patch.required_sgpr_count);
       rewrite.markers.push_back(
-          {.id = fragment_marker_id(fragment.id, FragmentMarkerRole::End),
+          {.id = fragment_marker_id(fragment->id, FragmentMarkerRole::End),
            .byte_offset = static_cast<uint32_t>(rewrite.prefix_words.size() * sizeof(uint32_t))});
     }
     return rewrite.prefix_words.empty() ? std::nullopt
@@ -598,7 +609,10 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   });
   translator.set_instruction_rewrite_callback(
       [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
-        return compose_consan_text_fragments(fragments, context, result.program_inventory,
+        const auto candidates = instruction_fragments_by_offset.find(context.source_offset);
+        if (candidates == instruction_fragments_by_offset.end())
+          return std::nullopt;
+        return compose_consan_text_fragments(candidates->second, context, result.program_inventory,
                                              source_text, arch, errors);
       });
   TranslatedCodeObject translated = translator.translate(source);
@@ -732,14 +746,30 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
   std::vector<ConSanPatchInfo> placed_patches;
   std::vector<ConSanCommittedLowering> commits;
   commits.reserve(result.staged_text_fragments.size());
+  std::unordered_map<uint64_t, std::vector<const TranslatedTextPlacement *>>
+      rewritten_placements_by_source_offset;
+  rewritten_placements_by_source_offset.reserve(result.staged_text_fragments.size());
+  for (const TranslatedTextPlacement &placement : relocated->placements) {
+    if (placement.client_rewrite)
+      rewritten_placements_by_source_offset[placement.source_offset].push_back(&placement);
+  }
+  std::unordered_map<uint64_t, std::vector<const ClientTextMarkerPlacement *>>
+      marker_placements_by_id;
+  marker_placements_by_id.reserve(relocated->marker_placements.size());
+  for (const ClientTextMarkerPlacement &placement : relocated->marker_placements)
+    marker_placements_by_id[placement.id].push_back(&placement);
   const auto marker_for = [&](const ConSanTextFragment &fragment, FragmentMarkerRole role,
-                              uint64_t owner, uint64_t source_offset) {
-    return std::ranges::find_if(relocated->marker_placements,
-                                [&](const ClientTextMarkerPlacement &placement) {
-                                  return placement.id == fragment_marker_id(fragment.id, role) &&
-                                         placement.source_offset == source_offset &&
-                                         placement.owner_descriptor_file_offset == owner;
-                                });
+                              uint64_t owner,
+                              uint64_t source_offset) -> const ClientTextMarkerPlacement * {
+    const auto candidates = marker_placements_by_id.find(fragment_marker_id(fragment.id, role));
+    if (candidates == marker_placements_by_id.end())
+      return nullptr;
+    const auto placement =
+        std::ranges::find_if(candidates->second, [&](const ClientTextMarkerPlacement *candidate) {
+          return candidate->source_offset == source_offset &&
+                 candidate->owner_descriptor_file_offset == owner;
+        });
+    return placement == candidates->second.end() ? nullptr : *placement;
   };
   for (ConSanTextFragment &staged : result.staged_text_fragments) {
     const bool in_place =
@@ -752,9 +782,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
             marker_for(staged, FragmentMarkerRole::Begin, owner, staged.patch.anchor_offset);
         const auto end =
             marker_for(staged, FragmentMarkerRole::End, owner, staged.patch.anchor_offset);
-        if (begin == relocated->marker_placements.end() ||
-            end == relocated->marker_placements.end() ||
-            end->target_offset < begin->target_offset) {
+        if (begin == nullptr || end == nullptr || end->target_offset < begin->target_offset) {
           continue;
         }
         ConSanPatchInfo placed = staged.patch;
@@ -764,18 +792,24 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         placed.trampoline_offset = begin->target_offset;
         placed.trampoline_size = static_cast<uint32_t>(end->target_offset - begin->target_offset);
         placed.dispatch_id_primary_prologue_offset = begin->target_offset;
-        const auto secondary = std::ranges::find_if(
-            relocated->marker_placements, [&](const ClientTextMarkerPlacement &placement) {
-              return placement.id == fragment_marker_id(staged.id, FragmentMarkerRole::Begin) &&
-                     placement.owner_descriptor_file_offset == owner &&
-                     placement.source_offset != staged.patch.anchor_offset;
-            });
-        if (secondary != relocated->marker_placements.end()) {
-          placed.dispatch_id_secondary_prologue_offset = secondary->target_offset;
-          const auto secondary_end =
-              marker_for(staged, FragmentMarkerRole::End, owner, secondary->source_offset);
-          if (secondary_end == relocated->marker_placements.end() ||
-              secondary_end->target_offset < secondary->target_offset ||
+        const auto begin_candidates =
+            marker_placements_by_id.find(fragment_marker_id(staged.id, FragmentMarkerRole::Begin));
+        const ClientTextMarkerPlacement *secondary_placement = nullptr;
+        if (begin_candidates != marker_placements_by_id.end()) {
+          const auto secondary = std::ranges::find_if(
+              begin_candidates->second, [&](const ClientTextMarkerPlacement *placement) {
+                return placement->owner_descriptor_file_offset == owner &&
+                       placement->source_offset != staged.patch.anchor_offset;
+              });
+          if (secondary != begin_candidates->second.end())
+            secondary_placement = *secondary;
+        }
+        if (secondary_placement != nullptr) {
+          placed.dispatch_id_secondary_prologue_offset = secondary_placement->target_offset;
+          const auto secondary_end = marker_for(staged, FragmentMarkerRole::End, owner,
+                                                secondary_placement->source_offset);
+          if (secondary_end == nullptr ||
+              secondary_end->target_offset < secondary_placement->target_offset ||
               secondary_end->target_offset < placed.trampoline_offset ||
               secondary_end->target_offset - placed.trampoline_offset >
                   std::numeric_limits<uint32_t>::max()) {
@@ -798,63 +832,64 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         placed_patches.push_back(std::move(placed));
       }
     }
-    for (const TranslatedTextPlacement &placement : relocated->placements) {
-      if (staged.kind == ConSanTextFragmentKind::EntryPrefix)
-        break;
-      if (placement.source_offset != staged.patch.anchor_offset || !placement.client_rewrite)
-        continue;
-      ConSanPatchInfo placed = staged.patch;
-      if (in_place) {
-        placed.trampoline_offset = placement.target_offset;
-        placed.original_size =
-            static_cast<uint32_t>(staged.replacement_words.size() * sizeof(uint32_t));
-        placed.trampoline_size = 0u;
-        if (placed.relocated_guest_instruction_offset)
-          *placed.relocated_guest_instruction_offset += placement.target_offset;
-      } else {
-        const auto begin =
-            marker_for(staged, FragmentMarkerRole::Begin, placement.owner_descriptor_file_offset,
-                       staged.patch.anchor_offset);
-        const auto end =
-            marker_for(staged, FragmentMarkerRole::End, placement.owner_descriptor_file_offset,
-                       staged.patch.anchor_offset);
-        if (begin == relocated->marker_placements.end() ||
-            end == relocated->marker_placements.end())
-          continue;
-        if (end->target_offset < begin->target_offset) {
-          result.errors.emplace_back("ConSan " + std::string(subject) +
-                                     " lost a relocated fragment boundary");
-          return false;
-        }
-        placed.trampoline_offset = begin->target_offset;
-        placed.trampoline_size = static_cast<uint32_t>(end->target_offset - begin->target_offset);
-        if (placed.relocated_guest_instruction_offset) {
-          const auto guest =
-              marker_for(staged, FragmentMarkerRole::Guest, placement.owner_descriptor_file_offset,
+    const auto rewritten = rewritten_placements_by_source_offset.find(staged.patch.anchor_offset);
+    if (staged.kind != ConSanTextFragmentKind::EntryPrefix &&
+        rewritten != rewritten_placements_by_source_offset.end()) {
+      for (const TranslatedTextPlacement *placement_ptr : rewritten->second) {
+        const TranslatedTextPlacement &placement = *placement_ptr;
+        ConSanPatchInfo placed = staged.patch;
+        if (in_place) {
+          placed.trampoline_offset = placement.target_offset;
+          placed.original_size =
+              static_cast<uint32_t>(staged.replacement_words.size() * sizeof(uint32_t));
+          placed.trampoline_size = 0u;
+          if (placed.relocated_guest_instruction_offset)
+            *placed.relocated_guest_instruction_offset += placement.target_offset;
+        } else {
+          const auto begin =
+              marker_for(staged, FragmentMarkerRole::Begin, placement.owner_descriptor_file_offset,
                          staged.patch.anchor_offset);
-          if (guest == relocated->marker_placements.end()) {
+          const auto end =
+              marker_for(staged, FragmentMarkerRole::End, placement.owner_descriptor_file_offset,
+                         staged.patch.anchor_offset);
+          if (begin == nullptr || end == nullptr)
+            continue;
+          if (end->target_offset < begin->target_offset) {
             result.errors.emplace_back("ConSan " + std::string(subject) +
-                                       " lost a relocated guest marker");
+                                       " lost a relocated fragment boundary");
             return false;
           }
-          placed.relocated_guest_instruction_offset = guest->target_offset;
+          placed.trampoline_offset = begin->target_offset;
+          placed.trampoline_size = static_cast<uint32_t>(end->target_offset - begin->target_offset);
+          if (placed.relocated_guest_instruction_offset) {
+            const auto guest =
+                marker_for(staged, FragmentMarkerRole::Guest,
+                           placement.owner_descriptor_file_offset, staged.patch.anchor_offset);
+            if (guest == nullptr) {
+              result.errors.emplace_back("ConSan " + std::string(subject) +
+                                         " lost a relocated guest marker");
+              return false;
+            }
+            placed.relocated_guest_instruction_offset = guest->target_offset;
+          }
         }
+        const uint64_t emitted_offset = in_place ? placed.anchor_offset : placed.trampoline_offset;
+        const uint64_t emitted_size = in_place ? placed.original_size : placed.trampoline_size;
+        if (emitted_offset > relocated->text_size ||
+            emitted_size > relocated->text_size - emitted_offset) {
+          result.errors.emplace_back("ConSan " + std::string(subject) +
+                                     " placement exceeds relocated text: source=" +
+                                     std::to_string(staged.patch.anchor_offset) +
+                                     " target=" + std::to_string(emitted_offset) +
+                                     " size=" + std::to_string(emitted_size) +
+                                     " text=" + std::to_string(relocated->text_size));
+          return false;
+        }
+        if (!primary)
+          primary = placed;
+        fragment_placements.push_back(placed);
+        placed_patches.push_back(std::move(placed));
       }
-      const uint64_t emitted_offset = in_place ? placed.anchor_offset : placed.trampoline_offset;
-      const uint64_t emitted_size = in_place ? placed.original_size : placed.trampoline_size;
-      if (emitted_offset > relocated->text_size ||
-          emitted_size > relocated->text_size - emitted_offset) {
-        result.errors.emplace_back(
-            "ConSan " + std::string(subject) + " placement exceeds relocated text: source=" +
-            std::to_string(staged.patch.anchor_offset) +
-            " target=" + std::to_string(emitted_offset) + " size=" + std::to_string(emitted_size) +
-            " text=" + std::to_string(relocated->text_size));
-        return false;
-      }
-      if (!primary)
-        primary = placed;
-      fragment_placements.push_back(placed);
-      placed_patches.push_back(std::move(placed));
     }
     if (!primary) {
       result.errors.emplace_back(

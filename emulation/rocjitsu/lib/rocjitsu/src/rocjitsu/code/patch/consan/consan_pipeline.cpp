@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <map>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -188,6 +189,10 @@ template <typename PatchRange>
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
                             const PatchRange &patches) {
   std::map<std::string, ConSanKernelDispatchRequirement> requirements_by_name;
+  std::unordered_map<uint64_t, std::vector<const ConSanProgramSite *>> sites_by_text_offset;
+  sites_by_text_offset.reserve(inventory.program_sites().size());
+  for (const ConSanProgramSite &site : inventory.program_sites())
+    sites_by_text_offset[site.physical_id.original_text_offset].push_back(&site);
   const auto note_kernel = [&](const ConSanProgramContainer &kernel, const auto &apply) {
     if (kernel.name.empty())
       return false;
@@ -202,12 +207,15 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
   };
   const auto note_physical_site = [&](const PhysicalSiteId &physical, const auto &apply) {
     bool attributed = false;
-    for (const ConSanProgramSite &site : inventory.program_sites()) {
-      if (site.physical_id != physical)
-        continue;
-      for (const ConSanExecutionOwner &owner : site.execution_owners) {
-        if (const ConSanProgramContainer *kernel = inventory.kernel(owner))
-          attributed |= note_kernel(*kernel, apply);
+    const auto candidates = sites_by_text_offset.find(physical.original_text_offset);
+    if (candidates != sites_by_text_offset.end()) {
+      for (const ConSanProgramSite *site : candidates->second) {
+        if (site->physical_id != physical)
+          continue;
+        for (const ConSanExecutionOwner &owner : site->execution_owners) {
+          if (const ConSanProgramContainer *kernel = inventory.kernel(owner))
+            attributed |= note_kernel(*kernel, apply);
+        }
       }
     }
     if (attributed)

@@ -181,8 +181,14 @@ template <typename Site>
 /// access and semantic ownership.
 class ConSanProgramSiteArena {
 public:
-  [[nodiscard]] std::span<const ConSanProgramSite> sites() const { return sites_; }
-  [[nodiscard]] std::span<ConSanProgramSite> sites() { return sites_; }
+  [[nodiscard]] std::span<const ConSanProgramSite> sites() const {
+    materialize_semantic_sites();
+    return sites_;
+  }
+  [[nodiscard]] std::span<ConSanProgramSite> sites() {
+    materialize_semantic_sites();
+    return sites_;
+  }
   [[nodiscard]] std::span<const ConSanProgramSite> access_sites() const {
     return std::span<const ConSanProgramSite>(sites_).first(access_site_count_);
   }
@@ -191,35 +197,47 @@ public:
   }
 
   void add_access(ConSanProgramSite site) {
-    sites_.insert(sites_.begin() + access_site_count_, std::move(site));
+    const size_t inserted_index = access_site_count_;
+    if (inserted_index == sites_.size())
+      sites_.push_back(std::move(site));
+    else
+      sites_.insert(sites_.begin() + inserted_index, std::move(site));
     ++access_site_count_;
-    reindex();
+    // Existing access records retain their ordinals. Only the inserted record
+    // and the semantic suffix moved by the insertion need new handles.
+    reindex_from(inserted_index);
   }
 
   void add_semantic(ConSanProgramSite site) {
-    const auto same_source = [&](const ConSanProgramSite &candidate) {
-      return candidate.container == site.container &&
-             candidate.physical_id.original_text_offset == site.physical_id.original_text_offset;
-    };
-    const auto access = std::ranges::find_if(access_sites(), same_source);
-    if (access != access_sites().end() &&
-        std::holds_alternative<ConSanAccessSite>(access->payload)) {
-      access->payload = std::move(site.payload);
-      return;
-    }
-    sites_.push_back(std::move(site));
-    reindex();
+    // Decoders encounter access and synchronization facets in instruction
+    // order. Keep the semantic suffix out of the access vector until a view
+    // is requested, so every later access remains an amortized append rather
+    // than shifting all previously decoded semantic records.
+    pending_semantic_sites_.push_back(std::move(site));
   }
 
   void append(ConSanProgramSiteArena batch) {
+    materialize_semantic_sites();
+    batch.materialize_semantic_sites();
     const size_t access_count = batch.access_site_count_;
-    for (size_t index = 0; index < access_count; ++index)
-      add_access(std::move(batch.sites_[index]));
-    for (size_t index = access_count; index < batch.sites_.size(); ++index)
-      add_semantic(std::move(batch.sites_[index]));
+    if (batch.sites_.empty())
+      return;
+
+    const size_t combined_size = sites_.size() + batch.sites_.size();
+    sites_.reserve(combined_size);
+    sites_.insert(sites_.begin() + access_site_count_,
+                  std::make_move_iterator(batch.sites_.begin()),
+                  std::make_move_iterator(batch.sites_.begin() + access_count));
+    access_site_count_ += access_count;
+    pending_semantic_sites_.insert(pending_semantic_sites_.end(),
+                                   std::make_move_iterator(batch.sites_.begin() + access_count),
+                                   std::make_move_iterator(batch.sites_.end()));
+    materialize_semantic_sites();
+    reindex();
   }
 
   template <typename Predicate> void erase_if(Predicate predicate) {
+    materialize_semantic_sites();
     auto access_end = sites_.begin() + access_site_count_;
     access_end = std::remove_if(sites_.begin(), access_end, predicate);
     const size_t retained_access_count = static_cast<size_t>(access_end - sites_.begin());
@@ -236,6 +254,7 @@ public:
   /// retain every independently normalized access record.
   void reattribute_semantic_range(uint64_t begin, uint32_t size,
                                   const ConSanProgramContainerId &owner) {
+    materialize_semantic_sites();
     const uint64_t end = begin + size;
     std::vector<std::pair<size_t, uint64_t>> seen;
     const auto in_range = [&](const ConSanProgramSite &site) {
@@ -270,12 +289,53 @@ public:
   }
 
 private:
-  void reindex() {
-    for (size_t index = 0; index < sites_.size(); ++index)
+  struct SourceKey {
+    uint32_t container = ConSanProgramContainerId::kInvalidOrdinal;
+    uint64_t text_offset = 0;
+    bool operator==(const SourceKey &) const = default;
+  };
+
+  struct SourceKeyHash {
+    [[nodiscard]] size_t operator()(const SourceKey &key) const {
+      const size_t container = std::hash<uint32_t>{}(key.container);
+      const size_t offset = std::hash<uint64_t>{}(key.text_offset);
+      return container ^ (offset + 0x9e3779b9u + (container << 6u) + (container >> 2u));
+    }
+  };
+
+  void materialize_semantic_sites() const {
+    if (pending_semantic_sites_.empty())
+      return;
+    std::unordered_map<SourceKey, size_t, SourceKeyHash> access_by_source;
+    access_by_source.reserve(access_site_count_);
+    for (size_t index = 0; index < access_site_count_; ++index) {
+      const ConSanProgramSite &access = sites_[index];
+      access_by_source.try_emplace(
+          SourceKey{access.container.ordinal, access.physical_id.original_text_offset}, index);
+    }
+    for (ConSanProgramSite &site : pending_semantic_sites_) {
+      const auto access = access_by_source.find(
+          SourceKey{site.container.ordinal, site.physical_id.original_text_offset});
+      if (access != access_by_source.end() &&
+          std::holds_alternative<ConSanAccessSite>(sites_[access->second].payload)) {
+        sites_[access->second].payload = std::move(site.payload);
+      } else {
+        sites_.push_back(std::move(site));
+      }
+    }
+    pending_semantic_sites_.clear();
+    reindex_from(access_site_count_);
+  }
+
+  void reindex_from(size_t begin) const {
+    for (size_t index = begin; index < sites_.size(); ++index)
       sites_[index].id = {static_cast<uint32_t>(index)};
   }
 
-  std::vector<ConSanProgramSite> sites_;
+  void reindex() const { reindex_from(0); }
+
+  mutable std::vector<ConSanProgramSite> sites_;
+  mutable std::vector<ConSanProgramSite> pending_semantic_sites_;
   size_t access_site_count_ = 0;
 };
 
@@ -974,7 +1034,13 @@ public:
             source.storage_ ? *source.storage_ : ConSanProgramInventoryStorage{})) {}
 
   /// Publish an immutable shared view of the builder's current revision.
-  [[nodiscard]] ProgramInventory view() const { return ProgramInventory(storage_); }
+  [[nodiscard]] ProgramInventory view() const {
+    // Freeze the arena ordering before publishing a const facade. This keeps
+    // immutable queries side-effect free even when the builder is destroyed
+    // immediately after returning the view.
+    (void)storage_->program_sites.sites();
+    return ProgramInventory(storage_);
+  }
 
   [[nodiscard]] std::vector<ConSanTextSection> &text_sections() { return storage_->text_sections; }
   [[nodiscard]] std::span<ConSanProgramContainer> containers() { return storage_->containers; }
@@ -1071,6 +1137,10 @@ public:
   /// Repeated publication is idempotent because a completed record has a valid
   /// code-object identity and no longer qualifies as pending decode output.
   void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
+    // Atomic/fence decoding can contribute a semantic facet whose normalized
+    // offset is authoritative for completing the access facet. Merge all
+    // deferred semantic records before deriving access ranges.
+    (void)storage_->program_sites.sites();
     for (ConSanProgramSite &access : access_sites()) {
       if (!access.physical_id.code_object.valid())
         access = complete_access_site(access.container, access, code_object_bytes);
