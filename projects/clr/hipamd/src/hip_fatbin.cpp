@@ -66,18 +66,18 @@ FatBinaryInfo::~FatBinaryInfo() {
       dev_programs_[dev_id] = nullptr;
     }
   }
-  // Release Code object allocations
-  for (const auto& i : code_obj_allocations_) {
-    if (kpack_params_.has_value()) {
-      // Kpack-allocated code objects must be freed via kpack API
+  // Release Code object allocations. kpack loader buffers and heap (new char[])
+  // buffers are tracked separately so each is freed the right way; a single
+  // kpack binary can produce both (SPIR-V loader buffer -> COMGR heap executable).
+  for (const auto& i : kpack_code_objects_) {
 #if ROCM_KPACK_ENABLED
-      kpack_free_code_object(const_cast<void*>(i));
+    kpack_free_code_object(const_cast<void*>(i));
 #else
-      guarantee(false, "Kpack code object but ROCM_KPACK_ENABLED=OFF");
+    guarantee(false, "Kpack code object but ROCM_KPACK_ENABLED=OFF");
 #endif
-    } else {
-      delete[] reinterpret_cast<const char*>(i);
-    }
+  }
+  for (const auto& i : heap_code_objects_) {
+    delete[] reinterpret_cast<const char*>(i);
   }
   ReleaseImageAndFile();
 }
@@ -521,9 +521,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       return hipErrorInvalidImage;
     }
     // For compressed code objects, we use comgr to extract and make a copy.
-    // Track these to release later
+    // These are heap buffers (freed via delete[]).
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
-                  [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
+                  [&](const auto& info) { heap_code_objects_.insert(info.second.first); });
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
@@ -555,134 +555,18 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
       } else if (spirv_isa_found) {
-        std::string target_id = device->devices()[0]->isa().targetId();
-        std::string isa = "amdgcn-amd-amdhsa--" + target_id;
-
-        comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
-        comgr_helper::ComgrDataSetUniqueHandle reloc_data;
-        comgr_helper::ComgrDataUniqueHandle spirv_data;
-        comgr_helper::ComgrActionInfoUniqueHandle reloc_action;
-
-        if (auto comgr_status = spirv_data_set.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create SPIRV Data set");
-          break;
-        }
-
-        if (auto comgr_status = spirv_data.Create(AMD_COMGR_DATA_KIND_SPIRV);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create SPIRV Data");
-          break;
-        }
-
-        // Handle both SPIRV isa name
+        // Lower the portable SPIR-V code object to this device's native ISA.
         auto spirv_isa_handle = code_obj_map.find(spirv_isa_name);
         if (spirv_isa_handle == code_obj_map.end()) {
           spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
         }
-        if (auto comgr_status =
-                amd::Comgr::set_data(spirv_data.get(), spirv_isa_handle->second.second /* size */,
-                                     reinterpret_cast<const char*>(spirv_isa_handle->second.first)
-                                     /* buffer */);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to assign SPIRV data");
-          break;
-        }
-
-        if (auto comgr_status = amd::Comgr::set_data_name(spirv_data.get(), "hip_code_object.spv");
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to set spirv data's name");
-          break;
-        }
-
-        if (auto comgr_status = amd::Comgr::data_set_add(spirv_data_set.get(), spirv_data.get());
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to add spir data to data set");
-          break;
-        }
-
-        if (auto comgr_status = reloc_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create reloc action");
-          break;
-        }
-
-        if (auto comgr_status =
-                amd::Comgr::action_info_set_isa_name(reloc_action.get(), isa.c_str());
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to set reloc action's isa name");
-          break;
-        }
-
-        if (auto comgr_status = reloc_data.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create reloc data");
-          break;
-        }
-
-        if (auto comgr_status =
-                amd::Comgr::action_info_set_device_lib_linking(reloc_action.get(), true);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to set device lib linking for reloc action");
-          break;
-        }
-
-        if (auto comgr_status =
-                amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE,
-                                      reloc_action.get(), spirv_data_set.get(), reloc_data.get());
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to compile spirv to reloc");
-          break;
-        }
-
-        comgr_helper::ComgrActionInfoUniqueHandle exe_action;
-        comgr_helper::ComgrDataSetUniqueHandle exe_output;
-        if (auto comgr_status = exe_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create exe action");
-          break;
-        }
-
-        if (auto comgr_status = amd::Comgr::action_info_set_isa_name(exe_action.get(), isa.c_str());
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to set exe action isa name");
-          break;
-        }
-
-        if (auto comgr_status = exe_output.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to create exe output");
-          break;
-        }
-
-        if (auto comgr_status =
-                amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                                      exe_action.get(), reloc_data.get(), exe_output.get());
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to do action: reloc to exe");
-          break;
-        }
-
-        amd_comgr_data_t exe_data_handle;
-        if (auto comgr_status = amd::Comgr::action_data_get_data(
-                exe_output.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &exe_data_handle);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to get exe data");
-          break;
-        }
-
-        // Move ownership of exe_data_handle to exe_data
-        comgr_helper::ComgrDataUniqueHandle exe_data(exe_data_handle);
+        char* co = nullptr;
         size_t co_size = 0;
-        if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, NULL);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to get exe size");
+        hip_status = TranslateSpirvToExecutable(device, spirv_isa_handle->second.first,
+                                                spirv_isa_handle->second.second, &co, &co_size);
+        if (hip_status != hipSuccess) {
           break;
         }
-
-        char* co = new char[co_size];
-        code_obj_allocations_.insert(co);  // track to release later
-        if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, co);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to get exe data");
-          break;
-        }
-
         hip_status = AddDevProgram(device, co, co_size, fdesc);
         if (hip_status != hipSuccess) {
           break;
@@ -700,10 +584,141 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   return hip_status;
 }
 
+// Lowers a portable SPIR-V code object to a native ISA executable for `device`
+// via COMGR (SPIR-V -> relocatable -> executable). On success, a new char[]
+// buffer holding the ELF executable is returned in *out_co / *out_size and
+// registered in heap_code_objects_ (owned by this FatBinaryInfo). This is shared
+// by the fat-binary path (ExtractFatBinaryUsingCOMGR) and the kpack path
+// (ExtractKpackBinary) so amdgcnspirv device code is JIT-lowered the same way
+// regardless of packaging.
+hipError_t FatBinaryInfo::TranslateSpirvToExecutable(hip::Device* device, const void* spirv_blob,
+                                                     size_t spirv_size, char** out_co,
+                                                     size_t* out_size) {
+  std::string target_id = device->devices()[0]->isa().targetId();
+  std::string isa = "amdgcn-amd-amdhsa--" + target_id;
+
+  comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
+  comgr_helper::ComgrDataSetUniqueHandle reloc_data;
+  comgr_helper::ComgrDataUniqueHandle spirv_data;
+  comgr_helper::ComgrActionInfoUniqueHandle reloc_action;
+
+  if (auto comgr_status = spirv_data_set.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create SPIRV Data set");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = spirv_data.Create(AMD_COMGR_DATA_KIND_SPIRV);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create SPIRV Data");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::set_data(spirv_data.get(), spirv_size,
+                                               reinterpret_cast<const char*>(spirv_blob));
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to assign SPIRV data");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::set_data_name(spirv_data.get(), "hip_code_object.spv");
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to set spirv data's name");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::data_set_add(spirv_data_set.get(), spirv_data.get());
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to add spir data to data set");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = reloc_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create reloc action");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::action_info_set_isa_name(reloc_action.get(), isa.c_str());
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to set reloc action's isa name");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = reloc_data.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create reloc data");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::action_info_set_device_lib_linking(reloc_action.get(), true);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to set device lib linking for reloc action");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status =
+          amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE, reloc_action.get(),
+                                spirv_data_set.get(), reloc_data.get());
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to compile spirv to reloc");
+    return hipErrorInvalidImage;
+  }
+
+  comgr_helper::ComgrActionInfoUniqueHandle exe_action;
+  comgr_helper::ComgrDataSetUniqueHandle exe_output;
+  if (auto comgr_status = exe_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create exe action");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = amd::Comgr::action_info_set_isa_name(exe_action.get(), isa.c_str());
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to set exe action isa name");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status = exe_output.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to create exe output");
+    return hipErrorInvalidImage;
+  }
+
+  if (auto comgr_status =
+          amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, exe_action.get(),
+                                reloc_data.get(), exe_output.get());
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to do action: reloc to exe");
+    return hipErrorInvalidImage;
+  }
+
+  amd_comgr_data_t exe_data_handle;
+  if (auto comgr_status = amd::Comgr::action_data_get_data(
+          exe_output.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &exe_data_handle);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to get exe data");
+    return hipErrorInvalidImage;
+  }
+
+  // Move ownership of exe_data_handle to exe_data
+  comgr_helper::ComgrDataUniqueHandle exe_data(exe_data_handle);
+  size_t co_size = 0;
+  if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, NULL);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to get exe size");
+    return hipErrorInvalidImage;
+  }
+
+  char* co = new char[co_size];
+  heap_code_objects_.insert(co);  // owned by this object, freed via delete[]
+  if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, co);
+      comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+    LogError("Failed to get exe data");
+    return hipErrorInvalidImage;
+  }
+
+  *out_co = co;
+  *out_size = co_size;
+  return hipSuccess;
+}
+
 // This function is always defined but errors if ROCM_KPACK_ENABLED=OFF
-// TODO: Extract SPIR-V translation from ExtractFatBinaryUsingCOMGR and call
-// it from both of these entry-points once we have enough testing in place
-// to ensure this advanced case is functional.
 hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& devices) {
 #if !ROCM_KPACK_ENABLED
   LogError("Kpack binary detected but ROCM_KPACK_ENABLED=OFF");
@@ -742,7 +757,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
       }
     }
     for (void* code_object : loaded_code_objects) {
-      code_obj_allocations_.erase(code_object);
+      kpack_code_objects_.erase(code_object);
       kpack_free_code_object(code_object);
     }
   };
@@ -756,7 +771,11 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     // 2) generic fallback name, examples:
     //  - amdgcn-amd-amdhsa--gfx11-generic
     //  - can also be empty string for some arch like gfx90a
-    arch_list.reserve(2);
+    // 3) portable SPIR-V ("amdgcnspirv"), lowest priority: used when no native
+    //    or generic code object exists for this device. The kpack archive stores
+    //    the SPIR-V payload under the short arch key "amdgcnspirv"; the resulting
+    //    blob is JIT-lowered to the device ISA below.
+    arch_list.reserve(3);
     arch_list.push_back(device_name);
 
     // Add generic fallback arch-name
@@ -764,6 +783,9 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     if (!generic_name.empty()) {
       arch_list.push_back(generic_name);
     }
+
+    // Add portable SPIR-V as the last-resort target.
+    arch_list.push_back("amdgcnspirv");
 
     // Convert arch-list to C-style array for kpack API
     std::vector<const char*> arch_ptrs;
@@ -800,15 +822,42 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     }
 
     loaded_code_objects.push_back(code_object);
-    code_obj_allocations_.insert(code_object);
+    kpack_code_objects_.insert(code_object);
+
+    // The loaded payload is either a native/generic device ELF (loadable as-is)
+    // or a portable SPIR-V object (arch key "amdgcnspirv") that must be lowered
+    // to the device ISA first. SPIR-V has magic 0x07230203 and is not an AMDGPU
+    // ELF, so IsCodeObjectElf() distinguishes the two.
+    const bool payload_is_elf = IsCodeObjectElf(code_object, code_object_size);
 
     // Add device type specific kpack code object buffer for each similar type of device.
     // The kpack buffer is shared by devices with the same ISA and is not
     // backed by a file on disk, so no fd is passed.
     for (auto device : matching_devices) {
       registered_device_ids.push_back(device->deviceId());
-      hipError_t hip_err =
-          AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
+
+      const void* image = code_object;
+      size_t image_size = code_object_size;
+      if (!payload_is_elf) {
+        // Portable SPIR-V: JIT-lower to this device's native ISA. The resulting
+        // executable is heap-tracked and owned by this object; the SPIR-V loader
+        // buffer stays in kpack_code_objects_ and is freed on destruction.
+        char* co = nullptr;
+        size_t co_size = 0;
+        hipError_t xlate_err =
+            TranslateSpirvToExecutable(device, code_object, code_object_size, &co, &co_size);
+        if (xlate_err != hipSuccess) {
+          LogPrintfError(
+              "Could not lower SPIR-V kpack object to device ISA for %s, device id: %d, err: %d",
+              device_name.c_str(), device->deviceId(), xlate_err);
+          rollback_kpack_state();
+          return xlate_err;
+        }
+        image = co;
+        image_size = co_size;
+      }
+
+      hipError_t hip_err = AddDevProgram(device, image, image_size, amd::Os::FDescInit());
       if (hip_err != hipSuccess) {
         LogPrintfError(
             "Could not add device type specific kpack object for %s, device id: %d, err: %d",
@@ -846,13 +895,15 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   //   - the caller passed an open fd for the source file,
   //   - the FatBinaryInfo did mmap that file as image_, and
   //   - the binary is not one of the freshly allocated buffers (compressed
-  //     bundle, SPIRV->native, kpack) tracked in code_obj_allocations_.
+  //     bundle, SPIRV->native, kpack) tracked in kpack_/heap_code_objects_.
   // In that case we dup the fd so the downstream setKernels owns and closes
   // its own copy.
   amd::Os::FileDesc out_fdesc = amd::Os::FDescInit();
   size_t out_foffset = 0;
-  const bool is_file_backed = fdesc != amd::Os::FDescInit() && image_mapped_ &&
-                              code_obj_allocations_.count(binary_image) == 0;
+  const bool is_allocated_buffer =
+      kpack_code_objects_.count(binary_image) != 0 || heap_code_objects_.count(binary_image) != 0;
+  const bool is_file_backed =
+      fdesc != amd::Os::FDescInit() && image_mapped_ && !is_allocated_buffer;
   if (is_file_backed) {
     out_fdesc = amd::Os::DupFileHandle(fdesc);
     out_foffset = static_cast<size_t>(reinterpret_cast<const char*>(binary_image) -
