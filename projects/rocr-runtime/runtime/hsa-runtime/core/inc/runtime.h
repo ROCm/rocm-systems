@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTME_CORE_INC_RUNTIME_H_
 #define HSA_RUNTME_CORE_INC_RUNTIME_H_
 
+#include <chrono>
 #include <cstdint>
 #include <vector>
 #include <map>
@@ -545,6 +546,28 @@ class Runtime {
 
   void InternalQueueCreateNotify(const hsa_queue_t* queue, hsa_agent_t agent);
 
+  /// @brief Track the asynchronous error callback of an SDMA queue on @p node_id.
+  ///
+  /// SDMA faults are reported by the driver as device-level hardware
+  /// exceptions rather than through a per-queue error reason, so the runtime
+  /// keeps its own registry to fan an exception out to the queues that asked
+  /// to be told about it. Registering a null @p callback is a no-op.
+  void RegisterSdmaErrorHandler(hsa_queue_t* queue, uint32_t node_id, HsaEventCallback callback,
+                                void* data);
+
+  /// @brief Stop tracking the error callback of a destroyed SDMA queue.
+  ///
+  /// Destroying a hung SDMA queue is what prompts the driver to reset it, so
+  /// the resulting exception normally arrives after the queue is gone. The
+  /// registration is therefore kept for a grace period and the callback may
+  /// still run afterwards, receiving the now-stale queue pointer.
+  void DetachSdmaErrorHandler(hsa_queue_t* queue);
+
+  /// @brief Report @p error to the SDMA error callbacks registered on @p node_id.
+  ///
+  /// @retval true if at least one callback was invoked.
+  bool NotifySdmaErrorHandlers(uint32_t node_id, hsa_status_t error);
+
   SharedSignalPool_t* GetSharedSignalPool() { return &SharedSignalPool; }
 
   InterruptSignal::EventPool* GetEventPool() { return &EventPool; }
@@ -877,6 +900,22 @@ class Runtime {
   std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>
   GetSystemEventHandlers();
 
+  // @brief Asynchronous error callback registered by an SDMA queue.
+  struct SdmaErrorHandler {
+    hsa_queue_t* queue;
+    uint32_t node_id;
+    AMD::callback_t<HsaEventCallback> callback;
+    void* data;
+    // Set once the queue has been destroyed. The entry outlives the queue so
+    // that a reset triggered by the destruction can still be reported.
+    bool detached;
+    std::chrono::steady_clock::time_point detach_time;
+  };
+
+  // @brief Drop detached SDMA error handlers whose grace period has expired.
+  // The caller must hold ::sdma_error_lock_.
+  void PruneSdmaErrorHandlers();
+
   /// @brief Get the index of ::link_matrix_.
   /// @param [in] node_id_from Node id of the source node.
   /// @param [in] node_id_to Node id of the destination node.
@@ -991,6 +1030,13 @@ class Runtime {
 
   // System event handler lock
   std::mutex system_event_lock_;
+
+  // Error callbacks of SDMA queues, indexed linearly. Entries persist past
+  // queue destruction for a grace period, see ::DetachSdmaErrorHandler.
+  std::vector<SdmaErrorHandler> sdma_error_handlers_;
+
+  // SDMA error handler registry lock
+  std::mutex sdma_error_lock_;
 
   // Internal queue creation notifier
   AMD::callback_t<hsa_amd_runtime_queue_notifier> internal_queue_create_notifier_;

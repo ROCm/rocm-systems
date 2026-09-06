@@ -2393,11 +2393,25 @@ bool Runtime::HwExceptionHandler(hsa_signal_value_t val, void* arg) {
     }
   }
 
-  if (custom_handler_status != HSA_STATUS_SUCCESS) {
+  // An SDMA queue fault surfaces here rather than through a per-queue error
+  // reason, because SDMA queues have no context save area to carry one. Report
+  // it to the error callbacks registered through hsa_amd_queue_create so those
+  // queues get the same notification an AQL queue would receive.
+  const bool ecc = (exception.ResetCause == HSA_EVENTID_HW_EXCEPTION_ECC);
+  // A queue callback only stands in for the abort below when the device is
+  // still usable. An ECC/RAS error is reported for information but remains
+  // fatal.
+  const bool sdma_handled =
+      runtime_singleton_->NotifySdmaErrorHandlers(exception.NodeId,
+                                                  ecc ? HSA_STATUS_ERROR
+                                                      : HSA_STATUS_ERROR_EXCEPTION) &&
+      !ecc;
+
+  if (custom_handler_status != HSA_STATUS_SUCCESS && !sdma_handled) {
     core::Agent* faultingAgent = runtime_singleton_->agents_by_node_[exception.NodeId][0];
     fprintf(stderr, "HW Exception by GPU node-%u (Agent handle: %p) reason :%s\n", exception.NodeId,
             reinterpret_cast<void*>(faultingAgent->public_handle().handle),
-            (exception.ResetCause == HSA_EVENTID_HW_EXCEPTION_ECC) ? "ECC" : "GPU Hang");
+            ecc ? "ECC" : "GPU Hang");
 
     assert(false && "GPU HW Exception");
     std::abort();
@@ -3304,6 +3318,67 @@ std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>
 Runtime::GetSystemEventHandlers() {
   std::lock_guard<std::mutex> lock(system_event_lock_);
   return system_event_handlers_;
+}
+
+// A hung SDMA queue is only reset once the queue is destroyed, so the exception
+// typically arrives after the application has dropped its handle. Error
+// callbacks stay registered this long past destruction.
+static const std::chrono::seconds kSdmaErrorHandlerGrace(10);
+
+void Runtime::RegisterSdmaErrorHandler(hsa_queue_t* queue, uint32_t node_id,
+                                       HsaEventCallback callback, void* data) {
+  if (callback == nullptr) return;
+
+  std::lock_guard<std::mutex> lock(sdma_error_lock_);
+  PruneSdmaErrorHandlers();
+  sdma_error_handlers_.push_back({queue, node_id, AMD::callback_t<HsaEventCallback>(callback), data,
+                                  false, std::chrono::steady_clock::time_point()});
+}
+
+void Runtime::DetachSdmaErrorHandler(hsa_queue_t* queue) {
+  std::lock_guard<std::mutex> lock(sdma_error_lock_);
+  for (auto& handler : sdma_error_handlers_) {
+    if (handler.queue == queue && !handler.detached) {
+      handler.detached = true;
+      handler.detach_time = std::chrono::steady_clock::now();
+    }
+  }
+  PruneSdmaErrorHandlers();
+}
+
+bool Runtime::NotifySdmaErrorHandlers(uint32_t node_id, hsa_status_t error) {
+  std::vector<SdmaErrorHandler> handlers;
+  {
+    std::lock_guard<std::mutex> lock(sdma_error_lock_);
+    PruneSdmaErrorHandlers();
+    for (const auto& handler : sdma_error_handlers_) {
+      if (handler.node_id == node_id) handlers.push_back(handler);
+    }
+    // A destroyed queue cannot fault twice, so report it once and forget it.
+    sdma_error_handlers_.erase(
+        std::remove_if(sdma_error_handlers_.begin(), sdma_error_handlers_.end(),
+                       [node_id](const SdmaErrorHandler& handler) {
+                         return handler.detached && handler.node_id == node_id;
+                       }),
+        sdma_error_handlers_.end());
+  }
+
+  for (auto& handler : handlers) {
+    handler.callback(error, handler.queue, handler.data);
+  }
+
+  return !handlers.empty();
+}
+
+void Runtime::PruneSdmaErrorHandlers() {
+  const auto now = std::chrono::steady_clock::now();
+  sdma_error_handlers_.erase(
+      std::remove_if(sdma_error_handlers_.begin(), sdma_error_handlers_.end(),
+                     [&now](const SdmaErrorHandler& handler) {
+                       return handler.detached &&
+                              (now - handler.detach_time) > kSdmaErrorHandlerGrace;
+                     }),
+      sdma_error_handlers_.end());
 }
 
 hsa_status_t Runtime::SetInternalQueueCreateNotifier(hsa_amd_runtime_queue_notifier callback,

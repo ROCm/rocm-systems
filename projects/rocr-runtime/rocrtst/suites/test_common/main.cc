@@ -812,6 +812,13 @@ TEST(rocrtstFunc, Queue_Create_SDMA_Create_Destroy_Test) {
   RunCustomTestEpilog(&qt);
 }
 
+TEST(rocrtstFunc, Queue_Create_SDMA_Error_Callback_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SdmaQueueErrorCallbackTest();
+  RunCustomTestEpilog(&qt);
+}
+
 TEST(rocrtstFunc, Queue_Create_Invalid_Args_Test) {
   QueueCreateTest qt;
   if (!RunCustomTestProlog(&qt)) return;
