@@ -183,8 +183,9 @@ TEST(AmdSmiFabricRuntimeLayout, ClassifiesWriteExtents)
         {kAmdSmiFabricInfo16GpuSize, 0, 0xFF, amdSmiFabricRuntimeLayout::SixteenGpu},
         // 288 sits outside [256,288), so widening that window would reclassify this.
         {kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize, 0x00, amdSmiFabricRuntimeLayout::ExtendedUnion},
-        // Stops in the 16-GPU trailing padding, which a compiler need not copy.
-        {kAmdSmiFabricInfo16GpuSize - 1, 0, 0x00, amdSmiFabricRuntimeLayout::SixteenGpu},
+        // Trailing padding a compiler need not copy, in each layout.
+        {kAmdSmiFabricReserved16GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::SixteenGpu},
+        {kAmdSmiFabricReserved8GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::EightGpu},
     };
 
     for (const FabricExtentCase& c : cases) {

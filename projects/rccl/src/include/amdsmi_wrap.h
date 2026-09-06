@@ -483,7 +483,8 @@ constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
 constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
-// End of reserved in the 16-GPU layout. The last 4 bytes are trailing padding a compiler need not copy.
+// End of reserved in each layout. The bytes after it are trailing padding a compiler need not copy.
+constexpr size_t kAmdSmiFabricReserved8GpuEnd = 284;
 constexpr size_t kAmdSmiFabricReserved16GpuEnd = 316;
 
 constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
@@ -633,7 +634,8 @@ inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, siz
 }
 
 static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
-                kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricInfo8GpuSize &&
+                kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricReserved8GpuEnd &&
+                kAmdSmiFabricReserved8GpuEnd < kAmdSmiFabricInfo8GpuSize &&
                 kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricReserved16GpuEnd &&
                 kAmdSmiFabricReserved16GpuEnd < kAmdSmiFabricInfo16GpuSize &&
                 kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
@@ -646,7 +648,7 @@ inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFab
   const bool wroteV1 =
     !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
   const bool wrotePast8Gpu =
-    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize);
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricReserved8GpuEnd);
   const bool wrotePast16Gpu =
     amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd);
 
