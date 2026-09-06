@@ -75,7 +75,7 @@ setup_library_path() {
   if [[ "$bin_dir" == *"/hipamd/src/hrr/playback" ]]; then
     lib_dirs+=("$(cd "$bin_dir/../../../lib" && pwd)")
   fi
-  clr="$(cd "$SCRIPT_DIR/../../../../../" 2>/dev/null && pwd || true)"
+  clr="$(cd "$SCRIPT_DIR/../../../../" 2>/dev/null && pwd || true)"
   for p in "${ROCR_LIB:-}" "${clr:+$clr/../rocr-runtime/build-local/rocr/lib}"; do
     [[ -n "$p" && -f "$p/libhsa-runtime64.so.1" ]] || continue
     lib_dirs+=("$p"); break
