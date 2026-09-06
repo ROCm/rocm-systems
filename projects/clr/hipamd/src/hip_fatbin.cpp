@@ -688,11 +688,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
       } else {
-        // We found neither a compatible code object nor SPIRV
-        LogPrintfError(
-            "No compatible code objects found with HIP_FORCE_SPIRV_CODEOBJECT=%d. Rebuild the application with option --offload-arch=%s",
-             HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
-        break;
+        // No compatible code object for this device — skip it so that other
+        // devices in a heterogeneous multi-GPU system can still be served.
+        LogPrintfInfo(
+            "No compatible code objects found for %s with HIP_FORCE_SPIRV_CODEOBJECT=%d, skipping."
+            " Rebuild the application with option --offload-arch=%s to enable this device.",
+             device->devices()[0]->isa().targetId(), HIP_FORCE_SPIRV_CODEOBJECT,
+             device->devices()[0]->isa().targetId());
+        continue;
       }
     }
   } while (0);
