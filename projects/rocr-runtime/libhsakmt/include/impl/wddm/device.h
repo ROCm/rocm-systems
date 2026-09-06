@@ -216,7 +216,8 @@ public:
   uint32_t LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt);
   uint32_t GetCmdbufSize(void) const { return cmdbuf_size_; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
-  static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlFrameNum(void) const { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlMergeLimit(void) const { return cmdbuf_aql_merge_limit_; }
 
   bool AllocUserQueueMemFromUMD(void) const {
     // stage 1 HWS queue memory is allocated by KMD.
@@ -291,7 +292,12 @@ private:
 
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
-  static const uint32_t cmdbuf_aql_frame_num_;
+  // Both narrowed by InitCmdbufInfo(): the ring so it keeps fitting in a fixed
+  // byte budget as the frame size grows, the merge limit so a run of merged
+  // AQL packets stays inside one frame.
+  static constexpr uint32_t kMaxAqlFrameNum = 0x1000;
+  uint32_t cmdbuf_aql_frame_num_ = kMaxAqlFrameNum;
+  uint32_t cmdbuf_aql_merge_limit_ = kMaxAqlFrameNum;
   uint32_t node_id_;
   // device info
   Wkmi::DeviceInfo device_info_;

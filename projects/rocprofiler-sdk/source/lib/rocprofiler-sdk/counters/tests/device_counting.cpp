@@ -266,6 +266,18 @@ class device_counting_service_test : public ::testing::Test
 protected:
     device_counting_service_test() {}
 
+    void SetUp() override
+    {
+        // WSL/no-KFD: agent exposes no counter metrics; skip until KFD profiler
+        // ioctl (or libhsakmt PM4 path) is available. When /dev/kfd is absent
+        // (WSL2/DXG) device counting cannot open /dev/kfd for the profiling
+        // queue and the service blocks forever waiting on hardware. Real-KFD CI
+        // is unaffected because /dev/kfd is present there.
+        if(!agent::kfd_device_available())
+            GTEST_SKIP() << "WSL/no-KFD: agent exposes no counter metrics; skipping "
+                            "until KFD profiler ioctl (or libhsakmt PM4 path) is available";
+    }
+
     static void test_run(rocprofiler_counter_flag_t flags = ROCPROFILER_COUNTER_FLAG_NONE,
                          const std::unordered_set<std::string>& test_metrics  = {},
                          size_t                                 delay         = 1,

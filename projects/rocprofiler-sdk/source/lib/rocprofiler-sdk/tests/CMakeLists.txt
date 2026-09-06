@@ -13,6 +13,8 @@ include(GoogleTest)
 
 set(rocprofiler_lib_sources
     agent.cpp
+    agent_mapping.cpp
+    parse_gfx_target_version_test.cpp
     buffer.cpp
     contexts.cpp
     enum_string.cpp

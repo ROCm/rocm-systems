@@ -25,6 +25,10 @@
 import sys
 import pytest
 
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
+
 
 def test_agent_info(agent_info_input_data):
     logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
@@ -47,6 +51,9 @@ def test_agent_info(agent_info_input_data):
 def test_validate_counter_collection_pmc2(counter_input_data):
     counter_names = ["SQ_WAVES", "GRBM_COUNT"]
     di_list = []
+    skip_if_hw_counter_values_unavailable(
+        row["Counter_Value"] for row in counter_input_data
+    )
 
     for row in counter_input_data:
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0

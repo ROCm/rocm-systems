@@ -222,7 +222,12 @@ public:
   // ib_size is the current ib size.
   uint64_t ib_size;
 
-  // record the last submitted aql frame write index
+  // This queue's submission ordinal: the number of PM4 frames it has submitted,
+  // which is also the fence value the most recent submission signals and, once
+  // the GPU reaches it, the value *sync_addr holds. It counts submissions
+  // rather than AQL packets, because one submission owns one physical frame
+  // however many merged packets that frame ended up holding. See
+  // impl/wddm/cmdbuf_frame_ring.h for the reuse invariant it indexes.
   uint64_t sync_point;
 
   uint64_t cmdbuf_aql_frame_write_index;

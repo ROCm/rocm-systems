@@ -349,6 +349,12 @@ if(attdecoder_FOUND
         FAIL_REGULAR_EXPRESSION "AssertionError")
 endif()
 
+# Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
+# rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
+# "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
+# any environment without the decoder installed). Gate on IS_DISABLED (which is ON when
+# attdecoder is not found) like the other ATT tests, so it is skipped rather than failing
+# when the decoder is unavailable.
 set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
 
 rocprofiler_add_integration_execute_test(
@@ -381,7 +387,7 @@ rocprofiler_add_integration_validate_test(
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
 list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
-if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$" AND NOT IS_DISABLED)
     set(IS_DISABLED_OTHER_SIMD OFF)
 endif()
 
@@ -453,8 +459,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    FAIL_REGULAR_EXPRESSION
-        "--selected-regions and --att-consecutive-kernels are mutually exclusive")
+    FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
 
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 

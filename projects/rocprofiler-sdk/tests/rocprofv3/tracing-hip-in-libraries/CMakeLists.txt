@@ -28,6 +28,7 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
             -o out ${PRELOAD_ARGS} -- $<TARGET_FILE:hip-in-libraries>
         DEPENDS hip-in-libraries
         TIMEOUT 120
+        WSL_TIMEOUT_SCALE
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)

@@ -25,6 +25,8 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
@@ -203,7 +205,29 @@ TEST(rocprofiler_lib, agent)
 
     auto& hsa_agents_v = _rocm_info.agents;
 
-    EXPECT_GE(agents.size(), hsa_agents_v.size());
+    // rocprofiler and the HSA runtime enumerate the topology independently. On
+    // bare metal both read the same KFD tree, so rocprofiler's list is a superset
+    // of HSA's. On WSL rocprofiler drops every GPU the DXG topology thunk cannot
+    // fully describe while HSA keeps reporting it, so there the list may
+    // legitimately be a strict subset.
+    //
+    // select_platform() in agent.cpp has internal linkage, so its precedence has
+    // to be restated here: an explicit ROCPROFILER_FORCE_PLATFORM decides, a
+    // value it does not recognize is ignored in favour of autodetect, and
+    // autodetect prefers gnulinux over wsl.
+    const bool wsl_topology = []() {
+        const auto forced =
+            ::rocprofiler::common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+        if(forced == "wsl") return true;
+        if(forced == "gnulinux") return false;
+        return !::rocprofiler::platform::gnulinux::is_available() &&
+               ::rocprofiler::platform::wsl::is_available();
+    }();
+
+    if(!wsl_topology)
+    {
+        EXPECT_GE(agents.size(), hsa_agents_v.size());
+    }
 
     uint64_t skipped = 0;
     for(const auto* agent : agents)
@@ -296,7 +320,19 @@ TEST(rocprofiler_lib, agent)
         }
     }
 
-    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
+    // Every rocprofiler agent either paired with a distinct HSA agent or was
+    // counted in 'skipped'. Phrased as a subtraction from agents.size() (never
+    // less than 'skipped') rather than 'skipped == agents.size() -
+    // hsa_agents_v.size()' so it cannot underflow when rocprofiler published
+    // fewer agents than HSA reports.
+    if(wsl_topology)
+    {
+        EXPECT_LE(agents.size() - skipped, hsa_agents_v.size());
+    }
+    else
+    {
+        EXPECT_EQ(agents.size() - skipped, hsa_agents_v.size());
+    }
 
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
@@ -625,15 +661,18 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
 
     ASSERT_EQ(in_half.size(), num_gpu_agents);
 
-    auto strngpus = std::to_string(num_gpu_agents);
-    all_ordinals  = all_ordinals.substr(1);
-    all_uuids     = all_uuids.substr(1);
-    all_mixed     = all_mixed.substr(1);
-
+    // Must precede the substr() calls below: the accumulators are only non-empty
+    // once the loop above has appended at least one ",<device>" pair, so with no
+    // gpu agents at all trimming the leading separator would throw.
     if(num_gpu_agents < 2)
     {
         GTEST_SKIP() << "requires multiple gpu agents";
     }
+
+    auto strngpus = std::to_string(num_gpu_agents);
+    all_ordinals  = all_ordinals.substr(1);
+    all_uuids     = all_uuids.substr(1);
+    all_mixed     = all_mixed.substr(1);
 
     common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
     common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
