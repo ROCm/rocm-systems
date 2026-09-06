@@ -1480,6 +1480,14 @@ class MemObjMap : public AllStatic {
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
 
+  //!< Non-fatal, range-aware removal for user-facing frees where the pointer
+  //!< may legitimately be absent from the global map (per-device VA on Windows,
+  //!< or external/host-registered memory). Erases only if the entry covering
+  //!< the pointer is `expected`, so an unrelated allocation whose range happens
+  //!< to overlap is never de-indexed by mistake. Warns instead of aborting on a
+  //!< miss. Returns true iff `expected`'s entry was removed.
+  static bool TryRemoveMemObj(const void* k, const amd::Memory* expected);
+
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   //!< Find any registered mem object whose range overlaps [ptr, ptr + size).

@@ -91,6 +91,7 @@ The `err_info` parameter is a pointer to a struct containing the error code, nam
 
 ### Resolved issues
 
+* Resolved a fatal abort (`Memobj map does not have ptr: 0x...`) in `hipFree` on Windows when multiple HIP devices are visible (for example, a discrete GPU together with an integrated GPU). Lookup resolves a pointer range-aware — including through per-device virtual-address maps — but the free path removed it from the global tracking map only by its exact base address, so a pointer resolved through an adjusted or per-device mapping freed correctly yet aborted the process on the missed erase. The de-index during `hipFree` is now non-fatal and identity-checked: a pointer legitimately absent from the global map degrades to a logged warning, and an unrelated allocation whose address range happens to overlap the freed pointer is never removed by mistake.
 * Resolved an issue where graph allocations that escape their originating graph (i.e., allocation nodes without a corresponding free node) failed to remain valid after the graph and its executable
 instance were destroyed. Allocations created via stream capture were not properly tracked and were incorrectly classified as reusable, leading to premature unmapping during `hipGraphExecDestroy` and resulting in memory faults on subsequent access.
 * Resolved an issue where an error propagated from the `hipModuleGetFunction` API, causing behavior inconsistent with the corresponding CUDA API. The HIP runtime now suppresses this propagated error to align with expected behavior.
