@@ -764,6 +764,28 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
     )
 
 
+def test_counter_collection_with_att(att_pmc_json_data):
+    data = att_pmc_json_data["rocprofiler-sdk-tool"]
+    assert data["strings"]["att_filenames"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    callbacks = data["callback_records"]["counter_collection"]
+    assert callbacks
+
+    found_positive_value = False
+    for entry in callbacks:
+        dispatch = entry["dispatch_data"]
+        assert dispatch["dispatch_info"]["dispatch_id"] > 0
+        assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
+        assert entry["records"]
+        for record in entry["records"]:
+            assert counter_names[record["counter_id"]["handle"]] == "SQ_WAVES"
+            assert record["value"] >= 0
+            found_positive_value = found_positive_value or record["value"] > 0
+    assert found_positive_value
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
