@@ -1123,9 +1123,16 @@ protected:
     // caller gets without saying anything is unchanged.
     static constexpr int kSlotWaitDefaultMs = kMaxRetryAttempts * kPollIntervalMs;
 
+    // nullRetries, when given, counts how many times isend came back without a
+    // request. FifoPressureSenderFast reports that count in its failure message
+    // rather than asserting on it: nothing orders the sender's attempt against the
+    // receiver publishing a slot, so a descheduled sender can legitimately see
+    // none. Without the count a test whose subject is backpressure would have to
+    // reimplement this loop just to observe it.
     ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
                                 void* mhandle, void** request, bool busyPoll = false,
-                                int timeoutMs = kSlotWaitDefaultMs) {
+                                int timeoutMs = kSlotWaitDefaultMs,
+                                int* nullRetries = nullptr) {
         ThreadResult result;
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -1136,6 +1143,7 @@ protected:
                 return result;
             }
             if (*request != nullptr) break;
+            if (nullRetries) (*nullRetries)++;
             if (std::chrono::steady_clock::now() >= deadline) {
                 result.ok = false;
                 result.msg = "isend kept returning a NULL request for "
@@ -1219,6 +1227,138 @@ protected:
         if (!result.ok) return result;
         if (receivedSize) *receivedSize = sizes[0];
         return result;
+    }
+
+    // One transfer plus host-side payload check: the sender fills a seeded
+    // pattern, the receiver clears its buffer first and verifies afterwards. A
+    // distinct seed per worker turns any cross-connection delivery into a data
+    // failure rather than a silent pass.
+    ThreadResult WorkerSendRecvPattern(int rank, ConnectionPair& pair, void* buffer, size_t size,
+                                       int tag, void* mhandle, int seed,
+                                       int timeoutMs = kDefaultTimeoutMs) {
+        if (rank == 0) {
+            memset(buffer, 0, size);
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
+        }
+
+        int received = 0;
+        ThreadResult result = WorkerSendRecvRaw(rank, pair, buffer, size, tag, mhandle,
+                                               timeoutMs, &received);
+        if (!result.ok) return result;
+
+        if (rank == 0) {
+            if (received != (int)size) {
+                result.ok = false;
+                result.msg = "received size mismatch";
+                return result;
+            }
+            if (size > 0
+                && !verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) {
+                result.ok = false;
+                result.msg = "data validation failed";
+            }
+        }
+        return result;
+    }
+
+    // Post a whole batch of equal-sized slots carved out of one registered buffer,
+    // then drain and verify every one. Both slot-pressure bodies did exactly this,
+    // differing only in how they labelled a failure, so the label is the parameter.
+    //
+    // Slot identity rests on the tag, not the payload: with the whole batch in
+    // flight at once a per-slot seed would alias into another worker's patterns
+    // modulo 256, so every slot carries this worker's single pattern and a payload
+    // arriving on the wrong connection is a mismatch rather than a clean pass.
+    ThreadResult WorkerBatchPostDrain(int rank, ConnectionPair& pair, void* buffer,
+                                      size_t slotSize, int slots, void* mhandle, int pattern,
+                                      const std::string& where) {
+        ThreadResult result;
+        std::vector<void*> requests(slots, nullptr);
+        for (int i = 0; i < slots; i++) {
+            char* slot = static_cast<char*>(buffer) + i * slotSize;
+            if (rank == 0) {
+                memset(slot, 0, slotSize);
+                result = WorkerPostRecv(pair.recvComm, slot, slotSize, i, mhandle, &requests[i]);
+            } else {
+                fillHostBufferWithPattern<uint8_t>(slot, slotSize, makeBytePattern(pattern));
+                // kStressTimeoutMs rather than the default slot wait: this post has
+                // to outlast the peer rank publishing all of its own slots under
+                // N-way contention on one NIC, which the drain below also budgets for.
+                result = WorkerPostSend(pair.sendComm, slot, slotSize, i, mhandle, &requests[i],
+                                        /*busyPoll=*/false, kStressTimeoutMs);
+            }
+            if (!result.ok) return result;
+        }
+        for (int i = 0; i < slots; i++) {
+            int sizes[1] = {0};
+            result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+            if (!result.ok) return result;
+            if (rank != 0) continue;
+            const char* slot = static_cast<const char*>(buffer) + i * slotSize;
+            if (sizes[0] != static_cast<int>(slotSize)) {
+                result.ok = false;
+                result.msg = where + "slot " + std::to_string(i) + ": received "
+                             + std::to_string(sizes[0]) + " of " + std::to_string(slotSize)
+                             + " bytes";
+                return result;
+            }
+            if (!verifyHostBufferData<uint8_t>(slot, slotSize, makeBytePattern(pattern))) {
+                result.ok = false;
+                result.msg = where + "slot " + std::to_string(i)
+                             + ": payload is not this worker's pattern";
+                return result;
+            }
+        }
+        return result;
+    }
+
+    // A worker's registered host buffer, kept alive as one movable value: the
+    // allocation and its registration, released registration-first when this
+    // dies because mhandleGuard is declared after bufferGuard. Returning it lets
+    // a body that needs the handle for a loop hold both without re-pasting the
+    // preamble, and keeps the guard order one reviewed fact rather than one per
+    // call site. On failure `result.ok` is false and the guards are empty no-ops.
+    struct WorkerHostBuffer {
+        ThreadResult result;
+        void* buffer = nullptr;
+        void* mhandle = nullptr;
+        HostBufferAutoGuard bufferGuard;
+        NetMHandleWorkerGuard mhandleGuard;
+    };
+
+    // The allocate-and-register preamble on its own: malloc(size, floored to 1),
+    // register it on this rank's comm, and hand back both guards live. A zero
+    // size still yields a one-byte registered buffer, as the transfer helpers
+    // expect.
+    WorkerHostBuffer WorkerSetupHostBuffer(int rank, ConnectionPair& pair, size_t size) {
+        WorkerHostBuffer h;
+        const size_t allocSize = size ? size : 1;
+        h.buffer = malloc(allocSize);
+        if (!h.buffer) {
+            h.result.ok = false;
+            h.result.msg = "malloc failed";
+            return h;
+        }
+        h.bufferGuard = makeHostBufferAutoGuard(h.buffer);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        h.result = WorkerRegister(comm, h.buffer, allocSize, NCCL_PTR_HOST, &h.mhandle);
+        if (!h.result.ok) return h;
+        h.mhandleGuard = NetMHandleWorkerGuard(h.mhandle, NetMHandleWorkerDeleter(net_, comm));
+        return h;
+    }
+
+    // Composite: allocate a host buffer, register it, run one seeded transfer,
+    // and release both. Covers the common single-transfer worker body. The
+    // holder outlives the transfer, so the buffer is deregistered and freed only
+    // after WorkerSendRecvPattern has returned.
+    ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
+                                    int seed, int timeoutMs = kDefaultTimeoutMs) {
+        WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, size);
+        if (!h.result.ok) return h.result;
+
+        return WorkerSendRecvPattern(rank, pair, h.buffer, size, tag, h.mhandle, seed, timeoutMs);
     }
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
@@ -1335,6 +1475,20 @@ protected:
     // the receive buffer is cleared to.
     static constexpr int kWorkerSeedBase   = 55;
     static constexpr int kWorkerSeedStride = 100001;
+    // With an odd stride the 256 indices a cap of 256 permits still land on 256
+    // distinct values modulo 256, one each. Worker 256 would be the first to share
+    // a pattern with worker 0, and a payload delivered on the wrong connection would
+    // then verify clean, so the cap is what the build refuses to let past 256 -- not
+    // the count of usable indices below it.
+    static_assert(MPIEnvironment::kMaxThreads <= 256,
+                  "WorkerSeed patterns alias once the worker cap exceeds 256; widen the "
+                  "pattern before raising it");
+    static_assert(kWorkerSeedStride % 2 == 1,
+                  "WorkerSeed stride must be odd, or workers a power of two apart collide");
+    static int WorkerSeed(int threadIdx, int seq) {
+        return kWorkerSeedBase + threadIdx * kWorkerSeedStride + seq;
+    }
+
     // Plugin-visible indices of physical (non-merged) devices. devices() also
     // reports virtual NICs created by earlier tests, and a deduped 1-device vNIC
     // reuses an existing physical index, so dedupe on vProps.devs[0].
@@ -1516,6 +1670,24 @@ protected:
         return physical[slotIdx % physical.size()];
     }
 
+    // Bounded rendezvous for workers that must all reach a point before any of
+    // them moves on, which the start gates cannot express: they only synchronize
+    // entry into the body. Bounded so a worker that failed earlier cannot hang
+    // its siblings; the caller reports the timeout as its own failure.
+    // aborted, when given, releases the wait early: a worker that failed before
+    // arriving never increments the counter, so without it the siblings spin out the
+    // whole budget and report "only K of N", which hides the failure that caused it.
+    static bool WorkerRendezvous(std::atomic<int>& arrived, int expected, int pollIterations,
+                                 const std::atomic<bool>* aborted = nullptr) {
+        arrived.fetch_add(1, std::memory_order_release);
+        for (int poll = 0; poll < pollIterations; poll++) {
+            if (arrived.load(std::memory_order_acquire) >= expected) return true;
+            if (aborted && aborted->load(std::memory_order_acquire)) return false;
+            usleep(kPollIntervalUs);
+        }
+        return false;
+    }
+
     // Mirrors the normal rccl-tests -t execution model: contexts and
     // communicators are established by the main thread, then workers drive
     // independent comms concurrently. MPI is used only between phases.
@@ -1617,13 +1789,68 @@ protected:
         RunMultiThreadedIndependent(ThreadDevPolicy::Fixed(dev), nThreads, body);
     }
 
-    // How a threaded size sweep registers memory. Some serial bodies register the
-    // whole buffer once, others register exactly the current size on every step;
-    // on a fused device that second shape is the point of the test, since each
-    // registration fans out across both members' protection domains and caches.
-    // The threaded branch has to match whichever its serial body does, or it
-    // quietly covers less.
-    enum class SweepRegistration { Once, PerSize };
+    // The envelope every threaded test body shares: snapshot the RDMA resource
+    // counts, run the workers, barrier so no rank captures its "after" while a
+    // peer is still releasing, and fail if anything leaked. Held here so the
+    // load-bearing barrier is not retyped by hand at each site.
+    void RunThreadedBody(ThreadDevPolicy policy, int nThreads, const char* label,
+                         std::function<ThreadResult(int, ConnectionPair&)> body) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(policy, nThreads, std::move(body));
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
+    }
+
+    // Threaded size sweep: every worker walks the list on its own connection with
+    // a per-worker payload seed, so a transfer delivered on the wrong connection
+    // fails verification. Registers the whole buffer once and reuses that handle
+    // for every size. Wraps the run in an RDMA resource leak check.
+    void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
+                              const std::vector<size_t>& sizes, int repeats,
+                              const char* label) {
+        const int rank = MPIEnvironment::world_rank;
+        size_t maxSize = 1;
+        for (size_t size : sizes) maxSize = std::max(maxSize, size);
+
+        RunThreadedBody(
+            policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(maxSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+                // One pattern for this worker across the whole sweep. Varying it per
+                // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
+                // the same byte -- and workers walk the ladder independently, so in a
+                // sweep that mixes sizes a 256-byte send misrouted into another
+                // worker's 1-byte receive would be clamped and then pass both the size
+                // and the payload check. The tag and the expected size identify the
+                // step; the payload identifies the worker.
+                const int workerPattern = WorkerSeed(threadIdx, 0);
+                int tag = 0;
+                for (size_t size : sizes) {
+                    for (int repeat = 0; repeat < repeats; repeat++) {
+                        const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
+                                                                 : kDefaultTimeoutMs;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle,
+                                                       workerPattern, timeout);
+                        if (!result.ok) return result;
+                        tag++;
+                    }
+                }
+                return result;
+            });
+    }
 
     // ===============================================================
     // Stress test infrastructure
