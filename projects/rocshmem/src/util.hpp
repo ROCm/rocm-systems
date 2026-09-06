@@ -401,6 +401,9 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+// dst/src must be genuine global addresses (symmetric heap, or an IPC/RDMA-
+// mapped remote of it) -- the tail loop below uses AsmAccess::load/store,
+// which emit global_load_*/global_store_* and are not address-space-agnostic.
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
@@ -437,10 +440,11 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
 // ==============================================================================
 // REMAINDER COPY (< 16 Bytes Fast Path)
 // ==============================================================================
+// dst/src must be genuine global addresses; see copy_bulk. Scalar p()/g() use
+// memcpy_lane_scalar instead, which only uses AsmAccess (global_*) on the
+// remote pointer; local scalars are handled via regular loads/stores.
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst,
-                                               uint8_t* src,
-                                               int remainder) {
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
   if (remainder == 0) return;
 
   if (remainder & 1) {
@@ -477,6 +481,47 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 }
 
 // ==============================================================================
+// SCALAR LANE COPY (p()/g() fast path)
+// ==============================================================================
+// Same (dst, src, size) shape as memcpy_lane: dst is remote for Put, src is
+// remote for Get. Only the remote side is ever touched by AsmAccess
+// (global_*) and must be a genuine global address (IPC peer / RDMA-mapped
+// remote of the symmetric heap), same requirement as copy_bulk/copy_remainder
+// above. 
+template <int N, MemcpyKind Kind>
+__device__ __forceinline__ void memcpy_lane_scalar_sized(void* dst, void* src) {
+  constexpr CachePolicy LP =
+    is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+    is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  using Acc = AsmAccess<N, LP, SP>;
+
+  if constexpr (is_put(Kind)) {
+    typename Acc::type tmp;
+    __builtin_memcpy(&tmp, src, sizeof(tmp));
+    Acc::store(dst, tmp);
+  } else {
+    typename Acc::type tmp = Acc::load(src);
+    __builtin_memcpy(dst, &tmp, sizeof(tmp));
+  }
+}
+
+template <MemcpyKind Kind>
+__device__ __forceinline__ void memcpy_lane_scalar(void* dst, void* src, size_t size) {
+  switch (size) {
+  case  1: memcpy_lane_scalar_sized<1, Kind>(dst, src);  break;
+  case  2: memcpy_lane_scalar_sized<2, Kind>(dst, src);  break;
+  case  4: memcpy_lane_scalar_sized<4, Kind>(dst, src);  break;
+  case  8: memcpy_lane_scalar_sized<8, Kind>(dst, src);  break;
+  case 16: memcpy_lane_scalar_sized<16, Kind>(dst, src); break;
+  default:
+    LOGD_ERROR_ABORT("memcpy_lane_scalar backs scalar p()/g() and only supports "
+                     "rocSHMEM's <=16-byte scalar RMA types (size=%zd)", size);
+    break;
+  }
+}
+
+// ==============================================================================
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 
@@ -489,7 +534,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int ChunkSize = 16;
   constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
-  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int n_chunks  = static_cast<int>(size / ChunkSize);

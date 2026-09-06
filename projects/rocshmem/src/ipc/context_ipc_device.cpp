@@ -74,6 +74,18 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
   ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
+__device__ void IPCContext::putmem_scalar(void *dest, const void *source,
+                                         size_t nelems, int pe) {
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
+  memcpy_lane_scalar<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems);
+}
+
+__device__ void IPCContext::getmem_scalar(void *dest, const void *source,
+                                         size_t nelems, int pe) {
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
+  memcpy_lane_scalar<MemcpyKind::Get>(dest, remote, nelems);
+}
+
 __device__ void IPCContext::fence() {
   ipcImpl_.ipcFence();
 }
