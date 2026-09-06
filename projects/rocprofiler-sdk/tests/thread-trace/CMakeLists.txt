@@ -34,6 +34,24 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
+# Same agent profiling test, but forcing the CP DMA copy path instead of SDMA.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-agent-cp-dma-test
+    TARGET thread-trace-test-app
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
+    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_CP_DMA=1")
+
+# Same agent profiling test, but forcing the HSA queue/signal backend instead of KFD.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-agent-hsa-fallback-test
+    TARGET thread-trace-test-app
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
+    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_HSA=1")
+
 # Start before hsa_init(): verifies the request is cached and replayed once HSA registers.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-before-hsa-init-test
@@ -113,7 +131,6 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Some runtime versions have a problem with this. Disabling until that is fully resolved.
 # Tests for thread trace not paused during application run (global destructor)
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
@@ -121,7 +138,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS} OR ${TRIPLE_BUFFER_DISABLED})
+    DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Tests for thread trace starting and stopping multiple times during the application
 rocprofiler_add_integration_execute_test(

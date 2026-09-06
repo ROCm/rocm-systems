@@ -335,11 +335,10 @@ read_map(const std::string& fname)
 
 template <typename MapT, typename Tp>
 void
-read_property(const MapT& data, const std::string& label, Tp& value)
+read_property_value(const MapT& data, const std::string& label, Tp& value)
 {
     using mutable_type = std::remove_const_t<Tp>;
 
-    get_agent_available_properties().insert(label);
     if constexpr(std::is_enum<Tp>::value)
     {
         using value_type = std::underlying_type_t<mutable_type>;
@@ -347,7 +346,7 @@ read_property(const MapT& data, const std::string& label, Tp& value)
         static_assert(!std::is_enum<value_type>::value, "Expected non-enum type");
 
         auto value_v = static_cast<value_type>(value);
-        read_property(data, label, value_v);
+        read_property_value(data, label, value_v);
         if constexpr(std::is_const<Tp>::value)
             const_cast<mutable_type&>(value) = static_cast<mutable_type>(value_v);
         else
@@ -396,6 +395,14 @@ read_property(const MapT& data, const std::string& label, Tp& value)
         else
             value = static_cast<Tp>(local_value);
     }
+}
+
+template <typename MapT, typename Tp>
+void
+read_property(const MapT& data, const std::string& label, Tp& value)
+{
+    get_agent_available_properties().insert(label);
+    read_property_value(data, label, value);
 }
 
 // Candidate locations for the KFD sysfs topology root, in priority order.
@@ -489,7 +496,8 @@ enumerate()
         // we may have been able to open the properties file but if it was empty, we ignore it
         if(properties.empty()) continue;
 
-        auto agent_info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        auto  internal_info             = platform::agent_info{};
+        auto& agent_info                = common::init_public_api_struct(internal_info.public_info);
         agent_info.type                 = ROCPROFILER_AGENT_TYPE_NONE;
         agent_info.logical_node_id      = idcount++;
         agent_info.node_id              = node_id;
@@ -579,6 +587,11 @@ enumerate()
             properties, "num_sdma_queues_per_engine", agent_info.num_sdma_queues_per_engine);
         read_property(properties, "num_cp_queues", agent_info.num_cp_queues);
         read_property(properties, "max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute);
+
+        if(properties.count("cwsr_size") > 0)
+            read_property_value(properties, "cwsr_size", internal_info.cwsr_size);
+        if(properties.count("ctl_stack_size") > 0)
+            read_property_value(properties, "ctl_stack_size", internal_info.ctl_stack_size);
 
         agent_info.name         = "";
         agent_info.product_name = "";
@@ -803,12 +816,12 @@ enumerate()
 
         update_agent_runtime_visibility(agent_info);
 
-        data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
+        data.emplace_back(new platform::agent_info{internal_info}, [](platform::agent_info* ptr) {
             if(ptr)
             {
-                delete[] ptr->mem_banks;
-                delete[] ptr->caches;
-                delete[] ptr->io_links;
+                delete[] ptr->public_info.mem_banks;
+                delete[] ptr->public_info.caches;
+                delete[] ptr->public_info.io_links;
             }
             delete ptr;
         });

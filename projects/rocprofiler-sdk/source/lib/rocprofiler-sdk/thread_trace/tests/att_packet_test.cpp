@@ -115,7 +115,7 @@ TEST(thread_trace, resource_creation)
     {
         auto params = thread_trace::thread_trace_parameter_pack{};
 
-        aql::ThreadTraceAQLPacketFactory factory(agent, params, get_api_table(), get_ext_table());
+        aql::ThreadTraceAQLPacketFactory factory(CHECK_NOTNULL(agent.get_rocp_agent())->id, params);
 
         auto packet = factory.construct_control_packet();
         packet->populate_before();
