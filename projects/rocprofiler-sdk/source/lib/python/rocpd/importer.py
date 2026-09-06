@@ -31,6 +31,13 @@ import sys
 import os
 import sqlite3
 
+from .database import (
+    attach_readonly,
+    configure_untrusted_schema,
+    create_union_views,
+    inspect_attached_rocpd,
+    qualified_identifier,
+)
 from .schema import RocpdSchema
 from . import libpyrocpd
 from .features import get_supported_features_from_version
@@ -41,19 +48,31 @@ __all__ = ["RocpdImportData", "execute_statement"]
 def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     from . import package
 
+    if isinstance(_input, str):
+        _input = [_input]
     _input = package.flatten_rocpd_yaml_input_file(
         _input, skip_auto_merge=skip_auto_merge, automerge_limit=automerge_limit
     )
-    assert not os.path.isdir(_output), "Output database name must not be a directory"
-    assert _check_for_valid_dbs(
-        _input
-    ), "RocpdImportData error, invalid SQLite3 database provided"
-    _connection = libpyrocpd.connect(_output)
-    _connection.execute("PRAGMA foreign_keys = ON")
-    _table_info = _create_temp_views(_connection, _input)
-    _schema_version = _fetch_version_info(_connection)
-    _create_meta_views(_connection, _schema_version)
-    return (_connection, _input, _table_info, _schema_version)
+    if os.path.isdir(_output):
+        raise ValueError("Output database name must not be a directory")
+    if not _check_for_valid_dbs(_input):
+        raise ValueError("RocpdImportData error, invalid SQLite3 database provided")
+    _connection = libpyrocpd.connect(_output, uri=True)
+    try:
+        configure_untrusted_schema(_connection)
+        _connection.execute("PRAGMA foreign_keys = ON")
+        _table_info = _create_temp_views(_connection, _input)
+        _schema_version = _fetch_version_info(_connection)
+        if str(_schema_version) != _table_info.schema_version:
+            raise ValueError(
+                "Validated schema version does not match imported metadata: "
+                f"{_table_info.schema_version!r} != {str(_schema_version)!r}"
+            )
+        _create_meta_views(_connection, _schema_version)
+        return (_connection, _input, _table_info, _schema_version)
+    except BaseException:
+        _connection.close()
+        raise
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
@@ -121,7 +140,7 @@ def _check_for_valid_dbs(input_files) -> bool:
     return True
 
 
-def execute_statement(conn, statement, is_script=False):
+def execute_statement(conn, statement, is_script=False, parameters=()):
     if isinstance(conn, RocpdImportData):
         _conn = conn.connection
     else:
@@ -130,8 +149,10 @@ def execute_statement(conn, statement, is_script=False):
     assert isinstance(_conn, sqlite3.Connection)
     try:
         if is_script:
+            if parameters:
+                raise ValueError("SQL scripts do not accept bound parameters")
             return _conn.executescript(statement)
-        return _conn.execute(f"{statement}")
+        return _conn.execute(statement, parameters)
     except sqlite3.Error as err:
         sys.stderr.write(f"SQLite3 error: {err}\nStatement:\n\t{statement}\n")
         sys.stderr.flush()
@@ -144,66 +165,52 @@ def _create_temp_views(connection, input):
     assert isinstance(connection, sqlite3.Connection)
     assert isinstance(input, list)
 
-    # Attach each database and extract the uuid from each database
-    dbinfo = []
-    uuids = []
-    for i, inp in enumerate(input):
-        execute_statement(connection, f"ATTACH DATABASE '{inp}' AS db{i}")
-        _uuids = [
-            itr[0]
-            for itr in execute_statement(
-                connection,
-                f"SELECT value FROM db{i}.rocpd_metadata WHERE tag='uuid'",
-            ).fetchall()
-        ]
-        dbinfo += [f"db{i}"]
-        uuids += [itr for itr in _uuids if itr not in uuids]
+    class TableInfo(dict):
+        def __init__(self, tables, schema_version):
+            super().__init__(tables)
+            self.schema_version = schema_version
 
-    # unique set of universal process identifiers
-    uuids = list(set(uuids))
+    # Attach and validate each database. Source paths are bound parameters and
+    # source sqlite_master SQL is never executed.
+    sources = []
+    seen_uuids = set()
+    schema_version = None
+    for i, inp in enumerate(input):
+        alias = f"db{i}"
+        resolved_source = attach_readonly(connection, inp, alias)
+        source = inspect_attached_rocpd(connection, alias, resolved_source)
+        if schema_version is None:
+            schema_version = source.version
+        elif source.version != schema_version:
+            raise RuntimeError(
+                "Multiple schema versions found: "
+                f"{sorted({schema_version, source.version})}"
+            )
+        duplicate_uuids = seen_uuids.intersection(source.uuids)
+        if duplicate_uuids:
+            raise ValueError(
+                "Duplicate rocPD UUID across import inputs: "
+                f"{sorted(duplicate_uuids)!r}"
+            )
+        seen_uuids.update(source.uuids)
+        sources.append(source)
+
+    if schema_version is None:
+        raise ValueError("No source databases provided")
 
     all_tables = {}
-    for ditr in dbinfo:
-        # get the tables for the given attached database
-        tables = [
-            itr[0]
-            for itr in execute_statement(
-                connection,
-                f"SELECT name FROM {ditr}.sqlite_master WHERE type='table' AND name LIKE 'rocpd_%'",
-            ).fetchall()
-        ]
-
-        # loop over the tables
-        for itr in tables:
-            # loop over the UUIDs
-            for uitr in uuids:
-                # skip the tables without the UUID suffix
-                if f"{uitr}" not in itr:
-                    continue
-
-                # strip the UUID suffix to create a base table name, e.g. 'rocpd_string_03daf93' -> 'rocpd_string'
-                base = itr.replace(f"{uitr}", "")
-
-                # create a list of attached databases which have the base table name
-                if base not in all_tables.keys():
-                    all_tables[base] = []
-
-                # create the SELECT statement from this database
-                select = f"SELECT * FROM {ditr}.{base}"
-
-                # make sure that we don't duplicate SELECT statements of same table from same attached database
-                if select in all_tables[base]:
-                    continue
-
-                # add this to list
-                all_tables[base] += [select]
+    union_tables = {}
+    for source in sources:
+        for base, tables in source.tables.items():
+            for table in tables:
+                select = f"SELECT * FROM {qualified_identifier(source.alias, table)}"
+                all_tables.setdefault(base, []).append(select)
+                union_tables.setdefault(base, []).append((source.alias, table))
 
     # create the temporary view that is a union of all the attached databases
-    for key, itr in all_tables.items():
-        stmt = "CREATE TEMPORARY VIEW {} AS {}".format(key, " UNION ALL ".join(itr))
-        execute_statement(connection, stmt)
+    create_union_views(connection, union_tables, temporary=True)
 
-    return all_tables
+    return TableInfo(all_tables, schema_version)
 
 
 def _create_meta_views(connection, schema_version):
