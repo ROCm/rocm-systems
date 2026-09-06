@@ -563,4 +563,5 @@ hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
+hipExtMemcpyBatchAsync
 @HSA_EXPORTS@

@@ -628,6 +628,8 @@ inline constexpr char const kNotEnoughFreeHostMemory[] =
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 inline constexpr char const kSdmaSwapUnsupported[] =
     "SDMA swap is not supported on this device.";
+inline constexpr char const kSdmaIndirectUnsupported[] =
+    "SDMA indirect copy is not supported on this device.";
 }  // namespace SkipReason
 
 /**

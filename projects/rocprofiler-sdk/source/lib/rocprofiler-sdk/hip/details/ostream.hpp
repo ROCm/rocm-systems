@@ -28,6 +28,8 @@
 // must be included after runtime api
 #include <hip/hip_deprecated.h>
 
+#include <hip/amd_detail/hip_api_trace.hpp>  // HIP_RUNTIME_API_TABLE_STEP_VERSION
+
 #include <cstdio>
 #include <iomanip>
 #include <ostream>
@@ -5664,3 +5666,20 @@ operator<<(std::ostream& out, const hipArrayMapInfo& v)
     ::rocprofiler::hip::detail::operator<<(out, v);
     return out;
 }
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+inline static std::ostream&
+operator<<(std::ostream& out, const hipExtMemcpyWait& v)
+{
+    out << "{addr=" << v.addr << ", value=" << v.value << ", mask=" << v.mask
+        << ", compareOp=" << v.compareOp << "}";
+    return out;
+}
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hipExtMemcpySignal& v)
+{
+    out << "{addr=" << v.addr << ", data=" << v.data << ", signalOp=" << v.signalOp << "}";
+    return out;
+}
+#endif

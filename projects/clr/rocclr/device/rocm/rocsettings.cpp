@@ -196,6 +196,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_indirect_supported_ = true;
   }
 
+  sdma_asymmetric_swap_supported_ = false;
+
 #if defined(_WIN32)
   if (gfxipMajor >= 11) {
     // Due to driver limitation,

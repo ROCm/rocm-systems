@@ -6191,6 +6191,41 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream __dparm(0));
 
 /**
+ * @brief Perform Batch of 1D copies with extended operation support.
+ *
+ * Extended version of hipMemcpyBatchAsync. The operation for each copy (linear,
+ * swap, indirect src/dst, PreferCE, PreferCU) is selected through attrs[i].flags,
+ * the same hipMemcpyFlags used by hipMemcpyBatchAsync, range-mapped by attrsIdxs.
+ * GPU-side wait/signal parameters are reserved for future use and must be NULL.
+ *
+ * @param [in] dsts        - Array of destination pointers.
+ * @param [in] srcs        - Array of source pointers.
+ * @param [in] sizes       - Array of copy sizes in bytes (source / A side).
+ * @param [in] sizesDst    - Array of destination / B-side sizes for swap
+ *                            (NULL = symmetric). For each swap entry, sizesDst[i]
+ *                            must be non-zero and <= sizes[i], otherwise
+ *                            hipErrorInvalidValue is returned.
+ * @param [in] waits       - Reserved for future use. Must be NULL.
+ * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] count       - Number of copy operations.
+ * @param [in] attrs       - Array of hipExtMemcpyAttributes. Op selection is via
+ *                            attrs[i].flags; reserved fields must be 0.
+ * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
+ * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
+ * @param [in] stream      - Stream to execute on.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
+ *          #hipErrorInvalidResourceHandle
+ */
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream __dparm(0));
+
+/**
  * @brief Perform Batch of 3D copies
  *
  * @param [in] numOps  - Total number of memcpy operations.
