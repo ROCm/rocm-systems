@@ -2205,6 +2205,15 @@ class Device : public RuntimeObject {
   //! Sets the current scratch limit of the device. Valid only on rocm device.
   virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
 
+  //! Returns current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeCurrent() const { return 0; }
+
+  //! Returns maximum persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeMax() const { return 0; }
+
+  //! Sets the current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const { return true; }
+
   //! Validate kernel
   virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,
                               bool coop_groups = false) {

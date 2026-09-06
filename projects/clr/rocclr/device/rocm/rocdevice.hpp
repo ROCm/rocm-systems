@@ -494,6 +494,9 @@ class Device : public NullDevice {
                                 size_t num_attributes, const void* dev_ptr, size_t count) const override;
   virtual size_t ScratchLimitCurrent() const final;
   virtual bool UpdateScratchLimitCurrent(size_t limit) const final;
+  virtual size_t PersistingL2CacheSizeCurrent() const final;
+  virtual size_t PersistingL2CacheSizeMax() const final;
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const final;
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 

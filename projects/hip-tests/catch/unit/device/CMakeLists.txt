@@ -26,6 +26,7 @@ set(TEST_SRC
     hipDeviceEnableDisablePeerAccess.cc
     hipExtGetLinkTypeAndHopCount.cc
     hipDeviceSetGetLimit.cc
+    hipDevicePersistingL2Cache.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
