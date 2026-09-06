@@ -94,6 +94,7 @@ class EventCommands:
             try:
                 events = listener.read(2000)
                 for event in events:
+                    values_dict["timestamp"] = event["timestamp"]
                     values_dict["event"] = event["event"]
                     # parse message as it's own dictionary
                     message_list = event["message"].split("  ")
