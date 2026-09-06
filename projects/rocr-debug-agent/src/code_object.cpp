@@ -28,6 +28,7 @@
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
    DEALINGS WITH THE SOFTWARE.  */
 
+#include "agent_utils.h"
 #include "code_object.h"
 #include "debug.h"
 #include "logging.h"
@@ -136,53 +137,10 @@ code_object_t::open ()
 {
   agent_assert (!is_open () && "code object is already opened");
 
-  const std::string protocol_delim{ "://" };
-
-  size_t protocol_end = m_uri.find (protocol_delim);
-  std::string protocol = m_uri.substr (0, protocol_end);
-  protocol_end += protocol_delim.length ();
-
-  std::transform (protocol.begin (), protocol.end (), protocol.begin (),
-                  [] (unsigned char c) { return std::tolower (c); });
-
-  std::string path;
-  size_t path_end = m_uri.find_first_of ("#?", protocol_end);
-  if (path_end != std::string::npos)
-    path = m_uri.substr (protocol_end, path_end++ - protocol_end);
-  else
-    path = m_uri.substr (protocol_end);
-
-  /* %-decode the string.  */
-  std::string decoded_path;
-  decoded_path.reserve (path.length ());
-  for (size_t i = 0; i < path.length (); ++i)
-    if (path[i] == '%' && std::isxdigit (path[i + 1])
-        && std::isxdigit (path[i + 2]))
-      {
-        decoded_path += std::stoi (path.substr (i + 1, 2), 0, 16);
-        i += 2;
-      }
-    else
-      decoded_path += path[i];
-
-  /* Tokenize the query/fragment.  */
-  std::vector<std::string> tokens;
-  size_t pos, last = path_end;
-  while ((pos = m_uri.find ('&', last)) != std::string::npos)
-    {
-      tokens.emplace_back (m_uri.substr (last, pos - last));
-      last = pos + 1;
-    }
-  if (last != std::string::npos)
-    tokens.emplace_back (m_uri.substr (last));
-
-  /* Create a tag-value map from the tokenized query/fragment.  */
-  std::unordered_map<std::string, std::string> params;
-  std::for_each (tokens.begin (), tokens.end (), [&] (std::string &token) {
-    size_t delim = token.find ('=');
-    if (delim != std::string::npos)
-      params.emplace (token.substr (0, delim), token.substr (delim + 1));
-  });
+  auto parsed = parse_code_object_uri (m_uri);
+  const std::string &protocol = parsed.protocol;
+  const std::string &decoded_path = parsed.decoded_path;
+  const auto &params = parsed.params;
 
   std::vector<char> buffer;
   try

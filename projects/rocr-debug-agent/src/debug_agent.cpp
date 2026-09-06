@@ -28,6 +28,7 @@
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
    DEALINGS WITH THE SOFTWARE.  */
 
+#include "agent_utils.h"
 #include "code_object.h"
 #include "debug.h"
 #include "logging.h"
@@ -225,54 +226,6 @@ static amd_dbgapi_callbacks_t dbgapi_callbacks = {
         agent_out << "rocm-dbgapi: " << message << std::endl;
       }
 };
-
-std::string
-hex_string (const std::vector<uint8_t> &value)
-{
-  std::string value_string;
-  value_string.reserve (2 * value.size ());
-
-  for (size_t pos = value.size (); pos > 0; --pos)
-    {
-      static constexpr char hex_digits[] = "0123456789abcdef";
-      value_string.push_back (hex_digits[value[pos - 1] >> 4]);
-      value_string.push_back (hex_digits[value[pos - 1] & 0xF]);
-    }
-
-  return value_string;
-}
-
-std::string
-register_value_string (const std::string &register_type,
-                       const std::vector<uint8_t> &register_value)
-{
-  /* handle vector types..  */
-  if (size_t pos = register_type.find_last_of ('['); pos != std::string::npos)
-    {
-      const std::string element_type = register_type.substr (0, pos);
-      const size_t element_count = std::stoi (register_type.substr (pos + 1));
-      const size_t element_size = register_value.size () / element_count;
-
-      agent_assert ((register_value.size () % element_size) == 0);
-
-      std::stringstream ss;
-      for (size_t i = 0; i < element_count; ++i)
-        {
-          if (i != 0)
-            ss << " ";
-          ss << "[" << i << "] ";
-
-          std::vector<uint8_t> element_value (
-              &register_value[element_size * i],
-              &register_value[element_size * (i + 1)]);
-
-          ss << register_value_string (element_type, element_value);
-        }
-      return ss.str ();
-    }
-
-  return hex_string (register_value);
-}
 
 void
 print_registers (amd_dbgapi_wave_id_t wave_id)
@@ -1262,68 +1215,8 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       DBGAPI_CHECK (
           amd_dbgapi_wave_get_info (wave_id, AMD_DBGAPI_WAVE_INFO_STOP_REASON,
                                     sizeof (stop_reason), &stop_reason));
-      auto stop_reason_bits{ stop_reason };
 
-      std::underlying_type_t<amd_dbgapi_exceptions_t> resume_exceptions = 0;
-      do
-        {
-          auto one_bit
-              = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
-          stop_reason_bits ^= one_bit;
-
-          switch (stop_reason)
-            {
-            case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
-            case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_BREAKPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_ASSERT_TRAP:
-            case AMD_DBGAPI_WAVE_STOP_REASON_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_TRAP;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP:
-              /* Is this even possible?  */
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION:
-            case AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MATH_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MEMORY_VIOLATION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
-              resume_exceptions
-                  |= AMD_DBGAPI_EXCEPTION_WAVE_ILLEGAL_INSTRUCTION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ECC_ERROR:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FATAL_HALT:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ABORT;
-              break;
-
-#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
-            case AMD_DBGAPI_WAVE_STOP_REASON_RESERVED:
-              break;
-#endif
-            }
-      } while (stop_reason_bits != 0);
+      auto resume_exceptions = map_stop_reason_to_exceptions (stop_reason);
 
       DBGAPI_CHECK (amd_dbgapi_wave_resume (
           wave_id, AMD_DBGAPI_RESUME_MODE_NORMAL,

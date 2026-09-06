@@ -64,7 +64,8 @@ option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 add_library(rocm-debug-agent SHARED)
 target_sources(
     rocm-debug-agent
-    PRIVATE src/code_object.cpp src/debug_agent.cpp src/logging.cpp
+    PRIVATE src/agent_utils.cpp src/code_object.cpp src/debug_agent.cpp
+            src/logging.cpp
 )
 
 set_target_properties(
@@ -246,6 +247,7 @@ install(
 )
 
 if(ENABLE_TESTS)
+    find_package(GTest CONFIG QUIET)
     enable_testing()
     add_subdirectory(test)
 endif()
