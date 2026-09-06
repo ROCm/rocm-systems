@@ -615,6 +615,53 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
+    // Parameterized by MPIEnvironment::nThreads. Every regMr on a fused device
+    // fans out across both members' protection domains and MR caches, so
+    // concurrent cycling on one address doubles the contended surface. The vNIC
+    // itself is created once on the main thread: the merged-device table is
+    // process-global.
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        // One region, cycled by every worker so they contend on a single MR cache
+        // entry, but sliced for the traffic that follows: the serial body moves
+        // data through the address it just recycled, and a shared payload buffer
+        // would have the workers overwriting each other's verification.
+        const size_t slotSize   = kSmallBufferSize;
+        const size_t sharedSize = slotSize * nThreads;
+        auto shared = makeHostBufferAutoGuard(malloc(sharedSize));
+        ASSERT_NE(shared.get(), nullptr);
+
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), nThreads, "threaded RegDeregCycling_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                for (int i = 0; i < 50; i++) {
+                    void* mhandle = nullptr;
+                    result = WorkerRegister(workerComm, shared.get(), sharedSize,
+                                            NCCL_PTR_HOST, &mhandle);
+                    if (!result.ok) return result;
+                    if (DeregisterMemory(workerComm, mhandle) != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "deregMr failed during vNIC cache cycling";
+                        return result;
+                    }
+                }
+
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, shared.get(), sharedSize, NCCL_PTR_HOST,
+                                        &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                void* slot = static_cast<char*>(shared.get()) + threadIdx * slotSize;
+                return WorkerSendRecvPattern(rank, pair, slot, slotSize, 530, mhandle,
+                                             WorkerSeed(threadIdx, 0));
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
@@ -694,6 +741,25 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
+    // Parameterized by MPIEnvironment::nThreads: several striped transfers run at
+    // once over the fused device. The per-worker size shrinks with the worker
+    // count: every registration on a fused device is pinned once per member, so
+    // 64 MB per worker exhausts registration resources at high worker counts
+    // while adding nothing to the striping coverage.
+    if (MPIEnvironment::nThreads > 1) {
+        const size_t threadedSize =
+            std::max<size_t>(4 * 1024 * 1024,
+                             (64 * 1024 * 1024) / MPIEnvironment::nThreads);
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded LargeTransfer_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, threadedSize, 540,
+                                          WorkerSeed(threadIdx, 5400), kLargeTransferTimeout);
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
@@ -760,6 +826,20 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
     ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
+
+    // Parameterized by MPIEnvironment::nThreads: the uneven-split ladder runs on
+    // every worker's own fused connection simultaneously.
+    if (MPIEnvironment::nThreads > 1) {
+        // Per-size allocation and registration, as the serial body does: on a fused
+        // device every regMr fans out across both members, and that churn is what
+        // this test is about.
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+                             {1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
+                              64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1},
+                             /*repeats=*/1, "threaded MixedSizes_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
@@ -837,6 +917,16 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
     ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
+    // 128-byte striping boundary on both members of the fused device at once.
+    if (MPIEnvironment::nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+                             {127, 129, 255, 257, 511, 513},
+                             /*repeats=*/2, "threaded UnalignedSizeTransfer_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
@@ -1057,6 +1147,100 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
     ASSERT_GE(vdev, 0);
 
     const int rank = MPIEnvironment::world_rank;
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent GPU receives and
+    // flushes on one fused device. Workers inherit this rank's HIP device from
+    // the harness, since the current device is thread-local.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 20;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded FlushRepeated_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t size = kSmallBufferSize;
+                void* gpuBuffer = nullptr;
+                if (hipMalloc(&gpuBuffer, size) != hipSuccess) {
+                    result.ok = false;
+                    result.msg = "hipMalloc failed";
+                    return result;
+                }
+                auto gpuGuard = makeDeviceBufferAutoGuard(gpuBuffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, gpuBuffer, size, NCCL_PTR_CUDA, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+                // One pattern per worker: a per-iteration seed aliases modulo 256.
+                const int seed = WorkerSeed(threadIdx, 6000);
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    if (rank == 1
+                        && initializeBufferWithPattern<uint8_t>(gpuBuffer, size,
+                                                                makeBytePattern(seed))
+                               != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "GPU buffer initialization failed";
+                        return result;
+                    }
+
+                    // Cleared before every receive, not just the first: the expected
+                    // pattern is the same on all iterations, so after iteration 0 a
+                    // flush that did nothing would leave the previous payload in place
+                    // and verify clean. Zeroing first makes each iteration prove that
+                    // this transfer's data became visible.
+                    if (rank == 0 && hipMemset(gpuBuffer, 0, size) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "clearing the GPU receive buffer failed at iteration "
+                                     + std::to_string(iter);
+                        return result;
+                    }
+
+                    // The size is checked too, so a short receive cannot verify on a
+                    // tail this clearing happened to leave at the expected value.
+                    int received = 0;
+                    result = WorkerSendRecvRaw(rank, pair, gpuBuffer, size, 600, mhandle,
+                                               kDefaultTimeoutMs, &received);
+                    if (!result.ok) return result;
+
+                    if (rank != 0) continue;
+                    if (received != static_cast<int>(size)) {
+                        result.ok = false;
+                        result.msg = "iteration " + std::to_string(iter) + " received "
+                                     + std::to_string(received) + " of "
+                                     + std::to_string(size) + " bytes";
+                        return result;
+                    }
+
+                    void* flushBuffers[1] = {gpuBuffer};
+                    int flushSizes[1] = {static_cast<int>(size)};
+                    void* flushHandles[1] = {mhandle};
+                    void* flushRequest = nullptr;
+                    // A null request means the flush was a no-op; an error
+                    // return means the flush itself failed.
+                    if (FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes, flushHandles,
+                                  &flushRequest)
+                        != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "FlushRecv failed at iteration " + std::to_string(iter);
+                        return result;
+                    }
+                    if (flushRequest != nullptr) {
+                        result = WorkerWait(flushRequest, nullptr);
+                        if (!result.ok) return result;
+                    }
+                    if (!verifyBufferData<uint8_t>(gpuBuffer, size, makeBytePattern(seed))) {
+                        result.ok = false;
+                        result.msg = "GPU data verification failed after flush";
+                        return result;
+                    }
+                }
+                return result;
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
@@ -1104,6 +1288,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
             ncclResult_t flushResult = FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes,
                                                  flushHandles, &flushRequest);
+            EXPECT_EQ(flushResult, ncclSuccess) << "Iter " << iter << ": FlushRecv failed";
             if (flushResult == ncclSuccess && flushRequest != nullptr) {
                 ASSERT_EQ(WaitForCompletion(flushRequest, nullptr), ncclSuccess);
             }
@@ -1140,6 +1325,42 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
     ASSERT_GE(vdev, 0);
 
     const int rank = MPIEnvironment::world_rank;
+
+    // Parameterized by MPIEnvironment::nThreads: every worker reuses one
+    // registration across its iterations, so the fused device serves many
+    // long-lived MRs at once.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 100;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded SequentialTransfers_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t size = kSmallBufferSize;
+                void* buffer = malloc(size);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, buffer, size, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+                // Worker-constant, as above.
+                const int seed = WorkerSeed(threadIdx, 7000);
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, size, 700, mhandle, seed);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        return;
+    }
 
     // Single connection through the vNIC, reused across all 100 iterations.
     ConnectionPair pair;

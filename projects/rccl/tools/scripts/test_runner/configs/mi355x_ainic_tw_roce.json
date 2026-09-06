@@ -199,6 +199,22 @@
         }
       ]
     },
+    "a_cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
 
     "gin_proxy": {
       "extends": "gtest_base",
@@ -489,6 +505,7 @@
     { "config": "gin_ainic_backend",     "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
