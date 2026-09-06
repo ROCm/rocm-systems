@@ -31,10 +31,21 @@ set ( ROCDXG "rocdxg" )
 set ( ROCDXG_PACKAGE "rocdxg-roct" )
 set ( ROCDXG_COMPONENT "lib${ROCDXG}" )
 set ( ROCDXG_TARGET "${ROCDXG}" )
-set ( ROCDXG_VERSION "1.1.0")
+
+# Read version from the shared header (single source of truth for both
+# librocdxg and hsa-runtime).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/rocdxg_version.h" _ver_major
+     REGEX "^#define ROCDXG_LIB_VERSION_MAJOR ")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/rocdxg_version.h" _ver_minor
+     REGEX "^#define ROCDXG_LIB_VERSION_MINOR ")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/rocdxg_version.h" _ver_patch
+     REGEX "^#define ROCDXG_LIB_VERSION_PATCH ")
+string(REGEX REPLACE ".*MAJOR " "" _ver_major "${_ver_major}")
+string(REGEX REPLACE ".*MINOR " "" _ver_minor "${_ver_minor}")
+string(REGEX REPLACE ".*PATCH " "" _ver_patch "${_ver_patch}")
+set ( ROCDXG_VERSION "${_ver_major}.${_ver_minor}.${_ver_patch}")
 
 project ( ${ROCDXG_TARGET} VERSION ${ROCDXG_VERSION} )
-# Project/version initialized; expose version to code via target defs below
 
 # Optionally, build ROCDXG with ccache.
 set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
@@ -53,23 +64,16 @@ list( PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 include ( utils )
 include ( GNUInstallDirs )
 
-## Setup the package version.
-get_version ( "${ROCDXG_VERSION}" )
+## Setup the package version from the project() call above.
+set ( BUILD_VERSION_MAJOR ${PROJECT_VERSION_MAJOR} )
+set ( BUILD_VERSION_MINOR ${PROJECT_VERSION_MINOR} )
+set ( BUILD_VERSION_PATCH ${PROJECT_VERSION_PATCH} )
 
-set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
-set ( BUILD_VERSION_MINOR ${VERSION_MINOR} )
-set ( BUILD_VERSION_PATCH ${VERSION_PATCH} )
-
-set ( LIB_VERSION_MAJOR ${VERSION_MAJOR})
-set ( LIB_VERSION_MINOR ${VERSION_MINOR})
-set ( LIB_VERSION_PATCH ${VERSION_PATCH})
+set ( LIB_VERSION_MAJOR ${PROJECT_VERSION_MAJOR} )
+set ( LIB_VERSION_MINOR ${PROJECT_VERSION_MINOR} )
+set ( LIB_VERSION_PATCH ${PROJECT_VERSION_PATCH} )
 
 set ( LIB_VERSION_STRING "${LIB_VERSION_MAJOR}.${LIB_VERSION_MINOR}.${LIB_VERSION_PATCH}" )
-
-if ( DEFINED VERSION_BUILD AND NOT ${VERSION_BUILD} STREQUAL "" )
-    message ( "VERSION BUILD DEFINED ${VERSION_BUILD}" )
-    set ( BUILD_VERSION_PATCH "${BUILD_VERSION_PATCH}-${VERSION_BUILD}" )
-endif ()
 set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUILD_VERSION_PATCH}" )
 
 ## Compiler flags
@@ -277,9 +281,9 @@ install(CODE "execute_process(COMMAND ldconfig)" COMPONENT binary)
 set(CPACK_COMPONENTS_GROUPING IGNORE)
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_VERSION_MAJOR ${VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${VERSION_MINOR})
-set(CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH})
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_CONTACT "AMD GFX mailing list <amd-gfx@lists.freedesktop.org>")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_COMPONENT_DESCRIPTION "ROCDXG development package.\n This package includes the user-mode API interfaces\nused to interact with the ROCm driver.\n This package contains the libraries and cmake files for the ROCDXG package.")
