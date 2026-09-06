@@ -367,6 +367,10 @@ enum class ConSanAccessOrigin : uint8_t {
 /// same record rather than copying selected operands into a parallel schema.
 struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
   std::optional<uint16_t> destination_accvgpr;
+  /// Memory-side vector address of a direct LDS transfer. Direct transfers
+  /// can also have an explicit LDS address, so this cannot share
+  /// `address_vgpr` without conflating the two address spaces.
+  std::optional<uint16_t> direct_memory_address_vgpr;
   /// Target-normalized scalar half of a scalar-vector FLAT address. The raw
   /// SADDR encoding remains below for exact lowering validation; absence here
   /// means that the target decoder identified its vector-only sentinel.

@@ -91,13 +91,13 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 }
 
 [[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
-                                                            const ConSanMoiCandidate &candidate,
+                                                            const ConSanProgramSite &site,
                                                             uint16_t result_vgpr,
                                                             uint16_t exec_save_sgpr,
                                                             rj_code_arch_t arch) {
-  if (!candidate.is_direct_to_lds() || !candidate.site().lowering.form)
+  if (!site.lowering.form)
     return false;
-  const ConSanAccessLoweringForm &form = *candidate.site().lowering.form;
+  const ConSanAccessLoweringForm &form = *site.lowering.form;
 
   if (form.kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress) {
     if (!form.address_vgpr || *form.address_vgpr >= 256u || result_vgpr >= 256u)

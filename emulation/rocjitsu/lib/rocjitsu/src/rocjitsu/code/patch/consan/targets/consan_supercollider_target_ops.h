@@ -22,6 +22,15 @@ struct ConSanScTwoAddressLdsByteOffsets {
   uint32_t second = 0;
 };
 
+/// Target encoding of one direct-to-LDS write expanded into an ordinary
+/// global load, an explicit LDS write, and an LDS readback. SuperCollider
+/// retains the loaded payload as the comparison reference.
+struct ConSanScDirectToLdsTransfer {
+  std::array<uint32_t, 2> global_load;
+  std::array<uint32_t, 2> lds_write;
+  std::array<uint32_t, 2> lds_readback;
+};
+
 [[nodiscard]] std::optional<uint32_t>
 consan_sc_build_guest_flat_completion_wait(rj_code_arch_t arch);
 
@@ -40,6 +49,11 @@ consan_sc_build_ds_load_word0(const ConSanAccessLoweringForm &form, uint32_t ori
                               rj_code_arch_t arch);
 
 [[nodiscard]] uint32_t consan_sc_build_ds_load_word1(uint16_t addr_vgpr, uint16_t dst_vgpr);
+
+[[nodiscard]] std::optional<ConSanScDirectToLdsTransfer>
+consan_sc_build_direct_to_lds_transfer(std::array<uint32_t, 2> original_words, uint32_t width_bits,
+                                       uint16_t address_vgpr, uint16_t payload_vgpr,
+                                       uint16_t readback_vgpr, rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<ConSanScTwoAddressLdsByteOffsets>
 consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form,

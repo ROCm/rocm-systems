@@ -178,6 +178,10 @@ struct ConSanBufferMemoryDecode {
 struct ConSanDirectLdsTransferEncoding {
   bool writes_lds = false;
   std::optional<uint8_t> address_source_operand;
+  /// Vector address used by the memory side of the transfer. This is
+  /// distinct from `address_source_operand`, which identifies an explicit
+  /// LDS address when the ISA exposes one.
+  std::optional<uint16_t> memory_address_vgpr;
 };
 
 /// One target's complete program-analysis normalization facet. Unsupported

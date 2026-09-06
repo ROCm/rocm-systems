@@ -11,11 +11,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   if (!delay_words)
     return;
 
-  const std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
+  std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
       result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::NativeLds);
+  const std::unordered_set<uint64_t> admitted_direct_file_offsets = sc_admitted_access_file_offsets(
+      result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::DirectToLds);
+  admitted_lds_file_offsets.insert(admitted_direct_file_offsets.begin(),
+                                   admitted_direct_file_offsets.end());
   std::map<uint64_t, const ConSanProgramSite *> admitted_sites;
   for (const ConSanProgramSite &access : result.program_inventory.access_sites())
-    if (access.origin == ConSanAccessOrigin::NativeLds &&
+    if ((access.origin == ConSanAccessOrigin::NativeLds ||
+         access.origin == ConSanAccessOrigin::DirectToLds) &&
         admitted_lds_file_offsets.contains(access.decoded_file_offset()))
       admitted_sites.try_emplace(access.decoded_file_offset(), &access);
 
@@ -37,7 +42,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           "SuperCollider LDS lowerer found no complete execution owner");
     }
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
-                                 "native-LDS load or store site with complete owners");
+                                 "LDS or Direct-to-LDS site with complete owners");
     return;
   }
 
@@ -89,8 +94,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::vector<LdsSitePlanningContext> site_contexts;
   for (const auto &[file_offset, site] : admitted_sites) {
     (void)file_offset;
-    auto facts = owner_analysis.site_facts(
-        *site, result.program_inventory.execution_owner_kernels(*site));
+    auto facts =
+        owner_analysis.site_facts(*site, result.program_inventory.execution_owner_kernels(*site));
     if (!facts) {
       (void)publish_sc_access_rejection(
           result.coverage_ledger, result.errors, site->physical_id,
@@ -183,8 +188,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       ++missing_width_plan_site_count;
       continue;
     }
-    const uint32_t report_alignment_padding =
-        options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
     const Instruction *site_inst = site_context.owners.instruction;
     // The complete physical-site owner set is known here, so a dead scalar
     // above one owner's current allocation is safe when every owner
@@ -212,27 +215,39 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       continue;
     }
     const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(target);
-    const bool reuse_readback_for_report = lds_report_action_reuses_readback(
-        options, target, static_cast<uint16_t>(*required_vgprs), options.scratch_vgpr);
-    const uint32_t core_scratch_vgprs =
-        *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, split_two_address);
-    const uint32_t scratch_before_saved_address =
-        reuse_readback_for_report
-            ? std::max(core_scratch_vgprs, report_action_scratch_vgprs(options))
-            : core_scratch_vgprs + report_alignment_padding +
-                  report_action_scratch_vgprs(options);
-    const uint32_t probe_scratch_vgprs =
-        scratch_before_saved_address + (lds_load_clobbers_address(site) ? 1u : 0u);
+    uint32_t probe_scratch_vgprs = 0u;
+    bool reuse_readback_for_report = false;
+    if (site.origin == ConSanAccessOrigin::DirectToLds) {
+      const auto direct_layout = direct_to_lds_scratch_layout(site, target, options, 0u);
+      if (!direct_layout) {
+        ++missing_width_plan_site_count;
+        continue;
+      }
+      probe_scratch_vgprs = direct_layout->count;
+    } else {
+      const uint32_t report_alignment_padding =
+          options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
+      reuse_readback_for_report = lds_report_action_reuses_readback(
+          options, target, static_cast<uint16_t>(*required_vgprs), options.scratch_vgpr);
+      const uint32_t core_scratch_vgprs =
+          *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, split_two_address);
+      const uint32_t scratch_before_saved_address =
+          reuse_readback_for_report
+              ? std::max(core_scratch_vgprs, report_action_scratch_vgprs(options))
+              : core_scratch_vgprs + report_alignment_padding +
+                    report_action_scratch_vgprs(options);
+      probe_scratch_vgprs =
+          scratch_before_saved_address + (lds_load_clobbers_address(site) ? 1u : 0u);
+    }
     const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
     const uint16_t scratch_search_start = site_context.owners.descriptor_file_offsets.size() > 1u
                                               ? 0u
                                               : min_auto_scratch_vgpr.value_or(0u);
     const uint16_t access_scratch_alignment =
         access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
-    const uint16_t scratch_alignment =
-        reuse_readback_for_report && target.requires_even_vgpr_tuples
-            ? std::max<uint16_t>(access_scratch_alignment, 2u)
-            : access_scratch_alignment;
+    const uint16_t scratch_alignment = reuse_readback_for_report && target.requires_even_vgpr_tuples
+                                           ? std::max<uint16_t>(access_scratch_alignment, 2u)
+                                           : access_scratch_alignment;
     const auto choose_context_scratch = [&](std::optional<uint16_t> allocation_limit) {
       return choose_sc_access_scratch_vgpr(site, options, site_inst, owner_liveness,
                                            scratch_search_start, allocation_limit, scratch_vgprs,
@@ -507,10 +522,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words = build_lds_check_trap_words(
-        original_bytes, site, target, options, candidate.scratch_vgpr, candidate.vcc_save_sgpr,
-        candidate.selectable_vgpr_bank_mode.value_or(0u), *delay_words,
-        guest_instruction_word_offset, result.errors);
+    auto words =
+        site.origin == ConSanAccessOrigin::DirectToLds
+            ? build_direct_to_lds_check_trap_words(original_bytes, site, target, options,
+                                                   candidate.scratch_vgpr, candidate.vcc_save_sgpr,
+                                                   *delay_words, result.errors)
+            : build_lds_check_trap_words(
+                  original_bytes, site, target, options, candidate.scratch_vgpr,
+                  candidate.vcc_save_sgpr, candidate.selectable_vgpr_bank_mode.value_or(0u),
+                  *delay_words, guest_instruction_word_offset, result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);

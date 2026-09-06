@@ -3467,6 +3467,59 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeExpandsCdna4DirectToLdsAndRetainsPayload) {
+  constexpr auto direct = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordx4Mubuf, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 0, .srsrc = 5});
+  std::vector<uint32_t> text_words = {direct[0], direct[1]};
+  text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "cdna4_direct_to_lds_b128");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_nops = 2u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  const ConSanProgramSite &site = result.program_inventory.access_sites().front();
+  EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
+  ASSERT_TRUE(site.lowering.form);
+  EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
+  EXPECT_TRUE(site.lowering.compare_observed_value.available());
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::LdsStoreCheckTrap);
+  ASSERT_TRUE(patch.scratch_vgpr);
+  const uint16_t scratch = *patch.scratch_vgpr;
+  // The instrumentation needs ten VGPRs for its retained B128 payload,
+  // lane-addressed LDS address, aligned readback, and report tuple. In
+  // particular, automatic placement must not consume the guest's v2 global
+  // address merely because Direct-to-LDS has a separate implicit LDS address.
+  EXPECT_TRUE(2u < scratch || 2u >= static_cast<uint32_t>(scratch) + 10u);
+  EXPECT_FALSE(patch.relocated_guest_instruction_offset);
+
+  const std::vector<uint32_t> body = emitted_patch_words(result, patch);
+  const auto retained_load = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordx4Mubuf,
+      {.offen = 1, .lds = 0, .vaddr = 2, .vdata = static_cast<uint8_t>(scratch), .srsrc = 5});
+  const uint16_t address = static_cast<uint16_t>(scratch + 4u);
+  const uint16_t readback = static_cast<uint16_t>((address + 2u) & ~uint16_t{1u});
+  const auto explicit_write =
+      cdna4::build_ds(cdna4::kDsWriteB128Ds, {.addr = static_cast<uint8_t>(address),
+                                              .data0 = static_cast<uint8_t>(scratch)});
+  const auto delayed_readback =
+      cdna4::build_ds(cdna4::kDsReadB128Ds, {.addr = static_cast<uint8_t>(address),
+                                             .vdst = static_cast<uint8_t>(readback)});
+  EXPECT_TRUE(contains_subsequence(body, retained_load));
+  EXPECT_TRUE(contains_subsequence(body, explicit_write));
+  EXPECT_TRUE(contains_subsequence(body, delayed_readback));
+  EXPECT_EQ(count_subsequence(body, direct), 0u);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};

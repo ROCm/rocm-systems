@@ -393,8 +393,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
             "ConSan MOI sampled direct-to-LDS probe requires an EXEC-save SGPR pair");
         return std::nullopt;
       }
-      if (!append_materialize_direct_to_lds_address(words, candidate, saved_lds_byte_offset_vgpr,
-                                                    *plan.exec_save_sgpr, arch)) {
+      if (!append_materialize_direct_to_lds_address(
+              words, candidate.site(), saved_lds_byte_offset_vgpr, *plan.exec_save_sgpr, arch)) {
         errors.emplace_back("ConSan MOI sampled probe could not materialize a direct-to-LDS "
                             "destination");
         return std::nullopt;

@@ -125,8 +125,7 @@ public:
     if (contexts_[id.ordinal])
       return &*contexts_[id.ordinal];
     const ConSanProgramContainer *owner = kernel(id);
-    if (!decoder_ || owner == nullptr || !owner->has_text_range ||
-        failed_contexts_[id.ordinal])
+    if (!decoder_ || owner == nullptr || !owner->has_text_range || failed_contexts_[id.ordinal])
       return nullptr;
     auto scope = build_kernel_cfg_scope(blocks_, block_index_,
                                         KernelScopeRequest{.entry_offset = owner->entry_text_offset,
@@ -136,11 +135,8 @@ public:
       failed_contexts_[id.ordinal] = true;
       return nullptr;
     }
-    ScOwnerContext &built = contexts_[id.ordinal].emplace(
-        ScOwnerContext{.kernel = owner,
-                       .scope = std::move(*scope),
-                       .liveness = nullptr,
-                       .max_refs = {}});
+    ScOwnerContext &built = contexts_[id.ordinal].emplace(ScOwnerContext{
+        .kernel = owner, .scope = std::move(*scope), .liveness = nullptr, .max_refs = {}});
     built.liveness =
         std::make_unique<LivenessAnalysis>(KernelBlockScope(built.scope.blocks),
                                            LivenessAnalysisOptions{}, built.scope.liveness_edges);
@@ -187,13 +183,13 @@ public:
       facts.max_private_segment_size =
           std::max(facts.max_private_segment_size, descriptor->private_segment_fixed_size);
       if (owner->max_refs.vgpr)
-        facts.max_vgpr_ref =
-            facts.max_vgpr_ref ? std::max(*facts.max_vgpr_ref, *owner->max_refs.vgpr)
-                               : owner->max_refs.vgpr;
+        facts.max_vgpr_ref = facts.max_vgpr_ref
+                                 ? std::max(*facts.max_vgpr_ref, *owner->max_refs.vgpr)
+                                 : owner->max_refs.vgpr;
       if (owner->max_refs.sgpr)
-        facts.max_sgpr_ref =
-            facts.max_sgpr_ref ? std::max(*facts.max_sgpr_ref, *owner->max_refs.sgpr)
-                               : owner->max_refs.sgpr;
+        facts.max_sgpr_ref = facts.max_sgpr_ref
+                                 ? std::max(*facts.max_sgpr_ref, *owner->max_refs.sgpr)
+                                 : owner->max_refs.sgpr;
       const bool dynamic = owner->kernel->uses_dynamic_stack.value_or(false);
       facts.any_dynamic_stack |= dynamic;
       facts.every_dynamic_stack &= dynamic;
@@ -254,6 +250,7 @@ private:
       request.forbidden.expand({RegClass::VGPR, *base, static_cast<uint8_t>(count)});
   };
   forbid(form.address_vgpr, form.address_vgpr_count);
+  forbid(form.direct_memory_address_vgpr, 1u);
   forbid(form.destination_vgpr, form.destination_register_count);
   const uint16_t data_count =
       form.second_data_vgpr ? form.element_register_count : form.data_register_count;
@@ -410,9 +407,10 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
   return options.report_buffer_address ? 3u : 0u;
 }
 
-[[nodiscard]] bool lds_report_action_reuses_readback(
-    const ConSanOptions &options, const ConSanTargetProfile &target, uint16_t readback_vgprs,
-    std::optional<uint16_t> scratch_vgpr = std::nullopt) {
+[[nodiscard]] bool
+lds_report_action_reuses_readback(const ConSanOptions &options, const ConSanTargetProfile &target,
+                                  uint16_t readback_vgprs,
+                                  std::optional<uint16_t> scratch_vgpr = std::nullopt) {
   // The automatic SuperCollider report is an idempotent one-word marker. Once
   // a comparison has found a mismatch, its LDS readback values need not
   // survive the marker store: clobbering them can only cause another marker
@@ -472,6 +470,127 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.insert(words.end(), mov_marker->begin(), mov_marker->end());
   words.insert(words.end(), store->begin(), store->end());
+  return words;
+}
+
+struct ScDirectToLdsScratchLayout {
+  uint16_t payload_vgpr = 0;
+  uint16_t address_vgpr = 0;
+  uint16_t readback_vgpr = 0;
+  uint16_t report_vgpr = 0;
+  uint16_t count = 0;
+};
+
+[[nodiscard]] std::optional<ScDirectToLdsScratchLayout>
+direct_to_lds_scratch_layout(const ConSanProgramSite &site, const ConSanTargetProfile &target,
+                             const ConSanOptions &options, uint16_t scratch_vgpr) {
+  const auto dwords = access_dword_count(site);
+  if (!dwords || !site.lowering.form ||
+      site.lowering.form->kind != ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed ||
+      !access_scratch_tuple_base_is_valid(site, scratch_vgpr))
+    return std::nullopt;
+  const auto align_tuple = [&](uint32_t value) {
+    return target.requires_even_vgpr_tuples && *dwords > 1u ? (value + 1u) & ~uint32_t{1u} : value;
+  };
+  const uint32_t payload = scratch_vgpr;
+  const uint32_t address = payload + *dwords;
+  const uint32_t readback = align_tuple(address + 1u);
+  uint32_t end = readback + *dwords;
+  uint32_t report = end;
+  if (options.report_buffer_address) {
+    if (lds_report_action_reuses_readback(options, target, *dwords,
+                                          static_cast<uint16_t>(readback))) {
+      report = readback;
+      end = std::max(end, report + report_action_scratch_vgprs(options));
+    } else {
+      report = target.requires_even_vgpr_tuples ? (end + 1u) & ~uint32_t{1u} : end;
+      end = report + report_action_scratch_vgprs(options);
+    }
+  }
+  if (end > 256u)
+    return std::nullopt;
+  return ScDirectToLdsScratchLayout{
+      .payload_vgpr = static_cast<uint16_t>(payload),
+      .address_vgpr = static_cast<uint16_t>(address),
+      .readback_vgpr = static_cast<uint16_t>(readback),
+      .report_vgpr = static_cast<uint16_t>(report),
+      .count = static_cast<uint16_t>(end - scratch_vgpr),
+  };
+}
+
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_to_lds_check_trap_words(
+    std::span<const uint8_t> original_bytes, const ConSanProgramSite &site,
+    const ConSanTargetProfile &target, const ConSanOptions &options, uint16_t scratch_vgpr,
+    uint16_t vcc_save_sgpr, std::span<const uint32_t> delay_words,
+    std::vector<std::string> &errors) {
+  const rj_code_arch_t arch = target.arch;
+  const auto dwords = access_dword_count(site);
+  const auto layout = direct_to_lds_scratch_layout(site, target, options, scratch_vgpr);
+  if (!dwords || !layout) {
+    errors.emplace_back("ConSan Direct-to-LDS check/trap selected unsupported scratch layout");
+    return std::nullopt;
+  }
+  std::array<uint32_t, 2> original{};
+  if (!read_words_at(original_bytes, site.decoded_file_offset(), std::span<uint32_t>(original))) {
+    errors.emplace_back("ConSan Direct-to-LDS check/trap could not read guest access");
+    return std::nullopt;
+  }
+  const auto transfer = consan_sc_build_direct_to_lds_transfer(
+      original, site.lowering.form->element_width_bits, layout->address_vgpr, layout->payload_vgpr,
+      layout->readback_vgpr, arch);
+  const auto wait_global = instrumentation::build_s_wait_global_load0(arch);
+  const auto wait_lds = instrumentation::build_s_wait_lds0(arch);
+  const bool descriptor_partitioned =
+      target.scalar_placement_model == ConSanScalarPlacementModel::DescriptorPartitioned;
+  const std::optional<uint32_t> save_vcc =
+      descriptor_partitioned
+          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
+  const std::optional<uint32_t> restore_vcc =
+      descriptor_partitioned
+          ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
+  auto mismatch = build_mismatch_action_words(options, target, layout->report_vgpr, errors,
+                                              "ConSan Direct-to-LDS check/trap");
+  if (!transfer || !wait_global || !wait_lds || !save_vcc || !restore_vcc || !mismatch ||
+      mismatch->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+    errors.emplace_back("ConSan Direct-to-LDS check/trap could not encode sequence");
+    return std::nullopt;
+  }
+  const auto skip_action =
+      instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(mismatch->size()), arch);
+  if (!skip_action) {
+    errors.emplace_back("ConSan Direct-to-LDS check/trap could not encode mismatch branch");
+    return std::nullopt;
+  }
+
+  std::vector<uint32_t> words;
+  if (!consan_moi_impl::append_materialize_direct_to_lds_address(words, site, layout->address_vgpr,
+                                                                 vcc_save_sgpr, arch)) {
+    errors.emplace_back("ConSan Direct-to-LDS check/trap could not materialize LDS address");
+    return std::nullopt;
+  }
+  words.insert(words.end(), transfer->global_load.begin(), transfer->global_load.end());
+  words.push_back(*wait_global);
+  words.insert(words.end(), transfer->lds_write.begin(), transfer->lds_write.end());
+  words.push_back(*wait_lds);
+  words.insert(words.end(), delay_words.begin(), delay_words.end());
+  words.insert(words.end(), transfer->lds_readback.begin(), transfer->lds_readback.end());
+  words.push_back(*wait_lds);
+  words.push_back(*save_vcc);
+  for (uint16_t i = 0; i < *dwords; ++i) {
+    const auto compare =
+        consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(layout->payload_vgpr + i),
+                                     static_cast<uint16_t>(layout->readback_vgpr + i), arch);
+    if (!compare) {
+      errors.emplace_back("ConSan Direct-to-LDS check/trap could not encode chunk compare");
+      return std::nullopt;
+    }
+    words.push_back(*compare);
+    words.push_back(*skip_action);
+    words.insert(words.end(), mismatch->begin(), mismatch->end());
+  }
+  words.push_back(*restore_vcc);
   return words;
 }
 

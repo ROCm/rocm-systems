@@ -82,6 +82,7 @@ decode_cdna5_direct_lds_transfer(std::string_view mnemonic, std::span<const uint
   return ConSanDirectLdsTransferEncoding{
       .writes_lds = async_load,
       .address_source_operand = static_cast<uint8_t>(async_load ? 0u : 1u),
+      .memory_address_vgpr = std::nullopt,
   };
 }
 

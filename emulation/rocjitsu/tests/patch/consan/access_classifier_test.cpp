@@ -130,6 +130,27 @@ TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTar
   }
 }
 
+TEST(ConSanAccessClassifier, LaneAddressedDirectToLdsWritesSupportValueComparison) {
+  ConSanProgramSite input;
+  input.origin = ConSanAccessOrigin::DirectToLds;
+  input.kind = ConSanLdsAccessKind::Write;
+  input.physical_id.original_text_offset = 8u;
+  input.decoded_site().text_offset = 8u;
+  input.decoded_site().file_offset = 8u;
+  input.decoded_site().size = 8u;
+  input.decoded_width_bits = 128u;
+  input.decoded_site().mnemonic = "buffer_load_dwordx4";
+  input.operands.direct_memory_address_vgpr = 3u;
+
+  const ConSanProgramSite site =
+      complete_site(std::move(input), ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
+
+  ASSERT_TRUE(site.lowering.form);
+  EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
+  EXPECT_TRUE(site.lowering.replay_guest_access.available());
+  EXPECT_TRUE(site.lowering.compare_observed_value.available());
+}
+
 TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabulary) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));

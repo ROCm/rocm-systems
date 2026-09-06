@@ -267,7 +267,7 @@ TEST(ConSanMoiModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm)
   candidate_site.lowering.form->address_vgpr = 7u;
   ConSanMoiCandidate candidate(candidate_site);
   std::vector<uint32_t> words;
-  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate.site(), 20u, 30u,
                                                        ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(words.empty());
 
@@ -275,12 +275,12 @@ TEST(ConSanMoiModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm)
   candidate_site.lowering.form->address_vgpr.reset();
   candidate_site.lowering.form->element_width_bits = 32u;
   words.clear();
-  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+  EXPECT_TRUE(append_materialize_direct_to_lds_address(words, candidate.site(), 20u, 30u,
                                                        ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(words.empty());
 
   candidate_site.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
-  EXPECT_FALSE(append_materialize_direct_to_lds_address(words, candidate, 20u, 30u,
+  EXPECT_FALSE(append_materialize_direct_to_lds_address(words, candidate.site(), 20u, 30u,
                                                         ROCJITSU_CODE_ARCH_CDNA4));
 }
 

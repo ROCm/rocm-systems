@@ -210,8 +210,8 @@ namespace consan_moi_impl {
     }
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
-    if (!append_materialize_direct_to_lds_address(words, candidate, materialized_address_vgpr,
-                                                  *point.moi_exec_save_sgpr, arch)) {
+    if (!append_materialize_direct_to_lds_address(
+            words, candidate.site(), materialized_address_vgpr, *point.moi_exec_save_sgpr, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not materialize a direct-to-LDS "
                           "destination");
       return std::nullopt;

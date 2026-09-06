@@ -16,9 +16,10 @@ std::optional<uint32_t> consan_sc_build_guest_flat_completion_wait(rj_code_arch_
                                              : instrumentation::build_s_wait_lds0(arch);
 }
 
-std::optional<std::vector<uint32_t>>
-consan_sc_build_delay_words(rj_code_arch_t arch, const ConSanRequest &request,
-                            std::vector<std::string> &errors, std::string_view context) {
+std::optional<std::vector<uint32_t>> consan_sc_build_delay_words(rj_code_arch_t arch,
+                                                                 const ConSanRequest &request,
+                                                                 std::vector<std::string> &errors,
+                                                                 std::string_view context) {
   std::vector<uint32_t> words;
   if (request.delay_nops == 0)
     return words;
@@ -76,6 +77,16 @@ std::optional<uint32_t> consan_sc_build_ds_load_word0(const ConSanAccessLowering
 
 uint32_t consan_sc_build_ds_load_word1(uint16_t addr_vgpr, uint16_t dst_vgpr) {
   return static_cast<uint32_t>(addr_vgpr) | (static_cast<uint32_t>(dst_vgpr) << 24u);
+}
+
+std::optional<ConSanScDirectToLdsTransfer>
+consan_sc_build_direct_to_lds_transfer(std::array<uint32_t, 2> original_words, uint32_t width_bits,
+                                       uint16_t address_vgpr, uint16_t payload_vgpr,
+                                       uint16_t readback_vgpr, rj_code_arch_t arch) {
+  if (!consan_arch_is_cdna3_or_cdna4(arch))
+    return std::nullopt;
+  return consan_sc_target_detail::build_cdna3_cdna4_direct_to_lds_transfer(
+      original_words, width_bits, address_vgpr, payload_vgpr, readback_vgpr, arch);
 }
 
 std::optional<ConSanScTwoAddressLdsByteOffsets>

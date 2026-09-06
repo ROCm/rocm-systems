@@ -331,6 +331,7 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
       .element_width_bits = access.decoded_width_bits,
       .range_count = static_cast<uint32_t>(access.ranges.size()),
       .address_vgpr = access.operands.address_vgpr,
+      .direct_memory_address_vgpr = access.operands.direct_memory_address_vgpr,
       .destination_vgpr = access.operands.destination_vgpr,
       .destination_accvgpr = access.operands.destination_accvgpr,
       .data_vgpr = access.operands.data_vgpr,
@@ -349,6 +350,17 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
     form.address_vgpr_count = access.operands.address_vgpr ? 1u : 0u;
     form.data_register_count = static_cast<uint16_t>((access.decoded_width_bits + 31u) / 32u);
     replay = Reason::None;
+    // CDNA3/4 MUBUF Direct-to-LDS loads use the lane-addressed destination
+    // form. SuperCollider can expand those writes into an ordinary global
+    // load plus explicit DS write, retaining the fetched payload for exact
+    // post-delay comparison. Explicit-address CDNA5 async transfers have a
+    // different VGLOBAL contract and remain independently unsupported here.
+    if (access.kind == ConSanLdsAccessKind::Write &&
+        form.kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed &&
+        form.direct_memory_address_vgpr &&
+        (form.element_width_bits == 32u || form.element_width_bits == 96u ||
+         form.element_width_bits == 128u))
+      compare = Reason::None;
   } else if (access.origin == ConSanAccessOrigin::NativeLds) {
     const auto two_address =
         consan_detail::decode_native_lds_two_range_shape(access.mnemonic_view());

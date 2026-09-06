@@ -1793,7 +1793,8 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
               "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
           return std::nullopt;
         }
-        if (!append_materialize_direct_to_lds_address(words, candidate, *saved_lds_byte_offset_vgpr,
+        if (!append_materialize_direct_to_lds_address(words, candidate.site(),
+                                                      *saved_lds_byte_offset_vgpr,
                                                       *plan.scalar_state.exec_save_sgpr, arch)) {
           errors.emplace_back("ConSan MOI inline-shadow probe could not materialize a "
                               "direct-to-LDS destination");

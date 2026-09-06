@@ -36,7 +36,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors);
 
 [[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
-                                                            const ConSanMoiCandidate &candidate,
+                                                            const ConSanProgramSite &site,
                                                             uint16_t result_vgpr,
                                                             uint16_t exec_save_sgpr,
                                                             rj_code_arch_t arch);

@@ -7,9 +7,9 @@
 
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
@@ -427,6 +427,9 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   if (form.address_vgpr &&
       vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
     return true;
+  if (form.direct_memory_address_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.direct_memory_address_vgpr, 1u))
+    return true;
 
   if (form.destination_vgpr &&
       vgpr_ranges_overlap(candidate, required_vgprs, *form.destination_vgpr,
@@ -456,6 +459,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   };
 
   note_range(form.address_vgpr, form.address_vgpr_count);
+  note_range(form.direct_memory_address_vgpr, 1u);
   note_range(form.destination_vgpr, form.destination_register_count);
   const uint16_t data_vgprs =
       form.second_data_vgpr ? form.element_register_count : form.data_register_count;
@@ -466,8 +470,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
-[[nodiscard]] bool
-needs_scratch_headroom_at_descriptor_edge(const ConSanProgramSite &access) {
+[[nodiscard]] bool needs_scratch_headroom_at_descriptor_edge(const ConSanProgramSite &access) {
   return access.lowering.form && access.lowering.form->destination_allocation_headroom != 0u;
 }
 
@@ -515,8 +518,7 @@ find_liveness_scratch_vgpr(const ConSanProgramSite &access, const Instruction *i
 }
 
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access,
-                    std::optional<uint16_t> requested_scratch_vgpr,
+choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *inst, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
@@ -535,9 +537,9 @@ choose_scratch_vgpr(const ConSanProgramSite &access,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_spill_scratch_vgpr(const ConSanProgramSite &access, uint16_t allocation_count,
-                          uint16_t required_vgprs) {
+[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
+                                                                uint16_t allocation_count,
+                                                                uint16_t required_vgprs) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
        ++candidate) {

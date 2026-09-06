@@ -108,7 +108,8 @@ decode_cdna3_cdna4_direct_lds_transfer(std::string_view mnemonic,
   if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
     return std::nullopt;
   return ConSanDirectLdsTransferEncoding{.writes_lds = true,
-                                         .address_source_operand = std::nullopt};
+                                         .address_source_operand = std::nullopt,
+                                         .memory_address_vgpr = static_cast<uint16_t>(raw.vaddr)};
 }
 
 bool decode_cdna3_cdna4_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
