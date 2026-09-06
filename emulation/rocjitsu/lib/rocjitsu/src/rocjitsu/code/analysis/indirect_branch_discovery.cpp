@@ -1148,6 +1148,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                                                      uint16_t pair_lo) {
   // Match:
   //   s_add_i32  tmp, literal, 4
+  //   [s_delay_alu]
   //   s_abs_i32  tmp, tmp
   //   s_sub_u32  pair_lo, pair_lo, tmp
   //   s_subb_u32 pair_hi, pair_hi, 0
@@ -1158,6 +1159,14 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (index + 3 > last_index)
     return std::nullopt;
 
+  size_t abs_index = index + 1;
+  if (ctx.insts[abs_index]->mnemonic() == "s_delay_alu")
+    ++abs_index;
+  const size_t low_index = abs_index + 1;
+  const size_t high_index = low_index + 1;
+  if (high_index > last_index)
+    return std::nullopt;
+
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
@@ -1165,9 +1174,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     return std::nullopt;
 
   const Instruction &temp_inst = *ctx.insts[index];
-  const Instruction &abs_inst = *ctx.insts[index + 1];
-  const Instruction &low_inst = *ctx.insts[index + 2];
-  const Instruction &high_inst = *ctx.insts[index + 3];
+  const Instruction &abs_inst = *ctx.insts[abs_index];
+  const Instruction &low_inst = *ctx.insts[low_index];
+  const Instruction &high_inst = *ctx.insts[high_index];
   const uint32_t temp_word = ctx.facts[index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
   const Operand *temp_dst = temp_inst.dst_operand(0);
@@ -1182,12 +1191,12 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
                                    *add_i32_opcode, temp_sdst, kInlineInt4, literal))
     return std::nullopt;
-  if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, "s_abs_i32", temp_sdst))
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", temp_sdst))
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[index + 2].word, *sub_u32_opcode, pair_lo,
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *sub_u32_opcode, pair_lo,
                                 pair_lo, temp_sdst))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[index + 3].word, *subb_u32_opcode,
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *subb_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
@@ -1195,7 +1204,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return TempDeltaPattern{
       .delta = static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
       .end_offset = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
-      .instruction_count = 4,
+      .instruction_count = high_index - index + 1,
   };
 }
 
