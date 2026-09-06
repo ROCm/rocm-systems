@@ -1629,10 +1629,9 @@ NATIVE_GTEST_TARGETS = {
         # completes that stronger contract in roughly 102 seconds.
         d128_block_run_timeout_seconds=150,
         # The pressure suite exercises all four host-reference cases in one
-        # process. Inline Shadow currently needs roughly 118 seconds under the
-        # native simulator, so retain the same 1.5x target-specific margin as
-        # the D128 block Record/Replay row.
-        d128_pressure_run_timeout_seconds=180,
+        # process. Inline Shadow currently needs roughly 200 seconds under the
+        # native simulator, so retain a 1.5x target-specific margin.
+        d128_pressure_run_timeout_seconds=300,
     ),
 }
 

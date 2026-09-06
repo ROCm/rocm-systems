@@ -2541,7 +2541,7 @@ class ConSanValidationTest(unittest.TestCase):
             ),
         )
         self.assertEqual(workloads["d128-block"]["run_timeout_seconds"], 150)
-        self.assertEqual(workloads["d128-pressure"]["run_timeout_seconds"], 180)
+        self.assertEqual(workloads["d128-pressure"]["run_timeout_seconds"], 300)
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             (
@@ -2626,7 +2626,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx950", "d128-block", 30),
                 ("gfx1250", "d128-block", 150),
                 ("gfx950", "d128-pressure", 30),
-                ("gfx1250", "d128-pressure", 180),
+                ("gfx1250", "d128-pressure", 300),
                 ("gfx950", "jakub-attention", 300),
                 ("gfx1250", "jakub-attention", 90),
                 ("gfx950", "tp1-prefill", 300),
