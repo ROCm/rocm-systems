@@ -108,17 +108,24 @@ struct cache_policy
                 { vcn_name.c_str(), thread_id, "{}" });
         }
 
+        for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
+        {
+            auto jpeg_name =
+                trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
+                    std::nullopt, jpeg);
+            trace_cache::get_metadata_registry().add_track(
+                { jpeg_name.c_str(), thread_id, "{}" });
+        }
+
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
-            auto read_name =
-                trace_cache::info::format_track_name<category::amd_smi_xgmi_read_data>(
-                    std::nullopt, link);
+            auto read_name = trace_cache::info::format_link_track_name(
+                trait::name<category::amd_smi_xgmi_read_data>::value, link);
             trace_cache::get_metadata_registry().add_track(
                 { read_name.c_str(), thread_id, "{}" });
 
-            auto write_name =
-                trace_cache::info::format_track_name<category::amd_smi_xgmi_write_data>(
-                    std::nullopt, link);
+            auto write_name = trace_cache::info::format_link_track_name(
+                trait::name<category::amd_smi_xgmi_write_data>::value, link);
             trace_cache::get_metadata_registry().add_track(
                 { write_name.c_str(), thread_id, "{}" });
         }
@@ -225,6 +232,20 @@ struct cache_policy
                   EXPRESSION, 0, 0, "{}" });
         }
 
+        for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
+        {
+            auto jpeg_name =
+                trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
+                    jpeg);
+
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  jpeg_name.c_str(), jpeg_name.c_str(),
+                  "JPEG (Image Decode) Engine Activity", LONG_DESCRIPTION, COMPONENT,
+                  trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+                  EXPRESSION, 0, 0, "{}" });
+        }
+
         for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
             for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
@@ -293,19 +314,27 @@ struct cache_policy
               LONG_DESCRIPTION, COMPONENT, "Mbps", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_xgmi_read_data>::value, "XGMI Read",
-              trait::name<category::amd_smi_xgmi_read_data>::description,
-              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-              EXPRESSION, 0, 0, "{}" });
+        // XGMI data accumulators are reported per-link, so one PMC per link is needed
+        for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
+        {
+            auto read_name = trace_cache::info::format_link_pmc_name(
+                trait::name<category::amd_smi_xgmi_read_data>::value, link);
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  read_name, fmt::format("XGMI Read [Link {}]", link),
+                  trait::name<category::amd_smi_xgmi_read_data>::description,
+                  LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE,
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_xgmi_write_data>::value, "XGMI Write",
-              trait::name<category::amd_smi_xgmi_write_data>::description,
-              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-              EXPRESSION, 0, 0, "{}" });
+            auto write_name = trace_cache::info::format_link_pmc_name(
+                trait::name<category::amd_smi_xgmi_write_data>::value, link);
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  write_name, fmt::format("XGMI Write [Link {}]", link),
+                  trait::name<category::amd_smi_xgmi_write_data>::description,
+                  LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE,
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
+        }
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
