@@ -754,7 +754,8 @@ std::vector<std::string> getLinkOptions(const LinkArguments& args) {
 RTCProgram::RTCProgram(const std::string &name) : name_(name) {
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   if (exec_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
-    guarantee(false, "Failed to allocate internal hiprtc structure");
+    LogPrintfError("Failed to allocate internal hiprtc structure");
+    // Cannot return from constructor, object will be in invalid state
   }
 }
 
@@ -853,7 +854,8 @@ std::recursive_mutex RTCProgram::lock_;
 
 LinkProgram::LinkProgram(const std::string &name) : RTCProgram(name) {
   if (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
-    guarantee(false, "Failed to allocate internal comgr structure");
+    LogPrintfError("Failed to allocate internal comgr structure");
+    // Cannot return from constructor, object will be in invalid state
   }
   std::scoped_lock lock(lock_);
   linker_set_.insert(this);

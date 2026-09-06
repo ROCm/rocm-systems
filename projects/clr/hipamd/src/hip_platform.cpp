@@ -226,16 +226,22 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
   if (platform.StatCO().GetFuncName(hostFunction) == nullptr) {
     hip::Function* func = new hip::Function(std::string(deviceName), fat_binary_modules);
     hipError_t hip_error = platform.StatCO().RegisterFunction(hostFunction, func);
-    guarantee(hip_error == hipSuccess, "Cannot register Static function, error: %d", hip_error);
+    if (hip_error != hipSuccess) {
+      LogPrintfError("Cannot register Static function, error: %d", hip_error);
+      return;
+    }
   }
 
   if (!enable_deferred_loading) {
     HIP_INIT_VOID();
-    
+
     for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
       hipFunction_t hfunc = nullptr;
       hipError_t hip_error = platform.StatCO().GetFunc(&hfunc, hostFunction, dev_idx);
-      guarantee(hip_error == hipSuccess, "Cannot retrieve Static function, error: %d", hip_error);
+      if (hip_error != hipSuccess) {
+        LogPrintfError("Cannot retrieve Static function, error: %d", hip_error);
+        return;
+      }
     }
   }
 }
@@ -255,7 +261,10 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
-  guarantee((err == hipSuccess), "Cannot register Static Global Var, error:%d", err);
+  if (err != hipSuccess) {
+    LogPrintfError("Cannot register Static Global Var, error:%d", err);
+    return;
+  }
 }
 
 // ================================================================================================
@@ -269,7 +278,10 @@ void __hipRegisterSurface(
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
                                    sizeof(surfaceReference), 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
-  guarantee((err == hipSuccess), "Cannot register Static Glbal Var, err:%d", err);
+  if (err != hipSuccess) {
+    LogPrintfError("Cannot register Static Glbal Var, err:%d", err);
+    return;
+  }
 }
 
 // ================================================================================================
@@ -292,7 +304,10 @@ void __hipRegisterManagedVar(
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
                                    size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
   hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
-  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
+  if (status != hipSuccess) {
+    LogPrintfError("Cannot register Static Managed Var, error: %d", status);
+    return;
+  }
 
   if (enable_deferred_loading) {
     // Allocate temporary var on host and initialize
@@ -306,12 +321,16 @@ void __hipRegisterManagedVar(
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
         status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *stream);
-        guarantee(status == hipSuccess, "Error during memcpy to managed memory, error: %d", status);
+        if (status != hipSuccess) {
+          LogPrintfError("Error during memcpy to managed memory, error: %d", status);
+          return;
+        }
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
       }
     } else {
-      guarantee(false, "Error during allocation of managed memory!, error: %d", status);
+      LogPrintfError("Error during allocation of managed memory!, error: %d", status);
+      return;
     }
   }
 }
@@ -327,7 +346,10 @@ void __hipRegisterTexture(
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
                                    sizeof(textureReference), 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
-  guarantee((err == hipSuccess), "Cannot register Static Global Var, status: %d", err);
+  if (err != hipSuccess) {
+    LogPrintfError("Cannot register Static Global Var, status: %d", err);
+    return;
+  }
 }
 
 // ================================================================================================
@@ -351,7 +373,10 @@ void __hipUnregisterFatBinary(void** modules) {
     });
   }
   hipError_t err = PlatformState::Instance().StatCO().RemoveFatBinary(fat_binary_modules);
-  guarantee((err == hipSuccess), "Cannot Unregister Fat Binary, error:%d", err);
+  if (err != hipSuccess) {
+    LogPrintfError("Cannot Unregister Fat Binary, error:%d", err);
+    return;
+  }
 }
 
 // ================================================================================================

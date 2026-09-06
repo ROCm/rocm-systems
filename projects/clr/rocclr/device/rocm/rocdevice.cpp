@@ -932,23 +932,33 @@ hsa_status_t Device::iterateCpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
           // from "fine_grain and kern_args".
           agentInfo->fine_grain_pool = pool;
         }
-        guarantee(((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) == 0),
-                  "Memory Segment cannot be both coarse and fine grained");
+        if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0) {
+          LogPrintfError("Memory Segment cannot be both coarse and fine grained");
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
       } else {
         // If the flag is not set to fine grained, then it is coarse_grained by default.
         agentInfo->coarse_grain_pool = pool;
-        guarantee(((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0),
-                  "Memory Segments that are not fine grained has to be coarse grained");
-        guarantee(((global_flag & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED) == 0),
-                  "Memory Segment cannot be both coarse and fine grained");
-        guarantee(((global_flag & HSA_REGION_GLOBAL_FLAG_KERNARG) == 0),
-                  "Coarse grained memory segment cannot have kern_args tag");
+        if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) == 0) {
+          LogPrintfError("Memory Segments that are not fine grained has to be coarse grained");
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        if ((global_flag & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED) != 0) {
+          LogPrintfError("Memory Segment cannot be both coarse and fine grained");
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        if ((global_flag & HSA_REGION_GLOBAL_FLAG_KERNARG) != 0) {
+          LogPrintfError("Coarse grained memory segment cannot have kern_args tag");
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
       }
 
       if ((global_flag & HSA_REGION_GLOBAL_FLAG_KERNARG) != 0) {
         agentInfo->kern_arg_pool = pool;
-        guarantee(((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) == 0),
-                  "Coarse grained memory segment cannot have kern_args tag");
+        if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0) {
+          LogPrintfError("Coarse grained memory segment cannot have kern_args tag");
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
       }
 
       break;
@@ -2258,7 +2268,8 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
         break;
       }
     default:
-      guarantee(false, "Invalid Memory Segment");
+      LogPrintfError("Invalid Memory Segment");
+      segment.handle = 0;
       break;
   }
   assert(segment.handle != 0);

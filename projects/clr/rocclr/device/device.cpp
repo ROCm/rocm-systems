@@ -359,7 +359,9 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
 void MemObjMap::RemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
-  guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
+  if (rval != 1) {
+    LogPrintfError("Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
+  }
 }
 
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
@@ -566,8 +568,9 @@ void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
 void MemObjMap::RemoveVirtualMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = VirtualMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
-  guarantee(rval == 1, "Virtual Memobj map does not have ptr: 0x%x",
-            reinterpret_cast<uintptr_t>(k));
+  if (rval != 1) {
+    LogPrintfError("Virtual Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
+  }
 }
 
 amd::Memory* MemObjMap::FindVirtualMemObj(const void* k) {
@@ -700,8 +703,9 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 
   if (vptr != nullptr) {
     // Assert to make sure that amd::Memory object has set the right ptr.
-    guarantee(vptr == (parent ? vaddr_base_obj->getSvmPtr() : vaddr_sub_obj->getSvmPtr()),
-              "amd::Memory object does not have the right ptr");
+    if (vptr != (parent ? vaddr_base_obj->getSvmPtr() : vaddr_sub_obj->getSvmPtr())) {
+      LogPrintfError("amd::Memory object does not have the right ptr");
+    }
   }
 
   return parent ? vaddr_base_obj : vaddr_sub_obj;
