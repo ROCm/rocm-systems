@@ -215,6 +215,45 @@
         }
       ]
     },
+    "a_fault_recovery_nightly": {
+      "extends": "cast_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "RCCL_IB_FAULT_INJECTION": "0",
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      },
+      "description": "A20: open finding, nightly only. Ten blocking messages on a connection the recovery thread has restored must not leave the two ranks a message apart. This suite is omitted from the smoke subset used by label-gated PR runs, so until the plugin side is fixed it is expected to fail only some nightly runs, where a reader can act on it.",
+      "tests": [
+        {
+          "name": "A20_Cast_PostRecoveryPingPongHoldsSync",
+          "description": "After recovery reports device 0 healthy, ten ping-pong messages must all arrive; the sender exhausting its FIFO-slot retries on message n+1 while the receiver waits for n is the finding.",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+        }
+      ]
+    },
+    "a_fault_inject_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "description": "A19: fault isolation between workers. One worker breaks its own connection while the others must keep transferring cleanly. Fault injection stays off: the tests use the per-comm hooks, and the libibverbs shims add process-global mutex traffic to every poll_cq while their per-device registry lets one worker's clear disarm the others.",
+      "tests": [
+        {
+          "name": "A19_Cast_FaultIsolationAcrossWorkers",
+          "description": "Injected fault state stays inside its communicator; bystander connections stay clean.",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "A19_Cast_FaultShimsAbsentUnlessRequested",
+          "description": "The libibverbs ops shims must not be installed while RCCL_IB_FAULT_INJECTION is off: their poll_cq serializes the whole process on one mutex.",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        }
+      ]
+    },
 
     "gin_proxy": {
       "extends": "gtest_base",
@@ -506,6 +545,8 @@
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
     { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
+    { "config": "a_fault_inject_multithread", "enabled": true, "smoke": true },
+    { "config": "a_fault_recovery_nightly",   "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
