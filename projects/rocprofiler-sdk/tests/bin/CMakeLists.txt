@@ -33,6 +33,7 @@ endif()
 add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
+add_subdirectory(hip-memcpy)
 add_subdirectory(openmp)
 add_subdirectory(signal-handler)
 
