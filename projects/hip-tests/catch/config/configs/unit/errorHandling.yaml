@@ -107,3 +107,5 @@ errorHandling:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
     disabled: [amd_windows, amd_wsl]
+  Unit_PageFault_NullPtrAccess: *level_2
+  Unit_PageFault_InvalidAddress: *level_2
