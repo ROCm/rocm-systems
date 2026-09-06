@@ -28,48 +28,6 @@
 // Playback shims
 // ============================================================
 
-static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipPushCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-extern hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx, const uint8_t* payload);
-
-static hipError_t playback___hipRegisterFunction(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipRegisterManagedVar(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipRegisterSurface(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipRegisterTexture(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipRegisterVar(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
-static hipError_t playback___hipUnregisterFatBinary(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  return hipSuccess;
-}
-
 static hipError_t playback_hipApiName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -2090,13 +2048,6 @@ static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* pay
   return _r;
 }
 
-static hipError_t playback_hipMemAdvise_v2(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise_v2*>(payload);
-  hipMemLocation _s_device{};
-  hipError_t _r = (hipError_t)hipMemAdvise_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (hipMemoryAdvise)a->advice, _s_device);
-  return _r;
-}
-
 static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -2271,67 +2222,6 @@ static hipError_t playback_hipMemPrefetchAsync(PlaybackContext& ctx, const uint8
   const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemPrefetchAsync(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (int)a->device, (hipStream_t)ctx.translate_stream(a->stream));
   return _r;
-}
-
-static hipError_t playback_hipMemPrefetchAsync_v2(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync_v2*>(payload);
-  hipMemLocation _s_location{};
-  hipError_t _r = (hipError_t)hipMemPrefetchAsync_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, _s_location, (unsigned int)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
-
-static hipError_t playback_hipMemPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchBatchAsync*>(payload);
-  void* _out_dev_ptrs = nullptr;
-  size_t _out_sizes{};
-  hipMemLocation* _s_prefetch_locs{};
-  size_t _out_prefetch_loc_idxs{};
-  hipError_t _r = (hipError_t)hipMemPrefetchBatchAsync((void**)&_out_dev_ptrs, &_out_sizes, (size_t)a->count, _s_prefetch_locs, &_out_prefetch_loc_idxs, (size_t)a->num_prefetch_locs, (unsigned long long)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
-
-static hipError_t playback_hipMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardBatchAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipDrvMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardBatchAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardAndPrefetchBatchAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipDrvMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardAndPrefetchBatchAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
 }
 
 static hipError_t playback_hipMemPtrGetInfo(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2701,17 +2591,6 @@ static hipError_t playback_hipMipmappedArrayGetLevel(PlaybackContext& ctx, const
 
 extern hipError_t playback_hipModuleGetFunction(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleGetFunctionCount — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
 static hipError_t playback_hipModuleGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -2755,45 +2634,6 @@ extern hipError_t playback_hipModuleLoad(PlaybackContext& ctx, const uint8_t* pa
 extern hipError_t playback_hipModuleLoadData(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipModuleLoadDataEx(PlaybackContext& ctx, const uint8_t* payload);
-
-static hipError_t playback_hipLinkAddData(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkAddData*>(payload);
-  hipJitOption _out_options{};
-  void* _out_optionValues = nullptr;
-  hipError_t _r = (hipError_t)hipLinkAddData((hipLinkState_t)a->state, (hipJitInputType)a->type, (void*)a->data, (size_t)a->size, (const char*)a->name, (unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues);
-  return _r;
-}
-
-static hipError_t playback_hipLinkAddFile(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkAddFile*>(payload);
-  hipJitOption _out_options{};
-  void* _out_optionValues = nullptr;
-  hipError_t _r = (hipError_t)hipLinkAddFile((hipLinkState_t)a->state, (hipJitInputType)a->type, (const char*)a->path, (unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues);
-  return _r;
-}
-
-static hipError_t playback_hipLinkComplete(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkComplete*>(payload);
-  void* _out_hipBinOut = nullptr;
-  size_t _out_sizeOut{};
-  hipError_t _r = (hipError_t)hipLinkComplete((hipLinkState_t)a->state, (void**)&_out_hipBinOut, &_out_sizeOut);
-  return _r;
-}
-
-static hipError_t playback_hipLinkCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkCreate*>(payload);
-  hipJitOption _out_options{};
-  void* _out_optionValues = nullptr;
-  hipLinkState_t _out_stateOut{};
-  hipError_t _r = (hipError_t)hipLinkCreate((unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues, &_out_stateOut);
-  return _r;
-}
-
-static hipError_t playback_hipLinkDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkDestroy*>(payload);
-  hipError_t _r = (hipError_t)hipLinkDestroy((hipLinkState_t)a->state);
-  return _r;
-}
 
 static hipError_t playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -2850,17 +2690,6 @@ static hipError_t playback_hipModuleUnload(PlaybackContext& ctx, const uint8_t* 
   return hipSuccess;
 }
 
-static hipError_t playback_hipOccupancyAvailableDynamicSMemPerBlock(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyAvailableDynamicSMemPerBlock — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
 static hipError_t playback_hipOccupancyMaxActiveBlocksPerMultiprocessor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -2889,28 +2718,6 @@ static hipError_t playback_hipOccupancyMaxPotentialBlockSize(PlaybackContext& ct
   if (!warned) {
     warned = true;
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxPotentialBlockSize — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipOccupancyMaxActiveClusters(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxActiveClusters — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipOccupancyMaxPotentialClusterSize(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxPotentialClusterSize — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -3013,12 +2820,6 @@ static hipError_t playback_hipStreamAttachMemAsync(PlaybackContext& ctx, const u
 
 extern hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipStreamCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamCopyAttributes*>(payload);
-  hipError_t _r = (hipError_t)hipStreamCopyAttributes((hipStream_t)ctx.translate_stream(a->dst), (hipStream_t)ctx.translate_stream(a->src));
-  return _r;
-}
-
 extern hipError_t playback_hipStreamCreate(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipStreamCreateWithFlags(PlaybackContext& ctx, const uint8_t* payload);
@@ -3063,13 +2864,6 @@ static hipError_t playback_hipStreamGetFlags(PlaybackContext& ctx, const uint8_t
   const auto* a = reinterpret_cast<const hrr_args_hipStreamGetFlags*>(payload);
   unsigned int _out_flags{};
   hipError_t _r = (hipError_t)hipStreamGetFlags((hipStream_t)ctx.translate_stream(a->stream), &_out_flags);
-  return _r;
-}
-
-static hipError_t playback_hipStreamGetId(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetId*>(payload);
-  unsigned long long _out_streamId{};
-  hipError_t _r = (hipError_t)hipStreamGetId((hipStream_t)ctx.translate_stream(a->stream), &_out_streamId);
   return _r;
 }
 
@@ -3167,13 +2961,6 @@ static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uin
     return hipSuccess;
   }
   hipError_t _r = (hipError_t)hipStreamWriteValue64((hipStream_t)ctx.translate_stream(a->stream), _live_dst, (uint64_t)a->value, (unsigned int)a->flags);
-  return _r;
-}
-
-static hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamBatchMemOp*>(payload);
-  hipStreamBatchMemOpParams _out_paramArray{};
-  hipError_t _r = (hipError_t)hipStreamBatchMemOp((hipStream_t)ctx.translate_stream(a->stream), (unsigned int)a->count, &_out_paramArray, (unsigned int)a->flags);
   return _r;
 }
 
@@ -3447,6 +3234,30 @@ static hipError_t playback_hipWaitExternalSemaphoresAsync(PlaybackContext& ctx, 
   const auto* a = reinterpret_cast<const hrr_args_hipWaitExternalSemaphoresAsync*>(payload);
   hipError_t _r = (hipError_t)hipWaitExternalSemaphoresAsync((const hipExternalSemaphore_t*)a->extSemArray, (const hipExternalSemaphoreWaitParams*)a->paramsArray, (unsigned int)a->numExtSems, (hipStream_t)ctx.translate_stream(a->stream));
   return _r;
+}
+
+static hipError_t playback_hipCreateChannelDesc(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipCreateChannelDesc — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+extern hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx, const uint8_t* payload);
+
+static hipError_t playback_hipHccModuleLaunchKernel(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipHccModuleLaunchKernel — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipMemcpy_spt(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3751,30 +3562,6 @@ static hipError_t playback_hipLaunchHostFunc_spt(PlaybackContext& ctx, const uin
   return _r;
 }
 
-static hipError_t playback_hipCreateChannelDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipCreateChannelDesc — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-extern hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx, const uint8_t* payload);
-
-static hipError_t playback_hipHccModuleLaunchKernel(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipHccModuleLaunchKernel — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
 static hipError_t playback_hipGetStreamDeviceId(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -3947,42 +3734,6 @@ static hipError_t playback_hipGetFuncBySymbol(PlaybackContext& ctx, const uint8_
   return hipSuccess;
 }
 
-static hipError_t playback_hipDrvGraphAddMemFreeNode(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] hipDrvGraphAddMemFreeNode: explicit (node-API) graph "
-            "construction is NOT supported by HRR replay. Only "
-            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
-            "are replayable; instantiating a node-API-built graph will "
-            "fail loudly. This call is skipped.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipDrvGraphExecMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphExecMemcpyNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipDrvGraphExecMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphExecMemsetNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
 static hipError_t playback_hipSetValidDevices(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -4055,6 +3806,42 @@ static hipError_t playback_hipMemcpy2DArrayToArray(PlaybackContext& ctx, const u
   if (!warned) {
     warned = true;
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DArrayToArray — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDrvGraphAddMemFreeNode(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] hipDrvGraphAddMemFreeNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDrvGraphExecMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphExecMemcpyNodeSetParams — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDrvGraphExecMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphExecMemsetNodeSetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -4144,6 +3931,13 @@ static hipError_t playback_hipDeviceGetTexture1DLinearMaxWidth(PlaybackContext& 
   return hipSuccess;
 }
 
+static hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamBatchMemOp*>(payload);
+  hipStreamBatchMemOpParams _out_paramArray{};
+  hipError_t _r = (hipError_t)hipStreamBatchMemOp((hipStream_t)ctx.translate_stream(a->stream), (unsigned int)a->count, &_out_paramArray, (unsigned int)a->flags);
+  return _r;
+}
+
 static hipError_t playback_hipGraphAddBatchMemOpNode(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -4191,6 +3985,45 @@ static hipError_t playback_hipGraphExecBatchMemOpNodeSetParams(PlaybackContext& 
   return hipSuccess;
 }
 
+static hipError_t playback_hipLinkAddData(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLinkAddData*>(payload);
+  hipJitOption _out_options{};
+  void* _out_optionValues = nullptr;
+  hipError_t _r = (hipError_t)hipLinkAddData((hipLinkState_t)a->state, (hipJitInputType)a->type, (void*)a->data, (size_t)a->size, (const char*)a->name, (unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues);
+  return _r;
+}
+
+static hipError_t playback_hipLinkAddFile(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLinkAddFile*>(payload);
+  hipJitOption _out_options{};
+  void* _out_optionValues = nullptr;
+  hipError_t _r = (hipError_t)hipLinkAddFile((hipLinkState_t)a->state, (hipJitInputType)a->type, (const char*)a->path, (unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues);
+  return _r;
+}
+
+static hipError_t playback_hipLinkComplete(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLinkComplete*>(payload);
+  void* _out_hipBinOut = nullptr;
+  size_t _out_sizeOut{};
+  hipError_t _r = (hipError_t)hipLinkComplete((hipLinkState_t)a->state, (void**)&_out_hipBinOut, &_out_sizeOut);
+  return _r;
+}
+
+static hipError_t playback_hipLinkCreate(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLinkCreate*>(payload);
+  hipJitOption _out_options{};
+  void* _out_optionValues = nullptr;
+  hipLinkState_t _out_stateOut{};
+  hipError_t _r = (hipError_t)hipLinkCreate((unsigned int)a->numOptions, &_out_options, (void**)&_out_optionValues, &_out_stateOut);
+  return _r;
+}
+
+static hipError_t playback_hipLinkDestroy(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLinkDestroy*>(payload);
+  hipError_t _r = (hipError_t)hipLinkDestroy((hipLinkState_t)a->state);
+  return _r;
+}
+
 static hipError_t playback_hipEventRecordWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipEventRecordWithFlags*>(payload);
   hipError_t _r = (hipError_t)hipEventRecordWithFlags((hipEvent_t)ctx.translate_event(a->event), (hipStream_t)ctx.translate_stream(a->stream), (unsigned int)a->flags);
@@ -4218,6 +4051,17 @@ static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, 
   if (!warned) {
     warned = true;
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetHandleForAddressRange — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleGetFunctionCount — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -4331,14 +4175,14 @@ static hipError_t playback_hipMemsetD2D32Async(PlaybackContext& ctx, const uint8
   return _r;
 }
 
-extern hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* payload);
-
 static hipError_t playback_hipStreamGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamGetAttribute*>(payload);
   hipStreamAttrValue _out_value_out{};
   hipError_t _r = (hipError_t)hipStreamGetAttribute((hipStream_t)ctx.translate_stream(a->stream), (hipStreamAttrID)a->attr, &_out_value_out);
   return _r;
 }
+
+extern hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipModuleLoadFatBinary(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -4415,6 +4259,27 @@ static hipError_t playback_hipGetDriverEntryPoint_spt(PlaybackContext& ctx, cons
   return hipSuccess;
 }
 
+static hipError_t playback_hipMemPrefetchAsync_v2(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync_v2*>(payload);
+  hipMemLocation _s_location{};
+  hipError_t _r = (hipError_t)hipMemPrefetchAsync_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, _s_location, (unsigned int)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
+}
+
+static hipError_t playback_hipMemAdvise_v2(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise_v2*>(payload);
+  hipMemLocation _s_device{};
+  hipError_t _r = (hipError_t)hipMemAdvise_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (hipMemoryAdvise)a->advice, _s_device);
+  return _r;
+}
+
+static hipError_t playback_hipStreamGetId(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetId*>(payload);
+  unsigned long long _out_streamId{};
+  hipError_t _r = (hipError_t)hipStreamGetId((hipStream_t)ctx.translate_stream(a->stream), &_out_streamId);
+  return _r;
+}
+
 static hipError_t playback_hipLibraryLoadData(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
@@ -4470,19 +4335,9 @@ static hipError_t playback_hipLibraryGetKernelCount(PlaybackContext& ctx, const 
   return hipSuccess;
 }
 
-static hipError_t playback_hipLibraryGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetGlobal*>(payload);
-  void* _out_dptr = nullptr;
-  size_t _out_bytes{};
-  hipError_t _r = (hipError_t)hipLibraryGetGlobal((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
-  return _r;
-}
-
-static hipError_t playback_hipLibraryGetManaged(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetManaged*>(payload);
-  void* _out_dptr = nullptr;
-  size_t _out_bytes{};
-  hipError_t _r = (hipError_t)hipLibraryGetManaged((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
+static hipError_t playback_hipStreamCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamCopyAttributes*>(payload);
+  hipError_t _r = (hipError_t)hipStreamCopyAttributes((hipStream_t)ctx.translate_stream(a->dst), (hipStream_t)ctx.translate_stream(a->src));
   return _r;
 }
 
@@ -4519,12 +4374,34 @@ static hipError_t playback_hipKernelGetName(PlaybackContext& ctx, const uint8_t*
   return hipSuccess;
 }
 
+static hipError_t playback_hipOccupancyAvailableDynamicSMemPerBlock(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyAvailableDynamicSMemPerBlock — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
 static hipError_t playback_hipGetProcAddress_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress_spt*>(payload);
   void* _out_pfn = nullptr;
   hipDriverProcAddressQueryResult _out_symbolStatus{};
   hipError_t _r = (hipError_t)hipGetProcAddress_spt((const char*)a->symbol, (void**)&_out_pfn, (int)a->hipVersion, (uint64_t)a->flags, &_out_symbolStatus);
   return _r;
+}
+
+static hipError_t playback_hipKernelGetParamInfo(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetParamInfo — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipExtDisableLogging(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4543,6 +4420,35 @@ static hipError_t playback_hipExtSetLoggingParams(PlaybackContext& ctx, const ui
   const auto* a = reinterpret_cast<const hrr_args_hipExtSetLoggingParams*>(payload);
   hipError_t _r = (hipError_t)hipExtSetLoggingParams((size_t)a->log_level, (size_t)a->log_size, (size_t)a->log_mask);
   return _r;
+}
+
+static hipError_t playback_hipMemSetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemSetMemPool*>(payload);
+  hipMemLocation* _s_location{};
+  hipError_t _r = (hipError_t)hipMemSetMemPool(_s_location, (hipMemAllocationType)a->type, (hipMemPool_t)ctx.translate_mempool(a->pool));
+  return _r;
+}
+
+static hipError_t playback_hipMemGetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetMemPool — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipMipmappedArrayGetMemoryRequirements(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayGetMemoryRequirements — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipKernelGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4578,41 +4484,33 @@ static hipError_t playback_hipKernelGetFunction(PlaybackContext& ctx, const uint
   return hipSuccess;
 }
 
-static hipError_t playback_hipKernelGetParamInfo(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetParamInfo — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
-
-static hipError_t playback_hipMemSetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemSetMemPool*>(payload);
-  hipMemLocation* _s_location{};
-  hipError_t _r = (hipError_t)hipMemSetMemPool(_s_location, (hipMemAllocationType)a->type, (hipMemPool_t)ctx.translate_mempool(a->pool));
+static hipError_t playback_hipMemPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchBatchAsync*>(payload);
+  void* _out_dev_ptrs = nullptr;
+  size_t _out_sizes{};
+  hipMemLocation* _s_prefetch_locs{};
+  size_t _out_prefetch_loc_idxs{};
+  hipError_t _r = (hipError_t)hipMemPrefetchBatchAsync((void**)&_out_dev_ptrs, &_out_sizes, (size_t)a->count, _s_prefetch_locs, &_out_prefetch_loc_idxs, (size_t)a->num_prefetch_locs, (unsigned long long)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
   return _r;
 }
 
-static hipError_t playback_hipMemGetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
+static hipError_t playback_hipOccupancyMaxPotentialClusterSize(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetMemPool — "
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxPotentialClusterSize — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
 }
 
-static hipError_t playback_hipMipmappedArrayGetMemoryRequirements(PlaybackContext& ctx, const uint8_t* payload) {
+static hipError_t playback_hipOccupancyMaxActiveClusters(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayGetMemoryRequirements — "
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxActiveClusters — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -4724,6 +4622,130 @@ static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const 
   return _r;
 }
 
+static hipError_t playback_hipLibraryGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetGlobal*>(payload);
+  void* _out_dptr = nullptr;
+  size_t _out_bytes{};
+  hipError_t _r = (hipError_t)hipLibraryGetGlobal((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
+  return _r;
+}
+
+static hipError_t playback_hipLibraryGetManaged(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetManaged*>(payload);
+  void* _out_dptr = nullptr;
+  size_t _out_bytes{};
+  hipError_t _r = (hipError_t)hipLibraryGetManaged((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
+  return _r;
+}
+
+static hipError_t playback_hipMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardBatchAsync — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDrvMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardBatchAsync — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardAndPrefetchBatchAsync — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDrvMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardAndPrefetchBatchAsync — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemGetDefaultMemPool*>(payload);
+  hipMemPool_t _out_memPool = nullptr;
+  hipMemLocation* _s_location{};
+  hipError_t _r = (hipError_t)hipMemGetDefaultMemPool(&_out_memPool, _s_location, (hipMemAllocationType)a->type);
+  return _r;
+}
+
+static hipError_t playback_hipDeviceGetLuid(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetLuid*>(payload);
+  char _out_luid{};
+  unsigned int _out_deviceNodeMask{};
+  hipError_t _r = (hipError_t)hipDeviceGetLuid(&_out_luid, &_out_deviceNodeMask, (hipDevice_t)a->device);
+  return _r;
+}
+
+static hipError_t playback_hipInitDevice(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipInitDevice*>(payload);
+  hipError_t _r = (hipError_t)hipInitDevice((int)a->device, (unsigned int)a->deviceFlags, (unsigned int)a->flags);
+  return _r;
+}
+
+static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipPushCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+extern hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx, const uint8_t* payload);
+
+static hipError_t playback___hipRegisterFunction(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipRegisterManagedVar(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipRegisterSurface(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipRegisterTexture(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipRegisterVar(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
+static hipError_t playback___hipUnregisterFatBinary(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  return hipSuccess;
+}
+
 
 // ============================================================
 // Minimum payload size per event type — indexed by hrr_api_id_t
@@ -4731,1110 +4753,1116 @@ static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const 
 // calling any handler to prevent OOB casts on malformed archives.
 // ============================================================
 const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [0] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [1] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [2] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [3] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [4] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [5] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [6] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [7] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [8] HRR_API_HIPUNREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args_hipApiName)),  // [9] HRR_API_HIPAPINAME
-    static_cast<uint32_t>(sizeof(hrr_args_hipArray3DCreate)),  // [10] HRR_API_HIPARRAY3DCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipArray3DGetDescriptor)),  // [11] HRR_API_HIPARRAY3DGETDESCRIPTOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipArrayCreate)),  // [12] HRR_API_HIPARRAYCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipArrayDestroy)),  // [13] HRR_API_HIPARRAYDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetDescriptor)),  // [14] HRR_API_HIPARRAYGETDESCRIPTOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetInfo)),  // [15] HRR_API_HIPARRAYGETINFO
-    static_cast<uint32_t>(sizeof(hrr_args_hipBindTexture)),  // [16] HRR_API_HIPBINDTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args_hipBindTexture2D)),  // [17] HRR_API_HIPBINDTEXTURE2D
-    static_cast<uint32_t>(sizeof(hrr_args_hipBindTextureToArray)),  // [18] HRR_API_HIPBINDTEXTURETOARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipBindTextureToMipmappedArray)),  // [19] HRR_API_HIPBINDTEXTURETOMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipChooseDevice)),  // [20] HRR_API_HIPCHOOSEDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipChooseDeviceR0000)),  // [21] HRR_API_HIPCHOOSEDEVICER0000
-    static_cast<uint32_t>(sizeof(hrr_args_hipConfigureCall)),  // [22] HRR_API_HIPCONFIGURECALL
-    static_cast<uint32_t>(sizeof(hrr_args_hipCreateSurfaceObject)),  // [23] HRR_API_HIPCREATESURFACEOBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCreateTextureObject)),  // [24] HRR_API_HIPCREATETEXTUREOBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxCreate)),  // [25] HRR_API_HIPCTXCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxDestroy)),  // [26] HRR_API_HIPCTXDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxDisablePeerAccess)),  // [27] HRR_API_HIPCTXDISABLEPEERACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxEnablePeerAccess)),  // [28] HRR_API_HIPCTXENABLEPEERACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetApiVersion)),  // [29] HRR_API_HIPCTXGETAPIVERSION
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetCacheConfig)),  // [30] HRR_API_HIPCTXGETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetCurrent)),  // [31] HRR_API_HIPCTXGETCURRENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetDevice)),  // [32] HRR_API_HIPCTXGETDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetFlags)),  // [33] HRR_API_HIPCTXGETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetSharedMemConfig)),  // [34] HRR_API_HIPCTXGETSHAREDMEMCONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxPopCurrent)),  // [35] HRR_API_HIPCTXPOPCURRENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxPushCurrent)),  // [36] HRR_API_HIPCTXPUSHCURRENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetCacheConfig)),  // [37] HRR_API_HIPCTXSETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetCurrent)),  // [38] HRR_API_HIPCTXSETCURRENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetSharedMemConfig)),  // [39] HRR_API_HIPCTXSETSHAREDMEMCONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSynchronize)),  // [40] HRR_API_HIPCTXSYNCHRONIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyExternalMemory)),  // [41] HRR_API_HIPDESTROYEXTERNALMEMORY
-    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyExternalSemaphore)),  // [42] HRR_API_HIPDESTROYEXTERNALSEMAPHORE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDestroySurfaceObject)),  // [43] HRR_API_HIPDESTROYSURFACEOBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyTextureObject)),  // [44] HRR_API_HIPDESTROYTEXTUREOBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceCanAccessPeer)),  // [45] HRR_API_HIPDEVICECANACCESSPEER
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceComputeCapability)),  // [46] HRR_API_HIPDEVICECOMPUTECAPABILITY
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceDisablePeerAccess)),  // [47] HRR_API_HIPDEVICEDISABLEPEERACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceEnablePeerAccess)),  // [48] HRR_API_HIPDEVICEENABLEPEERACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGet)),  // [49] HRR_API_HIPDEVICEGET
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetAttribute)),  // [50] HRR_API_HIPDEVICEGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetByPCIBusId)),  // [51] HRR_API_HIPDEVICEGETBYPCIBUSID
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetCacheConfig)),  // [52] HRR_API_HIPDEVICEGETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetDefaultMemPool)),  // [53] HRR_API_HIPDEVICEGETDEFAULTMEMPOOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetGraphMemAttribute)),  // [54] HRR_API_HIPDEVICEGETGRAPHMEMATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetLimit)),  // [55] HRR_API_HIPDEVICEGETLIMIT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetMemPool)),  // [56] HRR_API_HIPDEVICEGETMEMPOOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetName)),  // [57] HRR_API_HIPDEVICEGETNAME
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetP2PAttribute)),  // [58] HRR_API_HIPDEVICEGETP2PATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetPCIBusId)),  // [59] HRR_API_HIPDEVICEGETPCIBUSID
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetSharedMemConfig)),  // [60] HRR_API_HIPDEVICEGETSHAREDMEMCONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetStreamPriorityRange)),  // [61] HRR_API_HIPDEVICEGETSTREAMPRIORITYRANGE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetUuid)),  // [62] HRR_API_HIPDEVICEGETUUID
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGraphMemTrim)),  // [63] HRR_API_HIPDEVICEGRAPHMEMTRIM
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxGetState)),  // [64] HRR_API_HIPDEVICEPRIMARYCTXGETSTATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxRelease)),  // [65] HRR_API_HIPDEVICEPRIMARYCTXRELEASE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxReset)),  // [66] HRR_API_HIPDEVICEPRIMARYCTXRESET
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxRetain)),  // [67] HRR_API_HIPDEVICEPRIMARYCTXRETAIN
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxSetFlags)),  // [68] HRR_API_HIPDEVICEPRIMARYCTXSETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceReset)),  // [69] HRR_API_HIPDEVICERESET
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetCacheConfig)),  // [70] HRR_API_HIPDEVICESETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetGraphMemAttribute)),  // [71] HRR_API_HIPDEVICESETGRAPHMEMATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetLimit)),  // [72] HRR_API_HIPDEVICESETLIMIT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetMemPool)),  // [73] HRR_API_HIPDEVICESETMEMPOOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetSharedMemConfig)),  // [74] HRR_API_HIPDEVICESETSHAREDMEMCONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSynchronize)),  // [75] HRR_API_HIPDEVICESYNCHRONIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceTotalMem)),  // [76] HRR_API_HIPDEVICETOTALMEM
-    static_cast<uint32_t>(sizeof(hrr_args_hipDriverGetVersion)),  // [77] HRR_API_HIPDRIVERGETVERSION
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGetErrorName)),  // [78] HRR_API_HIPDRVGETERRORNAME
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGetErrorString)),  // [79] HRR_API_HIPDRVGETERRORSTRING
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemcpyNode)),  // [80] HRR_API_HIPDRVGRAPHADDMEMCPYNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy2DUnaligned)),  // [81] HRR_API_HIPDRVMEMCPY2DUNALIGNED
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy3D)),  // [82] HRR_API_HIPDRVMEMCPY3D
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy3DAsync)),  // [83] HRR_API_HIPDRVMEMCPY3DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvPointerGetAttributes)),  // [84] HRR_API_HIPDRVPOINTERGETATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventCreate)),  // [85] HRR_API_HIPEVENTCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventCreateWithFlags)),  // [86] HRR_API_HIPEVENTCREATEWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventDestroy)),  // [87] HRR_API_HIPEVENTDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventElapsedTime)),  // [88] HRR_API_HIPEVENTELAPSEDTIME
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventQuery)),  // [89] HRR_API_HIPEVENTQUERY
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecord)),  // [90] HRR_API_HIPEVENTRECORD
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventSynchronize)),  // [91] HRR_API_HIPEVENTSYNCHRONIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtGetLinkTypeAndHopCount)),  // [92] HRR_API_HIPEXTGETLINKTYPEANDHOPCOUNT
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtLaunchKernel)),  // [93] HRR_API_HIPEXTLAUNCHKERNEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtLaunchMultiKernelMultiDevice)),  // [94] HRR_API_HIPEXTLAUNCHMULTIKERNELMULTIDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtMallocWithFlags)),  // [95] HRR_API_HIPEXTMALLOCWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtStreamCreateWithCUMask)),  // [96] HRR_API_HIPEXTSTREAMCREATEWITHCUMASK
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtStreamGetCUMask)),  // [97] HRR_API_HIPEXTSTREAMGETCUMASK
-    static_cast<uint32_t>(sizeof(hrr_args_hipExternalMemoryGetMappedBuffer)),  // [98] HRR_API_HIPEXTERNALMEMORYGETMAPPEDBUFFER
-    static_cast<uint32_t>(sizeof(hrr_args_hipFree)),  // [99] HRR_API_HIPFREE
-    static_cast<uint32_t>(sizeof(hrr_args_hipFreeArray)),  // [100] HRR_API_HIPFREEARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipFreeAsync)),  // [101] HRR_API_HIPFREEASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipFreeHost)),  // [102] HRR_API_HIPFREEHOST
-    static_cast<uint32_t>(sizeof(hrr_args_hipFreeMipmappedArray)),  // [103] HRR_API_HIPFREEMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipFuncGetAttribute)),  // [104] HRR_API_HIPFUNCGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipFuncGetAttributes)),  // [105] HRR_API_HIPFUNCGETATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetAttribute)),  // [106] HRR_API_HIPFUNCSETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetCacheConfig)),  // [107] HRR_API_HIPFUNCSETCACHECONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetSharedMemConfig)),  // [108] HRR_API_HIPFUNCSETSHAREDMEMCONFIG
-    static_cast<uint32_t>(sizeof(hrr_args_hipGLGetDevices)),  // [109] HRR_API_HIPGLGETDEVICES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetChannelDesc)),  // [110] HRR_API_HIPGETCHANNELDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevice)),  // [111] HRR_API_HIPGETDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDeviceCount)),  // [112] HRR_API_HIPGETDEVICECOUNT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDeviceFlags)),  // [113] HRR_API_HIPGETDEVICEFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevicePropertiesR0600)),  // [114] HRR_API_HIPGETDEVICEPROPERTIESR0600
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevicePropertiesR0000)),  // [115] HRR_API_HIPGETDEVICEPROPERTIESR0000
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetErrorName)),  // [116] HRR_API_HIPGETERRORNAME
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetErrorString)),  // [117] HRR_API_HIPGETERRORSTRING
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetLastError)),  // [118] HRR_API_HIPGETLASTERROR
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetMipmappedArrayLevel)),  // [119] HRR_API_HIPGETMIPMAPPEDARRAYLEVEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetSymbolAddress)),  // [120] HRR_API_HIPGETSYMBOLADDRESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetSymbolSize)),  // [121] HRR_API_HIPGETSYMBOLSIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureAlignmentOffset)),  // [122] HRR_API_HIPGETTEXTUREALIGNMENTOFFSET
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectResourceDesc)),  // [123] HRR_API_HIPGETTEXTUREOBJECTRESOURCEDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectResourceViewDesc)),  // [124] HRR_API_HIPGETTEXTUREOBJECTRESOURCEVIEWDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectTextureDesc)),  // [125] HRR_API_HIPGETTEXTUREOBJECTTEXTUREDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureReference)),  // [126] HRR_API_HIPGETTEXTUREREFERENCE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddChildGraphNode)),  // [127] HRR_API_HIPGRAPHADDCHILDGRAPHNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddDependencies)),  // [128] HRR_API_HIPGRAPHADDDEPENDENCIES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEmptyNode)),  // [129] HRR_API_HIPGRAPHADDEMPTYNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEventRecordNode)),  // [130] HRR_API_HIPGRAPHADDEVENTRECORDNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEventWaitNode)),  // [131] HRR_API_HIPGRAPHADDEVENTWAITNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddHostNode)),  // [132] HRR_API_HIPGRAPHADDHOSTNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddKernelNode)),  // [133] HRR_API_HIPGRAPHADDKERNELNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemAllocNode)),  // [134] HRR_API_HIPGRAPHADDMEMALLOCNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemFreeNode)),  // [135] HRR_API_HIPGRAPHADDMEMFREENODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNode)),  // [136] HRR_API_HIPGRAPHADDMEMCPYNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNode1D)),  // [137] HRR_API_HIPGRAPHADDMEMCPYNODE1D
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNodeFromSymbol)),  // [138] HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNodeToSymbol)),  // [139] HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemsetNode)),  // [140] HRR_API_HIPGRAPHADDMEMSETNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphChildGraphNodeGetGraph)),  // [141] HRR_API_HIPGRAPHCHILDGRAPHNODEGETGRAPH
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphClone)),  // [142] HRR_API_HIPGRAPHCLONE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphCreate)),  // [143] HRR_API_HIPGRAPHCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDebugDotPrint)),  // [144] HRR_API_HIPGRAPHDEBUGDOTPRINT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDestroy)),  // [145] HRR_API_HIPGRAPHDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDestroyNode)),  // [146] HRR_API_HIPGRAPHDESTROYNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventRecordNodeGetEvent)),  // [147] HRR_API_HIPGRAPHEVENTRECORDNODEGETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventRecordNodeSetEvent)),  // [148] HRR_API_HIPGRAPHEVENTRECORDNODESETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventWaitNodeGetEvent)),  // [149] HRR_API_HIPGRAPHEVENTWAITNODEGETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventWaitNodeSetEvent)),  // [150] HRR_API_HIPGRAPHEVENTWAITNODESETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecChildGraphNodeSetParams)),  // [151] HRR_API_HIPGRAPHEXECCHILDGRAPHNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecDestroy)),  // [152] HRR_API_HIPGRAPHEXECDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecEventRecordNodeSetEvent)),  // [153] HRR_API_HIPGRAPHEXECEVENTRECORDNODESETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecEventWaitNodeSetEvent)),  // [154] HRR_API_HIPGRAPHEXECEVENTWAITNODESETEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecHostNodeSetParams)),  // [155] HRR_API_HIPGRAPHEXECHOSTNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecKernelNodeSetParams)),  // [156] HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParams)),  // [157] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParams1D)),  // [158] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS1D
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParamsFromSymbol)),  // [159] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSFROMSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol)),  // [160] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemsetNodeSetParams)),  // [161] HRR_API_HIPGRAPHEXECMEMSETNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecUpdate)),  // [162] HRR_API_HIPGRAPHEXECUPDATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetEdges)),  // [163] HRR_API_HIPGRAPHGETEDGES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetNodes)),  // [164] HRR_API_HIPGRAPHGETNODES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetRootNodes)),  // [165] HRR_API_HIPGRAPHGETROOTNODES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphHostNodeGetParams)),  // [166] HRR_API_HIPGRAPHHOSTNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphHostNodeSetParams)),  // [167] HRR_API_HIPGRAPHHOSTNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiate)),  // [168] HRR_API_HIPGRAPHINSTANTIATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiateWithFlags)),  // [169] HRR_API_HIPGRAPHINSTANTIATEWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeCopyAttributes)),  // [170] HRR_API_HIPGRAPHKERNELNODECOPYATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeGetAttribute)),  // [171] HRR_API_HIPGRAPHKERNELNODEGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeGetParams)),  // [172] HRR_API_HIPGRAPHKERNELNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeSetAttribute)),  // [173] HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeSetParams)),  // [174] HRR_API_HIPGRAPHKERNELNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphLaunch)),  // [175] HRR_API_HIPGRAPHLAUNCH
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemAllocNodeGetParams)),  // [176] HRR_API_HIPGRAPHMEMALLOCNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemFreeNodeGetParams)),  // [177] HRR_API_HIPGRAPHMEMFREENODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeGetParams)),  // [178] HRR_API_HIPGRAPHMEMCPYNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParams)),  // [179] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParams1D)),  // [180] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS1D
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParamsFromSymbol)),  // [181] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSFROMSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParamsToSymbol)),  // [182] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemsetNodeGetParams)),  // [183] HRR_API_HIPGRAPHMEMSETNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemsetNodeSetParams)),  // [184] HRR_API_HIPGRAPHMEMSETNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeFindInClone)),  // [185] HRR_API_HIPGRAPHNODEFINDINCLONE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetDependencies)),  // [186] HRR_API_HIPGRAPHNODEGETDEPENDENCIES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetDependentNodes)),  // [187] HRR_API_HIPGRAPHNODEGETDEPENDENTNODES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetEnabled)),  // [188] HRR_API_HIPGRAPHNODEGETENABLED
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetType)),  // [189] HRR_API_HIPGRAPHNODEGETTYPE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeSetEnabled)),  // [190] HRR_API_HIPGRAPHNODESETENABLED
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphReleaseUserObject)),  // [191] HRR_API_HIPGRAPHRELEASEUSEROBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphRemoveDependencies)),  // [192] HRR_API_HIPGRAPHREMOVEDEPENDENCIES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphRetainUserObject)),  // [193] HRR_API_HIPGRAPHRETAINUSEROBJECT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphUpload)),  // [194] HRR_API_HIPGRAPHUPLOAD
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsGLRegisterBuffer)),  // [195] HRR_API_HIPGRAPHICSGLREGISTERBUFFER
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsGLRegisterImage)),  // [196] HRR_API_HIPGRAPHICSGLREGISTERIMAGE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsMapResources)),  // [197] HRR_API_HIPGRAPHICSMAPRESOURCES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsResourceGetMappedPointer)),  // [198] HRR_API_HIPGRAPHICSRESOURCEGETMAPPEDPOINTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsSubResourceGetMappedArray)),  // [199] HRR_API_HIPGRAPHICSSUBRESOURCEGETMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsUnmapResources)),  // [200] HRR_API_HIPGRAPHICSUNMAPRESOURCES
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsUnregisterResource)),  // [201] HRR_API_HIPGRAPHICSUNREGISTERRESOURCE
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostAlloc)),  // [202] HRR_API_HIPHOSTALLOC
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostFree)),  // [203] HRR_API_HIPHOSTFREE
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostGetDevicePointer)),  // [204] HRR_API_HIPHOSTGETDEVICEPOINTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostGetFlags)),  // [205] HRR_API_HIPHOSTGETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostMalloc)),  // [206] HRR_API_HIPHOSTMALLOC
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostRegister)),  // [207] HRR_API_HIPHOSTREGISTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipHostUnregister)),  // [208] HRR_API_HIPHOSTUNREGISTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipImportExternalMemory)),  // [209] HRR_API_HIPIMPORTEXTERNALMEMORY
-    static_cast<uint32_t>(sizeof(hrr_args_hipImportExternalSemaphore)),  // [210] HRR_API_HIPIMPORTEXTERNALSEMAPHORE
-    static_cast<uint32_t>(sizeof(hrr_args_hipInit)),  // [211] HRR_API_HIPINIT
-    static_cast<uint32_t>(sizeof(hrr_args_hipIpcCloseMemHandle)),  // [212] HRR_API_HIPIPCCLOSEMEMHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipIpcGetEventHandle)),  // [213] HRR_API_HIPIPCGETEVENTHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipIpcGetMemHandle)),  // [214] HRR_API_HIPIPCGETMEMHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenEventHandle)),  // [215] HRR_API_HIPIPCOPENEVENTHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenMemHandle)),  // [216] HRR_API_HIPIPCOPENMEMHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRef)),  // [217] HRR_API_HIPKERNELNAMEREF
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRefByPtr)),  // [218] HRR_API_HIPKERNELNAMEREFBYPTR
-    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [219] variable-length kernel launch
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel)),  // [220] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernelMultiDevice)),  // [221] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc)),  // [222] HRR_API_HIPLAUNCHHOSTFUNC
-    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [223] variable-length kernel launch
-    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc)),  // [224] HRR_API_HIPMALLOC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3D)),  // [225] HRR_API_HIPMALLOC3D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3DArray)),  // [226] HRR_API_HIPMALLOC3DARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocArray)),  // [227] HRR_API_HIPMALLOCARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocAsync)),  // [228] HRR_API_HIPMALLOCASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocFromPoolAsync)),  // [229] HRR_API_HIPMALLOCFROMPOOLASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocHost)),  // [230] HRR_API_HIPMALLOCHOST
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocManaged)),  // [231] HRR_API_HIPMALLOCMANAGED
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocMipmappedArray)),  // [232] HRR_API_HIPMALLOCMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMallocPitch)),  // [233] HRR_API_HIPMALLOCPITCH
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAddressFree)),  // [234] HRR_API_HIPMEMADDRESSFREE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAddressReserve)),  // [235] HRR_API_HIPMEMADDRESSRESERVE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAdvise)),  // [236] HRR_API_HIPMEMADVISE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAdvise_v2)),  // [237] HRR_API_HIPMEMADVISE_V2
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAllocHost)),  // [238] HRR_API_HIPMEMALLOCHOST
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemAllocPitch)),  // [239] HRR_API_HIPMEMALLOCPITCH
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemCreate)),  // [240] HRR_API_HIPMEMCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemExportToShareableHandle)),  // [241] HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAccess)),  // [242] HRR_API_HIPMEMGETACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAddressRange)),  // [243] HRR_API_HIPMEMGETADDRESSRANGE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAllocationGranularity)),  // [244] HRR_API_HIPMEMGETALLOCATIONGRANULARITY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAllocationPropertiesFromHandle)),  // [245] HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetInfo)),  // [246] HRR_API_HIPMEMGETINFO
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemImportFromShareableHandle)),  // [247] HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemMap)),  // [248] HRR_API_HIPMEMMAP
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemMapArrayAsync)),  // [249] HRR_API_HIPMEMMAPARRAYASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolCreate)),  // [250] HRR_API_HIPMEMPOOLCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolDestroy)),  // [251] HRR_API_HIPMEMPOOLDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolExportPointer)),  // [252] HRR_API_HIPMEMPOOLEXPORTPOINTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolExportToShareableHandle)),  // [253] HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolGetAccess)),  // [254] HRR_API_HIPMEMPOOLGETACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolGetAttribute)),  // [255] HRR_API_HIPMEMPOOLGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolImportFromShareableHandle)),  // [256] HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolImportPointer)),  // [257] HRR_API_HIPMEMPOOLIMPORTPOINTER
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolSetAccess)),  // [258] HRR_API_HIPMEMPOOLSETACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolSetAttribute)),  // [259] HRR_API_HIPMEMPOOLSETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolTrimTo)),  // [260] HRR_API_HIPMEMPOOLTRIMTO
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchAsync)),  // [261] HRR_API_HIPMEMPREFETCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchAsync_v2)),  // [262] HRR_API_HIPMEMPREFETCHASYNC_V2
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchBatchAsync)),  // [263] HRR_API_HIPMEMPREFETCHBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemDiscardBatchAsync)),  // [264] HRR_API_HIPMEMDISCARDBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemDiscardBatchAsync)),  // [265] HRR_API_HIPDRVMEMDISCARDBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemDiscardAndPrefetchBatchAsync)),  // [266] HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync)),  // [267] HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemPtrGetInfo)),  // [268] HRR_API_HIPMEMPTRGETINFO
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemRangeGetAttribute)),  // [269] HRR_API_HIPMEMRANGEGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemRangeGetAttributes)),  // [270] HRR_API_HIPMEMRANGEGETATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemRelease)),  // [271] HRR_API_HIPMEMRELEASE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemRetainAllocationHandle)),  // [272] HRR_API_HIPMEMRETAINALLOCATIONHANDLE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemSetAccess)),  // [273] HRR_API_HIPMEMSETACCESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemUnmap)),  // [274] HRR_API_HIPMEMUNMAP
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy)),  // [275] HRR_API_HIPMEMCPY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2D)),  // [276] HRR_API_HIPMEMCPY2D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DAsync)),  // [277] HRR_API_HIPMEMCPY2DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArray)),  // [278] HRR_API_HIPMEMCPY2DFROMARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArrayAsync)),  // [279] HRR_API_HIPMEMCPY2DFROMARRAYASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArray)),  // [280] HRR_API_HIPMEMCPY2DTOARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArrayAsync)),  // [281] HRR_API_HIPMEMCPY2DTOARRAYASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3D)),  // [282] HRR_API_HIPMEMCPY3D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DAsync)),  // [283] HRR_API_HIPMEMCPY3DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAsync)),  // [284] HRR_API_HIPMEMCPYASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoH)),  // [285] HRR_API_HIPMEMCPYATOH
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoD)),  // [286] HRR_API_HIPMEMCPYDTOD
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoDAsync)),  // [287] HRR_API_HIPMEMCPYDTODASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoH)),  // [288] HRR_API_HIPMEMCPYDTOH
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoHAsync)),  // [289] HRR_API_HIPMEMCPYDTOHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromArray)),  // [290] HRR_API_HIPMEMCPYFROMARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbol)),  // [291] HRR_API_HIPMEMCPYFROMSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbolAsync)),  // [292] HRR_API_HIPMEMCPYFROMSYMBOLASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoA)),  // [293] HRR_API_HIPMEMCPYHTOA
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoD)),  // [294] HRR_API_HIPMEMCPYHTOD
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoDAsync)),  // [295] HRR_API_HIPMEMCPYHTODASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyParam2D)),  // [296] HRR_API_HIPMEMCPYPARAM2D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyParam2DAsync)),  // [297] HRR_API_HIPMEMCPYPARAM2DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyPeer)),  // [298] HRR_API_HIPMEMCPYPEER
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyPeerAsync)),  // [299] HRR_API_HIPMEMCPYPEERASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToArray)),  // [300] HRR_API_HIPMEMCPYTOARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbol)),  // [301] HRR_API_HIPMEMCPYTOSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbolAsync)),  // [302] HRR_API_HIPMEMCPYTOSYMBOLASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyWithStream)),  // [303] HRR_API_HIPMEMCPYWITHSTREAM
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset)),  // [304] HRR_API_HIPMEMSET
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2D)),  // [305] HRR_API_HIPMEMSET2D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2DAsync)),  // [306] HRR_API_HIPMEMSET2DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3D)),  // [307] HRR_API_HIPMEMSET3D
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3DAsync)),  // [308] HRR_API_HIPMEMSET3DASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetAsync)),  // [309] HRR_API_HIPMEMSETASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD16)),  // [310] HRR_API_HIPMEMSETD16
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD16Async)),  // [311] HRR_API_HIPMEMSETD16ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD32)),  // [312] HRR_API_HIPMEMSETD32
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD32Async)),  // [313] HRR_API_HIPMEMSETD32ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD8)),  // [314] HRR_API_HIPMEMSETD8
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD8Async)),  // [315] HRR_API_HIPMEMSETD8ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayCreate)),  // [316] HRR_API_HIPMIPMAPPEDARRAYCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayDestroy)),  // [317] HRR_API_HIPMIPMAPPEDARRAYDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayGetLevel)),  // [318] HRR_API_HIPMIPMAPPEDARRAYGETLEVEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetFunction)),  // [319] HRR_API_HIPMODULEGETFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetFunctionCount)),  // [320] HRR_API_HIPMODULEGETFUNCTIONCOUNT
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetGlobal)),  // [321] HRR_API_HIPMODULEGETGLOBAL
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetTexRef)),  // [322] HRR_API_HIPMODULEGETTEXREF
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernel)),  // [323] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernelMultiDevice)),  // [324] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [325] variable-length kernel launch
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoad)),  // [326] HRR_API_HIPMODULELOAD
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadData)),  // [327] HRR_API_HIPMODULELOADDATA
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadDataEx)),  // [328] HRR_API_HIPMODULELOADDATAEX
-    static_cast<uint32_t>(sizeof(hrr_args_hipLinkAddData)),  // [329] HRR_API_HIPLINKADDDATA
-    static_cast<uint32_t>(sizeof(hrr_args_hipLinkAddFile)),  // [330] HRR_API_HIPLINKADDFILE
-    static_cast<uint32_t>(sizeof(hrr_args_hipLinkComplete)),  // [331] HRR_API_HIPLINKCOMPLETE
-    static_cast<uint32_t>(sizeof(hrr_args_hipLinkCreate)),  // [332] HRR_API_HIPLINKCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipLinkDestroy)),  // [333] HRR_API_HIPLINKDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor)),  // [334] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)),  // [335] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxPotentialBlockSize)),  // [336] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)),  // [337] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleUnload)),  // [338] HRR_API_HIPMODULEUNLOAD
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyAvailableDynamicSMemPerBlock)),  // [339] HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveBlocksPerMultiprocessor)),  // [340] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)),  // [341] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxPotentialBlockSize)),  // [342] HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveClusters)),  // [343] HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS
-    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxPotentialClusterSize)),  // [344] HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipPeekAtLastError)),  // [345] HRR_API_HIPPEEKATLASTERROR
-    static_cast<uint32_t>(sizeof(hrr_args_hipPointerGetAttribute)),  // [346] HRR_API_HIPPOINTERGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipPointerGetAttributes)),  // [347] HRR_API_HIPPOINTERGETATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipPointerSetAttribute)),  // [348] HRR_API_HIPPOINTERSETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipProfilerStart)),  // [349] HRR_API_HIPPROFILERSTART
-    static_cast<uint32_t>(sizeof(hrr_args_hipProfilerStop)),  // [350] HRR_API_HIPPROFILERSTOP
-    static_cast<uint32_t>(sizeof(hrr_args_hipRuntimeGetVersion)),  // [351] HRR_API_HIPRUNTIMEGETVERSION
-    static_cast<uint32_t>(sizeof(hrr_args_hipSetDevice)),  // [352] HRR_API_HIPSETDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipSetDeviceFlags)),  // [353] HRR_API_HIPSETDEVICEFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipSetupArgument)),  // [354] HRR_API_HIPSETUPARGUMENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipSignalExternalSemaphoresAsync)),  // [355] HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAddCallback)),  // [356] HRR_API_HIPSTREAMADDCALLBACK
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAttachMemAsync)),  // [357] HRR_API_HIPSTREAMATTACHMEMASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCapture)),  // [358] HRR_API_HIPSTREAMBEGINCAPTURE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCopyAttributes)),  // [359] HRR_API_HIPSTREAMCOPYATTRIBUTES
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreate)),  // [360] HRR_API_HIPSTREAMCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreateWithFlags)),  // [361] HRR_API_HIPSTREAMCREATEWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreateWithPriority)),  // [362] HRR_API_HIPSTREAMCREATEWITHPRIORITY
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamDestroy)),  // [363] HRR_API_HIPSTREAMDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamEndCapture)),  // [364] HRR_API_HIPSTREAMENDCAPTURE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo)),  // [365] HRR_API_HIPSTREAMGETCAPTUREINFO
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2)),  // [366] HRR_API_HIPSTREAMGETCAPTUREINFO_V2
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetDevice)),  // [367] HRR_API_HIPSTREAMGETDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetFlags)),  // [368] HRR_API_HIPSTREAMGETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetId)),  // [369] HRR_API_HIPSTREAMGETID
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetPriority)),  // [370] HRR_API_HIPSTREAMGETPRIORITY
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamIsCapturing)),  // [371] HRR_API_HIPSTREAMISCAPTURING
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamQuery)),  // [372] HRR_API_HIPSTREAMQUERY
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSynchronize)),  // [373] HRR_API_HIPSTREAMSYNCHRONIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamUpdateCaptureDependencies)),  // [374] HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitEvent)),  // [375] HRR_API_HIPSTREAMWAITEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitValue32)),  // [376] HRR_API_HIPSTREAMWAITVALUE32
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitValue64)),  // [377] HRR_API_HIPSTREAMWAITVALUE64
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWriteValue32)),  // [378] HRR_API_HIPSTREAMWRITEVALUE32
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWriteValue64)),  // [379] HRR_API_HIPSTREAMWRITEVALUE64
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBatchMemOp)),  // [380] HRR_API_HIPSTREAMBATCHMEMOP
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectCreate)),  // [381] HRR_API_HIPTEXOBJECTCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectDestroy)),  // [382] HRR_API_HIPTEXOBJECTDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetResourceDesc)),  // [383] HRR_API_HIPTEXOBJECTGETRESOURCEDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetResourceViewDesc)),  // [384] HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetTextureDesc)),  // [385] HRR_API_HIPTEXOBJECTGETTEXTUREDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetAddress)),  // [386] HRR_API_HIPTEXREFGETADDRESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetAddressMode)),  // [387] HRR_API_HIPTEXREFGETADDRESSMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFilterMode)),  // [388] HRR_API_HIPTEXREFGETFILTERMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFlags)),  // [389] HRR_API_HIPTEXREFGETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFormat)),  // [390] HRR_API_HIPTEXREFGETFORMAT
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMaxAnisotropy)),  // [391] HRR_API_HIPTEXREFGETMAXANISOTROPY
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipMappedArray)),  // [392] HRR_API_HIPTEXREFGETMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapFilterMode)),  // [393] HRR_API_HIPTEXREFGETMIPMAPFILTERMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapLevelBias)),  // [394] HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapLevelClamp)),  // [395] HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddress)),  // [396] HRR_API_HIPTEXREFSETADDRESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddress2D)),  // [397] HRR_API_HIPTEXREFSETADDRESS2D
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddressMode)),  // [398] HRR_API_HIPTEXREFSETADDRESSMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetArray)),  // [399] HRR_API_HIPTEXREFSETARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetBorderColor)),  // [400] HRR_API_HIPTEXREFSETBORDERCOLOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFilterMode)),  // [401] HRR_API_HIPTEXREFSETFILTERMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFlags)),  // [402] HRR_API_HIPTEXREFSETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFormat)),  // [403] HRR_API_HIPTEXREFSETFORMAT
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMaxAnisotropy)),  // [404] HRR_API_HIPTEXREFSETMAXANISOTROPY
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapFilterMode)),  // [405] HRR_API_HIPTEXREFSETMIPMAPFILTERMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapLevelBias)),  // [406] HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapLevelClamp)),  // [407] HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmappedArray)),  // [408] HRR_API_HIPTEXREFSETMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipThreadExchangeStreamCaptureMode)),  // [409] HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipUnbindTexture)),  // [410] HRR_API_HIPUNBINDTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectCreate)),  // [411] HRR_API_HIPUSEROBJECTCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectRelease)),  // [412] HRR_API_HIPUSEROBJECTRELEASE
-    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectRetain)),  // [413] HRR_API_HIPUSEROBJECTRETAIN
-    static_cast<uint32_t>(sizeof(hrr_args_hipWaitExternalSemaphoresAsync)),  // [414] HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy_spt)),  // [415] HRR_API_HIPMEMCPY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbol_spt)),  // [416] HRR_API_HIPMEMCPYTOSYMBOL_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbol_spt)),  // [417] HRR_API_HIPMEMCPYFROMSYMBOL_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2D_spt)),  // [418] HRR_API_HIPMEMCPY2D_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArray_spt)),  // [419] HRR_API_HIPMEMCPY2DFROMARRAY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3D_spt)),  // [420] HRR_API_HIPMEMCPY3D_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset_spt)),  // [421] HRR_API_HIPMEMSET_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetAsync_spt)),  // [422] HRR_API_HIPMEMSETASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2D_spt)),  // [423] HRR_API_HIPMEMSET2D_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2DAsync_spt)),  // [424] HRR_API_HIPMEMSET2DASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3DAsync_spt)),  // [425] HRR_API_HIPMEMSET3DASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3D_spt)),  // [426] HRR_API_HIPMEMSET3D_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAsync_spt)),  // [427] HRR_API_HIPMEMCPYASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DAsync_spt)),  // [428] HRR_API_HIPMEMCPY3DASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DAsync_spt)),  // [429] HRR_API_HIPMEMCPY2DASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbolAsync_spt)),  // [430] HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbolAsync_spt)),  // [431] HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromArray_spt)),  // [432] HRR_API_HIPMEMCPYFROMARRAY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArray_spt)),  // [433] HRR_API_HIPMEMCPY2DTOARRAY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArrayAsync_spt)),  // [434] HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArrayAsync_spt)),  // [435] HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamQuery_spt)),  // [436] HRR_API_HIPSTREAMQUERY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSynchronize_spt)),  // [437] HRR_API_HIPSTREAMSYNCHRONIZE_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetPriority_spt)),  // [438] HRR_API_HIPSTREAMGETPRIORITY_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitEvent_spt)),  // [439] HRR_API_HIPSTREAMWAITEVENT_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetFlags_spt)),  // [440] HRR_API_HIPSTREAMGETFLAGS_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAddCallback_spt)),  // [441] HRR_API_HIPSTREAMADDCALLBACK_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecord_spt)),  // [442] HRR_API_HIPEVENTRECORD_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel_spt)),  // [443] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernel_spt)),  // [444] HRR_API_HIPLAUNCHKERNEL_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphLaunch_spt)),  // [445] HRR_API_HIPGRAPHLAUNCH_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCapture_spt)),  // [446] HRR_API_HIPSTREAMBEGINCAPTURE_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamEndCapture_spt)),  // [447] HRR_API_HIPSTREAMENDCAPTURE_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamIsCapturing_spt)),  // [448] HRR_API_HIPSTREAMISCAPTURING_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_spt)),  // [449] HRR_API_HIPSTREAMGETCAPTUREINFO_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2_spt)),  // [450] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc_spt)),  // [451] HRR_API_HIPLAUNCHHOSTFUNC_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipCreateChannelDesc)),  // [452] HRR_API_HIPCREATECHANNELDESC
-    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [453] variable-length kernel launch
-    static_cast<uint32_t>(sizeof(hrr_args_hipHccModuleLaunchKernel)),  // [454] HRR_API_HIPHCCMODULELAUNCHKERNEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetStreamDeviceId)),  // [455] HRR_API_HIPGETSTREAMDEVICEID
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemsetNode)),  // [456] HRR_API_HIPDRVGRAPHADDMEMSETNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddExternalSemaphoresWaitNode)),  // [457] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddExternalSemaphoresSignalNode)),  // [458] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresSignalNodeSetParams)),  // [459] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresWaitNodeSetParams)),  // [460] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresSignalNodeGetParams)),  // [461] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresWaitNodeGetParams)),  // [462] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecExternalSemaphoresSignalNodeSetParams)),  // [463] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecExternalSemaphoresWaitNodeSetParams)),  // [464] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddNode)),  // [465] HRR_API_HIPGRAPHADDNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiateWithParams)),  // [466] HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtGetLastError)),  // [467] HRR_API_HIPEXTGETLASTERROR
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetBorderColor)),  // [468] HRR_API_HIPTEXREFGETBORDERCOLOR
-    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetArray)),  // [469] HRR_API_HIPTEXREFGETARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetProcAddress)),  // [470] HRR_API_HIPGETPROCADDRESS
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCaptureToGraph)),  // [471] HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetFuncBySymbol)),  // [472] HRR_API_HIPGETFUNCBYSYMBOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemFreeNode)),  // [473] HRR_API_HIPDRVGRAPHADDMEMFREENODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphExecMemcpyNodeSetParams)),  // [474] HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphExecMemsetNodeSetParams)),  // [475] HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipSetValidDevices)),  // [476] HRR_API_HIPSETVALIDDEVICES
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoD)),  // [477] HRR_API_HIPMEMCPYATOD
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoA)),  // [478] HRR_API_HIPMEMCPYDTOA
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoA)),  // [479] HRR_API_HIPMEMCPYATOA
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoHAsync)),  // [480] HRR_API_HIPMEMCPYATOHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoAAsync)),  // [481] HRR_API_HIPMEMCPYHTOAASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DArrayToArray)),  // [482] HRR_API_HIPMEMCPY2DARRAYTOARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecGetFlags)),  // [483] HRR_API_HIPGRAPHEXECGETFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeSetParams)),  // [484] HRR_API_HIPGRAPHNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecNodeSetParams)),  // [485] HRR_API_HIPGRAPHEXECNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipExternalMemoryGetMappedMipmappedArray)),  // [486] HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphMemcpyNodeGetParams)),  // [487] HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphMemcpyNodeSetParams)),  // [488] HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtHostAlloc)),  // [489] HRR_API_HIPEXTHOSTALLOC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetTexture1DLinearMaxWidth)),  // [490] HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddBatchMemOpNode)),  // [491] HRR_API_HIPGRAPHADDBATCHMEMOPNODE
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphBatchMemOpNodeGetParams)),  // [492] HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphBatchMemOpNodeSetParams)),  // [493] HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecBatchMemOpNodeSetParams)),  // [494] HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecordWithFlags)),  // [495] HRR_API_HIPEVENTRECORDWITHFLAGS
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernelExC)),  // [496] HRR_API_HIPLAUNCHKERNELEXC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDrvLaunchKernelEx)),  // [497] HRR_API_HIPDRVLAUNCHKERNELEX
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetHandleForAddressRange)),  // [498] HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D8)),  // [499] HRR_API_HIPMEMSETD2D8
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D8Async)),  // [500] HRR_API_HIPMEMSETD2D8ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D16)),  // [501] HRR_API_HIPMEMSETD2D16
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D16Async)),  // [502] HRR_API_HIPMEMSETD2D16ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D32)),  // [503] HRR_API_HIPMEMSETD2D32
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D32Async)),  // [504] HRR_API_HIPMEMSETD2D32ASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSetAttribute)),  // [505] HRR_API_HIPSTREAMSETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetAttribute)),  // [506] HRR_API_HIPSTREAMGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadFatBinary)),  // [507] HRR_API_HIPMODULELOADFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyBatchAsync)),  // [508] HRR_API_HIPMEMCPYBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DBatchAsync)),  // [509] HRR_API_HIPMEMCPY3DBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DPeer)),  // [510] HRR_API_HIPMEMCPY3DPEER
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DPeerAsync)),  // [511] HRR_API_HIPMEMCPY3DPEERASYNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDriverEntryPoint)),  // [512] HRR_API_HIPGETDRIVERENTRYPOINT
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetDriverEntryPoint_spt)),  // [513] HRR_API_HIPGETDRIVERENTRYPOINT_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryLoadData)),  // [514] HRR_API_HIPLIBRARYLOADDATA
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryLoadFromFile)),  // [515] HRR_API_HIPLIBRARYLOADFROMFILE
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryUnload)),  // [516] HRR_API_HIPLIBRARYUNLOAD
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetKernel)),  // [517] HRR_API_HIPLIBRARYGETKERNEL
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetKernelCount)),  // [518] HRR_API_HIPLIBRARYGETKERNELCOUNT
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetGlobal)),  // [519] HRR_API_HIPLIBRARYGETGLOBAL
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetManaged)),  // [520] HRR_API_HIPLIBRARYGETMANAGED
-    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryEnumerateKernels)),  // [521] HRR_API_HIPLIBRARYENUMERATEKERNELS
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetLibrary)),  // [522] HRR_API_HIPKERNELGETLIBRARY
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetName)),  // [523] HRR_API_HIPKERNELGETNAME
-    static_cast<uint32_t>(sizeof(hrr_args_hipGetProcAddress_spt)),  // [524] HRR_API_HIPGETPROCADDRESS_SPT
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtDisableLogging)),  // [525] HRR_API_HIPEXTDISABLELOGGING
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtEnableLogging)),  // [526] HRR_API_HIPEXTENABLELOGGING
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtSetLoggingParams)),  // [527] HRR_API_HIPEXTSETLOGGINGPARAMS
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetAttribute)),  // [528] HRR_API_HIPKERNELGETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetAttribute)),  // [529] HRR_API_HIPKERNELSETATTRIBUTE
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetFunction)),  // [530] HRR_API_HIPKERNELGETFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetParamInfo)),  // [531] HRR_API_HIPKERNELGETPARAMINFO
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemSetMemPool)),  // [532] HRR_API_HIPMEMSETMEMPOOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetMemPool)),  // [533] HRR_API_HIPMEMGETMEMPOOL
-    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayGetMemoryRequirements)),  // [534] HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS
-    static_cast<uint32_t>(sizeof(hrr_args_hipGreenCtxCreate)),  // [535] HRR_API_HIPGREENCTXCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxDestroy)),  // [536] HRR_API_HIPEXECUTIONCTXDESTROY
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxStreamCreate)),  // [537] HRR_API_HIPEXECUTIONCTXSTREAMCREATE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetDevResource)),  // [538] HRR_API_HIPDEVICEGETDEVRESOURCE
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevSmResourceSplitByCount)),  // [539] HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevSmResourceSplit)),  // [540] HRR_API_HIPDEVSMRESOURCESPLIT
-    static_cast<uint32_t>(sizeof(hrr_args_hipDevResourceGenerateDesc)),  // [541] HRR_API_HIPDEVRESOURCEGENERATEDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetExecutionCtx)),  // [542] HRR_API_HIPDEVICEGETEXECUTIONCTX
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetDevResource)),  // [543] HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetDevice)),  // [544] HRR_API_HIPEXECUTIONCTXGETDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetId)),  // [545] HRR_API_HIPEXECUTIONCTXGETID
-    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetDevResource)),  // [546] HRR_API_HIPSTREAMGETDEVRESOURCE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxRecordEvent)),  // [547] HRR_API_HIPEXECUTIONCTXRECORDEVENT
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxSynchronize)),  // [548] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
-    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxWaitEvent)),  // [549] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipApiName)),  // [0] HRR_API_HIPAPINAME
+    static_cast<uint32_t>(sizeof(hrr_args_hipArray3DCreate)),  // [1] HRR_API_HIPARRAY3DCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipArray3DGetDescriptor)),  // [2] HRR_API_HIPARRAY3DGETDESCRIPTOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayCreate)),  // [3] HRR_API_HIPARRAYCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayDestroy)),  // [4] HRR_API_HIPARRAYDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetDescriptor)),  // [5] HRR_API_HIPARRAYGETDESCRIPTOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetInfo)),  // [6] HRR_API_HIPARRAYGETINFO
+    static_cast<uint32_t>(sizeof(hrr_args_hipBindTexture)),  // [7] HRR_API_HIPBINDTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args_hipBindTexture2D)),  // [8] HRR_API_HIPBINDTEXTURE2D
+    static_cast<uint32_t>(sizeof(hrr_args_hipBindTextureToArray)),  // [9] HRR_API_HIPBINDTEXTURETOARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipBindTextureToMipmappedArray)),  // [10] HRR_API_HIPBINDTEXTURETOMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipChooseDevice)),  // [11] HRR_API_HIPCHOOSEDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipChooseDeviceR0000)),  // [12] HRR_API_HIPCHOOSEDEVICER0000
+    static_cast<uint32_t>(sizeof(hrr_args_hipConfigureCall)),  // [13] HRR_API_HIPCONFIGURECALL
+    static_cast<uint32_t>(sizeof(hrr_args_hipCreateSurfaceObject)),  // [14] HRR_API_HIPCREATESURFACEOBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCreateTextureObject)),  // [15] HRR_API_HIPCREATETEXTUREOBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxCreate)),  // [16] HRR_API_HIPCTXCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxDestroy)),  // [17] HRR_API_HIPCTXDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxDisablePeerAccess)),  // [18] HRR_API_HIPCTXDISABLEPEERACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxEnablePeerAccess)),  // [19] HRR_API_HIPCTXENABLEPEERACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetApiVersion)),  // [20] HRR_API_HIPCTXGETAPIVERSION
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetCacheConfig)),  // [21] HRR_API_HIPCTXGETCACHECONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetCurrent)),  // [22] HRR_API_HIPCTXGETCURRENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetDevice)),  // [23] HRR_API_HIPCTXGETDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetFlags)),  // [24] HRR_API_HIPCTXGETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxGetSharedMemConfig)),  // [25] HRR_API_HIPCTXGETSHAREDMEMCONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxPopCurrent)),  // [26] HRR_API_HIPCTXPOPCURRENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxPushCurrent)),  // [27] HRR_API_HIPCTXPUSHCURRENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetCacheConfig)),  // [28] HRR_API_HIPCTXSETCACHECONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetCurrent)),  // [29] HRR_API_HIPCTXSETCURRENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSetSharedMemConfig)),  // [30] HRR_API_HIPCTXSETSHAREDMEMCONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipCtxSynchronize)),  // [31] HRR_API_HIPCTXSYNCHRONIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyExternalMemory)),  // [32] HRR_API_HIPDESTROYEXTERNALMEMORY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyExternalSemaphore)),  // [33] HRR_API_HIPDESTROYEXTERNALSEMAPHORE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDestroySurfaceObject)),  // [34] HRR_API_HIPDESTROYSURFACEOBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDestroyTextureObject)),  // [35] HRR_API_HIPDESTROYTEXTUREOBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceCanAccessPeer)),  // [36] HRR_API_HIPDEVICECANACCESSPEER
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceComputeCapability)),  // [37] HRR_API_HIPDEVICECOMPUTECAPABILITY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceDisablePeerAccess)),  // [38] HRR_API_HIPDEVICEDISABLEPEERACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceEnablePeerAccess)),  // [39] HRR_API_HIPDEVICEENABLEPEERACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGet)),  // [40] HRR_API_HIPDEVICEGET
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetAttribute)),  // [41] HRR_API_HIPDEVICEGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetByPCIBusId)),  // [42] HRR_API_HIPDEVICEGETBYPCIBUSID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetCacheConfig)),  // [43] HRR_API_HIPDEVICEGETCACHECONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetDefaultMemPool)),  // [44] HRR_API_HIPDEVICEGETDEFAULTMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetGraphMemAttribute)),  // [45] HRR_API_HIPDEVICEGETGRAPHMEMATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetLimit)),  // [46] HRR_API_HIPDEVICEGETLIMIT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetMemPool)),  // [47] HRR_API_HIPDEVICEGETMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetName)),  // [48] HRR_API_HIPDEVICEGETNAME
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetP2PAttribute)),  // [49] HRR_API_HIPDEVICEGETP2PATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetPCIBusId)),  // [50] HRR_API_HIPDEVICEGETPCIBUSID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetSharedMemConfig)),  // [51] HRR_API_HIPDEVICEGETSHAREDMEMCONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetStreamPriorityRange)),  // [52] HRR_API_HIPDEVICEGETSTREAMPRIORITYRANGE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetUuid)),  // [53] HRR_API_HIPDEVICEGETUUID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGraphMemTrim)),  // [54] HRR_API_HIPDEVICEGRAPHMEMTRIM
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxGetState)),  // [55] HRR_API_HIPDEVICEPRIMARYCTXGETSTATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxRelease)),  // [56] HRR_API_HIPDEVICEPRIMARYCTXRELEASE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxReset)),  // [57] HRR_API_HIPDEVICEPRIMARYCTXRESET
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxRetain)),  // [58] HRR_API_HIPDEVICEPRIMARYCTXRETAIN
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevicePrimaryCtxSetFlags)),  // [59] HRR_API_HIPDEVICEPRIMARYCTXSETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceReset)),  // [60] HRR_API_HIPDEVICERESET
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetCacheConfig)),  // [61] HRR_API_HIPDEVICESETCACHECONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetGraphMemAttribute)),  // [62] HRR_API_HIPDEVICESETGRAPHMEMATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetLimit)),  // [63] HRR_API_HIPDEVICESETLIMIT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetMemPool)),  // [64] HRR_API_HIPDEVICESETMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSetSharedMemConfig)),  // [65] HRR_API_HIPDEVICESETSHAREDMEMCONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceSynchronize)),  // [66] HRR_API_HIPDEVICESYNCHRONIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceTotalMem)),  // [67] HRR_API_HIPDEVICETOTALMEM
+    static_cast<uint32_t>(sizeof(hrr_args_hipDriverGetVersion)),  // [68] HRR_API_HIPDRIVERGETVERSION
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGetErrorName)),  // [69] HRR_API_HIPDRVGETERRORNAME
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGetErrorString)),  // [70] HRR_API_HIPDRVGETERRORSTRING
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemcpyNode)),  // [71] HRR_API_HIPDRVGRAPHADDMEMCPYNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy2DUnaligned)),  // [72] HRR_API_HIPDRVMEMCPY2DUNALIGNED
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy3D)),  // [73] HRR_API_HIPDRVMEMCPY3D
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemcpy3DAsync)),  // [74] HRR_API_HIPDRVMEMCPY3DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvPointerGetAttributes)),  // [75] HRR_API_HIPDRVPOINTERGETATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventCreate)),  // [76] HRR_API_HIPEVENTCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventCreateWithFlags)),  // [77] HRR_API_HIPEVENTCREATEWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventDestroy)),  // [78] HRR_API_HIPEVENTDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventElapsedTime)),  // [79] HRR_API_HIPEVENTELAPSEDTIME
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventQuery)),  // [80] HRR_API_HIPEVENTQUERY
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecord)),  // [81] HRR_API_HIPEVENTRECORD
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventSynchronize)),  // [82] HRR_API_HIPEVENTSYNCHRONIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtGetLinkTypeAndHopCount)),  // [83] HRR_API_HIPEXTGETLINKTYPEANDHOPCOUNT
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtLaunchKernel)),  // [84] HRR_API_HIPEXTLAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtLaunchMultiKernelMultiDevice)),  // [85] HRR_API_HIPEXTLAUNCHMULTIKERNELMULTIDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtMallocWithFlags)),  // [86] HRR_API_HIPEXTMALLOCWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtStreamCreateWithCUMask)),  // [87] HRR_API_HIPEXTSTREAMCREATEWITHCUMASK
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtStreamGetCUMask)),  // [88] HRR_API_HIPEXTSTREAMGETCUMASK
+    static_cast<uint32_t>(sizeof(hrr_args_hipExternalMemoryGetMappedBuffer)),  // [89] HRR_API_HIPEXTERNALMEMORYGETMAPPEDBUFFER
+    static_cast<uint32_t>(sizeof(hrr_args_hipFree)),  // [90] HRR_API_HIPFREE
+    static_cast<uint32_t>(sizeof(hrr_args_hipFreeArray)),  // [91] HRR_API_HIPFREEARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipFreeAsync)),  // [92] HRR_API_HIPFREEASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipFreeHost)),  // [93] HRR_API_HIPFREEHOST
+    static_cast<uint32_t>(sizeof(hrr_args_hipFreeMipmappedArray)),  // [94] HRR_API_HIPFREEMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipFuncGetAttribute)),  // [95] HRR_API_HIPFUNCGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipFuncGetAttributes)),  // [96] HRR_API_HIPFUNCGETATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetAttribute)),  // [97] HRR_API_HIPFUNCSETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetCacheConfig)),  // [98] HRR_API_HIPFUNCSETCACHECONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipFuncSetSharedMemConfig)),  // [99] HRR_API_HIPFUNCSETSHAREDMEMCONFIG
+    static_cast<uint32_t>(sizeof(hrr_args_hipGLGetDevices)),  // [100] HRR_API_HIPGLGETDEVICES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetChannelDesc)),  // [101] HRR_API_HIPGETCHANNELDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevice)),  // [102] HRR_API_HIPGETDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDeviceCount)),  // [103] HRR_API_HIPGETDEVICECOUNT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDeviceFlags)),  // [104] HRR_API_HIPGETDEVICEFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevicePropertiesR0600)),  // [105] HRR_API_HIPGETDEVICEPROPERTIESR0600
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDevicePropertiesR0000)),  // [106] HRR_API_HIPGETDEVICEPROPERTIESR0000
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetErrorName)),  // [107] HRR_API_HIPGETERRORNAME
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetErrorString)),  // [108] HRR_API_HIPGETERRORSTRING
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetLastError)),  // [109] HRR_API_HIPGETLASTERROR
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetMipmappedArrayLevel)),  // [110] HRR_API_HIPGETMIPMAPPEDARRAYLEVEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetSymbolAddress)),  // [111] HRR_API_HIPGETSYMBOLADDRESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetSymbolSize)),  // [112] HRR_API_HIPGETSYMBOLSIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureAlignmentOffset)),  // [113] HRR_API_HIPGETTEXTUREALIGNMENTOFFSET
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectResourceDesc)),  // [114] HRR_API_HIPGETTEXTUREOBJECTRESOURCEDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectResourceViewDesc)),  // [115] HRR_API_HIPGETTEXTUREOBJECTRESOURCEVIEWDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureObjectTextureDesc)),  // [116] HRR_API_HIPGETTEXTUREOBJECTTEXTUREDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetTextureReference)),  // [117] HRR_API_HIPGETTEXTUREREFERENCE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddChildGraphNode)),  // [118] HRR_API_HIPGRAPHADDCHILDGRAPHNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddDependencies)),  // [119] HRR_API_HIPGRAPHADDDEPENDENCIES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEmptyNode)),  // [120] HRR_API_HIPGRAPHADDEMPTYNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEventRecordNode)),  // [121] HRR_API_HIPGRAPHADDEVENTRECORDNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddEventWaitNode)),  // [122] HRR_API_HIPGRAPHADDEVENTWAITNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddHostNode)),  // [123] HRR_API_HIPGRAPHADDHOSTNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddKernelNode)),  // [124] HRR_API_HIPGRAPHADDKERNELNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemAllocNode)),  // [125] HRR_API_HIPGRAPHADDMEMALLOCNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemFreeNode)),  // [126] HRR_API_HIPGRAPHADDMEMFREENODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNode)),  // [127] HRR_API_HIPGRAPHADDMEMCPYNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNode1D)),  // [128] HRR_API_HIPGRAPHADDMEMCPYNODE1D
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNodeFromSymbol)),  // [129] HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemcpyNodeToSymbol)),  // [130] HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddMemsetNode)),  // [131] HRR_API_HIPGRAPHADDMEMSETNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphChildGraphNodeGetGraph)),  // [132] HRR_API_HIPGRAPHCHILDGRAPHNODEGETGRAPH
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphClone)),  // [133] HRR_API_HIPGRAPHCLONE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphCreate)),  // [134] HRR_API_HIPGRAPHCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDebugDotPrint)),  // [135] HRR_API_HIPGRAPHDEBUGDOTPRINT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDestroy)),  // [136] HRR_API_HIPGRAPHDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphDestroyNode)),  // [137] HRR_API_HIPGRAPHDESTROYNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventRecordNodeGetEvent)),  // [138] HRR_API_HIPGRAPHEVENTRECORDNODEGETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventRecordNodeSetEvent)),  // [139] HRR_API_HIPGRAPHEVENTRECORDNODESETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventWaitNodeGetEvent)),  // [140] HRR_API_HIPGRAPHEVENTWAITNODEGETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphEventWaitNodeSetEvent)),  // [141] HRR_API_HIPGRAPHEVENTWAITNODESETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecChildGraphNodeSetParams)),  // [142] HRR_API_HIPGRAPHEXECCHILDGRAPHNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecDestroy)),  // [143] HRR_API_HIPGRAPHEXECDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecEventRecordNodeSetEvent)),  // [144] HRR_API_HIPGRAPHEXECEVENTRECORDNODESETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecEventWaitNodeSetEvent)),  // [145] HRR_API_HIPGRAPHEXECEVENTWAITNODESETEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecHostNodeSetParams)),  // [146] HRR_API_HIPGRAPHEXECHOSTNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecKernelNodeSetParams)),  // [147] HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParams)),  // [148] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParams1D)),  // [149] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS1D
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParamsFromSymbol)),  // [150] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSFROMSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol)),  // [151] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecMemsetNodeSetParams)),  // [152] HRR_API_HIPGRAPHEXECMEMSETNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecUpdate)),  // [153] HRR_API_HIPGRAPHEXECUPDATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetEdges)),  // [154] HRR_API_HIPGRAPHGETEDGES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetNodes)),  // [155] HRR_API_HIPGRAPHGETNODES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetRootNodes)),  // [156] HRR_API_HIPGRAPHGETROOTNODES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphHostNodeGetParams)),  // [157] HRR_API_HIPGRAPHHOSTNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphHostNodeSetParams)),  // [158] HRR_API_HIPGRAPHHOSTNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiate)),  // [159] HRR_API_HIPGRAPHINSTANTIATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiateWithFlags)),  // [160] HRR_API_HIPGRAPHINSTANTIATEWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeCopyAttributes)),  // [161] HRR_API_HIPGRAPHKERNELNODECOPYATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeGetAttribute)),  // [162] HRR_API_HIPGRAPHKERNELNODEGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeGetParams)),  // [163] HRR_API_HIPGRAPHKERNELNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeSetAttribute)),  // [164] HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphKernelNodeSetParams)),  // [165] HRR_API_HIPGRAPHKERNELNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphLaunch)),  // [166] HRR_API_HIPGRAPHLAUNCH
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemAllocNodeGetParams)),  // [167] HRR_API_HIPGRAPHMEMALLOCNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemFreeNodeGetParams)),  // [168] HRR_API_HIPGRAPHMEMFREENODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeGetParams)),  // [169] HRR_API_HIPGRAPHMEMCPYNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParams)),  // [170] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParams1D)),  // [171] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS1D
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParamsFromSymbol)),  // [172] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSFROMSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemcpyNodeSetParamsToSymbol)),  // [173] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemsetNodeGetParams)),  // [174] HRR_API_HIPGRAPHMEMSETNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphMemsetNodeSetParams)),  // [175] HRR_API_HIPGRAPHMEMSETNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeFindInClone)),  // [176] HRR_API_HIPGRAPHNODEFINDINCLONE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetDependencies)),  // [177] HRR_API_HIPGRAPHNODEGETDEPENDENCIES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetDependentNodes)),  // [178] HRR_API_HIPGRAPHNODEGETDEPENDENTNODES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetEnabled)),  // [179] HRR_API_HIPGRAPHNODEGETENABLED
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetType)),  // [180] HRR_API_HIPGRAPHNODEGETTYPE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeSetEnabled)),  // [181] HRR_API_HIPGRAPHNODESETENABLED
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphReleaseUserObject)),  // [182] HRR_API_HIPGRAPHRELEASEUSEROBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphRemoveDependencies)),  // [183] HRR_API_HIPGRAPHREMOVEDEPENDENCIES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphRetainUserObject)),  // [184] HRR_API_HIPGRAPHRETAINUSEROBJECT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphUpload)),  // [185] HRR_API_HIPGRAPHUPLOAD
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsGLRegisterBuffer)),  // [186] HRR_API_HIPGRAPHICSGLREGISTERBUFFER
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsGLRegisterImage)),  // [187] HRR_API_HIPGRAPHICSGLREGISTERIMAGE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsMapResources)),  // [188] HRR_API_HIPGRAPHICSMAPRESOURCES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsResourceGetMappedPointer)),  // [189] HRR_API_HIPGRAPHICSRESOURCEGETMAPPEDPOINTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsSubResourceGetMappedArray)),  // [190] HRR_API_HIPGRAPHICSSUBRESOURCEGETMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsUnmapResources)),  // [191] HRR_API_HIPGRAPHICSUNMAPRESOURCES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphicsUnregisterResource)),  // [192] HRR_API_HIPGRAPHICSUNREGISTERRESOURCE
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostAlloc)),  // [193] HRR_API_HIPHOSTALLOC
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostFree)),  // [194] HRR_API_HIPHOSTFREE
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostGetDevicePointer)),  // [195] HRR_API_HIPHOSTGETDEVICEPOINTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostGetFlags)),  // [196] HRR_API_HIPHOSTGETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostMalloc)),  // [197] HRR_API_HIPHOSTMALLOC
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostRegister)),  // [198] HRR_API_HIPHOSTREGISTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipHostUnregister)),  // [199] HRR_API_HIPHOSTUNREGISTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipImportExternalMemory)),  // [200] HRR_API_HIPIMPORTEXTERNALMEMORY
+    static_cast<uint32_t>(sizeof(hrr_args_hipImportExternalSemaphore)),  // [201] HRR_API_HIPIMPORTEXTERNALSEMAPHORE
+    static_cast<uint32_t>(sizeof(hrr_args_hipInit)),  // [202] HRR_API_HIPINIT
+    static_cast<uint32_t>(sizeof(hrr_args_hipIpcCloseMemHandle)),  // [203] HRR_API_HIPIPCCLOSEMEMHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipIpcGetEventHandle)),  // [204] HRR_API_HIPIPCGETEVENTHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipIpcGetMemHandle)),  // [205] HRR_API_HIPIPCGETMEMHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenEventHandle)),  // [206] HRR_API_HIPIPCOPENEVENTHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenMemHandle)),  // [207] HRR_API_HIPIPCOPENMEMHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRef)),  // [208] HRR_API_HIPKERNELNAMEREF
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRefByPtr)),  // [209] HRR_API_HIPKERNELNAMEREFBYPTR
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [210] variable-length kernel launch
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel)),  // [211] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernelMultiDevice)),  // [212] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc)),  // [213] HRR_API_HIPLAUNCHHOSTFUNC
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [214] variable-length kernel launch
+    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc)),  // [215] HRR_API_HIPMALLOC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3D)),  // [216] HRR_API_HIPMALLOC3D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3DArray)),  // [217] HRR_API_HIPMALLOC3DARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocArray)),  // [218] HRR_API_HIPMALLOCARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocAsync)),  // [219] HRR_API_HIPMALLOCASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocFromPoolAsync)),  // [220] HRR_API_HIPMALLOCFROMPOOLASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocHost)),  // [221] HRR_API_HIPMALLOCHOST
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocManaged)),  // [222] HRR_API_HIPMALLOCMANAGED
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocMipmappedArray)),  // [223] HRR_API_HIPMALLOCMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMallocPitch)),  // [224] HRR_API_HIPMALLOCPITCH
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAddressFree)),  // [225] HRR_API_HIPMEMADDRESSFREE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAddressReserve)),  // [226] HRR_API_HIPMEMADDRESSRESERVE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAdvise)),  // [227] HRR_API_HIPMEMADVISE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAllocHost)),  // [228] HRR_API_HIPMEMALLOCHOST
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAllocPitch)),  // [229] HRR_API_HIPMEMALLOCPITCH
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemCreate)),  // [230] HRR_API_HIPMEMCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemExportToShareableHandle)),  // [231] HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAccess)),  // [232] HRR_API_HIPMEMGETACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAddressRange)),  // [233] HRR_API_HIPMEMGETADDRESSRANGE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAllocationGranularity)),  // [234] HRR_API_HIPMEMGETALLOCATIONGRANULARITY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetAllocationPropertiesFromHandle)),  // [235] HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetInfo)),  // [236] HRR_API_HIPMEMGETINFO
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemImportFromShareableHandle)),  // [237] HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemMap)),  // [238] HRR_API_HIPMEMMAP
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemMapArrayAsync)),  // [239] HRR_API_HIPMEMMAPARRAYASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolCreate)),  // [240] HRR_API_HIPMEMPOOLCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolDestroy)),  // [241] HRR_API_HIPMEMPOOLDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolExportPointer)),  // [242] HRR_API_HIPMEMPOOLEXPORTPOINTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolExportToShareableHandle)),  // [243] HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolGetAccess)),  // [244] HRR_API_HIPMEMPOOLGETACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolGetAttribute)),  // [245] HRR_API_HIPMEMPOOLGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolImportFromShareableHandle)),  // [246] HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolImportPointer)),  // [247] HRR_API_HIPMEMPOOLIMPORTPOINTER
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolSetAccess)),  // [248] HRR_API_HIPMEMPOOLSETACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolSetAttribute)),  // [249] HRR_API_HIPMEMPOOLSETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPoolTrimTo)),  // [250] HRR_API_HIPMEMPOOLTRIMTO
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchAsync)),  // [251] HRR_API_HIPMEMPREFETCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPtrGetInfo)),  // [252] HRR_API_HIPMEMPTRGETINFO
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemRangeGetAttribute)),  // [253] HRR_API_HIPMEMRANGEGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemRangeGetAttributes)),  // [254] HRR_API_HIPMEMRANGEGETATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemRelease)),  // [255] HRR_API_HIPMEMRELEASE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemRetainAllocationHandle)),  // [256] HRR_API_HIPMEMRETAINALLOCATIONHANDLE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemSetAccess)),  // [257] HRR_API_HIPMEMSETACCESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemUnmap)),  // [258] HRR_API_HIPMEMUNMAP
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy)),  // [259] HRR_API_HIPMEMCPY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2D)),  // [260] HRR_API_HIPMEMCPY2D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DAsync)),  // [261] HRR_API_HIPMEMCPY2DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArray)),  // [262] HRR_API_HIPMEMCPY2DFROMARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArrayAsync)),  // [263] HRR_API_HIPMEMCPY2DFROMARRAYASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArray)),  // [264] HRR_API_HIPMEMCPY2DTOARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArrayAsync)),  // [265] HRR_API_HIPMEMCPY2DTOARRAYASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3D)),  // [266] HRR_API_HIPMEMCPY3D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DAsync)),  // [267] HRR_API_HIPMEMCPY3DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAsync)),  // [268] HRR_API_HIPMEMCPYASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoH)),  // [269] HRR_API_HIPMEMCPYATOH
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoD)),  // [270] HRR_API_HIPMEMCPYDTOD
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoDAsync)),  // [271] HRR_API_HIPMEMCPYDTODASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoH)),  // [272] HRR_API_HIPMEMCPYDTOH
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoHAsync)),  // [273] HRR_API_HIPMEMCPYDTOHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromArray)),  // [274] HRR_API_HIPMEMCPYFROMARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbol)),  // [275] HRR_API_HIPMEMCPYFROMSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbolAsync)),  // [276] HRR_API_HIPMEMCPYFROMSYMBOLASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoA)),  // [277] HRR_API_HIPMEMCPYHTOA
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoD)),  // [278] HRR_API_HIPMEMCPYHTOD
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoDAsync)),  // [279] HRR_API_HIPMEMCPYHTODASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyParam2D)),  // [280] HRR_API_HIPMEMCPYPARAM2D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyParam2DAsync)),  // [281] HRR_API_HIPMEMCPYPARAM2DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyPeer)),  // [282] HRR_API_HIPMEMCPYPEER
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyPeerAsync)),  // [283] HRR_API_HIPMEMCPYPEERASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToArray)),  // [284] HRR_API_HIPMEMCPYTOARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbol)),  // [285] HRR_API_HIPMEMCPYTOSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbolAsync)),  // [286] HRR_API_HIPMEMCPYTOSYMBOLASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyWithStream)),  // [287] HRR_API_HIPMEMCPYWITHSTREAM
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset)),  // [288] HRR_API_HIPMEMSET
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2D)),  // [289] HRR_API_HIPMEMSET2D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2DAsync)),  // [290] HRR_API_HIPMEMSET2DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3D)),  // [291] HRR_API_HIPMEMSET3D
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3DAsync)),  // [292] HRR_API_HIPMEMSET3DASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetAsync)),  // [293] HRR_API_HIPMEMSETASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD16)),  // [294] HRR_API_HIPMEMSETD16
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD16Async)),  // [295] HRR_API_HIPMEMSETD16ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD32)),  // [296] HRR_API_HIPMEMSETD32
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD32Async)),  // [297] HRR_API_HIPMEMSETD32ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD8)),  // [298] HRR_API_HIPMEMSETD8
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD8Async)),  // [299] HRR_API_HIPMEMSETD8ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayCreate)),  // [300] HRR_API_HIPMIPMAPPEDARRAYCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayDestroy)),  // [301] HRR_API_HIPMIPMAPPEDARRAYDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayGetLevel)),  // [302] HRR_API_HIPMIPMAPPEDARRAYGETLEVEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetFunction)),  // [303] HRR_API_HIPMODULEGETFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetGlobal)),  // [304] HRR_API_HIPMODULEGETGLOBAL
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetTexRef)),  // [305] HRR_API_HIPMODULEGETTEXREF
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernel)),  // [306] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernelMultiDevice)),  // [307] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [308] variable-length kernel launch
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoad)),  // [309] HRR_API_HIPMODULELOAD
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadData)),  // [310] HRR_API_HIPMODULELOADDATA
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadDataEx)),  // [311] HRR_API_HIPMODULELOADDATAEX
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor)),  // [312] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)),  // [313] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxPotentialBlockSize)),  // [314] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)),  // [315] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleUnload)),  // [316] HRR_API_HIPMODULEUNLOAD
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveBlocksPerMultiprocessor)),  // [317] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)),  // [318] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxPotentialBlockSize)),  // [319] HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipPeekAtLastError)),  // [320] HRR_API_HIPPEEKATLASTERROR
+    static_cast<uint32_t>(sizeof(hrr_args_hipPointerGetAttribute)),  // [321] HRR_API_HIPPOINTERGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipPointerGetAttributes)),  // [322] HRR_API_HIPPOINTERGETATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipPointerSetAttribute)),  // [323] HRR_API_HIPPOINTERSETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipProfilerStart)),  // [324] HRR_API_HIPPROFILERSTART
+    static_cast<uint32_t>(sizeof(hrr_args_hipProfilerStop)),  // [325] HRR_API_HIPPROFILERSTOP
+    static_cast<uint32_t>(sizeof(hrr_args_hipRuntimeGetVersion)),  // [326] HRR_API_HIPRUNTIMEGETVERSION
+    static_cast<uint32_t>(sizeof(hrr_args_hipSetDevice)),  // [327] HRR_API_HIPSETDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipSetDeviceFlags)),  // [328] HRR_API_HIPSETDEVICEFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipSetupArgument)),  // [329] HRR_API_HIPSETUPARGUMENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipSignalExternalSemaphoresAsync)),  // [330] HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAddCallback)),  // [331] HRR_API_HIPSTREAMADDCALLBACK
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAttachMemAsync)),  // [332] HRR_API_HIPSTREAMATTACHMEMASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCapture)),  // [333] HRR_API_HIPSTREAMBEGINCAPTURE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreate)),  // [334] HRR_API_HIPSTREAMCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreateWithFlags)),  // [335] HRR_API_HIPSTREAMCREATEWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCreateWithPriority)),  // [336] HRR_API_HIPSTREAMCREATEWITHPRIORITY
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamDestroy)),  // [337] HRR_API_HIPSTREAMDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamEndCapture)),  // [338] HRR_API_HIPSTREAMENDCAPTURE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo)),  // [339] HRR_API_HIPSTREAMGETCAPTUREINFO
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2)),  // [340] HRR_API_HIPSTREAMGETCAPTUREINFO_V2
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetDevice)),  // [341] HRR_API_HIPSTREAMGETDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetFlags)),  // [342] HRR_API_HIPSTREAMGETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetPriority)),  // [343] HRR_API_HIPSTREAMGETPRIORITY
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamIsCapturing)),  // [344] HRR_API_HIPSTREAMISCAPTURING
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamQuery)),  // [345] HRR_API_HIPSTREAMQUERY
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSynchronize)),  // [346] HRR_API_HIPSTREAMSYNCHRONIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamUpdateCaptureDependencies)),  // [347] HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitEvent)),  // [348] HRR_API_HIPSTREAMWAITEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitValue32)),  // [349] HRR_API_HIPSTREAMWAITVALUE32
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitValue64)),  // [350] HRR_API_HIPSTREAMWAITVALUE64
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWriteValue32)),  // [351] HRR_API_HIPSTREAMWRITEVALUE32
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWriteValue64)),  // [352] HRR_API_HIPSTREAMWRITEVALUE64
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectCreate)),  // [353] HRR_API_HIPTEXOBJECTCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectDestroy)),  // [354] HRR_API_HIPTEXOBJECTDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetResourceDesc)),  // [355] HRR_API_HIPTEXOBJECTGETRESOURCEDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetResourceViewDesc)),  // [356] HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexObjectGetTextureDesc)),  // [357] HRR_API_HIPTEXOBJECTGETTEXTUREDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetAddress)),  // [358] HRR_API_HIPTEXREFGETADDRESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetAddressMode)),  // [359] HRR_API_HIPTEXREFGETADDRESSMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFilterMode)),  // [360] HRR_API_HIPTEXREFGETFILTERMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFlags)),  // [361] HRR_API_HIPTEXREFGETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetFormat)),  // [362] HRR_API_HIPTEXREFGETFORMAT
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMaxAnisotropy)),  // [363] HRR_API_HIPTEXREFGETMAXANISOTROPY
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipMappedArray)),  // [364] HRR_API_HIPTEXREFGETMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapFilterMode)),  // [365] HRR_API_HIPTEXREFGETMIPMAPFILTERMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapLevelBias)),  // [366] HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetMipmapLevelClamp)),  // [367] HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddress)),  // [368] HRR_API_HIPTEXREFSETADDRESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddress2D)),  // [369] HRR_API_HIPTEXREFSETADDRESS2D
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetAddressMode)),  // [370] HRR_API_HIPTEXREFSETADDRESSMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetArray)),  // [371] HRR_API_HIPTEXREFSETARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetBorderColor)),  // [372] HRR_API_HIPTEXREFSETBORDERCOLOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFilterMode)),  // [373] HRR_API_HIPTEXREFSETFILTERMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFlags)),  // [374] HRR_API_HIPTEXREFSETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetFormat)),  // [375] HRR_API_HIPTEXREFSETFORMAT
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMaxAnisotropy)),  // [376] HRR_API_HIPTEXREFSETMAXANISOTROPY
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapFilterMode)),  // [377] HRR_API_HIPTEXREFSETMIPMAPFILTERMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapLevelBias)),  // [378] HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmapLevelClamp)),  // [379] HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefSetMipmappedArray)),  // [380] HRR_API_HIPTEXREFSETMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipThreadExchangeStreamCaptureMode)),  // [381] HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipUnbindTexture)),  // [382] HRR_API_HIPUNBINDTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectCreate)),  // [383] HRR_API_HIPUSEROBJECTCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectRelease)),  // [384] HRR_API_HIPUSEROBJECTRELEASE
+    static_cast<uint32_t>(sizeof(hrr_args_hipUserObjectRetain)),  // [385] HRR_API_HIPUSEROBJECTRETAIN
+    static_cast<uint32_t>(sizeof(hrr_args_hipWaitExternalSemaphoresAsync)),  // [386] HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipCreateChannelDesc)),  // [387] HRR_API_HIPCREATECHANNELDESC
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [388] variable-length kernel launch
+    static_cast<uint32_t>(sizeof(hrr_args_hipHccModuleLaunchKernel)),  // [389] HRR_API_HIPHCCMODULELAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy_spt)),  // [390] HRR_API_HIPMEMCPY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbol_spt)),  // [391] HRR_API_HIPMEMCPYTOSYMBOL_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbol_spt)),  // [392] HRR_API_HIPMEMCPYFROMSYMBOL_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2D_spt)),  // [393] HRR_API_HIPMEMCPY2D_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArray_spt)),  // [394] HRR_API_HIPMEMCPY2DFROMARRAY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3D_spt)),  // [395] HRR_API_HIPMEMCPY3D_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset_spt)),  // [396] HRR_API_HIPMEMSET_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetAsync_spt)),  // [397] HRR_API_HIPMEMSETASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2D_spt)),  // [398] HRR_API_HIPMEMSET2D_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset2DAsync_spt)),  // [399] HRR_API_HIPMEMSET2DASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3DAsync_spt)),  // [400] HRR_API_HIPMEMSET3DASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemset3D_spt)),  // [401] HRR_API_HIPMEMSET3D_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAsync_spt)),  // [402] HRR_API_HIPMEMCPYASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DAsync_spt)),  // [403] HRR_API_HIPMEMCPY3DASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DAsync_spt)),  // [404] HRR_API_HIPMEMCPY2DASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromSymbolAsync_spt)),  // [405] HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyToSymbolAsync_spt)),  // [406] HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyFromArray_spt)),  // [407] HRR_API_HIPMEMCPYFROMARRAY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArray_spt)),  // [408] HRR_API_HIPMEMCPY2DTOARRAY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DFromArrayAsync_spt)),  // [409] HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DToArrayAsync_spt)),  // [410] HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamQuery_spt)),  // [411] HRR_API_HIPSTREAMQUERY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSynchronize_spt)),  // [412] HRR_API_HIPSTREAMSYNCHRONIZE_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetPriority_spt)),  // [413] HRR_API_HIPSTREAMGETPRIORITY_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamWaitEvent_spt)),  // [414] HRR_API_HIPSTREAMWAITEVENT_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetFlags_spt)),  // [415] HRR_API_HIPSTREAMGETFLAGS_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamAddCallback_spt)),  // [416] HRR_API_HIPSTREAMADDCALLBACK_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecord_spt)),  // [417] HRR_API_HIPEVENTRECORD_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel_spt)),  // [418] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernel_spt)),  // [419] HRR_API_HIPLAUNCHKERNEL_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphLaunch_spt)),  // [420] HRR_API_HIPGRAPHLAUNCH_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCapture_spt)),  // [421] HRR_API_HIPSTREAMBEGINCAPTURE_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamEndCapture_spt)),  // [422] HRR_API_HIPSTREAMENDCAPTURE_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamIsCapturing_spt)),  // [423] HRR_API_HIPSTREAMISCAPTURING_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_spt)),  // [424] HRR_API_HIPSTREAMGETCAPTUREINFO_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2_spt)),  // [425] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc_spt)),  // [426] HRR_API_HIPLAUNCHHOSTFUNC_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetStreamDeviceId)),  // [427] HRR_API_HIPGETSTREAMDEVICEID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemsetNode)),  // [428] HRR_API_HIPDRVGRAPHADDMEMSETNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddExternalSemaphoresWaitNode)),  // [429] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddExternalSemaphoresSignalNode)),  // [430] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresSignalNodeSetParams)),  // [431] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresWaitNodeSetParams)),  // [432] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresSignalNodeGetParams)),  // [433] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExternalSemaphoresWaitNodeGetParams)),  // [434] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecExternalSemaphoresSignalNodeSetParams)),  // [435] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecExternalSemaphoresWaitNodeSetParams)),  // [436] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddNode)),  // [437] HRR_API_HIPGRAPHADDNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphInstantiateWithParams)),  // [438] HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtGetLastError)),  // [439] HRR_API_HIPEXTGETLASTERROR
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetBorderColor)),  // [440] HRR_API_HIPTEXREFGETBORDERCOLOR
+    static_cast<uint32_t>(sizeof(hrr_args_hipTexRefGetArray)),  // [441] HRR_API_HIPTEXREFGETARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetProcAddress)),  // [442] HRR_API_HIPGETPROCADDRESS
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBeginCaptureToGraph)),  // [443] HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetFuncBySymbol)),  // [444] HRR_API_HIPGETFUNCBYSYMBOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipSetValidDevices)),  // [445] HRR_API_HIPSETVALIDDEVICES
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoD)),  // [446] HRR_API_HIPMEMCPYATOD
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyDtoA)),  // [447] HRR_API_HIPMEMCPYDTOA
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoA)),  // [448] HRR_API_HIPMEMCPYATOA
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyAtoHAsync)),  // [449] HRR_API_HIPMEMCPYATOHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyHtoAAsync)),  // [450] HRR_API_HIPMEMCPYHTOAASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy2DArrayToArray)),  // [451] HRR_API_HIPMEMCPY2DARRAYTOARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemFreeNode)),  // [452] HRR_API_HIPDRVGRAPHADDMEMFREENODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphExecMemcpyNodeSetParams)),  // [453] HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphExecMemsetNodeSetParams)),  // [454] HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecGetFlags)),  // [455] HRR_API_HIPGRAPHEXECGETFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeSetParams)),  // [456] HRR_API_HIPGRAPHNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecNodeSetParams)),  // [457] HRR_API_HIPGRAPHEXECNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipExternalMemoryGetMappedMipmappedArray)),  // [458] HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphMemcpyNodeGetParams)),  // [459] HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphMemcpyNodeSetParams)),  // [460] HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtHostAlloc)),  // [461] HRR_API_HIPEXTHOSTALLOC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetTexture1DLinearMaxWidth)),  // [462] HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamBatchMemOp)),  // [463] HRR_API_HIPSTREAMBATCHMEMOP
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphAddBatchMemOpNode)),  // [464] HRR_API_HIPGRAPHADDBATCHMEMOPNODE
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphBatchMemOpNodeGetParams)),  // [465] HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphBatchMemOpNodeSetParams)),  // [466] HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecBatchMemOpNodeSetParams)),  // [467] HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipLinkAddData)),  // [468] HRR_API_HIPLINKADDDATA
+    static_cast<uint32_t>(sizeof(hrr_args_hipLinkAddFile)),  // [469] HRR_API_HIPLINKADDFILE
+    static_cast<uint32_t>(sizeof(hrr_args_hipLinkComplete)),  // [470] HRR_API_HIPLINKCOMPLETE
+    static_cast<uint32_t>(sizeof(hrr_args_hipLinkCreate)),  // [471] HRR_API_HIPLINKCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipLinkDestroy)),  // [472] HRR_API_HIPLINKDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipEventRecordWithFlags)),  // [473] HRR_API_HIPEVENTRECORDWITHFLAGS
+    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernelExC)),  // [474] HRR_API_HIPLAUNCHKERNELEXC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvLaunchKernelEx)),  // [475] HRR_API_HIPDRVLAUNCHKERNELEX
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetHandleForAddressRange)),  // [476] HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetFunctionCount)),  // [477] HRR_API_HIPMODULEGETFUNCTIONCOUNT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D8)),  // [478] HRR_API_HIPMEMSETD2D8
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D8Async)),  // [479] HRR_API_HIPMEMSETD2D8ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D16)),  // [480] HRR_API_HIPMEMSETD2D16
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D16Async)),  // [481] HRR_API_HIPMEMSETD2D16ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D32)),  // [482] HRR_API_HIPMEMSETD2D32
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemsetD2D32Async)),  // [483] HRR_API_HIPMEMSETD2D32ASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetAttribute)),  // [484] HRR_API_HIPSTREAMGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamSetAttribute)),  // [485] HRR_API_HIPSTREAMSETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadFatBinary)),  // [486] HRR_API_HIPMODULELOADFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyBatchAsync)),  // [487] HRR_API_HIPMEMCPYBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DBatchAsync)),  // [488] HRR_API_HIPMEMCPY3DBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DPeer)),  // [489] HRR_API_HIPMEMCPY3DPEER
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DPeerAsync)),  // [490] HRR_API_HIPMEMCPY3DPEERASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDriverEntryPoint)),  // [491] HRR_API_HIPGETDRIVERENTRYPOINT
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetDriverEntryPoint_spt)),  // [492] HRR_API_HIPGETDRIVERENTRYPOINT_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchAsync_v2)),  // [493] HRR_API_HIPMEMPREFETCHASYNC_V2
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemAdvise_v2)),  // [494] HRR_API_HIPMEMADVISE_V2
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetId)),  // [495] HRR_API_HIPSTREAMGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryLoadData)),  // [496] HRR_API_HIPLIBRARYLOADDATA
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryLoadFromFile)),  // [497] HRR_API_HIPLIBRARYLOADFROMFILE
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryUnload)),  // [498] HRR_API_HIPLIBRARYUNLOAD
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetKernel)),  // [499] HRR_API_HIPLIBRARYGETKERNEL
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetKernelCount)),  // [500] HRR_API_HIPLIBRARYGETKERNELCOUNT
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamCopyAttributes)),  // [501] HRR_API_HIPSTREAMCOPYATTRIBUTES
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryEnumerateKernels)),  // [502] HRR_API_HIPLIBRARYENUMERATEKERNELS
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetLibrary)),  // [503] HRR_API_HIPKERNELGETLIBRARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetName)),  // [504] HRR_API_HIPKERNELGETNAME
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyAvailableDynamicSMemPerBlock)),  // [505] HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK
+    static_cast<uint32_t>(sizeof(hrr_args_hipGetProcAddress_spt)),  // [506] HRR_API_HIPGETPROCADDRESS_SPT
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetParamInfo)),  // [507] HRR_API_HIPKERNELGETPARAMINFO
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtDisableLogging)),  // [508] HRR_API_HIPEXTDISABLELOGGING
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtEnableLogging)),  // [509] HRR_API_HIPEXTENABLELOGGING
+    static_cast<uint32_t>(sizeof(hrr_args_hipExtSetLoggingParams)),  // [510] HRR_API_HIPEXTSETLOGGINGPARAMS
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemSetMemPool)),  // [511] HRR_API_HIPMEMSETMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetMemPool)),  // [512] HRR_API_HIPMEMGETMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipMipmappedArrayGetMemoryRequirements)),  // [513] HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetAttribute)),  // [514] HRR_API_HIPKERNELGETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetAttribute)),  // [515] HRR_API_HIPKERNELSETATTRIBUTE
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelGetFunction)),  // [516] HRR_API_HIPKERNELGETFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemPrefetchBatchAsync)),  // [517] HRR_API_HIPMEMPREFETCHBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxPotentialClusterSize)),  // [518] HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipOccupancyMaxActiveClusters)),  // [519] HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS
+    static_cast<uint32_t>(sizeof(hrr_args_hipGreenCtxCreate)),  // [520] HRR_API_HIPGREENCTXCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxDestroy)),  // [521] HRR_API_HIPEXECUTIONCTXDESTROY
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxStreamCreate)),  // [522] HRR_API_HIPEXECUTIONCTXSTREAMCREATE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetDevResource)),  // [523] HRR_API_HIPDEVICEGETDEVRESOURCE
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevSmResourceSplitByCount)),  // [524] HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevSmResourceSplit)),  // [525] HRR_API_HIPDEVSMRESOURCESPLIT
+    static_cast<uint32_t>(sizeof(hrr_args_hipDevResourceGenerateDesc)),  // [526] HRR_API_HIPDEVRESOURCEGENERATEDESC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetExecutionCtx)),  // [527] HRR_API_HIPDEVICEGETEXECUTIONCTX
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetDevResource)),  // [528] HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetDevice)),  // [529] HRR_API_HIPEXECUTIONCTXGETDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxGetId)),  // [530] HRR_API_HIPEXECUTIONCTXGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetDevResource)),  // [531] HRR_API_HIPSTREAMGETDEVRESOURCE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxRecordEvent)),  // [532] HRR_API_HIPEXECUTIONCTXRECORDEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxSynchronize)),  // [533] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
+    static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxWaitEvent)),  // [534] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetGlobal)),  // [535] HRR_API_HIPLIBRARYGETGLOBAL
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetManaged)),  // [536] HRR_API_HIPLIBRARYGETMANAGED
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemDiscardBatchAsync)),  // [537] HRR_API_HIPMEMDISCARDBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemDiscardBatchAsync)),  // [538] HRR_API_HIPDRVMEMDISCARDBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemDiscardAndPrefetchBatchAsync)),  // [539] HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync)),  // [540] HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetDefaultMemPool)),  // [541] HRR_API_HIPMEMGETDEFAULTMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetLuid)),  // [542] HRR_API_HIPDEVICEGETLUID
+    static_cast<uint32_t>(sizeof(hrr_args_hipInitDevice)),  // [543] HRR_API_HIPINITDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [544] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [545] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [546] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [547] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [548] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [549] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [550] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [551] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [552] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
 // Playback dispatch table — indexed by hrr_api_id_t
 // ============================================================
 hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
-    playback___hipPopCallConfiguration,  // [0] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [1] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [2] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [3] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [4] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [5] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [6] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [7] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [8] HRR_API_HIPUNREGISTERFATBINARY
-    playback_hipApiName,  // [9] HRR_API_HIPAPINAME
-    playback_hipArray3DCreate,  // [10] HRR_API_HIPARRAY3DCREATE
-    playback_hipArray3DGetDescriptor,  // [11] HRR_API_HIPARRAY3DGETDESCRIPTOR
-    playback_hipArrayCreate,  // [12] HRR_API_HIPARRAYCREATE
-    playback_hipArrayDestroy,  // [13] HRR_API_HIPARRAYDESTROY
-    playback_hipArrayGetDescriptor,  // [14] HRR_API_HIPARRAYGETDESCRIPTOR
-    playback_hipArrayGetInfo,  // [15] HRR_API_HIPARRAYGETINFO
-    playback_hipBindTexture,  // [16] HRR_API_HIPBINDTEXTURE
-    playback_hipBindTexture2D,  // [17] HRR_API_HIPBINDTEXTURE2D
-    playback_hipBindTextureToArray,  // [18] HRR_API_HIPBINDTEXTURETOARRAY
-    playback_hipBindTextureToMipmappedArray,  // [19] HRR_API_HIPBINDTEXTURETOMIPMAPPEDARRAY
-    playback_hipChooseDevice,  // [20] HRR_API_HIPCHOOSEDEVICE
-    playback_hipChooseDeviceR0000,  // [21] HRR_API_HIPCHOOSEDEVICER0000
-    playback_hipConfigureCall,  // [22] HRR_API_HIPCONFIGURECALL
-    playback_hipCreateSurfaceObject,  // [23] HRR_API_HIPCREATESURFACEOBJECT
-    playback_hipCreateTextureObject,  // [24] HRR_API_HIPCREATETEXTUREOBJECT
-    playback_hipCtxCreate,  // [25] HRR_API_HIPCTXCREATE
-    playback_hipCtxDestroy,  // [26] HRR_API_HIPCTXDESTROY
-    playback_hipCtxDisablePeerAccess,  // [27] HRR_API_HIPCTXDISABLEPEERACCESS
-    playback_hipCtxEnablePeerAccess,  // [28] HRR_API_HIPCTXENABLEPEERACCESS
-    playback_hipCtxGetApiVersion,  // [29] HRR_API_HIPCTXGETAPIVERSION
-    playback_hipCtxGetCacheConfig,  // [30] HRR_API_HIPCTXGETCACHECONFIG
-    playback_hipCtxGetCurrent,  // [31] HRR_API_HIPCTXGETCURRENT
-    playback_hipCtxGetDevice,  // [32] HRR_API_HIPCTXGETDEVICE
-    playback_hipCtxGetFlags,  // [33] HRR_API_HIPCTXGETFLAGS
-    playback_hipCtxGetSharedMemConfig,  // [34] HRR_API_HIPCTXGETSHAREDMEMCONFIG
-    playback_hipCtxPopCurrent,  // [35] HRR_API_HIPCTXPOPCURRENT
-    playback_hipCtxPushCurrent,  // [36] HRR_API_HIPCTXPUSHCURRENT
-    playback_hipCtxSetCacheConfig,  // [37] HRR_API_HIPCTXSETCACHECONFIG
-    playback_hipCtxSetCurrent,  // [38] HRR_API_HIPCTXSETCURRENT
-    playback_hipCtxSetSharedMemConfig,  // [39] HRR_API_HIPCTXSETSHAREDMEMCONFIG
-    playback_hipCtxSynchronize,  // [40] HRR_API_HIPCTXSYNCHRONIZE
-    playback_hipDestroyExternalMemory,  // [41] HRR_API_HIPDESTROYEXTERNALMEMORY
-    playback_hipDestroyExternalSemaphore,  // [42] HRR_API_HIPDESTROYEXTERNALSEMAPHORE
-    playback_hipDestroySurfaceObject,  // [43] HRR_API_HIPDESTROYSURFACEOBJECT
-    playback_hipDestroyTextureObject,  // [44] HRR_API_HIPDESTROYTEXTUREOBJECT
-    playback_hipDeviceCanAccessPeer,  // [45] HRR_API_HIPDEVICECANACCESSPEER
-    playback_hipDeviceComputeCapability,  // [46] HRR_API_HIPDEVICECOMPUTECAPABILITY
-    playback_hipDeviceDisablePeerAccess,  // [47] HRR_API_HIPDEVICEDISABLEPEERACCESS
-    playback_hipDeviceEnablePeerAccess,  // [48] HRR_API_HIPDEVICEENABLEPEERACCESS
-    playback_hipDeviceGet,  // [49] HRR_API_HIPDEVICEGET
-    playback_hipDeviceGetAttribute,  // [50] HRR_API_HIPDEVICEGETATTRIBUTE
-    playback_hipDeviceGetByPCIBusId,  // [51] HRR_API_HIPDEVICEGETBYPCIBUSID
-    playback_hipDeviceGetCacheConfig,  // [52] HRR_API_HIPDEVICEGETCACHECONFIG
-    playback_hipDeviceGetDefaultMemPool,  // [53] HRR_API_HIPDEVICEGETDEFAULTMEMPOOL
-    playback_hipDeviceGetGraphMemAttribute,  // [54] HRR_API_HIPDEVICEGETGRAPHMEMATTRIBUTE
-    playback_hipDeviceGetLimit,  // [55] HRR_API_HIPDEVICEGETLIMIT
-    playback_hipDeviceGetMemPool,  // [56] HRR_API_HIPDEVICEGETMEMPOOL
-    playback_hipDeviceGetName,  // [57] HRR_API_HIPDEVICEGETNAME
-    playback_hipDeviceGetP2PAttribute,  // [58] HRR_API_HIPDEVICEGETP2PATTRIBUTE
-    playback_hipDeviceGetPCIBusId,  // [59] HRR_API_HIPDEVICEGETPCIBUSID
-    playback_hipDeviceGetSharedMemConfig,  // [60] HRR_API_HIPDEVICEGETSHAREDMEMCONFIG
-    playback_hipDeviceGetStreamPriorityRange,  // [61] HRR_API_HIPDEVICEGETSTREAMPRIORITYRANGE
-    playback_hipDeviceGetUuid,  // [62] HRR_API_HIPDEVICEGETUUID
-    playback_hipDeviceGraphMemTrim,  // [63] HRR_API_HIPDEVICEGRAPHMEMTRIM
-    playback_hipDevicePrimaryCtxGetState,  // [64] HRR_API_HIPDEVICEPRIMARYCTXGETSTATE
-    playback_hipDevicePrimaryCtxRelease,  // [65] HRR_API_HIPDEVICEPRIMARYCTXRELEASE
-    playback_hipDevicePrimaryCtxReset,  // [66] HRR_API_HIPDEVICEPRIMARYCTXRESET
-    playback_hipDevicePrimaryCtxRetain,  // [67] HRR_API_HIPDEVICEPRIMARYCTXRETAIN
-    playback_hipDevicePrimaryCtxSetFlags,  // [68] HRR_API_HIPDEVICEPRIMARYCTXSETFLAGS
-    playback_hipDeviceReset,  // [69] HRR_API_HIPDEVICERESET
-    playback_hipDeviceSetCacheConfig,  // [70] HRR_API_HIPDEVICESETCACHECONFIG
-    playback_hipDeviceSetGraphMemAttribute,  // [71] HRR_API_HIPDEVICESETGRAPHMEMATTRIBUTE
-    playback_hipDeviceSetLimit,  // [72] HRR_API_HIPDEVICESETLIMIT
-    playback_hipDeviceSetMemPool,  // [73] HRR_API_HIPDEVICESETMEMPOOL
-    playback_hipDeviceSetSharedMemConfig,  // [74] HRR_API_HIPDEVICESETSHAREDMEMCONFIG
-    playback_hipDeviceSynchronize,  // [75] HRR_API_HIPDEVICESYNCHRONIZE
-    playback_hipDeviceTotalMem,  // [76] HRR_API_HIPDEVICETOTALMEM
-    playback_hipDriverGetVersion,  // [77] HRR_API_HIPDRIVERGETVERSION
-    playback_hipDrvGetErrorName,  // [78] HRR_API_HIPDRVGETERRORNAME
-    playback_hipDrvGetErrorString,  // [79] HRR_API_HIPDRVGETERRORSTRING
-    playback_hipDrvGraphAddMemcpyNode,  // [80] HRR_API_HIPDRVGRAPHADDMEMCPYNODE
-    playback_hipDrvMemcpy2DUnaligned,  // [81] HRR_API_HIPDRVMEMCPY2DUNALIGNED
-    playback_hipDrvMemcpy3D,  // [82] HRR_API_HIPDRVMEMCPY3D
-    playback_hipDrvMemcpy3DAsync,  // [83] HRR_API_HIPDRVMEMCPY3DASYNC
-    playback_hipDrvPointerGetAttributes,  // [84] HRR_API_HIPDRVPOINTERGETATTRIBUTES
-    playback_hipEventCreate,  // [85] HRR_API_HIPEVENTCREATE
-    playback_hipEventCreateWithFlags,  // [86] HRR_API_HIPEVENTCREATEWITHFLAGS
-    playback_hipEventDestroy,  // [87] HRR_API_HIPEVENTDESTROY
-    playback_hipEventElapsedTime,  // [88] HRR_API_HIPEVENTELAPSEDTIME
-    playback_hipEventQuery,  // [89] HRR_API_HIPEVENTQUERY
-    playback_hipEventRecord,  // [90] HRR_API_HIPEVENTRECORD
-    playback_hipEventSynchronize,  // [91] HRR_API_HIPEVENTSYNCHRONIZE
-    playback_hipExtGetLinkTypeAndHopCount,  // [92] HRR_API_HIPEXTGETLINKTYPEANDHOPCOUNT
-    playback_hipExtLaunchKernel,  // [93] HRR_API_HIPEXTLAUNCHKERNEL
-    playback_hipExtLaunchMultiKernelMultiDevice,  // [94] HRR_API_HIPEXTLAUNCHMULTIKERNELMULTIDEVICE
-    playback_hipExtMallocWithFlags,  // [95] HRR_API_HIPEXTMALLOCWITHFLAGS
-    playback_hipExtStreamCreateWithCUMask,  // [96] HRR_API_HIPEXTSTREAMCREATEWITHCUMASK
-    playback_hipExtStreamGetCUMask,  // [97] HRR_API_HIPEXTSTREAMGETCUMASK
-    playback_hipExternalMemoryGetMappedBuffer,  // [98] HRR_API_HIPEXTERNALMEMORYGETMAPPEDBUFFER
-    playback_hipFree,  // [99] HRR_API_HIPFREE
-    playback_hipFreeArray,  // [100] HRR_API_HIPFREEARRAY
-    playback_hipFreeAsync,  // [101] HRR_API_HIPFREEASYNC
-    playback_hipFreeHost,  // [102] HRR_API_HIPFREEHOST
-    playback_hipFreeMipmappedArray,  // [103] HRR_API_HIPFREEMIPMAPPEDARRAY
-    playback_hipFuncGetAttribute,  // [104] HRR_API_HIPFUNCGETATTRIBUTE
-    playback_hipFuncGetAttributes,  // [105] HRR_API_HIPFUNCGETATTRIBUTES
-    playback_hipFuncSetAttribute,  // [106] HRR_API_HIPFUNCSETATTRIBUTE
-    playback_hipFuncSetCacheConfig,  // [107] HRR_API_HIPFUNCSETCACHECONFIG
-    playback_hipFuncSetSharedMemConfig,  // [108] HRR_API_HIPFUNCSETSHAREDMEMCONFIG
-    playback_hipGLGetDevices,  // [109] HRR_API_HIPGLGETDEVICES
-    playback_hipGetChannelDesc,  // [110] HRR_API_HIPGETCHANNELDESC
-    playback_hipGetDevice,  // [111] HRR_API_HIPGETDEVICE
-    playback_hipGetDeviceCount,  // [112] HRR_API_HIPGETDEVICECOUNT
-    playback_hipGetDeviceFlags,  // [113] HRR_API_HIPGETDEVICEFLAGS
-    playback_hipGetDevicePropertiesR0600,  // [114] HRR_API_HIPGETDEVICEPROPERTIESR0600
-    playback_hipGetDevicePropertiesR0000,  // [115] HRR_API_HIPGETDEVICEPROPERTIESR0000
-    playback_hipGetErrorName,  // [116] HRR_API_HIPGETERRORNAME
-    playback_hipGetErrorString,  // [117] HRR_API_HIPGETERRORSTRING
-    playback_hipGetLastError,  // [118] HRR_API_HIPGETLASTERROR
-    playback_hipGetMipmappedArrayLevel,  // [119] HRR_API_HIPGETMIPMAPPEDARRAYLEVEL
-    playback_hipGetSymbolAddress,  // [120] HRR_API_HIPGETSYMBOLADDRESS
-    playback_hipGetSymbolSize,  // [121] HRR_API_HIPGETSYMBOLSIZE
-    playback_hipGetTextureAlignmentOffset,  // [122] HRR_API_HIPGETTEXTUREALIGNMENTOFFSET
-    playback_hipGetTextureObjectResourceDesc,  // [123] HRR_API_HIPGETTEXTUREOBJECTRESOURCEDESC
-    playback_hipGetTextureObjectResourceViewDesc,  // [124] HRR_API_HIPGETTEXTUREOBJECTRESOURCEVIEWDESC
-    playback_hipGetTextureObjectTextureDesc,  // [125] HRR_API_HIPGETTEXTUREOBJECTTEXTUREDESC
-    playback_hipGetTextureReference,  // [126] HRR_API_HIPGETTEXTUREREFERENCE
-    playback_hipGraphAddChildGraphNode,  // [127] HRR_API_HIPGRAPHADDCHILDGRAPHNODE
-    playback_hipGraphAddDependencies,  // [128] HRR_API_HIPGRAPHADDDEPENDENCIES
-    playback_hipGraphAddEmptyNode,  // [129] HRR_API_HIPGRAPHADDEMPTYNODE
-    playback_hipGraphAddEventRecordNode,  // [130] HRR_API_HIPGRAPHADDEVENTRECORDNODE
-    playback_hipGraphAddEventWaitNode,  // [131] HRR_API_HIPGRAPHADDEVENTWAITNODE
-    playback_hipGraphAddHostNode,  // [132] HRR_API_HIPGRAPHADDHOSTNODE
-    playback_hipGraphAddKernelNode,  // [133] HRR_API_HIPGRAPHADDKERNELNODE
-    playback_hipGraphAddMemAllocNode,  // [134] HRR_API_HIPGRAPHADDMEMALLOCNODE
-    playback_hipGraphAddMemFreeNode,  // [135] HRR_API_HIPGRAPHADDMEMFREENODE
-    playback_hipGraphAddMemcpyNode,  // [136] HRR_API_HIPGRAPHADDMEMCPYNODE
-    playback_hipGraphAddMemcpyNode1D,  // [137] HRR_API_HIPGRAPHADDMEMCPYNODE1D
-    playback_hipGraphAddMemcpyNodeFromSymbol,  // [138] HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL
-    playback_hipGraphAddMemcpyNodeToSymbol,  // [139] HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL
-    playback_hipGraphAddMemsetNode,  // [140] HRR_API_HIPGRAPHADDMEMSETNODE
-    playback_hipGraphChildGraphNodeGetGraph,  // [141] HRR_API_HIPGRAPHCHILDGRAPHNODEGETGRAPH
-    playback_hipGraphClone,  // [142] HRR_API_HIPGRAPHCLONE
-    playback_hipGraphCreate,  // [143] HRR_API_HIPGRAPHCREATE
-    playback_hipGraphDebugDotPrint,  // [144] HRR_API_HIPGRAPHDEBUGDOTPRINT
-    playback_hipGraphDestroy,  // [145] HRR_API_HIPGRAPHDESTROY
-    playback_hipGraphDestroyNode,  // [146] HRR_API_HIPGRAPHDESTROYNODE
-    playback_hipGraphEventRecordNodeGetEvent,  // [147] HRR_API_HIPGRAPHEVENTRECORDNODEGETEVENT
-    playback_hipGraphEventRecordNodeSetEvent,  // [148] HRR_API_HIPGRAPHEVENTRECORDNODESETEVENT
-    playback_hipGraphEventWaitNodeGetEvent,  // [149] HRR_API_HIPGRAPHEVENTWAITNODEGETEVENT
-    playback_hipGraphEventWaitNodeSetEvent,  // [150] HRR_API_HIPGRAPHEVENTWAITNODESETEVENT
-    playback_hipGraphExecChildGraphNodeSetParams,  // [151] HRR_API_HIPGRAPHEXECCHILDGRAPHNODESETPARAMS
-    playback_hipGraphExecDestroy,  // [152] HRR_API_HIPGRAPHEXECDESTROY
-    playback_hipGraphExecEventRecordNodeSetEvent,  // [153] HRR_API_HIPGRAPHEXECEVENTRECORDNODESETEVENT
-    playback_hipGraphExecEventWaitNodeSetEvent,  // [154] HRR_API_HIPGRAPHEXECEVENTWAITNODESETEVENT
-    playback_hipGraphExecHostNodeSetParams,  // [155] HRR_API_HIPGRAPHEXECHOSTNODESETPARAMS
-    playback_hipGraphExecKernelNodeSetParams,  // [156] HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS
-    playback_hipGraphExecMemcpyNodeSetParams,  // [157] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS
-    playback_hipGraphExecMemcpyNodeSetParams1D,  // [158] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS1D
-    playback_hipGraphExecMemcpyNodeSetParamsFromSymbol,  // [159] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSFROMSYMBOL
-    playback_hipGraphExecMemcpyNodeSetParamsToSymbol,  // [160] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL
-    playback_hipGraphExecMemsetNodeSetParams,  // [161] HRR_API_HIPGRAPHEXECMEMSETNODESETPARAMS
-    playback_hipGraphExecUpdate,  // [162] HRR_API_HIPGRAPHEXECUPDATE
-    playback_hipGraphGetEdges,  // [163] HRR_API_HIPGRAPHGETEDGES
-    playback_hipGraphGetNodes,  // [164] HRR_API_HIPGRAPHGETNODES
-    playback_hipGraphGetRootNodes,  // [165] HRR_API_HIPGRAPHGETROOTNODES
-    playback_hipGraphHostNodeGetParams,  // [166] HRR_API_HIPGRAPHHOSTNODEGETPARAMS
-    playback_hipGraphHostNodeSetParams,  // [167] HRR_API_HIPGRAPHHOSTNODESETPARAMS
-    playback_hipGraphInstantiate,  // [168] HRR_API_HIPGRAPHINSTANTIATE
-    playback_hipGraphInstantiateWithFlags,  // [169] HRR_API_HIPGRAPHINSTANTIATEWITHFLAGS
-    playback_hipGraphKernelNodeCopyAttributes,  // [170] HRR_API_HIPGRAPHKERNELNODECOPYATTRIBUTES
-    playback_hipGraphKernelNodeGetAttribute,  // [171] HRR_API_HIPGRAPHKERNELNODEGETATTRIBUTE
-    playback_hipGraphKernelNodeGetParams,  // [172] HRR_API_HIPGRAPHKERNELNODEGETPARAMS
-    playback_hipGraphKernelNodeSetAttribute,  // [173] HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE
-    playback_hipGraphKernelNodeSetParams,  // [174] HRR_API_HIPGRAPHKERNELNODESETPARAMS
-    playback_hipGraphLaunch,  // [175] HRR_API_HIPGRAPHLAUNCH
-    playback_hipGraphMemAllocNodeGetParams,  // [176] HRR_API_HIPGRAPHMEMALLOCNODEGETPARAMS
-    playback_hipGraphMemFreeNodeGetParams,  // [177] HRR_API_HIPGRAPHMEMFREENODEGETPARAMS
-    playback_hipGraphMemcpyNodeGetParams,  // [178] HRR_API_HIPGRAPHMEMCPYNODEGETPARAMS
-    playback_hipGraphMemcpyNodeSetParams,  // [179] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS
-    playback_hipGraphMemcpyNodeSetParams1D,  // [180] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS1D
-    playback_hipGraphMemcpyNodeSetParamsFromSymbol,  // [181] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSFROMSYMBOL
-    playback_hipGraphMemcpyNodeSetParamsToSymbol,  // [182] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL
-    playback_hipGraphMemsetNodeGetParams,  // [183] HRR_API_HIPGRAPHMEMSETNODEGETPARAMS
-    playback_hipGraphMemsetNodeSetParams,  // [184] HRR_API_HIPGRAPHMEMSETNODESETPARAMS
-    playback_hipGraphNodeFindInClone,  // [185] HRR_API_HIPGRAPHNODEFINDINCLONE
-    playback_hipGraphNodeGetDependencies,  // [186] HRR_API_HIPGRAPHNODEGETDEPENDENCIES
-    playback_hipGraphNodeGetDependentNodes,  // [187] HRR_API_HIPGRAPHNODEGETDEPENDENTNODES
-    playback_hipGraphNodeGetEnabled,  // [188] HRR_API_HIPGRAPHNODEGETENABLED
-    playback_hipGraphNodeGetType,  // [189] HRR_API_HIPGRAPHNODEGETTYPE
-    playback_hipGraphNodeSetEnabled,  // [190] HRR_API_HIPGRAPHNODESETENABLED
-    playback_hipGraphReleaseUserObject,  // [191] HRR_API_HIPGRAPHRELEASEUSEROBJECT
-    playback_hipGraphRemoveDependencies,  // [192] HRR_API_HIPGRAPHREMOVEDEPENDENCIES
-    playback_hipGraphRetainUserObject,  // [193] HRR_API_HIPGRAPHRETAINUSEROBJECT
-    playback_hipGraphUpload,  // [194] HRR_API_HIPGRAPHUPLOAD
-    playback_hipGraphicsGLRegisterBuffer,  // [195] HRR_API_HIPGRAPHICSGLREGISTERBUFFER
-    playback_hipGraphicsGLRegisterImage,  // [196] HRR_API_HIPGRAPHICSGLREGISTERIMAGE
-    playback_hipGraphicsMapResources,  // [197] HRR_API_HIPGRAPHICSMAPRESOURCES
-    playback_hipGraphicsResourceGetMappedPointer,  // [198] HRR_API_HIPGRAPHICSRESOURCEGETMAPPEDPOINTER
-    playback_hipGraphicsSubResourceGetMappedArray,  // [199] HRR_API_HIPGRAPHICSSUBRESOURCEGETMAPPEDARRAY
-    playback_hipGraphicsUnmapResources,  // [200] HRR_API_HIPGRAPHICSUNMAPRESOURCES
-    playback_hipGraphicsUnregisterResource,  // [201] HRR_API_HIPGRAPHICSUNREGISTERRESOURCE
-    playback_hipHostAlloc,  // [202] HRR_API_HIPHOSTALLOC
-    playback_hipHostFree,  // [203] HRR_API_HIPHOSTFREE
-    playback_hipHostGetDevicePointer,  // [204] HRR_API_HIPHOSTGETDEVICEPOINTER
-    playback_hipHostGetFlags,  // [205] HRR_API_HIPHOSTGETFLAGS
-    playback_hipHostMalloc,  // [206] HRR_API_HIPHOSTMALLOC
-    playback_hipHostRegister,  // [207] HRR_API_HIPHOSTREGISTER
-    playback_hipHostUnregister,  // [208] HRR_API_HIPHOSTUNREGISTER
-    playback_hipImportExternalMemory,  // [209] HRR_API_HIPIMPORTEXTERNALMEMORY
-    playback_hipImportExternalSemaphore,  // [210] HRR_API_HIPIMPORTEXTERNALSEMAPHORE
-    playback_hipInit,  // [211] HRR_API_HIPINIT
-    playback_hipIpcCloseMemHandle,  // [212] HRR_API_HIPIPCCLOSEMEMHANDLE
-    playback_hipIpcGetEventHandle,  // [213] HRR_API_HIPIPCGETEVENTHANDLE
-    playback_hipIpcGetMemHandle,  // [214] HRR_API_HIPIPCGETMEMHANDLE
-    playback_hipIpcOpenEventHandle,  // [215] HRR_API_HIPIPCOPENEVENTHANDLE
-    playback_hipIpcOpenMemHandle,  // [216] HRR_API_HIPIPCOPENMEMHANDLE
-    playback_hipKernelNameRef,  // [217] HRR_API_HIPKERNELNAMEREF
-    playback_hipKernelNameRefByPtr,  // [218] HRR_API_HIPKERNELNAMEREFBYPTR
-    playback_hipLaunchByPtr,  // [219] HRR_API_HIPLAUNCHBYPTR
-    playback_hipLaunchCooperativeKernel,  // [220] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
-    playback_hipLaunchCooperativeKernelMultiDevice,  // [221] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    playback_hipLaunchHostFunc,  // [222] HRR_API_HIPLAUNCHHOSTFUNC
-    playback_hipLaunchKernel,  // [223] HRR_API_HIPLAUNCHKERNEL
-    playback_hipMalloc,  // [224] HRR_API_HIPMALLOC
-    playback_hipMalloc3D,  // [225] HRR_API_HIPMALLOC3D
-    playback_hipMalloc3DArray,  // [226] HRR_API_HIPMALLOC3DARRAY
-    playback_hipMallocArray,  // [227] HRR_API_HIPMALLOCARRAY
-    playback_hipMallocAsync,  // [228] HRR_API_HIPMALLOCASYNC
-    playback_hipMallocFromPoolAsync,  // [229] HRR_API_HIPMALLOCFROMPOOLASYNC
-    playback_hipMallocHost,  // [230] HRR_API_HIPMALLOCHOST
-    playback_hipMallocManaged,  // [231] HRR_API_HIPMALLOCMANAGED
-    playback_hipMallocMipmappedArray,  // [232] HRR_API_HIPMALLOCMIPMAPPEDARRAY
-    playback_hipMallocPitch,  // [233] HRR_API_HIPMALLOCPITCH
-    playback_hipMemAddressFree,  // [234] HRR_API_HIPMEMADDRESSFREE
-    playback_hipMemAddressReserve,  // [235] HRR_API_HIPMEMADDRESSRESERVE
-    playback_hipMemAdvise,  // [236] HRR_API_HIPMEMADVISE
-    playback_hipMemAdvise_v2,  // [237] HRR_API_HIPMEMADVISE_V2
-    playback_hipMemAllocHost,  // [238] HRR_API_HIPMEMALLOCHOST
-    playback_hipMemAllocPitch,  // [239] HRR_API_HIPMEMALLOCPITCH
-    playback_hipMemCreate,  // [240] HRR_API_HIPMEMCREATE
-    playback_hipMemExportToShareableHandle,  // [241] HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE
-    playback_hipMemGetAccess,  // [242] HRR_API_HIPMEMGETACCESS
-    playback_hipMemGetAddressRange,  // [243] HRR_API_HIPMEMGETADDRESSRANGE
-    playback_hipMemGetAllocationGranularity,  // [244] HRR_API_HIPMEMGETALLOCATIONGRANULARITY
-    playback_hipMemGetAllocationPropertiesFromHandle,  // [245] HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE
-    playback_hipMemGetInfo,  // [246] HRR_API_HIPMEMGETINFO
-    playback_hipMemImportFromShareableHandle,  // [247] HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE
-    playback_hipMemMap,  // [248] HRR_API_HIPMEMMAP
-    playback_hipMemMapArrayAsync,  // [249] HRR_API_HIPMEMMAPARRAYASYNC
-    playback_hipMemPoolCreate,  // [250] HRR_API_HIPMEMPOOLCREATE
-    playback_hipMemPoolDestroy,  // [251] HRR_API_HIPMEMPOOLDESTROY
-    playback_hipMemPoolExportPointer,  // [252] HRR_API_HIPMEMPOOLEXPORTPOINTER
-    playback_hipMemPoolExportToShareableHandle,  // [253] HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE
-    playback_hipMemPoolGetAccess,  // [254] HRR_API_HIPMEMPOOLGETACCESS
-    playback_hipMemPoolGetAttribute,  // [255] HRR_API_HIPMEMPOOLGETATTRIBUTE
-    playback_hipMemPoolImportFromShareableHandle,  // [256] HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE
-    playback_hipMemPoolImportPointer,  // [257] HRR_API_HIPMEMPOOLIMPORTPOINTER
-    playback_hipMemPoolSetAccess,  // [258] HRR_API_HIPMEMPOOLSETACCESS
-    playback_hipMemPoolSetAttribute,  // [259] HRR_API_HIPMEMPOOLSETATTRIBUTE
-    playback_hipMemPoolTrimTo,  // [260] HRR_API_HIPMEMPOOLTRIMTO
-    playback_hipMemPrefetchAsync,  // [261] HRR_API_HIPMEMPREFETCHASYNC
-    playback_hipMemPrefetchAsync_v2,  // [262] HRR_API_HIPMEMPREFETCHASYNC_V2
-    playback_hipMemPrefetchBatchAsync,  // [263] HRR_API_HIPMEMPREFETCHBATCHASYNC
-    playback_hipMemDiscardBatchAsync,  // [264] HRR_API_HIPMEMDISCARDBATCHASYNC
-    playback_hipDrvMemDiscardBatchAsync,  // [265] HRR_API_HIPDRVMEMDISCARDBATCHASYNC
-    playback_hipMemDiscardAndPrefetchBatchAsync,  // [266] HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC
-    playback_hipDrvMemDiscardAndPrefetchBatchAsync,  // [267] HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC
-    playback_hipMemPtrGetInfo,  // [268] HRR_API_HIPMEMPTRGETINFO
-    playback_hipMemRangeGetAttribute,  // [269] HRR_API_HIPMEMRANGEGETATTRIBUTE
-    playback_hipMemRangeGetAttributes,  // [270] HRR_API_HIPMEMRANGEGETATTRIBUTES
-    playback_hipMemRelease,  // [271] HRR_API_HIPMEMRELEASE
-    playback_hipMemRetainAllocationHandle,  // [272] HRR_API_HIPMEMRETAINALLOCATIONHANDLE
-    playback_hipMemSetAccess,  // [273] HRR_API_HIPMEMSETACCESS
-    playback_hipMemUnmap,  // [274] HRR_API_HIPMEMUNMAP
-    playback_hipMemcpy,  // [275] HRR_API_HIPMEMCPY
-    playback_hipMemcpy2D,  // [276] HRR_API_HIPMEMCPY2D
-    playback_hipMemcpy2DAsync,  // [277] HRR_API_HIPMEMCPY2DASYNC
-    playback_hipMemcpy2DFromArray,  // [278] HRR_API_HIPMEMCPY2DFROMARRAY
-    playback_hipMemcpy2DFromArrayAsync,  // [279] HRR_API_HIPMEMCPY2DFROMARRAYASYNC
-    playback_hipMemcpy2DToArray,  // [280] HRR_API_HIPMEMCPY2DTOARRAY
-    playback_hipMemcpy2DToArrayAsync,  // [281] HRR_API_HIPMEMCPY2DTOARRAYASYNC
-    playback_hipMemcpy3D,  // [282] HRR_API_HIPMEMCPY3D
-    playback_hipMemcpy3DAsync,  // [283] HRR_API_HIPMEMCPY3DASYNC
-    playback_hipMemcpyAsync,  // [284] HRR_API_HIPMEMCPYASYNC
-    playback_hipMemcpyAtoH,  // [285] HRR_API_HIPMEMCPYATOH
-    playback_hipMemcpyDtoD,  // [286] HRR_API_HIPMEMCPYDTOD
-    playback_hipMemcpyDtoDAsync,  // [287] HRR_API_HIPMEMCPYDTODASYNC
-    playback_hipMemcpyDtoH,  // [288] HRR_API_HIPMEMCPYDTOH
-    playback_hipMemcpyDtoHAsync,  // [289] HRR_API_HIPMEMCPYDTOHASYNC
-    playback_hipMemcpyFromArray,  // [290] HRR_API_HIPMEMCPYFROMARRAY
-    playback_hipMemcpyFromSymbol,  // [291] HRR_API_HIPMEMCPYFROMSYMBOL
-    playback_hipMemcpyFromSymbolAsync,  // [292] HRR_API_HIPMEMCPYFROMSYMBOLASYNC
-    playback_hipMemcpyHtoA,  // [293] HRR_API_HIPMEMCPYHTOA
-    playback_hipMemcpyHtoD,  // [294] HRR_API_HIPMEMCPYHTOD
-    playback_hipMemcpyHtoDAsync,  // [295] HRR_API_HIPMEMCPYHTODASYNC
-    playback_hipMemcpyParam2D,  // [296] HRR_API_HIPMEMCPYPARAM2D
-    playback_hipMemcpyParam2DAsync,  // [297] HRR_API_HIPMEMCPYPARAM2DASYNC
-    playback_hipMemcpyPeer,  // [298] HRR_API_HIPMEMCPYPEER
-    playback_hipMemcpyPeerAsync,  // [299] HRR_API_HIPMEMCPYPEERASYNC
-    playback_hipMemcpyToArray,  // [300] HRR_API_HIPMEMCPYTOARRAY
-    playback_hipMemcpyToSymbol,  // [301] HRR_API_HIPMEMCPYTOSYMBOL
-    playback_hipMemcpyToSymbolAsync,  // [302] HRR_API_HIPMEMCPYTOSYMBOLASYNC
-    playback_hipMemcpyWithStream,  // [303] HRR_API_HIPMEMCPYWITHSTREAM
-    playback_hipMemset,  // [304] HRR_API_HIPMEMSET
-    playback_hipMemset2D,  // [305] HRR_API_HIPMEMSET2D
-    playback_hipMemset2DAsync,  // [306] HRR_API_HIPMEMSET2DASYNC
-    playback_hipMemset3D,  // [307] HRR_API_HIPMEMSET3D
-    playback_hipMemset3DAsync,  // [308] HRR_API_HIPMEMSET3DASYNC
-    playback_hipMemsetAsync,  // [309] HRR_API_HIPMEMSETASYNC
-    playback_hipMemsetD16,  // [310] HRR_API_HIPMEMSETD16
-    playback_hipMemsetD16Async,  // [311] HRR_API_HIPMEMSETD16ASYNC
-    playback_hipMemsetD32,  // [312] HRR_API_HIPMEMSETD32
-    playback_hipMemsetD32Async,  // [313] HRR_API_HIPMEMSETD32ASYNC
-    playback_hipMemsetD8,  // [314] HRR_API_HIPMEMSETD8
-    playback_hipMemsetD8Async,  // [315] HRR_API_HIPMEMSETD8ASYNC
-    playback_hipMipmappedArrayCreate,  // [316] HRR_API_HIPMIPMAPPEDARRAYCREATE
-    playback_hipMipmappedArrayDestroy,  // [317] HRR_API_HIPMIPMAPPEDARRAYDESTROY
-    playback_hipMipmappedArrayGetLevel,  // [318] HRR_API_HIPMIPMAPPEDARRAYGETLEVEL
-    playback_hipModuleGetFunction,  // [319] HRR_API_HIPMODULEGETFUNCTION
-    playback_hipModuleGetFunctionCount,  // [320] HRR_API_HIPMODULEGETFUNCTIONCOUNT
-    playback_hipModuleGetGlobal,  // [321] HRR_API_HIPMODULEGETGLOBAL
-    playback_hipModuleGetTexRef,  // [322] HRR_API_HIPMODULEGETTEXREF
-    playback_hipModuleLaunchCooperativeKernel,  // [323] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
-    playback_hipModuleLaunchCooperativeKernelMultiDevice,  // [324] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    playback_hipModuleLaunchKernel,  // [325] HRR_API_HIPMODULELAUNCHKERNEL
-    playback_hipModuleLoad,  // [326] HRR_API_HIPMODULELOAD
-    playback_hipModuleLoadData,  // [327] HRR_API_HIPMODULELOADDATA
-    playback_hipModuleLoadDataEx,  // [328] HRR_API_HIPMODULELOADDATAEX
-    playback_hipLinkAddData,  // [329] HRR_API_HIPLINKADDDATA
-    playback_hipLinkAddFile,  // [330] HRR_API_HIPLINKADDFILE
-    playback_hipLinkComplete,  // [331] HRR_API_HIPLINKCOMPLETE
-    playback_hipLinkCreate,  // [332] HRR_API_HIPLINKCREATE
-    playback_hipLinkDestroy,  // [333] HRR_API_HIPLINKDESTROY
-    playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor,  // [334] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
-    playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,  // [335] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
-    playback_hipModuleOccupancyMaxPotentialBlockSize,  // [336] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE
-    playback_hipModuleOccupancyMaxPotentialBlockSizeWithFlags,  // [337] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS
-    playback_hipModuleUnload,  // [338] HRR_API_HIPMODULEUNLOAD
-    playback_hipOccupancyAvailableDynamicSMemPerBlock,  // [339] HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK
-    playback_hipOccupancyMaxActiveBlocksPerMultiprocessor,  // [340] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
-    playback_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,  // [341] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
-    playback_hipOccupancyMaxPotentialBlockSize,  // [342] HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE
-    playback_hipOccupancyMaxActiveClusters,  // [343] HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS
-    playback_hipOccupancyMaxPotentialClusterSize,  // [344] HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE
-    playback_hipPeekAtLastError,  // [345] HRR_API_HIPPEEKATLASTERROR
-    playback_hipPointerGetAttribute,  // [346] HRR_API_HIPPOINTERGETATTRIBUTE
-    playback_hipPointerGetAttributes,  // [347] HRR_API_HIPPOINTERGETATTRIBUTES
-    playback_hipPointerSetAttribute,  // [348] HRR_API_HIPPOINTERSETATTRIBUTE
-    playback_hipProfilerStart,  // [349] HRR_API_HIPPROFILERSTART
-    playback_hipProfilerStop,  // [350] HRR_API_HIPPROFILERSTOP
-    playback_hipRuntimeGetVersion,  // [351] HRR_API_HIPRUNTIMEGETVERSION
-    playback_hipSetDevice,  // [352] HRR_API_HIPSETDEVICE
-    playback_hipSetDeviceFlags,  // [353] HRR_API_HIPSETDEVICEFLAGS
-    playback_hipSetupArgument,  // [354] HRR_API_HIPSETUPARGUMENT
-    playback_hipSignalExternalSemaphoresAsync,  // [355] HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC
-    playback_hipStreamAddCallback,  // [356] HRR_API_HIPSTREAMADDCALLBACK
-    playback_hipStreamAttachMemAsync,  // [357] HRR_API_HIPSTREAMATTACHMEMASYNC
-    playback_hipStreamBeginCapture,  // [358] HRR_API_HIPSTREAMBEGINCAPTURE
-    playback_hipStreamCopyAttributes,  // [359] HRR_API_HIPSTREAMCOPYATTRIBUTES
-    playback_hipStreamCreate,  // [360] HRR_API_HIPSTREAMCREATE
-    playback_hipStreamCreateWithFlags,  // [361] HRR_API_HIPSTREAMCREATEWITHFLAGS
-    playback_hipStreamCreateWithPriority,  // [362] HRR_API_HIPSTREAMCREATEWITHPRIORITY
-    playback_hipStreamDestroy,  // [363] HRR_API_HIPSTREAMDESTROY
-    playback_hipStreamEndCapture,  // [364] HRR_API_HIPSTREAMENDCAPTURE
-    playback_hipStreamGetCaptureInfo,  // [365] HRR_API_HIPSTREAMGETCAPTUREINFO
-    playback_hipStreamGetCaptureInfo_v2,  // [366] HRR_API_HIPSTREAMGETCAPTUREINFO_V2
-    playback_hipStreamGetDevice,  // [367] HRR_API_HIPSTREAMGETDEVICE
-    playback_hipStreamGetFlags,  // [368] HRR_API_HIPSTREAMGETFLAGS
-    playback_hipStreamGetId,  // [369] HRR_API_HIPSTREAMGETID
-    playback_hipStreamGetPriority,  // [370] HRR_API_HIPSTREAMGETPRIORITY
-    playback_hipStreamIsCapturing,  // [371] HRR_API_HIPSTREAMISCAPTURING
-    playback_hipStreamQuery,  // [372] HRR_API_HIPSTREAMQUERY
-    playback_hipStreamSynchronize,  // [373] HRR_API_HIPSTREAMSYNCHRONIZE
-    playback_hipStreamUpdateCaptureDependencies,  // [374] HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES
-    playback_hipStreamWaitEvent,  // [375] HRR_API_HIPSTREAMWAITEVENT
-    playback_hipStreamWaitValue32,  // [376] HRR_API_HIPSTREAMWAITVALUE32
-    playback_hipStreamWaitValue64,  // [377] HRR_API_HIPSTREAMWAITVALUE64
-    playback_hipStreamWriteValue32,  // [378] HRR_API_HIPSTREAMWRITEVALUE32
-    playback_hipStreamWriteValue64,  // [379] HRR_API_HIPSTREAMWRITEVALUE64
-    playback_hipStreamBatchMemOp,  // [380] HRR_API_HIPSTREAMBATCHMEMOP
-    playback_hipTexObjectCreate,  // [381] HRR_API_HIPTEXOBJECTCREATE
-    playback_hipTexObjectDestroy,  // [382] HRR_API_HIPTEXOBJECTDESTROY
-    playback_hipTexObjectGetResourceDesc,  // [383] HRR_API_HIPTEXOBJECTGETRESOURCEDESC
-    playback_hipTexObjectGetResourceViewDesc,  // [384] HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC
-    playback_hipTexObjectGetTextureDesc,  // [385] HRR_API_HIPTEXOBJECTGETTEXTUREDESC
-    playback_hipTexRefGetAddress,  // [386] HRR_API_HIPTEXREFGETADDRESS
-    playback_hipTexRefGetAddressMode,  // [387] HRR_API_HIPTEXREFGETADDRESSMODE
-    playback_hipTexRefGetFilterMode,  // [388] HRR_API_HIPTEXREFGETFILTERMODE
-    playback_hipTexRefGetFlags,  // [389] HRR_API_HIPTEXREFGETFLAGS
-    playback_hipTexRefGetFormat,  // [390] HRR_API_HIPTEXREFGETFORMAT
-    playback_hipTexRefGetMaxAnisotropy,  // [391] HRR_API_HIPTEXREFGETMAXANISOTROPY
-    playback_hipTexRefGetMipMappedArray,  // [392] HRR_API_HIPTEXREFGETMIPMAPPEDARRAY
-    playback_hipTexRefGetMipmapFilterMode,  // [393] HRR_API_HIPTEXREFGETMIPMAPFILTERMODE
-    playback_hipTexRefGetMipmapLevelBias,  // [394] HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS
-    playback_hipTexRefGetMipmapLevelClamp,  // [395] HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP
-    playback_hipTexRefSetAddress,  // [396] HRR_API_HIPTEXREFSETADDRESS
-    playback_hipTexRefSetAddress2D,  // [397] HRR_API_HIPTEXREFSETADDRESS2D
-    playback_hipTexRefSetAddressMode,  // [398] HRR_API_HIPTEXREFSETADDRESSMODE
-    playback_hipTexRefSetArray,  // [399] HRR_API_HIPTEXREFSETARRAY
-    playback_hipTexRefSetBorderColor,  // [400] HRR_API_HIPTEXREFSETBORDERCOLOR
-    playback_hipTexRefSetFilterMode,  // [401] HRR_API_HIPTEXREFSETFILTERMODE
-    playback_hipTexRefSetFlags,  // [402] HRR_API_HIPTEXREFSETFLAGS
-    playback_hipTexRefSetFormat,  // [403] HRR_API_HIPTEXREFSETFORMAT
-    playback_hipTexRefSetMaxAnisotropy,  // [404] HRR_API_HIPTEXREFSETMAXANISOTROPY
-    playback_hipTexRefSetMipmapFilterMode,  // [405] HRR_API_HIPTEXREFSETMIPMAPFILTERMODE
-    playback_hipTexRefSetMipmapLevelBias,  // [406] HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS
-    playback_hipTexRefSetMipmapLevelClamp,  // [407] HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP
-    playback_hipTexRefSetMipmappedArray,  // [408] HRR_API_HIPTEXREFSETMIPMAPPEDARRAY
-    playback_hipThreadExchangeStreamCaptureMode,  // [409] HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE
-    playback_hipUnbindTexture,  // [410] HRR_API_HIPUNBINDTEXTURE
-    playback_hipUserObjectCreate,  // [411] HRR_API_HIPUSEROBJECTCREATE
-    playback_hipUserObjectRelease,  // [412] HRR_API_HIPUSEROBJECTRELEASE
-    playback_hipUserObjectRetain,  // [413] HRR_API_HIPUSEROBJECTRETAIN
-    playback_hipWaitExternalSemaphoresAsync,  // [414] HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC
-    playback_hipMemcpy_spt,  // [415] HRR_API_HIPMEMCPY_SPT
-    playback_hipMemcpyToSymbol_spt,  // [416] HRR_API_HIPMEMCPYTOSYMBOL_SPT
-    playback_hipMemcpyFromSymbol_spt,  // [417] HRR_API_HIPMEMCPYFROMSYMBOL_SPT
-    playback_hipMemcpy2D_spt,  // [418] HRR_API_HIPMEMCPY2D_SPT
-    playback_hipMemcpy2DFromArray_spt,  // [419] HRR_API_HIPMEMCPY2DFROMARRAY_SPT
-    playback_hipMemcpy3D_spt,  // [420] HRR_API_HIPMEMCPY3D_SPT
-    playback_hipMemset_spt,  // [421] HRR_API_HIPMEMSET_SPT
-    playback_hipMemsetAsync_spt,  // [422] HRR_API_HIPMEMSETASYNC_SPT
-    playback_hipMemset2D_spt,  // [423] HRR_API_HIPMEMSET2D_SPT
-    playback_hipMemset2DAsync_spt,  // [424] HRR_API_HIPMEMSET2DASYNC_SPT
-    playback_hipMemset3DAsync_spt,  // [425] HRR_API_HIPMEMSET3DASYNC_SPT
-    playback_hipMemset3D_spt,  // [426] HRR_API_HIPMEMSET3D_SPT
-    playback_hipMemcpyAsync_spt,  // [427] HRR_API_HIPMEMCPYASYNC_SPT
-    playback_hipMemcpy3DAsync_spt,  // [428] HRR_API_HIPMEMCPY3DASYNC_SPT
-    playback_hipMemcpy2DAsync_spt,  // [429] HRR_API_HIPMEMCPY2DASYNC_SPT
-    playback_hipMemcpyFromSymbolAsync_spt,  // [430] HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT
-    playback_hipMemcpyToSymbolAsync_spt,  // [431] HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT
-    playback_hipMemcpyFromArray_spt,  // [432] HRR_API_HIPMEMCPYFROMARRAY_SPT
-    playback_hipMemcpy2DToArray_spt,  // [433] HRR_API_HIPMEMCPY2DTOARRAY_SPT
-    playback_hipMemcpy2DFromArrayAsync_spt,  // [434] HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT
-    playback_hipMemcpy2DToArrayAsync_spt,  // [435] HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT
-    playback_hipStreamQuery_spt,  // [436] HRR_API_HIPSTREAMQUERY_SPT
-    playback_hipStreamSynchronize_spt,  // [437] HRR_API_HIPSTREAMSYNCHRONIZE_SPT
-    playback_hipStreamGetPriority_spt,  // [438] HRR_API_HIPSTREAMGETPRIORITY_SPT
-    playback_hipStreamWaitEvent_spt,  // [439] HRR_API_HIPSTREAMWAITEVENT_SPT
-    playback_hipStreamGetFlags_spt,  // [440] HRR_API_HIPSTREAMGETFLAGS_SPT
-    playback_hipStreamAddCallback_spt,  // [441] HRR_API_HIPSTREAMADDCALLBACK_SPT
-    playback_hipEventRecord_spt,  // [442] HRR_API_HIPEVENTRECORD_SPT
-    playback_hipLaunchCooperativeKernel_spt,  // [443] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT
-    playback_hipLaunchKernel_spt,  // [444] HRR_API_HIPLAUNCHKERNEL_SPT
-    playback_hipGraphLaunch_spt,  // [445] HRR_API_HIPGRAPHLAUNCH_SPT
-    playback_hipStreamBeginCapture_spt,  // [446] HRR_API_HIPSTREAMBEGINCAPTURE_SPT
-    playback_hipStreamEndCapture_spt,  // [447] HRR_API_HIPSTREAMENDCAPTURE_SPT
-    playback_hipStreamIsCapturing_spt,  // [448] HRR_API_HIPSTREAMISCAPTURING_SPT
-    playback_hipStreamGetCaptureInfo_spt,  // [449] HRR_API_HIPSTREAMGETCAPTUREINFO_SPT
-    playback_hipStreamGetCaptureInfo_v2_spt,  // [450] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
-    playback_hipLaunchHostFunc_spt,  // [451] HRR_API_HIPLAUNCHHOSTFUNC_SPT
-    playback_hipCreateChannelDesc,  // [452] HRR_API_HIPCREATECHANNELDESC
-    playback_hipExtModuleLaunchKernel,  // [453] HRR_API_HIPEXTMODULELAUNCHKERNEL
-    playback_hipHccModuleLaunchKernel,  // [454] HRR_API_HIPHCCMODULELAUNCHKERNEL
-    playback_hipGetStreamDeviceId,  // [455] HRR_API_HIPGETSTREAMDEVICEID
-    playback_hipDrvGraphAddMemsetNode,  // [456] HRR_API_HIPDRVGRAPHADDMEMSETNODE
-    playback_hipGraphAddExternalSemaphoresWaitNode,  // [457] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE
-    playback_hipGraphAddExternalSemaphoresSignalNode,  // [458] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE
-    playback_hipGraphExternalSemaphoresSignalNodeSetParams,  // [459] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS
-    playback_hipGraphExternalSemaphoresWaitNodeSetParams,  // [460] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS
-    playback_hipGraphExternalSemaphoresSignalNodeGetParams,  // [461] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS
-    playback_hipGraphExternalSemaphoresWaitNodeGetParams,  // [462] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS
-    playback_hipGraphExecExternalSemaphoresSignalNodeSetParams,  // [463] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS
-    playback_hipGraphExecExternalSemaphoresWaitNodeSetParams,  // [464] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS
-    playback_hipGraphAddNode,  // [465] HRR_API_HIPGRAPHADDNODE
-    playback_hipGraphInstantiateWithParams,  // [466] HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS
-    playback_hipExtGetLastError,  // [467] HRR_API_HIPEXTGETLASTERROR
-    playback_hipTexRefGetBorderColor,  // [468] HRR_API_HIPTEXREFGETBORDERCOLOR
-    playback_hipTexRefGetArray,  // [469] HRR_API_HIPTEXREFGETARRAY
-    playback_hipGetProcAddress,  // [470] HRR_API_HIPGETPROCADDRESS
-    playback_hipStreamBeginCaptureToGraph,  // [471] HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH
-    playback_hipGetFuncBySymbol,  // [472] HRR_API_HIPGETFUNCBYSYMBOL
-    playback_hipDrvGraphAddMemFreeNode,  // [473] HRR_API_HIPDRVGRAPHADDMEMFREENODE
-    playback_hipDrvGraphExecMemcpyNodeSetParams,  // [474] HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS
-    playback_hipDrvGraphExecMemsetNodeSetParams,  // [475] HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS
-    playback_hipSetValidDevices,  // [476] HRR_API_HIPSETVALIDDEVICES
-    playback_hipMemcpyAtoD,  // [477] HRR_API_HIPMEMCPYATOD
-    playback_hipMemcpyDtoA,  // [478] HRR_API_HIPMEMCPYDTOA
-    playback_hipMemcpyAtoA,  // [479] HRR_API_HIPMEMCPYATOA
-    playback_hipMemcpyAtoHAsync,  // [480] HRR_API_HIPMEMCPYATOHASYNC
-    playback_hipMemcpyHtoAAsync,  // [481] HRR_API_HIPMEMCPYHTOAASYNC
-    playback_hipMemcpy2DArrayToArray,  // [482] HRR_API_HIPMEMCPY2DARRAYTOARRAY
-    playback_hipGraphExecGetFlags,  // [483] HRR_API_HIPGRAPHEXECGETFLAGS
-    playback_hipGraphNodeSetParams,  // [484] HRR_API_HIPGRAPHNODESETPARAMS
-    playback_hipGraphExecNodeSetParams,  // [485] HRR_API_HIPGRAPHEXECNODESETPARAMS
-    playback_hipExternalMemoryGetMappedMipmappedArray,  // [486] HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY
-    playback_hipDrvGraphMemcpyNodeGetParams,  // [487] HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS
-    playback_hipDrvGraphMemcpyNodeSetParams,  // [488] HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS
-    playback_hipExtHostAlloc,  // [489] HRR_API_HIPEXTHOSTALLOC
-    playback_hipDeviceGetTexture1DLinearMaxWidth,  // [490] HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH
-    playback_hipGraphAddBatchMemOpNode,  // [491] HRR_API_HIPGRAPHADDBATCHMEMOPNODE
-    playback_hipGraphBatchMemOpNodeGetParams,  // [492] HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS
-    playback_hipGraphBatchMemOpNodeSetParams,  // [493] HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS
-    playback_hipGraphExecBatchMemOpNodeSetParams,  // [494] HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS
-    playback_hipEventRecordWithFlags,  // [495] HRR_API_HIPEVENTRECORDWITHFLAGS
-    playback_hipLaunchKernelExC,  // [496] HRR_API_HIPLAUNCHKERNELEXC
-    playback_hipDrvLaunchKernelEx,  // [497] HRR_API_HIPDRVLAUNCHKERNELEX
-    playback_hipMemGetHandleForAddressRange,  // [498] HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE
-    playback_hipMemsetD2D8,  // [499] HRR_API_HIPMEMSETD2D8
-    playback_hipMemsetD2D8Async,  // [500] HRR_API_HIPMEMSETD2D8ASYNC
-    playback_hipMemsetD2D16,  // [501] HRR_API_HIPMEMSETD2D16
-    playback_hipMemsetD2D16Async,  // [502] HRR_API_HIPMEMSETD2D16ASYNC
-    playback_hipMemsetD2D32,  // [503] HRR_API_HIPMEMSETD2D32
-    playback_hipMemsetD2D32Async,  // [504] HRR_API_HIPMEMSETD2D32ASYNC
-    playback_hipStreamSetAttribute,  // [505] HRR_API_HIPSTREAMSETATTRIBUTE
-    playback_hipStreamGetAttribute,  // [506] HRR_API_HIPSTREAMGETATTRIBUTE
-    playback_hipModuleLoadFatBinary,  // [507] HRR_API_HIPMODULELOADFATBINARY
-    playback_hipMemcpyBatchAsync,  // [508] HRR_API_HIPMEMCPYBATCHASYNC
-    playback_hipMemcpy3DBatchAsync,  // [509] HRR_API_HIPMEMCPY3DBATCHASYNC
-    playback_hipMemcpy3DPeer,  // [510] HRR_API_HIPMEMCPY3DPEER
-    playback_hipMemcpy3DPeerAsync,  // [511] HRR_API_HIPMEMCPY3DPEERASYNC
-    playback_hipGetDriverEntryPoint,  // [512] HRR_API_HIPGETDRIVERENTRYPOINT
-    playback_hipGetDriverEntryPoint_spt,  // [513] HRR_API_HIPGETDRIVERENTRYPOINT_SPT
-    playback_hipLibraryLoadData,  // [514] HRR_API_HIPLIBRARYLOADDATA
-    playback_hipLibraryLoadFromFile,  // [515] HRR_API_HIPLIBRARYLOADFROMFILE
-    playback_hipLibraryUnload,  // [516] HRR_API_HIPLIBRARYUNLOAD
-    playback_hipLibraryGetKernel,  // [517] HRR_API_HIPLIBRARYGETKERNEL
-    playback_hipLibraryGetKernelCount,  // [518] HRR_API_HIPLIBRARYGETKERNELCOUNT
-    playback_hipLibraryGetGlobal,  // [519] HRR_API_HIPLIBRARYGETGLOBAL
-    playback_hipLibraryGetManaged,  // [520] HRR_API_HIPLIBRARYGETMANAGED
-    playback_hipLibraryEnumerateKernels,  // [521] HRR_API_HIPLIBRARYENUMERATEKERNELS
-    playback_hipKernelGetLibrary,  // [522] HRR_API_HIPKERNELGETLIBRARY
-    playback_hipKernelGetName,  // [523] HRR_API_HIPKERNELGETNAME
-    playback_hipGetProcAddress_spt,  // [524] HRR_API_HIPGETPROCADDRESS_SPT
-    playback_hipExtDisableLogging,  // [525] HRR_API_HIPEXTDISABLELOGGING
-    playback_hipExtEnableLogging,  // [526] HRR_API_HIPEXTENABLELOGGING
-    playback_hipExtSetLoggingParams,  // [527] HRR_API_HIPEXTSETLOGGINGPARAMS
-    playback_hipKernelGetAttribute,  // [528] HRR_API_HIPKERNELGETATTRIBUTE
-    playback_hipKernelSetAttribute,  // [529] HRR_API_HIPKERNELSETATTRIBUTE
-    playback_hipKernelGetFunction,  // [530] HRR_API_HIPKERNELGETFUNCTION
-    playback_hipKernelGetParamInfo,  // [531] HRR_API_HIPKERNELGETPARAMINFO
-    playback_hipMemSetMemPool,  // [532] HRR_API_HIPMEMSETMEMPOOL
-    playback_hipMemGetMemPool,  // [533] HRR_API_HIPMEMGETMEMPOOL
-    playback_hipMipmappedArrayGetMemoryRequirements,  // [534] HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS
-    playback_hipGreenCtxCreate,  // [535] HRR_API_HIPGREENCTXCREATE
-    playback_hipExecutionCtxDestroy,  // [536] HRR_API_HIPEXECUTIONCTXDESTROY
-    playback_hipExecutionCtxStreamCreate,  // [537] HRR_API_HIPEXECUTIONCTXSTREAMCREATE
-    playback_hipDeviceGetDevResource,  // [538] HRR_API_HIPDEVICEGETDEVRESOURCE
-    playback_hipDevSmResourceSplitByCount,  // [539] HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT
-    playback_hipDevSmResourceSplit,  // [540] HRR_API_HIPDEVSMRESOURCESPLIT
-    playback_hipDevResourceGenerateDesc,  // [541] HRR_API_HIPDEVRESOURCEGENERATEDESC
-    playback_hipDeviceGetExecutionCtx,  // [542] HRR_API_HIPDEVICEGETEXECUTIONCTX
-    playback_hipExecutionCtxGetDevResource,  // [543] HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE
-    playback_hipExecutionCtxGetDevice,  // [544] HRR_API_HIPEXECUTIONCTXGETDEVICE
-    playback_hipExecutionCtxGetId,  // [545] HRR_API_HIPEXECUTIONCTXGETID
-    playback_hipStreamGetDevResource,  // [546] HRR_API_HIPSTREAMGETDEVRESOURCE
-    playback_hipExecutionCtxRecordEvent,  // [547] HRR_API_HIPEXECUTIONCTXRECORDEVENT
-    playback_hipExecutionCtxSynchronize,  // [548] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
-    playback_hipExecutionCtxWaitEvent,  // [549] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    playback_hipApiName,  // [0] HRR_API_HIPAPINAME
+    playback_hipArray3DCreate,  // [1] HRR_API_HIPARRAY3DCREATE
+    playback_hipArray3DGetDescriptor,  // [2] HRR_API_HIPARRAY3DGETDESCRIPTOR
+    playback_hipArrayCreate,  // [3] HRR_API_HIPARRAYCREATE
+    playback_hipArrayDestroy,  // [4] HRR_API_HIPARRAYDESTROY
+    playback_hipArrayGetDescriptor,  // [5] HRR_API_HIPARRAYGETDESCRIPTOR
+    playback_hipArrayGetInfo,  // [6] HRR_API_HIPARRAYGETINFO
+    playback_hipBindTexture,  // [7] HRR_API_HIPBINDTEXTURE
+    playback_hipBindTexture2D,  // [8] HRR_API_HIPBINDTEXTURE2D
+    playback_hipBindTextureToArray,  // [9] HRR_API_HIPBINDTEXTURETOARRAY
+    playback_hipBindTextureToMipmappedArray,  // [10] HRR_API_HIPBINDTEXTURETOMIPMAPPEDARRAY
+    playback_hipChooseDevice,  // [11] HRR_API_HIPCHOOSEDEVICE
+    playback_hipChooseDeviceR0000,  // [12] HRR_API_HIPCHOOSEDEVICER0000
+    playback_hipConfigureCall,  // [13] HRR_API_HIPCONFIGURECALL
+    playback_hipCreateSurfaceObject,  // [14] HRR_API_HIPCREATESURFACEOBJECT
+    playback_hipCreateTextureObject,  // [15] HRR_API_HIPCREATETEXTUREOBJECT
+    playback_hipCtxCreate,  // [16] HRR_API_HIPCTXCREATE
+    playback_hipCtxDestroy,  // [17] HRR_API_HIPCTXDESTROY
+    playback_hipCtxDisablePeerAccess,  // [18] HRR_API_HIPCTXDISABLEPEERACCESS
+    playback_hipCtxEnablePeerAccess,  // [19] HRR_API_HIPCTXENABLEPEERACCESS
+    playback_hipCtxGetApiVersion,  // [20] HRR_API_HIPCTXGETAPIVERSION
+    playback_hipCtxGetCacheConfig,  // [21] HRR_API_HIPCTXGETCACHECONFIG
+    playback_hipCtxGetCurrent,  // [22] HRR_API_HIPCTXGETCURRENT
+    playback_hipCtxGetDevice,  // [23] HRR_API_HIPCTXGETDEVICE
+    playback_hipCtxGetFlags,  // [24] HRR_API_HIPCTXGETFLAGS
+    playback_hipCtxGetSharedMemConfig,  // [25] HRR_API_HIPCTXGETSHAREDMEMCONFIG
+    playback_hipCtxPopCurrent,  // [26] HRR_API_HIPCTXPOPCURRENT
+    playback_hipCtxPushCurrent,  // [27] HRR_API_HIPCTXPUSHCURRENT
+    playback_hipCtxSetCacheConfig,  // [28] HRR_API_HIPCTXSETCACHECONFIG
+    playback_hipCtxSetCurrent,  // [29] HRR_API_HIPCTXSETCURRENT
+    playback_hipCtxSetSharedMemConfig,  // [30] HRR_API_HIPCTXSETSHAREDMEMCONFIG
+    playback_hipCtxSynchronize,  // [31] HRR_API_HIPCTXSYNCHRONIZE
+    playback_hipDestroyExternalMemory,  // [32] HRR_API_HIPDESTROYEXTERNALMEMORY
+    playback_hipDestroyExternalSemaphore,  // [33] HRR_API_HIPDESTROYEXTERNALSEMAPHORE
+    playback_hipDestroySurfaceObject,  // [34] HRR_API_HIPDESTROYSURFACEOBJECT
+    playback_hipDestroyTextureObject,  // [35] HRR_API_HIPDESTROYTEXTUREOBJECT
+    playback_hipDeviceCanAccessPeer,  // [36] HRR_API_HIPDEVICECANACCESSPEER
+    playback_hipDeviceComputeCapability,  // [37] HRR_API_HIPDEVICECOMPUTECAPABILITY
+    playback_hipDeviceDisablePeerAccess,  // [38] HRR_API_HIPDEVICEDISABLEPEERACCESS
+    playback_hipDeviceEnablePeerAccess,  // [39] HRR_API_HIPDEVICEENABLEPEERACCESS
+    playback_hipDeviceGet,  // [40] HRR_API_HIPDEVICEGET
+    playback_hipDeviceGetAttribute,  // [41] HRR_API_HIPDEVICEGETATTRIBUTE
+    playback_hipDeviceGetByPCIBusId,  // [42] HRR_API_HIPDEVICEGETBYPCIBUSID
+    playback_hipDeviceGetCacheConfig,  // [43] HRR_API_HIPDEVICEGETCACHECONFIG
+    playback_hipDeviceGetDefaultMemPool,  // [44] HRR_API_HIPDEVICEGETDEFAULTMEMPOOL
+    playback_hipDeviceGetGraphMemAttribute,  // [45] HRR_API_HIPDEVICEGETGRAPHMEMATTRIBUTE
+    playback_hipDeviceGetLimit,  // [46] HRR_API_HIPDEVICEGETLIMIT
+    playback_hipDeviceGetMemPool,  // [47] HRR_API_HIPDEVICEGETMEMPOOL
+    playback_hipDeviceGetName,  // [48] HRR_API_HIPDEVICEGETNAME
+    playback_hipDeviceGetP2PAttribute,  // [49] HRR_API_HIPDEVICEGETP2PATTRIBUTE
+    playback_hipDeviceGetPCIBusId,  // [50] HRR_API_HIPDEVICEGETPCIBUSID
+    playback_hipDeviceGetSharedMemConfig,  // [51] HRR_API_HIPDEVICEGETSHAREDMEMCONFIG
+    playback_hipDeviceGetStreamPriorityRange,  // [52] HRR_API_HIPDEVICEGETSTREAMPRIORITYRANGE
+    playback_hipDeviceGetUuid,  // [53] HRR_API_HIPDEVICEGETUUID
+    playback_hipDeviceGraphMemTrim,  // [54] HRR_API_HIPDEVICEGRAPHMEMTRIM
+    playback_hipDevicePrimaryCtxGetState,  // [55] HRR_API_HIPDEVICEPRIMARYCTXGETSTATE
+    playback_hipDevicePrimaryCtxRelease,  // [56] HRR_API_HIPDEVICEPRIMARYCTXRELEASE
+    playback_hipDevicePrimaryCtxReset,  // [57] HRR_API_HIPDEVICEPRIMARYCTXRESET
+    playback_hipDevicePrimaryCtxRetain,  // [58] HRR_API_HIPDEVICEPRIMARYCTXRETAIN
+    playback_hipDevicePrimaryCtxSetFlags,  // [59] HRR_API_HIPDEVICEPRIMARYCTXSETFLAGS
+    playback_hipDeviceReset,  // [60] HRR_API_HIPDEVICERESET
+    playback_hipDeviceSetCacheConfig,  // [61] HRR_API_HIPDEVICESETCACHECONFIG
+    playback_hipDeviceSetGraphMemAttribute,  // [62] HRR_API_HIPDEVICESETGRAPHMEMATTRIBUTE
+    playback_hipDeviceSetLimit,  // [63] HRR_API_HIPDEVICESETLIMIT
+    playback_hipDeviceSetMemPool,  // [64] HRR_API_HIPDEVICESETMEMPOOL
+    playback_hipDeviceSetSharedMemConfig,  // [65] HRR_API_HIPDEVICESETSHAREDMEMCONFIG
+    playback_hipDeviceSynchronize,  // [66] HRR_API_HIPDEVICESYNCHRONIZE
+    playback_hipDeviceTotalMem,  // [67] HRR_API_HIPDEVICETOTALMEM
+    playback_hipDriverGetVersion,  // [68] HRR_API_HIPDRIVERGETVERSION
+    playback_hipDrvGetErrorName,  // [69] HRR_API_HIPDRVGETERRORNAME
+    playback_hipDrvGetErrorString,  // [70] HRR_API_HIPDRVGETERRORSTRING
+    playback_hipDrvGraphAddMemcpyNode,  // [71] HRR_API_HIPDRVGRAPHADDMEMCPYNODE
+    playback_hipDrvMemcpy2DUnaligned,  // [72] HRR_API_HIPDRVMEMCPY2DUNALIGNED
+    playback_hipDrvMemcpy3D,  // [73] HRR_API_HIPDRVMEMCPY3D
+    playback_hipDrvMemcpy3DAsync,  // [74] HRR_API_HIPDRVMEMCPY3DASYNC
+    playback_hipDrvPointerGetAttributes,  // [75] HRR_API_HIPDRVPOINTERGETATTRIBUTES
+    playback_hipEventCreate,  // [76] HRR_API_HIPEVENTCREATE
+    playback_hipEventCreateWithFlags,  // [77] HRR_API_HIPEVENTCREATEWITHFLAGS
+    playback_hipEventDestroy,  // [78] HRR_API_HIPEVENTDESTROY
+    playback_hipEventElapsedTime,  // [79] HRR_API_HIPEVENTELAPSEDTIME
+    playback_hipEventQuery,  // [80] HRR_API_HIPEVENTQUERY
+    playback_hipEventRecord,  // [81] HRR_API_HIPEVENTRECORD
+    playback_hipEventSynchronize,  // [82] HRR_API_HIPEVENTSYNCHRONIZE
+    playback_hipExtGetLinkTypeAndHopCount,  // [83] HRR_API_HIPEXTGETLINKTYPEANDHOPCOUNT
+    playback_hipExtLaunchKernel,  // [84] HRR_API_HIPEXTLAUNCHKERNEL
+    playback_hipExtLaunchMultiKernelMultiDevice,  // [85] HRR_API_HIPEXTLAUNCHMULTIKERNELMULTIDEVICE
+    playback_hipExtMallocWithFlags,  // [86] HRR_API_HIPEXTMALLOCWITHFLAGS
+    playback_hipExtStreamCreateWithCUMask,  // [87] HRR_API_HIPEXTSTREAMCREATEWITHCUMASK
+    playback_hipExtStreamGetCUMask,  // [88] HRR_API_HIPEXTSTREAMGETCUMASK
+    playback_hipExternalMemoryGetMappedBuffer,  // [89] HRR_API_HIPEXTERNALMEMORYGETMAPPEDBUFFER
+    playback_hipFree,  // [90] HRR_API_HIPFREE
+    playback_hipFreeArray,  // [91] HRR_API_HIPFREEARRAY
+    playback_hipFreeAsync,  // [92] HRR_API_HIPFREEASYNC
+    playback_hipFreeHost,  // [93] HRR_API_HIPFREEHOST
+    playback_hipFreeMipmappedArray,  // [94] HRR_API_HIPFREEMIPMAPPEDARRAY
+    playback_hipFuncGetAttribute,  // [95] HRR_API_HIPFUNCGETATTRIBUTE
+    playback_hipFuncGetAttributes,  // [96] HRR_API_HIPFUNCGETATTRIBUTES
+    playback_hipFuncSetAttribute,  // [97] HRR_API_HIPFUNCSETATTRIBUTE
+    playback_hipFuncSetCacheConfig,  // [98] HRR_API_HIPFUNCSETCACHECONFIG
+    playback_hipFuncSetSharedMemConfig,  // [99] HRR_API_HIPFUNCSETSHAREDMEMCONFIG
+    playback_hipGLGetDevices,  // [100] HRR_API_HIPGLGETDEVICES
+    playback_hipGetChannelDesc,  // [101] HRR_API_HIPGETCHANNELDESC
+    playback_hipGetDevice,  // [102] HRR_API_HIPGETDEVICE
+    playback_hipGetDeviceCount,  // [103] HRR_API_HIPGETDEVICECOUNT
+    playback_hipGetDeviceFlags,  // [104] HRR_API_HIPGETDEVICEFLAGS
+    playback_hipGetDevicePropertiesR0600,  // [105] HRR_API_HIPGETDEVICEPROPERTIESR0600
+    playback_hipGetDevicePropertiesR0000,  // [106] HRR_API_HIPGETDEVICEPROPERTIESR0000
+    playback_hipGetErrorName,  // [107] HRR_API_HIPGETERRORNAME
+    playback_hipGetErrorString,  // [108] HRR_API_HIPGETERRORSTRING
+    playback_hipGetLastError,  // [109] HRR_API_HIPGETLASTERROR
+    playback_hipGetMipmappedArrayLevel,  // [110] HRR_API_HIPGETMIPMAPPEDARRAYLEVEL
+    playback_hipGetSymbolAddress,  // [111] HRR_API_HIPGETSYMBOLADDRESS
+    playback_hipGetSymbolSize,  // [112] HRR_API_HIPGETSYMBOLSIZE
+    playback_hipGetTextureAlignmentOffset,  // [113] HRR_API_HIPGETTEXTUREALIGNMENTOFFSET
+    playback_hipGetTextureObjectResourceDesc,  // [114] HRR_API_HIPGETTEXTUREOBJECTRESOURCEDESC
+    playback_hipGetTextureObjectResourceViewDesc,  // [115] HRR_API_HIPGETTEXTUREOBJECTRESOURCEVIEWDESC
+    playback_hipGetTextureObjectTextureDesc,  // [116] HRR_API_HIPGETTEXTUREOBJECTTEXTUREDESC
+    playback_hipGetTextureReference,  // [117] HRR_API_HIPGETTEXTUREREFERENCE
+    playback_hipGraphAddChildGraphNode,  // [118] HRR_API_HIPGRAPHADDCHILDGRAPHNODE
+    playback_hipGraphAddDependencies,  // [119] HRR_API_HIPGRAPHADDDEPENDENCIES
+    playback_hipGraphAddEmptyNode,  // [120] HRR_API_HIPGRAPHADDEMPTYNODE
+    playback_hipGraphAddEventRecordNode,  // [121] HRR_API_HIPGRAPHADDEVENTRECORDNODE
+    playback_hipGraphAddEventWaitNode,  // [122] HRR_API_HIPGRAPHADDEVENTWAITNODE
+    playback_hipGraphAddHostNode,  // [123] HRR_API_HIPGRAPHADDHOSTNODE
+    playback_hipGraphAddKernelNode,  // [124] HRR_API_HIPGRAPHADDKERNELNODE
+    playback_hipGraphAddMemAllocNode,  // [125] HRR_API_HIPGRAPHADDMEMALLOCNODE
+    playback_hipGraphAddMemFreeNode,  // [126] HRR_API_HIPGRAPHADDMEMFREENODE
+    playback_hipGraphAddMemcpyNode,  // [127] HRR_API_HIPGRAPHADDMEMCPYNODE
+    playback_hipGraphAddMemcpyNode1D,  // [128] HRR_API_HIPGRAPHADDMEMCPYNODE1D
+    playback_hipGraphAddMemcpyNodeFromSymbol,  // [129] HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL
+    playback_hipGraphAddMemcpyNodeToSymbol,  // [130] HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL
+    playback_hipGraphAddMemsetNode,  // [131] HRR_API_HIPGRAPHADDMEMSETNODE
+    playback_hipGraphChildGraphNodeGetGraph,  // [132] HRR_API_HIPGRAPHCHILDGRAPHNODEGETGRAPH
+    playback_hipGraphClone,  // [133] HRR_API_HIPGRAPHCLONE
+    playback_hipGraphCreate,  // [134] HRR_API_HIPGRAPHCREATE
+    playback_hipGraphDebugDotPrint,  // [135] HRR_API_HIPGRAPHDEBUGDOTPRINT
+    playback_hipGraphDestroy,  // [136] HRR_API_HIPGRAPHDESTROY
+    playback_hipGraphDestroyNode,  // [137] HRR_API_HIPGRAPHDESTROYNODE
+    playback_hipGraphEventRecordNodeGetEvent,  // [138] HRR_API_HIPGRAPHEVENTRECORDNODEGETEVENT
+    playback_hipGraphEventRecordNodeSetEvent,  // [139] HRR_API_HIPGRAPHEVENTRECORDNODESETEVENT
+    playback_hipGraphEventWaitNodeGetEvent,  // [140] HRR_API_HIPGRAPHEVENTWAITNODEGETEVENT
+    playback_hipGraphEventWaitNodeSetEvent,  // [141] HRR_API_HIPGRAPHEVENTWAITNODESETEVENT
+    playback_hipGraphExecChildGraphNodeSetParams,  // [142] HRR_API_HIPGRAPHEXECCHILDGRAPHNODESETPARAMS
+    playback_hipGraphExecDestroy,  // [143] HRR_API_HIPGRAPHEXECDESTROY
+    playback_hipGraphExecEventRecordNodeSetEvent,  // [144] HRR_API_HIPGRAPHEXECEVENTRECORDNODESETEVENT
+    playback_hipGraphExecEventWaitNodeSetEvent,  // [145] HRR_API_HIPGRAPHEXECEVENTWAITNODESETEVENT
+    playback_hipGraphExecHostNodeSetParams,  // [146] HRR_API_HIPGRAPHEXECHOSTNODESETPARAMS
+    playback_hipGraphExecKernelNodeSetParams,  // [147] HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS
+    playback_hipGraphExecMemcpyNodeSetParams,  // [148] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS
+    playback_hipGraphExecMemcpyNodeSetParams1D,  // [149] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS1D
+    playback_hipGraphExecMemcpyNodeSetParamsFromSymbol,  // [150] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSFROMSYMBOL
+    playback_hipGraphExecMemcpyNodeSetParamsToSymbol,  // [151] HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL
+    playback_hipGraphExecMemsetNodeSetParams,  // [152] HRR_API_HIPGRAPHEXECMEMSETNODESETPARAMS
+    playback_hipGraphExecUpdate,  // [153] HRR_API_HIPGRAPHEXECUPDATE
+    playback_hipGraphGetEdges,  // [154] HRR_API_HIPGRAPHGETEDGES
+    playback_hipGraphGetNodes,  // [155] HRR_API_HIPGRAPHGETNODES
+    playback_hipGraphGetRootNodes,  // [156] HRR_API_HIPGRAPHGETROOTNODES
+    playback_hipGraphHostNodeGetParams,  // [157] HRR_API_HIPGRAPHHOSTNODEGETPARAMS
+    playback_hipGraphHostNodeSetParams,  // [158] HRR_API_HIPGRAPHHOSTNODESETPARAMS
+    playback_hipGraphInstantiate,  // [159] HRR_API_HIPGRAPHINSTANTIATE
+    playback_hipGraphInstantiateWithFlags,  // [160] HRR_API_HIPGRAPHINSTANTIATEWITHFLAGS
+    playback_hipGraphKernelNodeCopyAttributes,  // [161] HRR_API_HIPGRAPHKERNELNODECOPYATTRIBUTES
+    playback_hipGraphKernelNodeGetAttribute,  // [162] HRR_API_HIPGRAPHKERNELNODEGETATTRIBUTE
+    playback_hipGraphKernelNodeGetParams,  // [163] HRR_API_HIPGRAPHKERNELNODEGETPARAMS
+    playback_hipGraphKernelNodeSetAttribute,  // [164] HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE
+    playback_hipGraphKernelNodeSetParams,  // [165] HRR_API_HIPGRAPHKERNELNODESETPARAMS
+    playback_hipGraphLaunch,  // [166] HRR_API_HIPGRAPHLAUNCH
+    playback_hipGraphMemAllocNodeGetParams,  // [167] HRR_API_HIPGRAPHMEMALLOCNODEGETPARAMS
+    playback_hipGraphMemFreeNodeGetParams,  // [168] HRR_API_HIPGRAPHMEMFREENODEGETPARAMS
+    playback_hipGraphMemcpyNodeGetParams,  // [169] HRR_API_HIPGRAPHMEMCPYNODEGETPARAMS
+    playback_hipGraphMemcpyNodeSetParams,  // [170] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS
+    playback_hipGraphMemcpyNodeSetParams1D,  // [171] HRR_API_HIPGRAPHMEMCPYNODESETPARAMS1D
+    playback_hipGraphMemcpyNodeSetParamsFromSymbol,  // [172] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSFROMSYMBOL
+    playback_hipGraphMemcpyNodeSetParamsToSymbol,  // [173] HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL
+    playback_hipGraphMemsetNodeGetParams,  // [174] HRR_API_HIPGRAPHMEMSETNODEGETPARAMS
+    playback_hipGraphMemsetNodeSetParams,  // [175] HRR_API_HIPGRAPHMEMSETNODESETPARAMS
+    playback_hipGraphNodeFindInClone,  // [176] HRR_API_HIPGRAPHNODEFINDINCLONE
+    playback_hipGraphNodeGetDependencies,  // [177] HRR_API_HIPGRAPHNODEGETDEPENDENCIES
+    playback_hipGraphNodeGetDependentNodes,  // [178] HRR_API_HIPGRAPHNODEGETDEPENDENTNODES
+    playback_hipGraphNodeGetEnabled,  // [179] HRR_API_HIPGRAPHNODEGETENABLED
+    playback_hipGraphNodeGetType,  // [180] HRR_API_HIPGRAPHNODEGETTYPE
+    playback_hipGraphNodeSetEnabled,  // [181] HRR_API_HIPGRAPHNODESETENABLED
+    playback_hipGraphReleaseUserObject,  // [182] HRR_API_HIPGRAPHRELEASEUSEROBJECT
+    playback_hipGraphRemoveDependencies,  // [183] HRR_API_HIPGRAPHREMOVEDEPENDENCIES
+    playback_hipGraphRetainUserObject,  // [184] HRR_API_HIPGRAPHRETAINUSEROBJECT
+    playback_hipGraphUpload,  // [185] HRR_API_HIPGRAPHUPLOAD
+    playback_hipGraphicsGLRegisterBuffer,  // [186] HRR_API_HIPGRAPHICSGLREGISTERBUFFER
+    playback_hipGraphicsGLRegisterImage,  // [187] HRR_API_HIPGRAPHICSGLREGISTERIMAGE
+    playback_hipGraphicsMapResources,  // [188] HRR_API_HIPGRAPHICSMAPRESOURCES
+    playback_hipGraphicsResourceGetMappedPointer,  // [189] HRR_API_HIPGRAPHICSRESOURCEGETMAPPEDPOINTER
+    playback_hipGraphicsSubResourceGetMappedArray,  // [190] HRR_API_HIPGRAPHICSSUBRESOURCEGETMAPPEDARRAY
+    playback_hipGraphicsUnmapResources,  // [191] HRR_API_HIPGRAPHICSUNMAPRESOURCES
+    playback_hipGraphicsUnregisterResource,  // [192] HRR_API_HIPGRAPHICSUNREGISTERRESOURCE
+    playback_hipHostAlloc,  // [193] HRR_API_HIPHOSTALLOC
+    playback_hipHostFree,  // [194] HRR_API_HIPHOSTFREE
+    playback_hipHostGetDevicePointer,  // [195] HRR_API_HIPHOSTGETDEVICEPOINTER
+    playback_hipHostGetFlags,  // [196] HRR_API_HIPHOSTGETFLAGS
+    playback_hipHostMalloc,  // [197] HRR_API_HIPHOSTMALLOC
+    playback_hipHostRegister,  // [198] HRR_API_HIPHOSTREGISTER
+    playback_hipHostUnregister,  // [199] HRR_API_HIPHOSTUNREGISTER
+    playback_hipImportExternalMemory,  // [200] HRR_API_HIPIMPORTEXTERNALMEMORY
+    playback_hipImportExternalSemaphore,  // [201] HRR_API_HIPIMPORTEXTERNALSEMAPHORE
+    playback_hipInit,  // [202] HRR_API_HIPINIT
+    playback_hipIpcCloseMemHandle,  // [203] HRR_API_HIPIPCCLOSEMEMHANDLE
+    playback_hipIpcGetEventHandle,  // [204] HRR_API_HIPIPCGETEVENTHANDLE
+    playback_hipIpcGetMemHandle,  // [205] HRR_API_HIPIPCGETMEMHANDLE
+    playback_hipIpcOpenEventHandle,  // [206] HRR_API_HIPIPCOPENEVENTHANDLE
+    playback_hipIpcOpenMemHandle,  // [207] HRR_API_HIPIPCOPENMEMHANDLE
+    playback_hipKernelNameRef,  // [208] HRR_API_HIPKERNELNAMEREF
+    playback_hipKernelNameRefByPtr,  // [209] HRR_API_HIPKERNELNAMEREFBYPTR
+    playback_hipLaunchByPtr,  // [210] HRR_API_HIPLAUNCHBYPTR
+    playback_hipLaunchCooperativeKernel,  // [211] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
+    playback_hipLaunchCooperativeKernelMultiDevice,  // [212] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
+    playback_hipLaunchHostFunc,  // [213] HRR_API_HIPLAUNCHHOSTFUNC
+    playback_hipLaunchKernel,  // [214] HRR_API_HIPLAUNCHKERNEL
+    playback_hipMalloc,  // [215] HRR_API_HIPMALLOC
+    playback_hipMalloc3D,  // [216] HRR_API_HIPMALLOC3D
+    playback_hipMalloc3DArray,  // [217] HRR_API_HIPMALLOC3DARRAY
+    playback_hipMallocArray,  // [218] HRR_API_HIPMALLOCARRAY
+    playback_hipMallocAsync,  // [219] HRR_API_HIPMALLOCASYNC
+    playback_hipMallocFromPoolAsync,  // [220] HRR_API_HIPMALLOCFROMPOOLASYNC
+    playback_hipMallocHost,  // [221] HRR_API_HIPMALLOCHOST
+    playback_hipMallocManaged,  // [222] HRR_API_HIPMALLOCMANAGED
+    playback_hipMallocMipmappedArray,  // [223] HRR_API_HIPMALLOCMIPMAPPEDARRAY
+    playback_hipMallocPitch,  // [224] HRR_API_HIPMALLOCPITCH
+    playback_hipMemAddressFree,  // [225] HRR_API_HIPMEMADDRESSFREE
+    playback_hipMemAddressReserve,  // [226] HRR_API_HIPMEMADDRESSRESERVE
+    playback_hipMemAdvise,  // [227] HRR_API_HIPMEMADVISE
+    playback_hipMemAllocHost,  // [228] HRR_API_HIPMEMALLOCHOST
+    playback_hipMemAllocPitch,  // [229] HRR_API_HIPMEMALLOCPITCH
+    playback_hipMemCreate,  // [230] HRR_API_HIPMEMCREATE
+    playback_hipMemExportToShareableHandle,  // [231] HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE
+    playback_hipMemGetAccess,  // [232] HRR_API_HIPMEMGETACCESS
+    playback_hipMemGetAddressRange,  // [233] HRR_API_HIPMEMGETADDRESSRANGE
+    playback_hipMemGetAllocationGranularity,  // [234] HRR_API_HIPMEMGETALLOCATIONGRANULARITY
+    playback_hipMemGetAllocationPropertiesFromHandle,  // [235] HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE
+    playback_hipMemGetInfo,  // [236] HRR_API_HIPMEMGETINFO
+    playback_hipMemImportFromShareableHandle,  // [237] HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE
+    playback_hipMemMap,  // [238] HRR_API_HIPMEMMAP
+    playback_hipMemMapArrayAsync,  // [239] HRR_API_HIPMEMMAPARRAYASYNC
+    playback_hipMemPoolCreate,  // [240] HRR_API_HIPMEMPOOLCREATE
+    playback_hipMemPoolDestroy,  // [241] HRR_API_HIPMEMPOOLDESTROY
+    playback_hipMemPoolExportPointer,  // [242] HRR_API_HIPMEMPOOLEXPORTPOINTER
+    playback_hipMemPoolExportToShareableHandle,  // [243] HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE
+    playback_hipMemPoolGetAccess,  // [244] HRR_API_HIPMEMPOOLGETACCESS
+    playback_hipMemPoolGetAttribute,  // [245] HRR_API_HIPMEMPOOLGETATTRIBUTE
+    playback_hipMemPoolImportFromShareableHandle,  // [246] HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE
+    playback_hipMemPoolImportPointer,  // [247] HRR_API_HIPMEMPOOLIMPORTPOINTER
+    playback_hipMemPoolSetAccess,  // [248] HRR_API_HIPMEMPOOLSETACCESS
+    playback_hipMemPoolSetAttribute,  // [249] HRR_API_HIPMEMPOOLSETATTRIBUTE
+    playback_hipMemPoolTrimTo,  // [250] HRR_API_HIPMEMPOOLTRIMTO
+    playback_hipMemPrefetchAsync,  // [251] HRR_API_HIPMEMPREFETCHASYNC
+    playback_hipMemPtrGetInfo,  // [252] HRR_API_HIPMEMPTRGETINFO
+    playback_hipMemRangeGetAttribute,  // [253] HRR_API_HIPMEMRANGEGETATTRIBUTE
+    playback_hipMemRangeGetAttributes,  // [254] HRR_API_HIPMEMRANGEGETATTRIBUTES
+    playback_hipMemRelease,  // [255] HRR_API_HIPMEMRELEASE
+    playback_hipMemRetainAllocationHandle,  // [256] HRR_API_HIPMEMRETAINALLOCATIONHANDLE
+    playback_hipMemSetAccess,  // [257] HRR_API_HIPMEMSETACCESS
+    playback_hipMemUnmap,  // [258] HRR_API_HIPMEMUNMAP
+    playback_hipMemcpy,  // [259] HRR_API_HIPMEMCPY
+    playback_hipMemcpy2D,  // [260] HRR_API_HIPMEMCPY2D
+    playback_hipMemcpy2DAsync,  // [261] HRR_API_HIPMEMCPY2DASYNC
+    playback_hipMemcpy2DFromArray,  // [262] HRR_API_HIPMEMCPY2DFROMARRAY
+    playback_hipMemcpy2DFromArrayAsync,  // [263] HRR_API_HIPMEMCPY2DFROMARRAYASYNC
+    playback_hipMemcpy2DToArray,  // [264] HRR_API_HIPMEMCPY2DTOARRAY
+    playback_hipMemcpy2DToArrayAsync,  // [265] HRR_API_HIPMEMCPY2DTOARRAYASYNC
+    playback_hipMemcpy3D,  // [266] HRR_API_HIPMEMCPY3D
+    playback_hipMemcpy3DAsync,  // [267] HRR_API_HIPMEMCPY3DASYNC
+    playback_hipMemcpyAsync,  // [268] HRR_API_HIPMEMCPYASYNC
+    playback_hipMemcpyAtoH,  // [269] HRR_API_HIPMEMCPYATOH
+    playback_hipMemcpyDtoD,  // [270] HRR_API_HIPMEMCPYDTOD
+    playback_hipMemcpyDtoDAsync,  // [271] HRR_API_HIPMEMCPYDTODASYNC
+    playback_hipMemcpyDtoH,  // [272] HRR_API_HIPMEMCPYDTOH
+    playback_hipMemcpyDtoHAsync,  // [273] HRR_API_HIPMEMCPYDTOHASYNC
+    playback_hipMemcpyFromArray,  // [274] HRR_API_HIPMEMCPYFROMARRAY
+    playback_hipMemcpyFromSymbol,  // [275] HRR_API_HIPMEMCPYFROMSYMBOL
+    playback_hipMemcpyFromSymbolAsync,  // [276] HRR_API_HIPMEMCPYFROMSYMBOLASYNC
+    playback_hipMemcpyHtoA,  // [277] HRR_API_HIPMEMCPYHTOA
+    playback_hipMemcpyHtoD,  // [278] HRR_API_HIPMEMCPYHTOD
+    playback_hipMemcpyHtoDAsync,  // [279] HRR_API_HIPMEMCPYHTODASYNC
+    playback_hipMemcpyParam2D,  // [280] HRR_API_HIPMEMCPYPARAM2D
+    playback_hipMemcpyParam2DAsync,  // [281] HRR_API_HIPMEMCPYPARAM2DASYNC
+    playback_hipMemcpyPeer,  // [282] HRR_API_HIPMEMCPYPEER
+    playback_hipMemcpyPeerAsync,  // [283] HRR_API_HIPMEMCPYPEERASYNC
+    playback_hipMemcpyToArray,  // [284] HRR_API_HIPMEMCPYTOARRAY
+    playback_hipMemcpyToSymbol,  // [285] HRR_API_HIPMEMCPYTOSYMBOL
+    playback_hipMemcpyToSymbolAsync,  // [286] HRR_API_HIPMEMCPYTOSYMBOLASYNC
+    playback_hipMemcpyWithStream,  // [287] HRR_API_HIPMEMCPYWITHSTREAM
+    playback_hipMemset,  // [288] HRR_API_HIPMEMSET
+    playback_hipMemset2D,  // [289] HRR_API_HIPMEMSET2D
+    playback_hipMemset2DAsync,  // [290] HRR_API_HIPMEMSET2DASYNC
+    playback_hipMemset3D,  // [291] HRR_API_HIPMEMSET3D
+    playback_hipMemset3DAsync,  // [292] HRR_API_HIPMEMSET3DASYNC
+    playback_hipMemsetAsync,  // [293] HRR_API_HIPMEMSETASYNC
+    playback_hipMemsetD16,  // [294] HRR_API_HIPMEMSETD16
+    playback_hipMemsetD16Async,  // [295] HRR_API_HIPMEMSETD16ASYNC
+    playback_hipMemsetD32,  // [296] HRR_API_HIPMEMSETD32
+    playback_hipMemsetD32Async,  // [297] HRR_API_HIPMEMSETD32ASYNC
+    playback_hipMemsetD8,  // [298] HRR_API_HIPMEMSETD8
+    playback_hipMemsetD8Async,  // [299] HRR_API_HIPMEMSETD8ASYNC
+    playback_hipMipmappedArrayCreate,  // [300] HRR_API_HIPMIPMAPPEDARRAYCREATE
+    playback_hipMipmappedArrayDestroy,  // [301] HRR_API_HIPMIPMAPPEDARRAYDESTROY
+    playback_hipMipmappedArrayGetLevel,  // [302] HRR_API_HIPMIPMAPPEDARRAYGETLEVEL
+    playback_hipModuleGetFunction,  // [303] HRR_API_HIPMODULEGETFUNCTION
+    playback_hipModuleGetGlobal,  // [304] HRR_API_HIPMODULEGETGLOBAL
+    playback_hipModuleGetTexRef,  // [305] HRR_API_HIPMODULEGETTEXREF
+    playback_hipModuleLaunchCooperativeKernel,  // [306] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
+    playback_hipModuleLaunchCooperativeKernelMultiDevice,  // [307] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
+    playback_hipModuleLaunchKernel,  // [308] HRR_API_HIPMODULELAUNCHKERNEL
+    playback_hipModuleLoad,  // [309] HRR_API_HIPMODULELOAD
+    playback_hipModuleLoadData,  // [310] HRR_API_HIPMODULELOADDATA
+    playback_hipModuleLoadDataEx,  // [311] HRR_API_HIPMODULELOADDATAEX
+    playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor,  // [312] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
+    playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,  // [313] HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
+    playback_hipModuleOccupancyMaxPotentialBlockSize,  // [314] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE
+    playback_hipModuleOccupancyMaxPotentialBlockSizeWithFlags,  // [315] HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS
+    playback_hipModuleUnload,  // [316] HRR_API_HIPMODULEUNLOAD
+    playback_hipOccupancyMaxActiveBlocksPerMultiprocessor,  // [317] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
+    playback_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,  // [318] HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS
+    playback_hipOccupancyMaxPotentialBlockSize,  // [319] HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE
+    playback_hipPeekAtLastError,  // [320] HRR_API_HIPPEEKATLASTERROR
+    playback_hipPointerGetAttribute,  // [321] HRR_API_HIPPOINTERGETATTRIBUTE
+    playback_hipPointerGetAttributes,  // [322] HRR_API_HIPPOINTERGETATTRIBUTES
+    playback_hipPointerSetAttribute,  // [323] HRR_API_HIPPOINTERSETATTRIBUTE
+    playback_hipProfilerStart,  // [324] HRR_API_HIPPROFILERSTART
+    playback_hipProfilerStop,  // [325] HRR_API_HIPPROFILERSTOP
+    playback_hipRuntimeGetVersion,  // [326] HRR_API_HIPRUNTIMEGETVERSION
+    playback_hipSetDevice,  // [327] HRR_API_HIPSETDEVICE
+    playback_hipSetDeviceFlags,  // [328] HRR_API_HIPSETDEVICEFLAGS
+    playback_hipSetupArgument,  // [329] HRR_API_HIPSETUPARGUMENT
+    playback_hipSignalExternalSemaphoresAsync,  // [330] HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC
+    playback_hipStreamAddCallback,  // [331] HRR_API_HIPSTREAMADDCALLBACK
+    playback_hipStreamAttachMemAsync,  // [332] HRR_API_HIPSTREAMATTACHMEMASYNC
+    playback_hipStreamBeginCapture,  // [333] HRR_API_HIPSTREAMBEGINCAPTURE
+    playback_hipStreamCreate,  // [334] HRR_API_HIPSTREAMCREATE
+    playback_hipStreamCreateWithFlags,  // [335] HRR_API_HIPSTREAMCREATEWITHFLAGS
+    playback_hipStreamCreateWithPriority,  // [336] HRR_API_HIPSTREAMCREATEWITHPRIORITY
+    playback_hipStreamDestroy,  // [337] HRR_API_HIPSTREAMDESTROY
+    playback_hipStreamEndCapture,  // [338] HRR_API_HIPSTREAMENDCAPTURE
+    playback_hipStreamGetCaptureInfo,  // [339] HRR_API_HIPSTREAMGETCAPTUREINFO
+    playback_hipStreamGetCaptureInfo_v2,  // [340] HRR_API_HIPSTREAMGETCAPTUREINFO_V2
+    playback_hipStreamGetDevice,  // [341] HRR_API_HIPSTREAMGETDEVICE
+    playback_hipStreamGetFlags,  // [342] HRR_API_HIPSTREAMGETFLAGS
+    playback_hipStreamGetPriority,  // [343] HRR_API_HIPSTREAMGETPRIORITY
+    playback_hipStreamIsCapturing,  // [344] HRR_API_HIPSTREAMISCAPTURING
+    playback_hipStreamQuery,  // [345] HRR_API_HIPSTREAMQUERY
+    playback_hipStreamSynchronize,  // [346] HRR_API_HIPSTREAMSYNCHRONIZE
+    playback_hipStreamUpdateCaptureDependencies,  // [347] HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES
+    playback_hipStreamWaitEvent,  // [348] HRR_API_HIPSTREAMWAITEVENT
+    playback_hipStreamWaitValue32,  // [349] HRR_API_HIPSTREAMWAITVALUE32
+    playback_hipStreamWaitValue64,  // [350] HRR_API_HIPSTREAMWAITVALUE64
+    playback_hipStreamWriteValue32,  // [351] HRR_API_HIPSTREAMWRITEVALUE32
+    playback_hipStreamWriteValue64,  // [352] HRR_API_HIPSTREAMWRITEVALUE64
+    playback_hipTexObjectCreate,  // [353] HRR_API_HIPTEXOBJECTCREATE
+    playback_hipTexObjectDestroy,  // [354] HRR_API_HIPTEXOBJECTDESTROY
+    playback_hipTexObjectGetResourceDesc,  // [355] HRR_API_HIPTEXOBJECTGETRESOURCEDESC
+    playback_hipTexObjectGetResourceViewDesc,  // [356] HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC
+    playback_hipTexObjectGetTextureDesc,  // [357] HRR_API_HIPTEXOBJECTGETTEXTUREDESC
+    playback_hipTexRefGetAddress,  // [358] HRR_API_HIPTEXREFGETADDRESS
+    playback_hipTexRefGetAddressMode,  // [359] HRR_API_HIPTEXREFGETADDRESSMODE
+    playback_hipTexRefGetFilterMode,  // [360] HRR_API_HIPTEXREFGETFILTERMODE
+    playback_hipTexRefGetFlags,  // [361] HRR_API_HIPTEXREFGETFLAGS
+    playback_hipTexRefGetFormat,  // [362] HRR_API_HIPTEXREFGETFORMAT
+    playback_hipTexRefGetMaxAnisotropy,  // [363] HRR_API_HIPTEXREFGETMAXANISOTROPY
+    playback_hipTexRefGetMipMappedArray,  // [364] HRR_API_HIPTEXREFGETMIPMAPPEDARRAY
+    playback_hipTexRefGetMipmapFilterMode,  // [365] HRR_API_HIPTEXREFGETMIPMAPFILTERMODE
+    playback_hipTexRefGetMipmapLevelBias,  // [366] HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS
+    playback_hipTexRefGetMipmapLevelClamp,  // [367] HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP
+    playback_hipTexRefSetAddress,  // [368] HRR_API_HIPTEXREFSETADDRESS
+    playback_hipTexRefSetAddress2D,  // [369] HRR_API_HIPTEXREFSETADDRESS2D
+    playback_hipTexRefSetAddressMode,  // [370] HRR_API_HIPTEXREFSETADDRESSMODE
+    playback_hipTexRefSetArray,  // [371] HRR_API_HIPTEXREFSETARRAY
+    playback_hipTexRefSetBorderColor,  // [372] HRR_API_HIPTEXREFSETBORDERCOLOR
+    playback_hipTexRefSetFilterMode,  // [373] HRR_API_HIPTEXREFSETFILTERMODE
+    playback_hipTexRefSetFlags,  // [374] HRR_API_HIPTEXREFSETFLAGS
+    playback_hipTexRefSetFormat,  // [375] HRR_API_HIPTEXREFSETFORMAT
+    playback_hipTexRefSetMaxAnisotropy,  // [376] HRR_API_HIPTEXREFSETMAXANISOTROPY
+    playback_hipTexRefSetMipmapFilterMode,  // [377] HRR_API_HIPTEXREFSETMIPMAPFILTERMODE
+    playback_hipTexRefSetMipmapLevelBias,  // [378] HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS
+    playback_hipTexRefSetMipmapLevelClamp,  // [379] HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP
+    playback_hipTexRefSetMipmappedArray,  // [380] HRR_API_HIPTEXREFSETMIPMAPPEDARRAY
+    playback_hipThreadExchangeStreamCaptureMode,  // [381] HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE
+    playback_hipUnbindTexture,  // [382] HRR_API_HIPUNBINDTEXTURE
+    playback_hipUserObjectCreate,  // [383] HRR_API_HIPUSEROBJECTCREATE
+    playback_hipUserObjectRelease,  // [384] HRR_API_HIPUSEROBJECTRELEASE
+    playback_hipUserObjectRetain,  // [385] HRR_API_HIPUSEROBJECTRETAIN
+    playback_hipWaitExternalSemaphoresAsync,  // [386] HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC
+    playback_hipCreateChannelDesc,  // [387] HRR_API_HIPCREATECHANNELDESC
+    playback_hipExtModuleLaunchKernel,  // [388] HRR_API_HIPEXTMODULELAUNCHKERNEL
+    playback_hipHccModuleLaunchKernel,  // [389] HRR_API_HIPHCCMODULELAUNCHKERNEL
+    playback_hipMemcpy_spt,  // [390] HRR_API_HIPMEMCPY_SPT
+    playback_hipMemcpyToSymbol_spt,  // [391] HRR_API_HIPMEMCPYTOSYMBOL_SPT
+    playback_hipMemcpyFromSymbol_spt,  // [392] HRR_API_HIPMEMCPYFROMSYMBOL_SPT
+    playback_hipMemcpy2D_spt,  // [393] HRR_API_HIPMEMCPY2D_SPT
+    playback_hipMemcpy2DFromArray_spt,  // [394] HRR_API_HIPMEMCPY2DFROMARRAY_SPT
+    playback_hipMemcpy3D_spt,  // [395] HRR_API_HIPMEMCPY3D_SPT
+    playback_hipMemset_spt,  // [396] HRR_API_HIPMEMSET_SPT
+    playback_hipMemsetAsync_spt,  // [397] HRR_API_HIPMEMSETASYNC_SPT
+    playback_hipMemset2D_spt,  // [398] HRR_API_HIPMEMSET2D_SPT
+    playback_hipMemset2DAsync_spt,  // [399] HRR_API_HIPMEMSET2DASYNC_SPT
+    playback_hipMemset3DAsync_spt,  // [400] HRR_API_HIPMEMSET3DASYNC_SPT
+    playback_hipMemset3D_spt,  // [401] HRR_API_HIPMEMSET3D_SPT
+    playback_hipMemcpyAsync_spt,  // [402] HRR_API_HIPMEMCPYASYNC_SPT
+    playback_hipMemcpy3DAsync_spt,  // [403] HRR_API_HIPMEMCPY3DASYNC_SPT
+    playback_hipMemcpy2DAsync_spt,  // [404] HRR_API_HIPMEMCPY2DASYNC_SPT
+    playback_hipMemcpyFromSymbolAsync_spt,  // [405] HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT
+    playback_hipMemcpyToSymbolAsync_spt,  // [406] HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT
+    playback_hipMemcpyFromArray_spt,  // [407] HRR_API_HIPMEMCPYFROMARRAY_SPT
+    playback_hipMemcpy2DToArray_spt,  // [408] HRR_API_HIPMEMCPY2DTOARRAY_SPT
+    playback_hipMemcpy2DFromArrayAsync_spt,  // [409] HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT
+    playback_hipMemcpy2DToArrayAsync_spt,  // [410] HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT
+    playback_hipStreamQuery_spt,  // [411] HRR_API_HIPSTREAMQUERY_SPT
+    playback_hipStreamSynchronize_spt,  // [412] HRR_API_HIPSTREAMSYNCHRONIZE_SPT
+    playback_hipStreamGetPriority_spt,  // [413] HRR_API_HIPSTREAMGETPRIORITY_SPT
+    playback_hipStreamWaitEvent_spt,  // [414] HRR_API_HIPSTREAMWAITEVENT_SPT
+    playback_hipStreamGetFlags_spt,  // [415] HRR_API_HIPSTREAMGETFLAGS_SPT
+    playback_hipStreamAddCallback_spt,  // [416] HRR_API_HIPSTREAMADDCALLBACK_SPT
+    playback_hipEventRecord_spt,  // [417] HRR_API_HIPEVENTRECORD_SPT
+    playback_hipLaunchCooperativeKernel_spt,  // [418] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT
+    playback_hipLaunchKernel_spt,  // [419] HRR_API_HIPLAUNCHKERNEL_SPT
+    playback_hipGraphLaunch_spt,  // [420] HRR_API_HIPGRAPHLAUNCH_SPT
+    playback_hipStreamBeginCapture_spt,  // [421] HRR_API_HIPSTREAMBEGINCAPTURE_SPT
+    playback_hipStreamEndCapture_spt,  // [422] HRR_API_HIPSTREAMENDCAPTURE_SPT
+    playback_hipStreamIsCapturing_spt,  // [423] HRR_API_HIPSTREAMISCAPTURING_SPT
+    playback_hipStreamGetCaptureInfo_spt,  // [424] HRR_API_HIPSTREAMGETCAPTUREINFO_SPT
+    playback_hipStreamGetCaptureInfo_v2_spt,  // [425] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
+    playback_hipLaunchHostFunc_spt,  // [426] HRR_API_HIPLAUNCHHOSTFUNC_SPT
+    playback_hipGetStreamDeviceId,  // [427] HRR_API_HIPGETSTREAMDEVICEID
+    playback_hipDrvGraphAddMemsetNode,  // [428] HRR_API_HIPDRVGRAPHADDMEMSETNODE
+    playback_hipGraphAddExternalSemaphoresWaitNode,  // [429] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE
+    playback_hipGraphAddExternalSemaphoresSignalNode,  // [430] HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE
+    playback_hipGraphExternalSemaphoresSignalNodeSetParams,  // [431] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS
+    playback_hipGraphExternalSemaphoresWaitNodeSetParams,  // [432] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS
+    playback_hipGraphExternalSemaphoresSignalNodeGetParams,  // [433] HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS
+    playback_hipGraphExternalSemaphoresWaitNodeGetParams,  // [434] HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS
+    playback_hipGraphExecExternalSemaphoresSignalNodeSetParams,  // [435] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS
+    playback_hipGraphExecExternalSemaphoresWaitNodeSetParams,  // [436] HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS
+    playback_hipGraphAddNode,  // [437] HRR_API_HIPGRAPHADDNODE
+    playback_hipGraphInstantiateWithParams,  // [438] HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS
+    playback_hipExtGetLastError,  // [439] HRR_API_HIPEXTGETLASTERROR
+    playback_hipTexRefGetBorderColor,  // [440] HRR_API_HIPTEXREFGETBORDERCOLOR
+    playback_hipTexRefGetArray,  // [441] HRR_API_HIPTEXREFGETARRAY
+    playback_hipGetProcAddress,  // [442] HRR_API_HIPGETPROCADDRESS
+    playback_hipStreamBeginCaptureToGraph,  // [443] HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH
+    playback_hipGetFuncBySymbol,  // [444] HRR_API_HIPGETFUNCBYSYMBOL
+    playback_hipSetValidDevices,  // [445] HRR_API_HIPSETVALIDDEVICES
+    playback_hipMemcpyAtoD,  // [446] HRR_API_HIPMEMCPYATOD
+    playback_hipMemcpyDtoA,  // [447] HRR_API_HIPMEMCPYDTOA
+    playback_hipMemcpyAtoA,  // [448] HRR_API_HIPMEMCPYATOA
+    playback_hipMemcpyAtoHAsync,  // [449] HRR_API_HIPMEMCPYATOHASYNC
+    playback_hipMemcpyHtoAAsync,  // [450] HRR_API_HIPMEMCPYHTOAASYNC
+    playback_hipMemcpy2DArrayToArray,  // [451] HRR_API_HIPMEMCPY2DARRAYTOARRAY
+    playback_hipDrvGraphAddMemFreeNode,  // [452] HRR_API_HIPDRVGRAPHADDMEMFREENODE
+    playback_hipDrvGraphExecMemcpyNodeSetParams,  // [453] HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS
+    playback_hipDrvGraphExecMemsetNodeSetParams,  // [454] HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS
+    playback_hipGraphExecGetFlags,  // [455] HRR_API_HIPGRAPHEXECGETFLAGS
+    playback_hipGraphNodeSetParams,  // [456] HRR_API_HIPGRAPHNODESETPARAMS
+    playback_hipGraphExecNodeSetParams,  // [457] HRR_API_HIPGRAPHEXECNODESETPARAMS
+    playback_hipExternalMemoryGetMappedMipmappedArray,  // [458] HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY
+    playback_hipDrvGraphMemcpyNodeGetParams,  // [459] HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS
+    playback_hipDrvGraphMemcpyNodeSetParams,  // [460] HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS
+    playback_hipExtHostAlloc,  // [461] HRR_API_HIPEXTHOSTALLOC
+    playback_hipDeviceGetTexture1DLinearMaxWidth,  // [462] HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH
+    playback_hipStreamBatchMemOp,  // [463] HRR_API_HIPSTREAMBATCHMEMOP
+    playback_hipGraphAddBatchMemOpNode,  // [464] HRR_API_HIPGRAPHADDBATCHMEMOPNODE
+    playback_hipGraphBatchMemOpNodeGetParams,  // [465] HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS
+    playback_hipGraphBatchMemOpNodeSetParams,  // [466] HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS
+    playback_hipGraphExecBatchMemOpNodeSetParams,  // [467] HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS
+    playback_hipLinkAddData,  // [468] HRR_API_HIPLINKADDDATA
+    playback_hipLinkAddFile,  // [469] HRR_API_HIPLINKADDFILE
+    playback_hipLinkComplete,  // [470] HRR_API_HIPLINKCOMPLETE
+    playback_hipLinkCreate,  // [471] HRR_API_HIPLINKCREATE
+    playback_hipLinkDestroy,  // [472] HRR_API_HIPLINKDESTROY
+    playback_hipEventRecordWithFlags,  // [473] HRR_API_HIPEVENTRECORDWITHFLAGS
+    playback_hipLaunchKernelExC,  // [474] HRR_API_HIPLAUNCHKERNELEXC
+    playback_hipDrvLaunchKernelEx,  // [475] HRR_API_HIPDRVLAUNCHKERNELEX
+    playback_hipMemGetHandleForAddressRange,  // [476] HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE
+    playback_hipModuleGetFunctionCount,  // [477] HRR_API_HIPMODULEGETFUNCTIONCOUNT
+    playback_hipMemsetD2D8,  // [478] HRR_API_HIPMEMSETD2D8
+    playback_hipMemsetD2D8Async,  // [479] HRR_API_HIPMEMSETD2D8ASYNC
+    playback_hipMemsetD2D16,  // [480] HRR_API_HIPMEMSETD2D16
+    playback_hipMemsetD2D16Async,  // [481] HRR_API_HIPMEMSETD2D16ASYNC
+    playback_hipMemsetD2D32,  // [482] HRR_API_HIPMEMSETD2D32
+    playback_hipMemsetD2D32Async,  // [483] HRR_API_HIPMEMSETD2D32ASYNC
+    playback_hipStreamGetAttribute,  // [484] HRR_API_HIPSTREAMGETATTRIBUTE
+    playback_hipStreamSetAttribute,  // [485] HRR_API_HIPSTREAMSETATTRIBUTE
+    playback_hipModuleLoadFatBinary,  // [486] HRR_API_HIPMODULELOADFATBINARY
+    playback_hipMemcpyBatchAsync,  // [487] HRR_API_HIPMEMCPYBATCHASYNC
+    playback_hipMemcpy3DBatchAsync,  // [488] HRR_API_HIPMEMCPY3DBATCHASYNC
+    playback_hipMemcpy3DPeer,  // [489] HRR_API_HIPMEMCPY3DPEER
+    playback_hipMemcpy3DPeerAsync,  // [490] HRR_API_HIPMEMCPY3DPEERASYNC
+    playback_hipGetDriverEntryPoint,  // [491] HRR_API_HIPGETDRIVERENTRYPOINT
+    playback_hipGetDriverEntryPoint_spt,  // [492] HRR_API_HIPGETDRIVERENTRYPOINT_SPT
+    playback_hipMemPrefetchAsync_v2,  // [493] HRR_API_HIPMEMPREFETCHASYNC_V2
+    playback_hipMemAdvise_v2,  // [494] HRR_API_HIPMEMADVISE_V2
+    playback_hipStreamGetId,  // [495] HRR_API_HIPSTREAMGETID
+    playback_hipLibraryLoadData,  // [496] HRR_API_HIPLIBRARYLOADDATA
+    playback_hipLibraryLoadFromFile,  // [497] HRR_API_HIPLIBRARYLOADFROMFILE
+    playback_hipLibraryUnload,  // [498] HRR_API_HIPLIBRARYUNLOAD
+    playback_hipLibraryGetKernel,  // [499] HRR_API_HIPLIBRARYGETKERNEL
+    playback_hipLibraryGetKernelCount,  // [500] HRR_API_HIPLIBRARYGETKERNELCOUNT
+    playback_hipStreamCopyAttributes,  // [501] HRR_API_HIPSTREAMCOPYATTRIBUTES
+    playback_hipLibraryEnumerateKernels,  // [502] HRR_API_HIPLIBRARYENUMERATEKERNELS
+    playback_hipKernelGetLibrary,  // [503] HRR_API_HIPKERNELGETLIBRARY
+    playback_hipKernelGetName,  // [504] HRR_API_HIPKERNELGETNAME
+    playback_hipOccupancyAvailableDynamicSMemPerBlock,  // [505] HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK
+    playback_hipGetProcAddress_spt,  // [506] HRR_API_HIPGETPROCADDRESS_SPT
+    playback_hipKernelGetParamInfo,  // [507] HRR_API_HIPKERNELGETPARAMINFO
+    playback_hipExtDisableLogging,  // [508] HRR_API_HIPEXTDISABLELOGGING
+    playback_hipExtEnableLogging,  // [509] HRR_API_HIPEXTENABLELOGGING
+    playback_hipExtSetLoggingParams,  // [510] HRR_API_HIPEXTSETLOGGINGPARAMS
+    playback_hipMemSetMemPool,  // [511] HRR_API_HIPMEMSETMEMPOOL
+    playback_hipMemGetMemPool,  // [512] HRR_API_HIPMEMGETMEMPOOL
+    playback_hipMipmappedArrayGetMemoryRequirements,  // [513] HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS
+    playback_hipKernelGetAttribute,  // [514] HRR_API_HIPKERNELGETATTRIBUTE
+    playback_hipKernelSetAttribute,  // [515] HRR_API_HIPKERNELSETATTRIBUTE
+    playback_hipKernelGetFunction,  // [516] HRR_API_HIPKERNELGETFUNCTION
+    playback_hipMemPrefetchBatchAsync,  // [517] HRR_API_HIPMEMPREFETCHBATCHASYNC
+    playback_hipOccupancyMaxPotentialClusterSize,  // [518] HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE
+    playback_hipOccupancyMaxActiveClusters,  // [519] HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS
+    playback_hipGreenCtxCreate,  // [520] HRR_API_HIPGREENCTXCREATE
+    playback_hipExecutionCtxDestroy,  // [521] HRR_API_HIPEXECUTIONCTXDESTROY
+    playback_hipExecutionCtxStreamCreate,  // [522] HRR_API_HIPEXECUTIONCTXSTREAMCREATE
+    playback_hipDeviceGetDevResource,  // [523] HRR_API_HIPDEVICEGETDEVRESOURCE
+    playback_hipDevSmResourceSplitByCount,  // [524] HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT
+    playback_hipDevSmResourceSplit,  // [525] HRR_API_HIPDEVSMRESOURCESPLIT
+    playback_hipDevResourceGenerateDesc,  // [526] HRR_API_HIPDEVRESOURCEGENERATEDESC
+    playback_hipDeviceGetExecutionCtx,  // [527] HRR_API_HIPDEVICEGETEXECUTIONCTX
+    playback_hipExecutionCtxGetDevResource,  // [528] HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE
+    playback_hipExecutionCtxGetDevice,  // [529] HRR_API_HIPEXECUTIONCTXGETDEVICE
+    playback_hipExecutionCtxGetId,  // [530] HRR_API_HIPEXECUTIONCTXGETID
+    playback_hipStreamGetDevResource,  // [531] HRR_API_HIPSTREAMGETDEVRESOURCE
+    playback_hipExecutionCtxRecordEvent,  // [532] HRR_API_HIPEXECUTIONCTXRECORDEVENT
+    playback_hipExecutionCtxSynchronize,  // [533] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
+    playback_hipExecutionCtxWaitEvent,  // [534] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    playback_hipLibraryGetGlobal,  // [535] HRR_API_HIPLIBRARYGETGLOBAL
+    playback_hipLibraryGetManaged,  // [536] HRR_API_HIPLIBRARYGETMANAGED
+    playback_hipMemDiscardBatchAsync,  // [537] HRR_API_HIPMEMDISCARDBATCHASYNC
+    playback_hipDrvMemDiscardBatchAsync,  // [538] HRR_API_HIPDRVMEMDISCARDBATCHASYNC
+    playback_hipMemDiscardAndPrefetchBatchAsync,  // [539] HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC
+    playback_hipDrvMemDiscardAndPrefetchBatchAsync,  // [540] HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC
+    playback_hipMemGetDefaultMemPool,  // [541] HRR_API_HIPMEMGETDEFAULTMEMPOOL
+    playback_hipDeviceGetLuid,  // [542] HRR_API_HIPDEVICEGETLUID
+    playback_hipInitDevice,  // [543] HRR_API_HIPINITDEVICE
+    playback___hipPopCallConfiguration,  // [544] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [545] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [546] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [547] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [548] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [549] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [550] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [551] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [552] HRR_API_HIPUNREGISTERFATBINARY
 };
