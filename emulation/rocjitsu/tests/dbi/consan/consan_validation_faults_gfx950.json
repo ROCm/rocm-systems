@@ -30,6 +30,31 @@
         }
       ]
     },
+    "pytorch-torch-mode": {
+      "faults": [
+        {
+          "id": "barrier-drop-bitonic-stage",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected s_barrier is the first non-redundant synchronization edge in the bitonic-sort loop of the executed int32, Power2Size=128 compute_mode specialization. Peer LDS writes at .text+0x6a8c4 through .text+0x6a8dc precede it, and peer LDS reads begin immediately after it at .text+0x6a908. The workload launches this specialization for its one-row, 128-column int32 input, and the retained run installs this exact mutation once. The deterministic emulator schedule may preserve the exact result without producing a conflict, so this is prospectively classified as a qualified miss rather than changing selectors after observation."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:682f8f2029495ec4|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x000000000006a904|mnemonic=s_barrier|occurrence=2"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll"
+              }
+            }
+          }
+        }
+      ]
+    },
     "d128-pressure": {
       "faults": [
         {
