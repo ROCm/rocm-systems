@@ -68,16 +68,16 @@ template <typename Range>
     return true;
   }
   constexpr std::array always = {
-      "ds_load_i8",         "ds_load_u8",          "ds_load_i16",       "ds_load_u16",
-      "ds_load_u8_d16",     "ds_load_u8_d16_hi",   "ds_load_i8_d16",    "ds_load_i8_d16_hi",
-      "ds_load_u16_d16",    "ds_load_u16_d16_hi",  "ds_store_b8",       "ds_store_b16",
-      "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_u8",        "ds_read_u16",
-      "ds_write_b8",        "ds_write_b16",        "ds_load_b32",       "ds_load_b64",
-      "ds_load_b128",       "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",
-      "ds_read_b64",        "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32",
-      "ds_store_b64",       "ds_store_b128",       "ds_write_b32",      "ds_write_b64",
-      "ds_write_b128",      "ds_add_f32",          "ds_add_f64",        "ds_add_u32",
-      "ds_add_u64",         "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32",
+      "ds_load_i8",         "ds_load_u8",          "ds_load_i16",         "ds_load_u16",
+      "ds_load_u8_d16",     "ds_load_u8_d16_hi",   "ds_load_i8_d16",      "ds_load_i8_d16_hi",
+      "ds_load_u16_d16",    "ds_load_u16_d16_hi",  "ds_store_b8",         "ds_store_b16",
+      "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_u8",          "ds_read_i16",
+      "ds_read_u16",        "ds_write_b8",         "ds_write_b16",        "ds_load_b32",
+      "ds_load_b64",        "ds_load_b128",        "ds_load_tr8_b64",     "ds_load_tr16_b128",
+      "ds_read_b32",        "ds_read_b64",         "ds_read_b64_tr_b16",  "ds_read_b128",
+      "ds_store_b32",       "ds_store_b64",        "ds_store_b128",       "ds_write_b32",
+      "ds_write_b64",       "ds_write_b128",       "ds_add_f32",          "ds_add_f64",
+      "ds_add_u32",         "ds_add_u64",          "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32",
   };
   if (named(mnemonic, always))
     return true;
