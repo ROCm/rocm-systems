@@ -27,19 +27,35 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 #include <string>
-#include <fcntl.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_2.h>
+#include <va/va_win32.h>
+#include "d3d12_interop.h"
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <libdrm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
-#include <va/va.h>
 #include <va/va_drm.h>
+#endif
+
+#include <va/va.h>
 #include <va/va_drmcommon.h>
 #ifdef ROCDECODE_USE_DLOPEN_VA
 #include "vaapi_loader.h"
@@ -65,6 +81,7 @@ THE SOFTWARE.
 
 #define INIT_SLICE_PARAM_LIST_NUM 16 // initial slice parameter buffer list size
 
+#ifndef _WIN32
 typedef enum {
     kSpx = 0, // Single Partition Accelerator
     kDpx = 1, // Dual Partition Accelerator
@@ -72,12 +89,17 @@ typedef enum {
     kQpx = 3, // Quad Partition Accelerator
     kCpx = 4, // Core Partition Accelerator
 } ComputePartition;
+#endif
 
 typedef struct {
     int device_id;
     std::string gpu_uuid;
     std::string gpu_pci_bdf;
+#ifndef _WIN32
     int drm_fd;
+#else
+    LUID adapter_luid;
+#endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
     uint32_t num_dec_engines;
@@ -101,7 +123,14 @@ public:
     rocDecStatus InitializeDecoder();
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
+#ifndef _WIN32
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
+#else
+    // Interop path (forwarders into D3D12Interop): tiled D3D12 decode texture ->
+    // linear staging buffer -> HIP import. Implementation lives in d3d12_interop.cpp.
+    rocDecStatus CopyToStagingBuffer(int pic_idx);
+    rocDecStatus ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out);
+#endif
     rocDecStatus SyncSurface(int pic_idx);
     rocDecStatus ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params);
 
@@ -115,6 +144,10 @@ private:
     VAContextID va_context_id_;
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
+#ifdef _WIN32
+    // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
+    std::unique_ptr<D3D12Interop> d3d12_interop_;
+#endif
 
     VABufferID pic_params_buf_id_;
     VABufferID iq_matrix_buf_id_;
@@ -148,6 +181,7 @@ public:
 
 private:
     std::mutex mutex;
+#ifndef _WIN32
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
      *
@@ -161,7 +195,7 @@ private:
     // GPU PCI BDF -> render node index / compute partition (primary match key).
     std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
-
+#endif
     VaContext();
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
@@ -175,6 +209,7 @@ private:
 #endif
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
+#ifndef _WIN32
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
@@ -185,4 +220,7 @@ private:
 
     // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
     std::string GetFirstAvailableDrmNode();
+#else
+    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
+#endif
 };
