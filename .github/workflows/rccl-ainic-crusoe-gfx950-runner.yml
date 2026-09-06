@@ -1,0 +1,358 @@
+# RCCL AINIC test runner for the Crusoe gfx950 (MI355X) cluster.
+#
+# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl. The
+# test_runner framework lives at projects/rccl/tools/scripts/test_runner/ and its
+# entry point is test_runner.py (run from that directory so its `from lib...`
+# imports resolve, matching the README). The test plan is
+# configs/mi355x_ainic_crusoe_roce.json. Runs on the org runner
+# crusoe-linux-slurm-01. That agent was registered with --no-default-labels,
+# so its only GitHub label is crusoe-linux-slurm-scale-runner -- do not also
+# require self-hosted, or the job waits forever for a runner that will never
+# match.
+#
+# Test scope and categories live entirely in the JSON config (not here), so the
+# set of suites and the smoke subset can be changed without editing this
+# workflow:
+#   - Category is derived from is_gtest in the config: "gtest-tests" (freshly
+#     built rccl-UnitTestsMPI gtests) vs "rccl-tests-sweeps" (prebuilt rccl-tests
+#     perf binaries + IONIC counter validation). Both run in one test_runner
+#     invocation; each suite resolves its own binary directory (GTEST_BIN_DIR vs
+#     PERF_BIN_DIR) from its base config's test_binary_dir.
+#   - Scope is selected with --scope: PRs run --scope smoke (only suites marked
+#     "smoke": true); schedule/manual run the full plan (all enabled suites).
+#
+# Triggers: manual (workflow_dispatch), nightly (schedule) against the default
+# branch, and label-gated on PRs -- add the "crusoe-test" label to run the
+# smoke subset. Not a required merge gate.
+#
+# Build strategy: the runner is a submit node with no local GPUs, so everything
+# runs inside one batch job on the GPU compute nodes. Phase 0 builds RCCL fresh
+# with --enable-mpi-tests from this run's own checkout on the compute node
+# (install.sh defaults -j to $(nproc)). The single test run then loads that
+# fresh build: gtest suites use the freshly built rccl-UnitTestsMPI binary, and
+# rccl-tests perf suites use prebuilt rccl-tests binaries that load the fresh
+# librccl.so via LD_LIBRARY_PATH. TMPDIR is /dev/shm: $HOME is NFS without
+# O_TMPFILE, and clang temporaries otherwise produce a library with no gfx950
+# device code.
+#
+# Crusoe scheduler notes (SPUR, not Slurm; sbatch/squeue/scontrol are aliases):
+#   - The client talks to localhost unless SPUR_CONTROLLER_ADDR is set.
+#   - sbatch has no --wait: submit --parsable, stream the NFS log, read ExitCode
+#     from `spur show job` once the job leaves the queue. This image has no
+#     scontrol symlink (only sbatch/squeue/srun/spur). Wrap every SPUR CLI call
+#     in `timeout -k 5 30` -- the controller can wedge, and SIGTERM alone is not
+#     enough.
+#   - Request GPUs with --gpus-per-node, not --gres=gpu:mi355x:N.
+#   - Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
+#     Request --ntasks=$nodes --ntasks-per-node=1 --gpus-per-node=8. SPUR still
+#     runs the batch script on every node; the payload parks extra copies and
+#     mpirun fans out ranks.
+#   - Before the 2-node job, 1-node probes fingerprint idle nodes: 8x gfx950,
+#     ionic_0..7 visible in sysfs and ibv_devices with GID-index-1 present, and
+#     the same CPU/NUMA/NIC-map hash. Pin the allocation to a matching pair. If
+#     none are idle, wait and probe again -- do not submit an asymmetric pair
+#     (Rome topo consensus FATAL) or a node missing an ionic NIC/GID.
+#   - SPUR has no `scontrol show hostnames`. test_runner expands
+#     SLURM_JOB_NODELIST. OpenMPI's plm slurm is pointed at
+#     scripts/spur_srun.sh (installed as `srun` first on PATH) because SPUR's
+#     srun rejects --ntasks-per-node and ignores --nodelist.
+name: RCCL AINIC Crusoe gfx950 Runner
+
+on:
+  workflow_dispatch:
+    # Inputs are left without hardcoded defaults: when empty they fall back to the
+    # env.DEFAULT_* values below (the single source of truth), so nothing is
+    # duplicated between here and the env block.
+    inputs:
+      scope:
+        description: 'Suite scope: "nightly" (all enabled suites) or "smoke" (only suites marked smoke in the config)'
+        required: false
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - smoke
+      workdir:
+        description: 'Working directory on the runner for test artifacts/logs (WORKDIR)'
+        required: false
+        default: ''
+      mpi_path:
+        description: 'MPI install path (MPI_PATH)'
+        required: false
+        default: ''
+      rocm_path:
+        description: 'ROCm toolchain root (ROCM_PATH)'
+        required: false
+        default: ''
+      perf_bin_dir:
+        description: 'Prebuilt rccl-tests perf binary dir for the rccl-tests-sweeps category (empty = env default)'
+        required: false
+        default: ''
+      salloc_partition:
+        description: 'SLURM partition to allocate GPU nodes from (empty = env default)'
+        required: false
+        default: ''
+      salloc_reservation:
+        description: 'SLURM reservation holding the AINIC GPU nodes (empty = env default)'
+        required: false
+        default: ''
+      salloc_nodes:
+        description: 'Number of GPU nodes to allocate (empty = env default)'
+        required: false
+        default: ''
+      salloc_time:
+        description: 'Max wall clock for the SLURM allocation, HH:MM:SS (empty = env default)'
+        required: false
+        default: ''
+      salloc_exclude:
+        description: 'SLURM nodes to exclude from allocation (empty = env default, known-broken hardware)'
+        required: false
+        default: ''
+      salloc_account:
+        description: 'SPUR account for the runner user z1_coco (empty = env default)'
+        required: false
+        default: ''
+  schedule:
+    # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
+    - cron: '0 2 * * *'
+  pull_request:
+    # Label-gated smoke: runs only when the "crusoe-test"
+    # label is present (see the job `if`); the subset that runs is every suite
+    # marked "smoke": true in the config (selected via --scope smoke below).
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  # Shared CI root on the Crusoe cluster. /it-shared is read-only.
+  RCCL_CI_ROOT: /shared_nfs/rccl-ci
+  # SPUR (not Slurm): without this the client talks to localhost:6817.
+  SPUR_CONTROLLER_ADDR: http://crs-m2m-cpu-spur-005.crusoe.amd.com:6817
+  TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
+  # Management/OOB interface OpenMPI is pinned to (oob_tcp_if_include /
+  # btl_tcp_if_include in the ainic mpi_args). The node probe rejects nodes
+  # whose mgmt NIC is missing/down/without IPv4, and the pair MPI smoke
+  # (crusoe_mpi_smoke.sh) verifies the two pinned nodes can bootstrap mpirun
+  # over it before build+test. Keep in sync with the config's ainic mpi_args.
+  PROBE_OOB_IF: ens3
+  # Empty => github.workspace. z1_coco cannot write /shared_nfs/rccl-ci/rocm-systems.
+  DEFAULT_WORKDIR: ''
+  DEFAULT_MPI_PATH: /opt/openmpi
+  DEFAULT_ROCM_PATH: /opt/rocm
+  # Prebuilt rccl-tests perf binaries for the rccl-tests-sweeps category (they
+  # load the fresh librccl.so at runtime via LD_LIBRARY_PATH; see the
+  # build-strategy note in the header).
+  DEFAULT_PERF_BIN_DIR: /opt/rccl-tests/build
+  # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
+  # override them when non-empty).
+  DEFAULT_SALLOC_PARTITION: amd-spur
+  DEFAULT_SALLOC_RESERVATION: ''
+  DEFAULT_SALLOC_NODES: '2'
+  DEFAULT_SALLOC_TIME: '04:00:00'
+  # Runner process is z1_coco; that user is associated with amd-frameworks-ci.
+  DEFAULT_SALLOC_ACCOUNT: amd-frameworks-ci
+  # No nodes excluded by default; override via the salloc_exclude input if needed.
+  DEFAULT_SALLOC_EXCLUDE: ''
+
+jobs:
+  crusoe-ainic-test-runner:
+    # On PRs, run only for same-repo branches (never forks) that carry the
+    # "crusoe-test" label -- the same-repo guard stops a
+    # labeled fork PR from running updated fork code on the self-hosted runner
+    # via later synchronize events. All other events (workflow_dispatch,
+    # schedule) always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'crusoe-test'))
+    # Serialise on the shared Crusoe nodes: only one run at a time, and never
+    # cancel an in-progress allocation (it must finish cleanly to release the
+    # nodes). Job-level (not workflow-level) so skipped PR runs -- every PR
+    # synchronize in the monorepo triggers this workflow -- don't join the queue
+    # and cancel a pending labeled run that is still waiting for the runner.
+    concurrency:
+      group: crusoe-ainic-test-runner-pinned-nodes
+      cancel-in-progress: false
+    runs-on: crusoe-linux-slurm-scale-runner
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # This runner only needs the RCCL project tree (source to build, plus
+          # tools/scripts/test_runner and its configs/scripts). Sparse-checkout
+          # avoids materialising the rest of the rocm-systems monorepo on the
+          # shared NFS home. The shared/ctest test-category block is gated and
+          # silently skipped when absent (see projects/rccl/CMakeLists.txt), so
+          # it is deliberately not fetched.
+          sparse-checkout: |
+            projects/rccl
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Probe & pin GPU nodes
+        id: probe
+        # Its own step so node selection is a distinct pass/fail in the checklist
+        # instead of being buried in the run step's log. A busy cluster is not a
+        # failure: crusoe_probe_pin.sh waits patiently (re-probing) until a healthy
+        # symmetric pair frees up, so this only goes red on a genuine probe error
+        # or the overall job timeout. The pinned pair is handed to the run step
+        # via the `pin` output (and RUNNER_TEMP/crusoe_pin.txt).
+        env:
+          SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
+          SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
+          SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
+          SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+          SALLOC_ACCOUNT: ${{ github.event.inputs.salloc_account || env.DEFAULT_SALLOC_ACCOUNT }}
+        run: |
+          bash "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_probe_pin.sh"
+
+      - name: Submit & run AINIC suite (build+test)
+        id: run_tests
+        # continue-on-error so the report/summary steps and the per-phase Build /
+        # Test result steps below always run; the real pass/fail is enforced by
+        # those phase steps (and the no-allocation guard), not here.
+        continue-on-error: true
+        env:
+          # The symmetric pair pinned by the probe step; the launch script re-probes
+          # if it is taken/faults before the allocation starts (self-healing).
+          INITIAL_PIN: ${{ steps.probe.outputs.pin }}
+          WORKDIR: ${{ github.event.inputs.workdir || github.workspace }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
+          ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
+          # Fresh build produced by Phase 0 of the batch job (on the compute node).
+          # librccl.so lives directly under build/debug; this is passed to the test
+          # run as RCCL_BUILD_DIR (librccl.so existence check + LD_LIBRARY_PATH so
+          # the prebuilt perf binaries load the fresh lib). It is deliberately NOT
+          # named RCCL_BUILD_DIR at the step/env level: test_runner treats a
+          # non-empty RCCL_BUILD_DIR as a prebuilt library and would skip Phase 0's
+          # build, so it must be absent from the environment while Phase 0 runs and
+          # only set inline on the --no-build test run below. The gtest binaries
+          # live under build/debug/test (GTEST_BIN_DIR -> the gtest_base
+          # test_binary_dir in the config); GTEST_BIN_DIR/PERF_BIN_DIR do not
+          # trigger the prebuilt-library path, so they are safe to export. Both
+          # live under ${{ github.workspace }} (on NFS /home, shared with the
+          # compute nodes).
+          RUN_RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
+          GTEST_BIN_DIR: ${{ github.workspace }}/projects/rccl/build/debug/test
+          # rccl-tests-sweeps category: prebuilt perf binaries (rccl_tests_base
+          # test_binary_dir in the config resolves PERF_BIN_DIR).
+          PERF_BIN_DIR: ${{ github.event.inputs.perf_bin_dir || env.DEFAULT_PERF_BIN_DIR }}
+          # PRs run the smoke subset; workflow_dispatch honors its input;
+          # schedule runs the full plan.
+          SCOPE: ${{ github.event_name == 'pull_request' && 'smoke' || (github.event.inputs.scope || 'nightly') }}
+          SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
+          SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
+          SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
+          SALLOC_TIME: ${{ github.event.inputs.salloc_time || env.DEFAULT_SALLOC_TIME }}
+          SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+          SALLOC_ACCOUNT: ${{ github.event.inputs.salloc_account || env.DEFAULT_SALLOC_ACCOUNT }}
+        run: |
+          bash "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_slurm_launch.sh"
+
+      - name: Collect reports
+        if: always()
+        env:
+          WORKDIR: ${{ github.event.inputs.workdir || github.workspace }}
+        run: |
+          # test_runner writes reports to
+          # ${WORKDIR}/rccl_test_artifacts_ainic_<timestamp>; copy the newest into
+          # RUNNER_TEMP so the upload step captures the full per-test logs/reports
+          # (not just the tee'd console log) without picking up older runs that
+          # share this WORKDIR.
+          REPORTS_DIR="${RUNNER_TEMP}/reports"
+          mkdir -p "${REPORTS_DIR}"
+          newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_ainic_* 2>/dev/null | head -n1)"
+          if [ -n "${newest}" ]; then
+            cp -a "${newest}" "${REPORTS_DIR}/" 2>/dev/null || true
+          fi
+
+      - name: Upload run log and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crusoe-ainic-test-report
+          path: |
+            ${{ runner.temp }}/crusoe_build.log
+            ${{ runner.temp }}/crusoe_run.log
+            ${{ runner.temp }}/reports
+          if-no-files-found: warn
+
+      - name: Print summary
+        if: always()
+        run: |
+          {
+            echo '### RCCL AINIC Crusoe gfx950 Runner'
+            # crusoe_run_batch.sh records which phase ran and its rc, so the
+            # summary states exactly what failed (build vs tests) without reading
+            # the log. Absent file => no allocation ever survived to a workload
+            # exit (see log; on this cluster usually preemption or no capacity).
+            if [ -f "${RUNNER_TEMP}/crusoe_result.txt" ]; then
+              phase="$(sed -n 's/^phase=//p' "${RUNNER_TEMP}/crusoe_result.txt")"
+              rc="$(sed -n 's/^rc=//p' "${RUNNER_TEMP}/crusoe_result.txt")"
+              if [ "${rc:-1}" = "0" ]; then
+                echo "**Result:** PASSED (build + tests)"
+              else
+                echo "**Result:** FAILED in phase \`${phase:-unknown}\` (rc=${rc:-?})"
+              fi
+            else
+              echo "**Result:** no workload result recorded -- no allocation survived to a workload exit (likely preemption or no free capacity; see run log)"
+            fi
+            for label_log in "Build (--enable-mpi-tests):${RUNNER_TEMP}/crusoe_build.log" \
+                              "AINIC tests:${RUNNER_TEMP}/crusoe_run.log"; do
+              label="${label_log%%:*}"
+              log="${label_log#*:}"
+              if [ -f "${log}" ]; then
+                echo "#### ${label}"
+                echo '```'
+                # The runner prints a "Detailed Results" / "Total Tests" block at
+                # the end; surface the tail of the log in the job summary.
+                tail -n 80 "${log}"
+                echo '```'
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Parse workload result
+        id: result
+        if: always()
+        # crusoe_run_batch.sh records build_rc (always) and test_rc (once the test
+        # phase runs) in crusoe_result.txt. Expose them as outputs so the Build /
+        # Test phase steps below turn into distinct checklist entries.
+        run: |
+          f="${RUNNER_TEMP}/crusoe_result.txt"
+          if [ -f "${f}" ]; then
+            echo "have_result=true" >> "${GITHUB_OUTPUT}"
+            echo "build_rc=$(sed -n 's/^build_rc=//p' "${f}")" >> "${GITHUB_OUTPUT}"
+            echo "test_rc=$(sed -n 's/^test_rc=//p' "${f}")" >> "${GITHUB_OUTPUT}"
+          else
+            echo "have_result=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build phase
+        if: always() && steps.result.outputs.have_result == 'true'
+        run: |
+          rc="${{ steps.result.outputs.build_rc }}"
+          if [ -z "${rc}" ]; then echo "::error::RCCL build did not run"; exit 1; fi
+          if [ "${rc}" != "0" ]; then echo "::error::RCCL build failed (rc=${rc})"; exit 1; fi
+          echo "RCCL build passed"
+
+      - name: Test phase
+        # Only meaningful once the build passed; if the build failed the Build
+        # phase step above already reds the job and tests never ran.
+        if: always() && steps.result.outputs.have_result == 'true' && steps.result.outputs.build_rc == '0'
+        run: |
+          rc="${{ steps.result.outputs.test_rc }}"
+          if [ -z "${rc}" ]; then echo "::error::AINIC tests did not run"; exit 1; fi
+          if [ "${rc}" != "0" ]; then echo "::error::AINIC tests failed (rc=${rc})"; exit 1; fi
+          echo "AINIC tests passed"
+
+      - name: Fail job if no allocation completed
+        # No result file => no allocation ever survived to a workload exit (usually
+        # preemption or no free capacity). That is an infra failure, not build/test.
+        if: always() && steps.result.outputs.have_result != 'true'
+        run: |
+          echo "::error::No workload result recorded -- no allocation survived to a workload exit (preemption or no capacity; see run log)"
+          exit 1

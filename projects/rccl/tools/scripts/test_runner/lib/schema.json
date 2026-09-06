@@ -372,6 +372,10 @@
           "type": "boolean",
           "description": "When true this suite is part of the fast smoke subset selected by --scope smoke (e.g. the label-gated PR run). Default: false. With --scope nightly (or no --scope) all enabled suites run regardless of this flag."
         },
+        "smoke": {
+          "type": "boolean",
+          "description": "When true this suite is part of the fast smoke subset selected by --scope smoke (e.g. the label-gated PR run). Default: false. With --scope nightly (or no --scope) all enabled suites run regardless of this flag."
+        },
         "is_gtest":  { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
         "binary":    { "$ref": "#/$defs/test_defaults/properties/binary" },
         "test_binary_dir": {
