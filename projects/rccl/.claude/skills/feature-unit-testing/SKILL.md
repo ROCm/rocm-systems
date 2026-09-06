@@ -173,6 +173,42 @@ EXPECT_EQ(PostRecv(…), ncclSuccess);
 MPI_Barrier(MPI_COMM_WORLD);  // unconditional — always reached
 ```
 
+**A fatal assertion is only safe where the ranks have agreed.** Two rules, and
+the second is the one that gets missed:
+
+1. A `void` helper that asserts internally returns from *the helper*, not the
+   test. The caller carries on with whatever out-parameters the helper never
+   filled in, and hands them to the code under test. Give such a helper a status
+   return instead, so ignoring it is a compile error rather than a review item.
+   `[[nodiscard]]` alone only warns, and `WERROR` defaults to OFF, so pair it
+   with `-Werror=unused-result` — set on the sources that follow the rule, not
+   on the target. A shared target is the trap: `rccl-UnitTestsMPI` also carries
+   suites that discard `[[nodiscard]]` results of their own, and promoting the
+   warning there fails builds the change never touched. `test/CMakeLists.txt`
+   filters the NetIbMPI sources out of the target's source list and sets the
+   option on those alone, via `set_source_files_properties`.
+2. The caller may only assert on that status if the failure is *rank-agreed*.
+   A helper that fails rank-locally — one node's device, one NIC — takes its
+   rank out of the test while the others wait at the next collective, and
+   `MPI_Barrier` has no timeout. Wrapping such a call in
+   `ASSERT_NO_FATAL_FAILURE` is not a fix: it trades an unset out-parameter for
+   a hang.
+
+```cpp
+// Safe: the ranks reduce a status before anyone gives up, so all of them reach
+// the same verdict and leave together.
+int ok = localOk ? 1 : 0;
+MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+if (!ok) { /* release what this rank created */ }
+return ok ? ncclSuccess : ncclRemoteError;   // caller: ASSERT_EQ(..., ncclSuccess)
+```
+
+Calling a helper from every rank does not make it fail on every rank — that is
+the distinction the whole rule rests on. A helper that cannot agree must not be
+asserted on at all; making it safe means hoisting the agreement out of any
+`if (rank == N)` to a point every rank reaches, which changes the test's control
+flow and is worth planning as its own work.
+
 **Timeout in poll loops (never spin forever):**
 ```cpp
 // Poll loops that wait for async completion MUST have a timeout.

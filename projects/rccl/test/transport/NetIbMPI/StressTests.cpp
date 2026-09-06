@@ -31,7 +31,7 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     if (rank == 0) {
         // n=9 > NCCL_NET_IB_MAX_RECVS (8) — must return ncclInternalError
@@ -58,7 +58,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -95,7 +95,7 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     static constexpr size_t kRecvSize = 4096;
     static constexpr size_t kSendSize = 65536;  // larger than kRecvSize — will be clamped
@@ -167,6 +167,54 @@ TEST_F(NetIbMPITest, NullCommClose) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// E3b. NullCommCastDataPath — the IB-CAST data-path entry points must reject a
+//      NULL comm with ncclInvalidArgument rather than reading the device list,
+//      the ready flag or the flush flag straight off it. All five faulted
+//      before their guards went in -- regMr and deregMr got theirs in #10484,
+//      isend, irecv and iflush get theirs here -- which is how a failed
+//      connection setup surfaced as a SIGSEGV inside librccl instead of as a
+//      test failure.
+//
+//      Calls netIbCast directly rather than through net_: the guards live in
+//      net_ib_cast, while net_ defaults to the plain net_ib plugin, which has
+//      no such guards. Going through net_ here would test the wrong plugin.
+//
+//      No connection is established on purpose -- each guard returns before it
+//      touches any state, so the argument check is all that is exercised.
+//      Every call is rank-symmetric and non-fatal, and there is no allocation
+//      to check, so both ranks reach the barrier whatever happens.
+TEST_F(NetIbMPITest, NullCommCastDataPath) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+
+    // A fixed buffer rather than an allocation: every guard returns before it
+    // touches the data, so nothing needs a heap, and checking a malloc here
+    // would be a rank-local fatal assertion in front of the barrier below --
+    // the very shape this change exists to remove.
+    char   buf[kSmallBufferSize];
+    const size_t sz = sizeof(buf);
+
+    void*  mhandle     = nullptr;
+    void*  request     = nullptr;
+    void*  bufs[1]     = {buf};
+    size_t sizes64[1]  = {sz};
+    int    sizes32[1]  = {static_cast<int>(sz)};
+    int    tags[1]     = {0};
+    void*  mhandles[1] = {nullptr};
+    void*  phandles[1] = {nullptr};
+
+    EXPECT_EQ(netIbCast.regMr(nullptr, buf, sz, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.deregMr(nullptr, &mhandle), ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.isend(nullptr, buf, sz, /*tag=*/0, /*mhandle=*/nullptr,
+                              /*phandle=*/nullptr, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.irecv(nullptr, 1, bufs, sizes64, tags, mhandles, phandles, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.iflush(nullptr, 1, bufs, sizes32, mhandles, &request), ncclInvalidArgument);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // E4.  TagZeroReuse — 50 messages all sent with tag=0.
 //      Verifies FIFO ordering: messages arrive in send order because
 //      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).
@@ -178,7 +226,7 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -213,7 +261,7 @@ TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 16384;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -254,7 +302,7 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -285,7 +333,7 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 64 * 1024 * 1024; // 64 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -332,7 +380,7 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -402,7 +450,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     static constexpr int kMaxReqs = 32; // NCCL_NET_MAX_REQUESTS
     const size_t sz = 256;
@@ -465,7 +513,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -892,7 +940,7 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -937,7 +985,7 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -1414,7 +1462,7 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -1462,7 +1510,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     static constexpr int kCycles = 5;
     const size_t sizes[] = {512 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024};
@@ -1526,7 +1574,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     static constexpr int kCycles = 100;
     static constexpr int kBatch  = 32;
