@@ -58,6 +58,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/vm/plugins/coverage/plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -1415,6 +1416,317 @@ TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
   EXPECT_EQ(dispatch.wave_instructions, 1u);
   EXPECT_EQ(dispatch.family_instructions[control], 1u);
   EXPECT_GT(dispatch.execution_seconds[control], 0.0);
+}
+
+class CoverageTestInstruction final : public Instruction {
+public:
+  explicit CoverageTestInstruction(std::string_view mnemonic, uint64_t flags = 0,
+                                   std::unique_ptr<DynamicInstState> state = nullptr)
+      : Instruction(mnemonic, nullptr) {
+    flags_ = flags;
+    set_data(std::move(state));
+  }
+};
+
+class EncodedTestInstruction final : public Instruction {
+public:
+  EncodedTestInstruction(std::string_view mnemonic, uint16_t encoding_id, uint16_t opcode = 0)
+      : Instruction(mnemonic, nullptr) {
+    encoding_id_ = encoding_id;
+    opcode_ = opcode;
+  }
+};
+
+struct ParsedCoverageRecord {
+  std::string record;
+  uint64_t dispatch_id = 0;
+  std::string kernel_name;
+  uint64_t dispatches = 0;
+  uint64_t wave_instructions = 0;
+  uint64_t unique_mnemonics = 0;
+  std::map<std::string, uint64_t> mnemonic_executions;
+  std::map<std::string, std::string> mnemonic_family;
+  std::map<std::string, uint64_t> mnemonic_encoding;
+  std::map<std::string, uint64_t> family_mnemonics;
+  std::map<std::string, uint64_t> family_executions;
+};
+
+std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
+  std::vector<ParsedCoverageRecord> records;
+  std::istringstream lines{std::string(jsonl)};
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.empty())
+      continue;
+
+    flexbuffers::Builder builder;
+    if (!plugin_detail::flexbuffer_from_json(line, builder)) {
+      ADD_FAILURE() << "invalid JSONL record: " << line;
+      continue;
+    }
+    auto root = flexbuffers::GetRoot(builder.GetBuffer());
+    if (!root.IsMap()) {
+      ADD_FAILURE() << "coverage record is not a JSON object";
+      continue;
+    }
+    auto object = root.AsMap();
+    const auto schema = object["schema"];
+    const auto record_type = object["record"];
+    EXPECT_TRUE(schema.IsString()) << "schema must be a string";
+    EXPECT_TRUE(record_type.IsString()) << "record must be a string";
+    if (!schema.IsString() || !record_type.IsString())
+      continue;
+    EXPECT_EQ(schema.AsString().str(), "rocjitsu.coverage.v1");
+
+    ParsedCoverageRecord record;
+    record.record = record_type.AsString().str();
+    record.wave_instructions = object["wave_instructions"].AsUInt64();
+    record.unique_mnemonics = object["unique_mnemonics"].AsUInt64();
+    if (record.record == "dispatch") {
+      record.dispatch_id = object["dispatch_id"].AsUInt64();
+      record.kernel_name = object["kernel_name"].AsString().str();
+    } else if (record.record == "summary") {
+      record.dispatches = object["dispatches"].AsUInt64();
+    } else {
+      ADD_FAILURE() << "unknown coverage record type: " << record.record;
+      continue;
+    }
+
+    const auto families = object["families"];
+    EXPECT_TRUE(families.IsMap()) << "families must be an object";
+    if (families.IsMap()) {
+      auto family_map = families.AsMap();
+      auto keys = family_map.Keys();
+      for (size_t i = 0; i < keys.size(); ++i) {
+        const std::string name = keys[i].AsString().str();
+        auto entry = family_map[name.c_str()].AsMap();
+        record.family_mnemonics[name] = entry["mnemonics"].AsUInt64();
+        record.family_executions[name] = entry["executions"].AsUInt64();
+      }
+    }
+
+    const auto mnemonics = object["mnemonics"];
+    EXPECT_TRUE(mnemonics.IsMap()) << "mnemonics must be an object";
+    if (mnemonics.IsMap()) {
+      auto mnemonic_map = mnemonics.AsMap();
+      auto keys = mnemonic_map.Keys();
+      for (size_t i = 0; i < keys.size(); ++i) {
+        const std::string name = keys[i].AsString().str();
+        auto entry = mnemonic_map[name.c_str()].AsMap();
+        record.mnemonic_executions[name] = entry["executions"].AsUInt64();
+        record.mnemonic_family[name] = entry["family"].AsString().str();
+        record.mnemonic_encoding[name] = entry["encoding_id"].AsUInt64();
+      }
+    }
+    records.push_back(std::move(record));
+  }
+  return records;
+}
+
+TEST(CoveragePluginTest, ClassifiesExclusiveInstructionFamilies) {
+  using plugins::coverage::CoveragePlugin;
+  using plugins::coverage::InstructionFamily;
+
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_add_u32")),
+            InstructionFamily::Scalar);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_add_f32")),
+            InstructionFamily::Vector);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_mfma_f32_16x16x16_f16", MFMA)),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_wmma_f32_16x16x16_f16")),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("ds_read_b32", MEMORY_OP)),
+            InstructionFamily::Lds);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("global_load_b32", MEMORY_OP)),
+            InstructionFamily::Global);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_branch", BRANCH | IGNORES_EXEC)),
+            InstructionFamily::Control);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_endpgm", PROGRAM_TERMINATOR)),
+            InstructionFamily::Control);
+  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("exp")), InstructionFamily::Other);
+}
+
+TEST(CoveragePluginTest, ReportsExecutedMnemonicsAsJsonl) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {vop1_encode(/*v_mov_b32 opcode=*/1, /*vdst=*/0, /*constant 0=*/128),
+                           S_NOP, S_NOP, S_ENDPGM};
+  f.run_kernel(code, 4);
+  f.shutdown();
+
+  const auto records = parse_coverage_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+
+  const auto &dispatch = records[0];
+  EXPECT_EQ(dispatch.record, "dispatch");
+  EXPECT_GT(dispatch.dispatch_id, 0u);
+  EXPECT_FALSE(dispatch.kernel_name.empty());
+  EXPECT_EQ(dispatch.wave_instructions, 4u);
+  // v_mov_b32, s_nop and s_endpgm: three distinct mnemonics over four executions.
+  EXPECT_EQ(dispatch.unique_mnemonics, 3u);
+  EXPECT_EQ(dispatch.mnemonic_executions.size(), 3u);
+  EXPECT_EQ(dispatch.mnemonic_executions.at("s_nop"), 2u);
+  EXPECT_EQ(dispatch.mnemonic_executions.at("s_endpgm"), 1u);
+  EXPECT_EQ(dispatch.mnemonic_family.at("s_nop"), "control");
+  EXPECT_EQ(dispatch.mnemonic_family.at("s_endpgm"), "control");
+  EXPECT_EQ(dispatch.family_mnemonics.at("control"), 2u);
+  EXPECT_EQ(dispatch.family_executions.at("control"), 3u);
+  EXPECT_EQ(dispatch.family_mnemonics.at("vector"), 1u);
+  EXPECT_EQ(dispatch.family_executions.at("vector"), 1u);
+  EXPECT_EQ(dispatch.family_mnemonics.at("matrix"), 0u);
+
+  uint64_t family_execution_total = 0;
+  uint64_t family_mnemonic_total = 0;
+  for (const auto &[name, count] : dispatch.family_executions)
+    family_execution_total += count;
+  for (const auto &[name, count] : dispatch.family_mnemonics)
+    family_mnemonic_total += count;
+  EXPECT_EQ(family_execution_total, dispatch.wave_instructions);
+  EXPECT_EQ(family_mnemonic_total, dispatch.unique_mnemonics);
+
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);
+  EXPECT_EQ(summary.unique_mnemonics, dispatch.unique_mnemonics);
+  EXPECT_EQ(summary.mnemonic_executions, dispatch.mnemonic_executions);
+}
+
+// The coverage report is only joinable with the throughput report if the two
+// plugins agree on what family an instruction is in, and they carry separate
+// copies of that classifier. Nothing else makes them agree, so this does.
+TEST(CoveragePluginTest, AgreesWithThroughputOnInstructionFamilies) {
+  struct Case {
+    const char *mnemonic;
+    uint64_t flags;
+  };
+  // One representative per family, plus the cases where the two classifiers
+  // could plausibly drift: flag-driven vs prefix-driven, and the mnemonics
+  // that are control flow despite a scalar prefix.
+  constexpr Case kCases[] = {
+      {"s_add_u32", 0},
+      {"v_add_f32", 0},
+      {"v_mfma_f32_16x16x16_f16", MFMA},
+      {"v_smfmac_f32_16x16x32_f16", 0},
+      {"v_wmma_f32_16x16x16_f16", 0},
+      {"v_swmmac_f32_16x16x32_f8", 0},
+      {"ds_read_b32", MEMORY_OP},
+      {"global_load_b32", MEMORY_OP},
+      {"buffer_load_dword", MEMORY_OP},
+      {"s_load_dword", MEMORY_OP},
+      {"s_branch", BRANCH | IGNORES_EXEC},
+      {"s_cbranch_execz", COND_BRANCH},
+      {"s_endpgm", PROGRAM_TERMINATOR},
+      {"s_waitcnt", WAITCNT},
+      {"s_barrier", BARRIER},
+      {"s_nop", 0},
+      {"s_sleep", 0},
+      {"s_delay_alu", 0},
+      {"exp", 0},
+  };
+
+  for (const auto &c : kCases) {
+    const auto coverage_family =
+        plugins::coverage::CoveragePlugin::classify(CoverageTestInstruction(c.mnemonic, c.flags));
+    const auto throughput_family = plugins::throughput::ThroughputPlugin::classify(
+        ThroughputTestInstruction(c.mnemonic, c.flags));
+    EXPECT_EQ(plugins::coverage::CoveragePlugin::family_name(coverage_family),
+              plugins::throughput::ThroughputPlugin::family_name(throughput_family))
+        << "coverage and throughput disagree on " << c.mnemonic;
+  }
+
+  // The family name lists must also line up index for index, since the JSONL
+  // schemas present them in enum order.
+  ASSERT_EQ(plugins::coverage::kInstructionFamilyCount,
+            plugins::throughput::kInstructionFamilyCount);
+  for (size_t i = 0; i < plugins::coverage::kInstructionFamilyCount; ++i) {
+    EXPECT_EQ(plugins::coverage::CoveragePlugin::family_name(
+                  static_cast<plugins::coverage::InstructionFamily>(i)),
+              plugins::throughput::ThroughputPlugin::family_name(
+                  static_cast<plugins::throughput::InstructionFamily>(i)))
+        << "family order differs at index " << i;
+  }
+}
+
+// Merging walks unordered maps, so a mnemonic seen through two encodings must
+// not have its reported encoding decided by hash order -- the whole point of
+// the report is that two runs of the same workload diff cleanly.
+TEST(CoveragePluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
+  PluginFixture f(/*num_wf_slots=*/1);
+
+  auto run = [&f](bool reversed) {
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    ExecutionPluginGroup group(std::move(sink_config));
+    EXPECT_TRUE(group.add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+
+    // Two waves in the same dispatch reach the same mnemonic through different
+    // encodings. Feeding them in either order must produce one answer.
+    const uint16_t first = reversed ? 421 : 417;
+    const uint16_t second = reversed ? 417 : 421;
+    for (const uint16_t encoding : {first, second}) {
+      amdgpu::Wavefront &wf = *f.cu()->wf(0);
+      wf.set_dispatch_id(1);
+      group.onAmdgpuWavefrontDispatched(wf);
+      EncodedTestInstruction inst("v_lshlrev_b64", encoding);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuWavefrontHalted(wf);
+    }
+    group.onAmdgpuDispatchExecutionEnd(1);
+    group.onShutdown();
+    return sink.str();
+  };
+
+  const auto forward = parse_coverage_jsonl(run(false));
+  const auto backward = parse_coverage_jsonl(run(true));
+  ASSERT_FALSE(forward.empty());
+  ASSERT_FALSE(backward.empty());
+  EXPECT_EQ(forward.front().mnemonic_encoding, backward.front().mnemonic_encoding);
+  // Both sightings are still counted, whichever encoding was reported.
+  EXPECT_EQ(forward.front().mnemonic_executions.at("v_lshlrev_b64"), 2u);
+  EXPECT_EQ(backward.front().mnemonic_executions.at("v_lshlrev_b64"), 2u);
+}
+
+// The mnemonic a plugin observes does not always point to static storage:
+// the generated FLAT encoding on every architecture and VOPD on gfx11/gfx12
+// and CDNA5 synthesise it into a per-instruction std::string member
+// (generated/cdna4/encodings.cpp Flat::Flat, generated/cdna5/vopd.cpp), so a
+// stored std::string_view outlives its characters. The plugin must copy on
+// first sight; this test fails with a view-keyed map.
+TEST(CoveragePluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_TRUE(group.add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+
+  amdgpu::Wavefront &wf = *f.cu()->wf(0);
+  wf.set_dispatch_id(1);
+  group.onAmdgpuWavefrontDispatched(wf);
+  {
+    std::string transient_mnemonic = "global_load_dwordx4_transient_storage";
+    CoverageTestInstruction inst(transient_mnemonic, MEMORY_OP);
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    // Scribble over the characters the view pointed at, then release them.
+    transient_mnemonic.assign(transient_mnemonic.size(), 'X');
+    transient_mnemonic = std::string();
+  }
+  group.onAmdgpuWavefrontHalted(wf);
+  group.onAmdgpuDispatchExecutionEnd(1);
+  group.onShutdown();
+
+  const auto records = parse_coverage_jsonl(sink.str());
+  ASSERT_FALSE(records.empty());
+  const auto &dispatch = records.front();
+  ASSERT_EQ(dispatch.mnemonic_executions.size(), 1u);
+  EXPECT_EQ(dispatch.mnemonic_executions.begin()->first, "global_load_dwordx4_transient_storage");
+  EXPECT_EQ(dispatch.mnemonic_executions.begin()->second, 1u);
 }
 
 TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {

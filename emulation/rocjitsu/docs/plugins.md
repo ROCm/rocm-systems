@@ -11,6 +11,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
+| `CoveragePlugin` | `coverage/` | Records which ISA mnemonics a run executed, per dispatch and in aggregate, for instruction-coverage reporting. |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -63,6 +64,49 @@ For a machine-readable report:
 
 The report is written to `/tmp/rocjitsu-throughput/throughput.log`.
 
+### Coverage Plugin
+
+The coverage plugin answers "which instructions did this run actually
+execute?". It counts one execution whenever a wavefront reaches the
+before-execute hook, so counts are executed **wave instructions**, not
+active-lane operations — the same convention as the throughput plugin, and the
+two reports join on mnemonic.
+
+It emits one JSON object per line using the `rocjitsu.coverage.v1` schema: one
+`"record":"dispatch"` object per completed dispatch and one `"record":"summary"`
+object at shutdown. Each carries `wave_instructions`, `unique_mnemonics`, a
+per-family breakdown (`scalar`, `vector`, `matrix`, `lds`, `global`, `control`,
+`other` — the same exclusive families the throughput plugin uses), and a
+`mnemonics` object mapping each executed mnemonic to its execution count, the
+encoding format id and opcode of its first sighting, its encoding size in
+bytes, its family, and the first dispatch that reached it. Mnemonics are
+emitted in sorted order so two runs of the same workload produce
+byte-comparable output.
+
+A mnemonic absent from the summary was not executed. Turning that into a
+coverage *percentage* needs a denominator the plugin deliberately does not
+supply: it observes decoded instructions, not the target that produced them, so
+it reports no architecture name. The harness that chose the config knows the
+architecture and joins the report against the per-architecture instruction set.
+
+```json
+{
+  "plugins": { "coverage": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/rocjitsu-coverage" }
+}
+```
+
+The report is written to `/tmp/rocjitsu-coverage/coverage.log`.
+
+Note on mnemonic storage: `Instruction::mnemonic()` is documented as pointing to
+static storage, but the generated FLAT encoding on every architecture and VOPD
+on gfx11/gfx12 and CDNA5 point it at a per-instruction `std::string` member
+instead. The returned `std::string_view` therefore does not outlive the
+instruction, and this plugin copies each mnemonic on first sight rather than
+storing the view. A plugin that keys a long-lived map on the view will read
+freed memory; `CoveragePluginTest.OwnsMnemonicStorageWhenTheSourceIsNotStatic`
+pins the behaviour.
+
 ### Kernel Logging Plugin
 
 The logging plugin records kernel dispatch metadata and detects MMA
@@ -97,7 +141,8 @@ plugin's configuration:
 ```
 
 The bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
-(`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`).
+(`KernelLoggingPlugin`), `throughput` (`ThroughputPlugin`), and `coverage`
+(`CoveragePlugin`).
 
 ### Enabling plugins from the mirage CLI
 
@@ -178,8 +223,8 @@ sink-related environment variables.
 
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
-`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`, and
-`throughput` for `ThroughputPlugin`.
+`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`,
+`throughput` for `ThroughputPlugin`, and `coverage` for `CoveragePlugin`.
 
 ### Examples
 
