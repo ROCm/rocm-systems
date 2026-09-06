@@ -88,6 +88,44 @@ inline unsigned long getParentProcessId() {
 }
 
 namespace hip {
+#if !HT_WIN
+/**
+ * read()/write() on a pipe (or socket/terminal) may transfer fewer bytes than
+ * requested, and may be interrupted by a signal (EINTR) before moving any data.
+ * A single call with a ">= 0" success check can therefore leave the buffer only
+ * partially filled. These helpers loop until the entire buffer has been
+ * transferred, retrying on EINTR, and treat a 0 return (EOF / peer closed early)
+ * as an error.
+ **/
+inline bool writeAll(int fd, const void* buf, size_t count) {
+  const char* ptr = static_cast<const char*>(buf);
+  size_t total = 0;
+  while (total < count) {
+    ssize_t n = write(fd, ptr + total, count - total);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) continue;
+      return false;
+    }
+    total += static_cast<size_t>(n);
+  }
+  return true;
+}
+
+inline bool readAll(int fd, void* buf, size_t count) {
+  char* ptr = static_cast<char*>(buf);
+  size_t total = 0;
+  while (total < count) {
+    ssize_t n = read(fd, ptr + total, count - total);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) continue;
+      return false;  // n == 0 is an unexpected EOF
+    }
+    total += static_cast<size_t>(n);
+  }
+  return true;
+}
+#endif  // !HT_WIN
+
 /*
 Class to spawn a process in isolation and test its standard output and return status.
 
