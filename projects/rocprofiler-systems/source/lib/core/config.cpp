@@ -35,7 +35,6 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -3491,7 +3490,10 @@ tmp_file::touch() const
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
+        if(!path::create_parent_dirs_and_open_ofstream(_ofs, filename))
+        {
+            LOG_ERROR("Failed to create temporary file '{}'", filename);
+        }
     }
 }
 

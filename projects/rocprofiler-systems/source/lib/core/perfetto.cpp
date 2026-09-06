@@ -263,7 +263,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                          bytes{ static_cast<double>(trace_data.size()) })
                          .count());
             std::ofstream ofs{};
-            if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+            if(!path::create_parent_dirs_and_open_ofstream(
+                   ofs, _filename, std::ios::out | std::ios::binary))
             {
                 _fom.append("Error opening '%s'...", _filename.c_str());
                 _perfetto_output_error = true;
