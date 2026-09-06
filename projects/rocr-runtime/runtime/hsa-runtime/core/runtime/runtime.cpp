@@ -4828,7 +4828,6 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
 hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
                                                    uint64_t flags) {
-  (void)flags;
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   *dmabuf_fd = -1;
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
@@ -4843,6 +4842,12 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
    * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
   auto agentOwner = memoryHandle->drmAgent();
+
+  auto* gpuAgentOwner = static_cast<AMD::GpuAgent*>(agentOwner);
+  if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE && !gpuAgentOwner->is_xgmi_cpu_gpu() &&
+      !gpuAgentOwner->LargeBarEnabled()){
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::DMABUF_FD, dmabuf_fd);

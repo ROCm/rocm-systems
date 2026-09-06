@@ -27,7 +27,12 @@ virtualMemoryManagement:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory_PcieFlag:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_VM_PcieFlag: *level_2
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_2
     # Does not play well with ASAN
