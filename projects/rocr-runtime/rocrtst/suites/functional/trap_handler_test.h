@@ -147,7 +147,8 @@ class TrapHandlerTest : public TestBase {
    * @param divisor_value Divisor for math test
    */
   void RunTestOnAllGPUs(const char* kernel_name, hsa_status_t expected_status,
-                        bool pass_null_ptr = false, int divisor_value = 1);
+                        bool pass_null_ptr = false, int divisor_value = 1,
+                        bool skip_gfx11_below5 = false);
 
   // Test results tracking
   int tests_passed_{0};

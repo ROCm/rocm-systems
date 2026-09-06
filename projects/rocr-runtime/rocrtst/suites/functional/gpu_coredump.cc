@@ -41,6 +41,26 @@ static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256
 // Convert core pattern to glob pattern, substituting known values
 // and using wildcards for unknowable values (timestamp, TID)
 namespace {
+// True if any GPU is gfx11 minor<5. The parent has no HSA runtime, so read
+// gfx_target_version (major*10000 + minor*100 + step) from KFD topology sysfs.
+bool AnyGpuIsGfx11BelowMinor5() {
+  for (int node = 0; node < 64; ++node) {
+    std::ifstream f("/sys/devices/virtual/kfd/kfd/topology/nodes/" +
+                    std::to_string(node) + "/properties");
+    if (!f.is_open()) break;
+    std::string key;
+    while (f >> key) {
+      if (key == "gfx_target_version") {
+        unsigned long ver = 0;
+        f >> ver;
+        if (ver / 10000 == 11 && (ver / 100) % 100 < 5) return true;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
 std::string PatternToGlob(const std::string& pattern, pid_t child_pid) {
   std::string result;
 
@@ -169,6 +189,20 @@ bool GpuCoreDumpTest::CheckPrerequisites() {
 
 void GpuCoreDumpTest::SetUp(void) {
   if (!checkPlatformFiltering()) return;
+
+  // GPU core dump generation is gated off on gfx11 minor<5, 
+  // so no core dump is ever produced and these tests cannot
+  // pass. Skip rather than fail.
+  if (AnyGpuIsGfx11BelowMinor5()) {
+    std::string testName =
+        std::string(::testing::UnitTest::GetInstance()->current_test_info()->test_case_name()) +
+        "." + ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    std::string reason = "GPU core dump is not supported on gfx11 (minor<5)";
+    std::cout << "[ SKIPPED ] " << reason << std::endl;
+    rocrtst::SkippedTestTracker::getInstance().recordSkip(testName, reason);
+    test_skipped_ = true;
+    return;
+  }
 
 #ifdef ROCRTST_ASAN
   // Under ASAN, these tests fork children (unsupported in ASAN) that trigger

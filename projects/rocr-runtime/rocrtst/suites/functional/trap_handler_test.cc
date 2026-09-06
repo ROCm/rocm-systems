@@ -27,6 +27,7 @@
 #include "common/base_rocr_utils.h"
 #include "common/common.h"
 #include "common/helper_funcs.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
@@ -417,7 +418,8 @@ bool TrapHandlerTest::RunTrapTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
 }
 
 void TrapHandlerTest::RunTestOnAllGPUs(const char* kernel_name, hsa_status_t expected_status,
-                                       bool pass_null_ptr, int divisor_value) {
+                                       bool pass_null_ptr, int divisor_value,
+                                       bool skip_gfx11_below5) {
   hsa_status_t err;
 
   // Find all CPU agents
@@ -434,7 +436,18 @@ void TrapHandlerTest::RunTestOnAllGPUs(const char* kernel_name, hsa_status_t exp
 
   // Run test on each GPU
   uint32_t tests_failed_before = tests_failed_;
+  size_t gpus_tested = 0;
   for (size_t i = 0; i < gpus.size(); ++i) {
+    char gpu_name[64] = {0};
+    hsa_agent_get_info(gpus[i], HSA_AGENT_INFO_NAME, gpu_name);
+    // gfx110X does not service s_trap 2 (abort), so the callback never fires.
+    if (skip_gfx11_below5 && std::string(gpu_name).compare(0, 6, "gfx110") == 0) {
+      std::cout << "  Testing " << kernel_name << " on " << gpu_name
+                << "... SKIPPED (gfx110X)" << std::endl;
+      continue;
+    }
+
+    ++gpus_tested;
     bool passed =
         RunTrapTest(cpus[0], gpus[i], kernel_name, expected_status, pass_null_ptr, divisor_value);
     if (passed) {
@@ -444,6 +457,19 @@ void TrapHandlerTest::RunTestOnAllGPUs(const char* kernel_name, hsa_status_t exp
     }
   }
 
+  // If every present GPU was skipped, record the skip so the test is reported
+  // as SKIPPED rather than PASSED. The bundled gtest predates GTEST_SKIP(), so
+  // use the same SkippedTestTracker mechanism as the core dump tests.
+  if (skip_gfx11_below5 && gpus_tested == 0) {
+    const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    std::string testName = std::string(info->test_case_name()) + "." + info->name();
+    std::string reason =
+        std::string(kernel_name) + " is not supported on any present GPU (gfx110X)";
+    std::cout << "[ SKIPPED ] " << reason << std::endl;
+    rocrtst::SkippedTestTracker::getInstance().recordSkip(testName, reason);
+    return;
+  }
+
   // Fail the gtest if any GPU failed this test
   EXPECT_EQ(tests_failed_, tests_failed_before)
       << "Test " << kernel_name << " failed on one or more GPUs";
@@ -451,7 +477,8 @@ void TrapHandlerTest::RunTestOnAllGPUs(const char* kernel_name, hsa_status_t exp
 
 void TrapHandlerTest::TestTrapAbort() {
   std::cout << "\n--- Test: S_TRAP Abort (s_trap 2) ---" << std::endl;
-  RunTestOnAllGPUs("trap_abort", HSA_STATUS_ERROR_EXCEPTION);
+  RunTestOnAllGPUs("trap_abort", HSA_STATUS_ERROR_EXCEPTION, false /* pass_null_ptr */,
+                   1 /* divisor_value */, true /* skip_gfx11_below5 */);
 }
 
 void TrapHandlerTest::TestTrapDebugger() {
