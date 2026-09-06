@@ -456,7 +456,9 @@ Optional:
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
-  --rerun-failed            Rerun failed tests with additional environment variables
+  -j, --jobs N              Run N test entries concurrently within a suite (default: 1 = serial)
+  --max-parallel-gpus N     Aggregate per-node GPU budget shared by concurrent entries under --jobs>1 (default: detected GPUs per node)
+  --rerun-failed            Rerun failed tests with additional environment variables (not supported with --jobs>1)
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
   --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')

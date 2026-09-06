@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import datetime
 import copy
@@ -228,6 +229,36 @@ def _distinct_host_count(mpi_hosts: dict) -> int:
             return 0
         return len(seen)
     return 0
+
+
+class GpuBudget:
+    """
+    Aggregate per-node GPU budget shared by co-tenant workers in parallel mode.
+
+    acquire(n) blocks until n permits are free; n is clamped to the total so an entry as
+    large as the whole node still runs (alone) instead of deadlocking. This bounds the sum
+    of GPUs in flight across concurrent entries, so --jobs>1 never oversubscribes the node
+    no matter how many workers the thread pool has.
+    """
+
+    def __init__(self, total):
+        self.total = max(1, int(total))
+        self._avail = self.total
+        self._cv = threading.Condition()
+
+    def acquire(self, n):
+        n = max(1, min(int(n), self.total))
+        with self._cv:
+            while self._avail < n:
+                self._cv.wait()
+            self._avail -= n
+        return n
+
+    def release(self, n):
+        n = max(1, min(int(n), self.total))
+        with self._cv:
+            self._avail = min(self.total, self._avail + n)
+            self._cv.notify_all()
 
 
 class TestExecutor:
@@ -1006,9 +1037,13 @@ class TestExecutor:
             return detected if detected else 8
         return int(value)
 
-    def run_test(self, test_config, suite_config):
+    def run_test(self, test_config, suite_config, capture_log_path=None):
         """
         Run a single test
+
+        When capture_log_path is set (parallel mode), the test's stdout+stderr are
+        redirected straight to that file instead of the shared console, so concurrently
+        running tests never interleave their output; the file also serves as the emit log.
 
         Args:
             test_config: Test configuration dict
@@ -1447,8 +1482,31 @@ class TestExecutor:
         # the test's (not tee's). Default behaviour (inherited stdout, no capture)
         # is unchanged when emission is off.
         emit_log_path = None
+        capture_fd = None
         start_time = time.time()
-        if self.emit_enabled:
+        if capture_log_path:
+            # Parallel mode: redirect this test's stdout+stderr straight to its own log
+            # file so concurrent tests never interleave on the shared console. Writing to
+            # a real file descriptor (not a PIPE) means proc.wait() cannot deadlock on a
+            # full pipe buffer. The file doubles as the emit log for perf parsing.
+            emit_log_path = capture_log_path
+            capture_fd = open(capture_log_path, "wb")
+            # Close the just-opened fd if Popen fails (it runs before the try/finally
+            # below), so a launch failure under high --jobs doesn't leak a descriptor.
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    cwd=run_cwd,
+                    env=env,
+                    stdout=capture_fd,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except BaseException:
+                capture_fd.close()
+                raise
+        elif self.emit_enabled:
             emit_log_path = self._emit_log_path(test_name)
             wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
             proc = subprocess.Popen(
@@ -1525,6 +1583,11 @@ class TestExecutor:
                 "exec_mode": exec_mode, "nthreads": perf_nthreads,
             }
         finally:
+            if capture_fd is not None:
+                try:
+                    capture_fd.close()
+                except OSError:
+                    pass
             if gtest_json_path:
                 try:
                     os.unlink(gtest_json_path)
@@ -1733,6 +1796,12 @@ class TestExecutor:
             print(f"WARNING: No tests defined for test suite '{suite_name}'")
             return []
 
+        # Parallel prototype: with --jobs > 1, dispatch this suite's entries through a
+        # bounded thread pool so their per-process init overlaps. Default (jobs==1)
+        # falls through to the unchanged serial path below.
+        if getattr(self.args, "jobs", 1) and self.args.jobs > 1:
+            return self._run_test_suite_parallel(suite_config, suite_name, tests)
+
         results = []
         skipped_count = 0
         should_stop = False  # Track if we should stop due to rerun failure
@@ -1831,6 +1900,232 @@ class TestExecutor:
         if self.args.verbose and skipped_count > 0:
             print(f"  Skipped {skipped_count} test(s) due to filters")
 
+        return results
+
+    def _can_parallelize(self, test, suite_config):
+        """
+        Decide whether `test` may run concurrently (co-tenant) under --jobs>1.
+
+        Each admissibility rule is an independent, short-circuiting clause; extend the
+        policy by adding a clause here (e.g. a future host-memory budget or a
+        node_exclusive flag) rather than changing call sites. Returns True only if every
+        rule passes.
+        """
+        # Rule 1: entries tagged serial_only never co-tenant. serial_only is resolved
+        # configuration -> suite -> test by TestConfigProcessor and pushed into each test
+        # dict, so a test-level serial_only:false correctly overrides an inherited true.
+        # This is where NET/IB, SMI, perf and all-GPU fixture suites are excluded -- via
+        # config data, not hard-coded name matching.
+        if test.get("serial_only"):
+            return False
+
+        # Rule 2: an entry whose own per-node GPU demand already fills (or exceeds) the
+        # co-tenancy budget can never share the node, so it runs serially. The aggregate
+        # budget across *several* co-tenants is enforced separately by the GPU budget in
+        # _run_test_suite_parallel -- this rule only rejects the single-entry-too-big case.
+        if self._gpu_demand(test, suite_config) > self._parallel_gpu_budget():
+            return False
+
+        return True
+
+    def _parallel_gpu_budget(self):
+        """
+        Co-tenancy GPU budget: --max-parallel-gpus when given, else the detected node size.
+
+        Defaulting to the detected count rather than a literal 8 keeps the budget matched to
+        the hardware: on a 2-GPU box a hard-coded 8 would admit four 1-GPU entries onto two
+        GPUs. Falls back to 8 only when detection failed (gpus_per_node returns 0, which it
+        already warns about), matching _resolve_gpu_count's convention. Both the eligibility
+        rule and the runtime semaphore call this, so they can never disagree.
+        """
+        configured = getattr(self.args, "max_parallel_gpus", None)
+        if configured is not None:
+            return configured
+        return self.gpus_per_node or 8
+
+    def _gpu_demand(self, test, suite_config):
+        """
+        Per-node GPU footprint of one entry, used by both _can_parallelize (per-entry cap)
+        and the aggregate GPU budget in _run_test_suite_parallel, so eligibility and
+        budgeting agree. "auto"/unparseable values resolve to the detected node size.
+
+        The footprint depends on the entry shape:
+          * multi-node                -> num_gpus (ranks placed per node),
+          * single-node MPI (ranks>1) -> num_ranks (one GPU per rank; num_gpus here is just
+                                          node capacity, not this test's use),
+          * single-process (ranks==1) -> num_gpus, because a single-process gtest enumerates
+                                          num_gpus devices IN-PROCESS. Using num_ranks (==1)
+                                          would understate an all-GPU fixtures suite as 1 GPU
+                                          and let up to `budget` of them co-tenant -> massive
+                                          oversubscription. num_gpus makes an 8-GPU fixtures
+                                          suite fill the budget and run alone automatically.
+        """
+        detected = self.gpus_per_node
+
+        def _resolve(value, default):
+            v = value if value is not None else default
+            if isinstance(v, str) and v.strip().lower() == "auto":
+                return detected if detected else 8
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return detected if detected else 8
+
+        num_nodes = _resolve(test.get("num_nodes", suite_config.get("num_nodes", 1)), 1)
+        num_gpus = _resolve(test.get("num_gpus", suite_config.get("num_gpus", "auto")), "auto")
+        raw_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+        if isinstance(raw_ranks, str) and raw_ranks.strip().lower() == "auto":
+            num_ranks = num_gpus * max(num_nodes, 1)
+        else:
+            try:
+                num_ranks = int(raw_ranks)
+            except (ValueError, TypeError):
+                num_ranks = num_gpus * max(num_nodes, 1)
+
+        if num_nodes > 1:
+            demand = num_gpus
+        elif num_ranks > 1:
+            demand = num_ranks
+        else:
+            demand = num_gpus
+        return max(1, demand)
+
+    def _run_test_suite_parallel(self, suite_config, suite_name, tests):
+        """
+        Parallel executor for one suite: run co-tenant-eligible entries concurrently in a
+        bounded thread pool (each thread blocks in run_test -> one test process),
+        overlapping their per-process init, while an aggregate GPU budget
+        (--max-parallel-gpus) bounds the total GPUs in flight so several co-tenants never
+        oversubscribe the node. Entries that are serial_only, or that alone fill the
+        budget, run one at a time. Applies the same name/skip-mpi filters as the serial
+        path. A worker that raises is recorded as a failed entry rather than aborting the
+        rest of the run, and results are committed in a deterministic (suite, name) order
+        so repeated runs are reproducible.
+
+        Note: immediate --rerun-failed is not applied in parallel mode; the caller rejects
+        the --rerun-failed + --jobs>1 combination before we get here.
+        """
+        import concurrent.futures
+
+        # Warm GPU detection once, single-threaded, so concurrent _gpu_demand callers
+        # don't race the lazy rocminfo probe.
+        _ = self.gpus_per_node
+
+        # Same pre-dispatch filtering the serial loop applies.
+        runnable = []
+        skipped_count = 0
+        for test in tests:
+            test_name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(test_name, self.args.test_name):
+                skipped_count += 1
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto_ranks = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi_test = is_auto_ranks or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi_test:
+                skipped_count += 1
+                continue
+            runnable.append(test)
+
+        # Partition into concurrent vs serial by the admissibility policy (see
+        # _can_parallelize): serial_only-tagged entries (NET/IB, SMI, perf) and entries
+        # exceeding --max-parallel-gpus run serially; the rest co-tenant.
+        parallel_entries, serial_entries = [], []
+        for test in runnable:
+            if self._can_parallelize(test, suite_config):
+                parallel_entries.append(test)
+            else:
+                serial_entries.append(test)
+
+        jobs = self.args.jobs
+        budget = GpuBudget(self._parallel_gpu_budget())
+        print(f"\n[parallel] suite '{suite_name}': {len(parallel_entries)} concurrent + "
+              f"{len(serial_entries)} serial entries, jobs={jobs}, gpu_budget={budget.total}"
+              f"{f', {skipped_count} filtered' if skipped_count else ''}")
+
+        lock = threading.Lock()
+        # Collected in completion order, then committed in a deterministic (suite, name)
+        # order below -- completion order is nondeterministic under concurrency.
+        collected = []
+
+        def _collect(test, res):
+            with lock:
+                collected.append((test, res))
+
+        # Per-test log path (thread-safe): each parallel-mode entry writes to its own file
+        # under log_dir so concurrent output never interleaves. The lock-guarded counter
+        # keeps names unique (shared with the emit-log numbering).
+        def _plog_path(test):
+            safe_s = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(suite_name))[:40]
+            safe_t = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(test.get("name", "test")))[:60]
+            with lock:
+                self._emit_log_counter += 1
+                n = self._emit_log_counter
+            return os.path.join(self.log_dir, f"{n:04d}_{safe_s}__{safe_t}.log")
+
+        # Run one entry with its output redirected to its own log file, printing only
+        # concise START/result status to the console (under the lock so the two status
+        # lines themselves never interleave across threads). Concurrent entries hold a
+        # slice of the aggregate GPU budget for the duration of their process so the
+        # co-tenant sum never oversubscribes the node. A worker that raises is recorded
+        # as a failed entry -- it must never abort the remaining entries or later suites.
+        def _run_one(test, tag):
+            tname = test.get("name")
+            plog = _plog_path(test)
+            take = 0
+            if tag == "concurrent":
+                take = budget.acquire(self._gpu_demand(test, suite_config))
+            try:
+                with lock:
+                    print(f"[parallel] START   [{tag}] {suite_name} / {tname}")
+                    print(f"[parallel]         log: {plog}")
+                try:
+                    res = self.run_test(test, suite_config, capture_log_path=plog)
+                except Exception as e:  # never let one worker abort the rest of the run
+                    res = {
+                        "name": tname,
+                        "result": TestResult.RESULT_FAILED.value,
+                        "duration": 0.0,
+                        "error": f"worker exception: {e}",
+                        "log_file": plog,
+                    }
+            finally:
+                if take:
+                    budget.release(take)
+            _collect(test, res)
+            with lock:
+                print(f"[parallel] {str(res.get('result', '?')):7s} {suite_name} / {tname} "
+                      f"({res.get('duration', 0.0):.1f}s)  log: {plog}")
+            return res
+
+        # 1) Concurrent entries through the bounded pool (each streams to its own file).
+        if parallel_entries:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+                futures = [ex.submit(_run_one, t, "concurrent") for t in parallel_entries]
+                for f in concurrent.futures.as_completed(futures):
+                    f.result()  # _run_one records test errors; this only surfaces harness bugs
+
+        # 2) serial_only / whole-node entries one at a time (still per-test logs).
+        for test in serial_entries:
+            _run_one(test, "serial")
+
+        # Commit in a deterministic order so the summary and emit records are reproducible
+        # run-to-run regardless of the (nondeterministic) completion order.
+        collected.sort(key=lambda tr: str(tr[0].get("name", "")))
+        results = []
+        for test, res in collected:
+            results.append(res)
+            self.test_names.append(test.get("name"))
+            self.test_results.append(res["result"])
+            self.test_durations.append(res["duration"])
+            self.test_suites.append(suite_name)
+            if self.emit_enabled:
+                record = dict(res)
+                record["suite"] = suite_name
+                record["test_name"] = test.get("name")
+                self.test_records.append(record)
+
+        print(f"[parallel] suite '{suite_name}' done -- per-test logs under {self.log_dir}")
         return results
 
     def _format_duration(self, seconds):

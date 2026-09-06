@@ -200,6 +200,27 @@ Examples:
             default=10,
             help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
+        self.parser.add_argument(
+            '-j', '--jobs',
+            type=int,
+            default=1,
+            help="Number of test entries to run concurrently within a suite (default: 1 = "
+                 "serial, behavior unchanged). >1 dispatches entries through a bounded thread "
+                 "pool (each thread = one test process), overlapping their per-process init; "
+                 "the aggregate GPU budget in --max-parallel-gpus bounds how many actually "
+                 "share the node. Note: --rerun-failed is not supported with --jobs>1."
+        )
+        self.parser.add_argument(
+            '--max-parallel-gpus',
+            type=int,
+            default=None,
+            help="Under --jobs>1, the aggregate per-node GPU budget shared by concurrent "
+                 "entries: co-tenants run only while their combined GPU demand fits this "
+                 "budget, so the total never oversubscribes the node. Defaults to the "
+                 "detected GPUs per node (8 if detection fails), so the budget matches the "
+                 "hardware; override to cap or widen it. An entry whose own demand exceeds "
+                 "the budget, or one flagged serial_only, always runs serially."
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
