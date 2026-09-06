@@ -306,7 +306,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Dcache Hit Rate:
+        DCache Hit Rate:
           avg: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           min: 100 * MIN(SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
           max: 100 * MAX(SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
@@ -386,7 +386,7 @@ Panel Config:
       Percentage of instruction cache accesses that hit. High hit rates are essential
       for sustained instruction throughput. Low rates may indicate large kernels or
       divergent branches causing instruction cache thrashing.
-    Dcache Hit Rate: >-
+    DCache Hit Rate: >-
       Percentage of scalar data cache accesses that hit. High hit rates indicate
       efficient reuse of constant and uniform data. Low rates may suggest excessive
       unique constant data or poor temporal locality.

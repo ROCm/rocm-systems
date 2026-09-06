@@ -102,6 +102,7 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     )
     assert content != ""
     assert "v_mov" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
 
 
 def test_has_time_data_detection() -> None:
@@ -413,23 +414,32 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     """Memory Chart output uses the architecture renderer and shared heading."""
     calls: dict[str, dict] = {}
 
-    def record(name: str, return_value: str):
-        def stub(mem_data: dict, *, chart_title: str) -> str:
-            calls[name] = {
-                "mem_data": mem_data,
-                "chart_title": chart_title,
-            }
-            return return_value
+    def gfx11_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls["gfx11"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered RDNA3.5 memory chart"
 
-        return stub
+    def gfx9_stub(
+        mem_data: dict,
+        *,
+        chart_title: str = "",
+        gpu_arch: str = "",
+    ) -> str:
+        calls["gfx9"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered CDNA memory chart"
 
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        record("gfx11", "rendered RDNA3.5 memory chart"),
+        gfx11_stub,
     )
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        record("gfx9", "rendered CDNA memory chart"),
+        gfx9_stub,
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 

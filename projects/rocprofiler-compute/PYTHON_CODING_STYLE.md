@@ -7,6 +7,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
 - [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
+- [Docstrings](#docstrings)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
@@ -145,11 +146,11 @@ from pathlib import Path
 from typing import List, Optional
 
 
-def find_csvs(directory: Path, pattern: str) -> List[Path]:
+def list_result_csvs(directory: Path) -> List[Path]:
     ...
 
 
-def resolve_csv(path: Optional[Path]) -> Path:
+def compressed_name(path: Optional[Path]) -> Path:
     ...
 ```
 
@@ -161,12 +162,43 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def find_csvs(directory: Path, pattern: str) -> list[Path]:
+def list_result_csvs(directory: Path) -> list[Path]:
     ...
 
 
-def resolve_csv(path: Path | None) -> Path:
+def compressed_name(path: Path | None) -> Path:
     ...
+```
+
+## Docstrings
+
+Docstrings are read in the editor and in `help()`. This project publishes no Sphinx site, so reStructuredText markup renders nowhere and only makes the text harder to read.
+
+Write docstrings as plain sentences and name other functions, classes, and constants directly.
+
+### Rules
+
+- Never use reStructuredText markup in docstrings: no `:func:`, `:data:`, `:class:`, `:meth:`, `:mod:`, `:param:`, `:returns:`, or `:raises:`.
+- Never use double-backtick literals.
+- Keep the existing `Args:` / `Returns:` block style where a function needs one.
+
+### Example
+
+**Good:** Plain sentence naming the constant directly
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
+```
+
+**Bad:** reStructuredText markup
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`.
+
+    Unlike :func:`parse_counters_text`, returns a single ``str``.
+    """
 ```
 
 ## I/O and Computation Separation
@@ -215,6 +247,7 @@ Text-mode file I/O should be deterministic across machines. Bare `open()` picks 
 
 - Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
 - Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+- In Python comments and docstrings, use the plain ASCII hyphen `-` instead of the Unicode em dash or en dash.
 
 ### Example
 
@@ -429,7 +462,6 @@ Each function should do **ONE** thing well. If you use "and" to describe what it
 ```python
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
@@ -437,7 +469,7 @@ def create_df_pmc(
     df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
     if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
-    kernel_name_shortener(df, kernel_verbose)
+    utils_analysis.add_unit_counter(df)
     return df
 ```
 
@@ -485,7 +517,6 @@ def pre_processing(self) -> None:
             )
 
         file_io.create_df_kernel_top_stats(...)
-        kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
         parser.load_table_data(...)
 ```
 

@@ -3,6 +3,7 @@
 
 """Unit tests for utils/utils_profile.py."""
 
+import gzip
 import os
 from unittest import mock
 
@@ -10,7 +11,6 @@ import pandas as pd
 import pytest
 
 import utils.utils_profile as utils_profile
-from utils import csv_compression
 from utils.utils_profile import (
     _augment_marker_csv,
     _parse_function_backend,
@@ -171,7 +171,7 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     def fake_convert(db_paths, counter_csv, marker_csv):
         assert counter_csv.endswith(".csv.gz"), counter_csv
         if counter_csv_body is not None:
-            with csv_compression.open_csv_write(counter_csv) as f:
+            with gzip.open(counter_csv, "wt", encoding="utf-8") as f:
                 f.write(counter_csv_body)
 
     monkeypatch.setattr(
@@ -213,7 +213,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
-    assert csv_compression.find_csvs(workload_dir, "results_*.csv") == []
+    assert sorted(workload_dir.glob("results_*.csv.gz")) == []
     assert not (workload_dir / "out").exists()
 
 
@@ -242,8 +242,6 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
-    assert csv_compression._is_compressed(results_csv)
-
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns
     assert results["Dispatch_ID"].tolist() == [0, 0, 1, 2]
@@ -289,7 +287,17 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     assert "TCC_HIT" in merged_counters
 
 
-def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_subprocess(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options
+):
     """
     Test run_prof when subprocess execution fails.
 
@@ -304,7 +312,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (False, "error output"),
@@ -312,14 +320,76 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
+    errors = []
+
     def mock_console_error(msg, exit=True):
+        errors.append((msg, exit))
         if exit:
             raise RuntimeError("console_error called")
 
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+
+    assert all(msg != utils_profile._DUPLICATE_ROCM_MESSAGE for msg, _ in errors)
+
+
+@pytest.mark.parametrize(
+    "abort_line",
+    [
+        "Option 'spirv-expand-step' registered more than once!",
+        "ROCPROFILER_REGISTER_LIBRARY is already set to '/opt/rocm/lib/lib.so'",
+    ],
+    ids=["llvm-duplicate-option", "rocprofiler-register-conflict"],
+)
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_prints_duplicate_rocm_install_message(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options, abort_line
+):
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+    captured_output = "\n".join([
+        f"[{rocprof_cmd}] tool initialization ::     0.146483 sec",
+        "running vcopy",
+        abort_line,
+        "workload stderr",
+    ])
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (False, captured_output),
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+
+    errors = []
+
+    def mock_console_error(msg, exit=True):
+        errors.append((msg, exit))
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+
+    with pytest.raises(RuntimeError, match="console_error called"):
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+
+    # The raw failure output stays visible; the hint follows it, then the abort.
+    assert (abort_line, False) in errors
+    assert errors[-2:] == [
+        (utils_profile._DUPLICATE_ROCM_MESSAGE, False),
+        ("Profiling execution failed.", True),
+    ]
 
 
 def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
@@ -958,8 +1028,8 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
     """Untagged rows are tagged 'unknown' and emit a warning."""
     from utils import utils_profile
 
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
     pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
 
     warnings: list[tuple] = []
@@ -976,8 +1046,8 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
 
 def test_augment_marker_csv_adds_backend_column(tmp_path):
     """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
 
     src_df = pd.DataFrame({
         "Domain": ["MARKER_CORE_RANGE_API"] * 3,
@@ -1008,10 +1078,11 @@ def test_augment_marker_csv_adds_backend_column(tmp_path):
 
 def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     """A CSV without a Function column copies verbatim instead of corrupting."""
-    src = tmp_path / "src.csv"
-    dst = tmp_path / "dst.csv"
-    src.write_text("Foo,Bar\n1,2\n3,4\n", encoding="utf-8")
+    src = tmp_path / "src.csv.gz"
+    dst = tmp_path / "dst.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("Foo,Bar\n1,2\n3,4\n")
 
     _augment_marker_csv(str(src), str(dst))
 
-    assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    assert dst.read_bytes() == src.read_bytes()

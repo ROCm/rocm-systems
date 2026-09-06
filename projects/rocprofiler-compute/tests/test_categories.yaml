@@ -38,7 +38,6 @@ test_categories:
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -64,6 +63,8 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -151,6 +152,8 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -242,6 +245,8 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -333,6 +338,8 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -351,6 +358,7 @@ test_categories:
     test_patterns:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
+      - test-compression
     labels:
       - "sanitizer"
 
