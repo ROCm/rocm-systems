@@ -148,7 +148,7 @@ The `symbol` + `target_arch` join key is unique: in the verified rocflop rocpd a
 Build profiler-hub from source in-repo via `ExternalProject_Add`, linked statically into
 the single `librocprofiler-compute-tool.so`. `add_subdirectory` (one CMake configure) will
 not work: profiler-hub FetchContent's its own fmt, spdlog, nlohmann_json, and sqlite3,
-which collide with the fmt, json, and googletest under `src/lib/external/` and duplicate
+which collide with the fmt, json, and googletest under `external/` and duplicate
 those targets. A separate CMake invocation isolates its dependency resolution.
 
 The sparse-checkout guard and `ExternalProject_Add` go in `src/lib/CMakeLists.txt`, not the
