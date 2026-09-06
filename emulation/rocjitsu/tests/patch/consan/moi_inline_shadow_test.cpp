@@ -6238,7 +6238,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowCapturesHighBankLdsAddressBeforeScratchUse) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneTextTransaction) {
+TEST(ConSanMoi, Gfx1250DenseInlineShadowAllSupportedPolicyIgnoresNominalPatchLimit) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
       9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
@@ -6258,7 +6258,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneTextTransaction) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.test_force_private_epoch = true;
-  options.max_patches = kAccessCount;
+  options.max_patches = 1u;
+  options.max_patches_is_expert_limit = false;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 

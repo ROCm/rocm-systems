@@ -856,13 +856,13 @@ TEST(ConSan, PatchedImageGrowthPolicyPreservesAbsoluteDefault) {
 }
 
 TEST(ConSan, PatchedImageGrowthDefaultCoversQualifiedGeneratedOperator) {
-  // The gfx1250 PyTorch top-k Record/Replay transform is the largest qualified
+  // The gfx950 PyTorch top-k InlineShadow transform is the largest qualified
   // generated operator at this policy boundary. Keep modest bounded headroom
   // above its alignment-inclusive growth instead of requiring an expert
   // per-workload override.
-  constexpr uint64_t kTopkRecordReplayGrowthBytes = 455'942'144u;
-  EXPECT_EQ(kConSanDefaultMaxPatchedImageGrowthBytes, uint64_t{448} * 1024 * 1024);
-  EXPECT_GT(kConSanDefaultMaxPatchedImageGrowthBytes, kTopkRecordReplayGrowthBytes);
+  constexpr uint64_t kTopkInlineShadowGrowthBytes = 916'557'824u;
+  EXPECT_EQ(kConSanDefaultMaxPatchedImageGrowthBytes, uint64_t{896} * 1024 * 1024);
+  EXPECT_GT(kConSanDefaultMaxPatchedImageGrowthBytes, kTopkInlineShadowGrowthBytes);
 }
 
 TEST(ConSan, RelativePatchedImageGrowthPolicyRoundsDownWithoutOverflow) {

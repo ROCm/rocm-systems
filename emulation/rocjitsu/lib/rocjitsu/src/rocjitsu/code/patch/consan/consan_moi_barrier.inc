@@ -286,11 +286,14 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
     return;
   }
   std::vector<MoiBarrierEvidenceSitePlan> selected_candidates;
-  selected_candidates.reserve(options.max_patches);
+  const size_t selected_limit = options.max_patches_is_expert_limit
+                                    ? std::min<size_t>(options.max_patches, candidates.size())
+                                    : candidates.size();
+  selected_candidates.reserve(selected_limit);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result.patches, result.staged_text_fragments);
   for (const MoiBarrierEvidenceSitePlan &candidate : candidates) {
-    if (selected_candidates.size() == options.max_patches)
+    if (selected_candidates.size() == selected_limit)
       break;
     const ConSanBarrierSite *source =
         result.program_inventory.program_site<ConSanBarrierSite>(candidate.source_site);

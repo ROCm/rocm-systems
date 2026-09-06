@@ -189,7 +189,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-    if (planned_candidates.size() == options.max_patches)
+    if (options.max_patches_is_expert_limit && planned_candidates.size() == options.max_patches)
       break;
     const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
     std::optional<MoiAtomicEvidenceSourceView> source =

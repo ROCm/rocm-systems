@@ -389,7 +389,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.push_back({std::move(probe), candidate_ptr, std::move(candidate_point),
                        std::move(owner_derivation), std::move(emission),
                        guest_instruction_word_count});
-    if (planned.size() == options.max_patches)
+    if (options.max_patches_is_expert_limit && planned.size() == options.max_patches)
       break;
   }
 

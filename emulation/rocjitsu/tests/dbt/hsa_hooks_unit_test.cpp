@@ -307,7 +307,7 @@ TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
   const auto estimate =
       rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
   ASSERT_TRUE(estimate);
-  EXPECT_EQ(estimate->reservation_bytes, 5033164904u);
+  EXPECT_EQ(estimate->reservation_bytes, 11274289256u);
 }
 
 TEST(ConSanTransformMemoryTest, ReportsGoverningCompositePhaseForDefaultGrowth) {
