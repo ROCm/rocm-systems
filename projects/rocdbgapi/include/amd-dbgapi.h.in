@@ -665,6 +665,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1944,6 +1950,17 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
     amd_dbgapi_process_id_t process_id, amd_dbgapi_process_info_t query,
     size_t value_size, void *value) AMD_DBGAPI_VERSION_0_80;
 
+/** Flags influencing the how the library attaches to a process.
+  */
+typedef enum {
+  AMD_DBGAPI_PROCESS_ATTACH_FLAGS_NONE = 0,
+  /**
+   * When attaching to a process, set forward progress requirement to
+   * ::AMD_DBGAPI_PROGRESS_NO_FORWARD.
+   */
+  AMD_DBGAPI_PROCESS_ATTACH_FLAGS_NO_FORWARD_PROGRESS = 1,
+} amd_dbgapi_process_attach_flags;
+
 /**
  * Attach to a process in order to provide debug control of the AMD GPUs it
  * uses.
@@ -2042,7 +2059,8 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_attach (
     amd_dbgapi_client_process_id_t client_process_id,
-    amd_dbgapi_process_id_t *process_id) AMD_DBGAPI_VERSION_0_56;
+    amd_dbgapi_process_id_t *process_id,
+    amd_dbgapi_process_attach_flags attach_flags) AMD_DBGAPI_VERSION_0_81;
 
 /**
  * Detach from a process and no longer have debug control of the AMD GPU

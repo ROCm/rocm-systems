@@ -2569,9 +2569,11 @@ amd_dbgapi_process_unfreeze (amd_dbgapi_process_id_t process_id)
 
 amd_dbgapi_status_t AMD_DBGAPI
 amd_dbgapi_process_attach (amd_dbgapi_client_process_id_t client_process_id,
-                           amd_dbgapi_process_id_t *process_id)
+                           amd_dbgapi_process_id_t *process_id,
+                           amd_dbgapi_process_attach_flags attach_flags)
 {
-  TRACE_BEGIN (param_in (client_process_id), param_in (process_id));
+  TRACE_BEGIN (param_in (client_process_id), param_in (process_id),
+               param_in (attach_flags));
   TRY
   {
     if (!detail::is_initialized)
@@ -2601,6 +2603,8 @@ amd_dbgapi_process_attach (amd_dbgapi_client_process_id_t client_process_id,
 
     try
       {
+        if (attach_flags & AMD_DBGAPI_PROCESS_ATTACH_FLAGS_NO_FORWARD_PROGRESS)
+          process->set_forward_progress_needed (false);
         process->attach ();
       }
     catch (const process_exited_exception_t &)
