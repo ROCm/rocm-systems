@@ -6,7 +6,7 @@
 
 /**
  * @file DdaAllReduceMPITests.cpp
- * @brief MPI end-to-end tests for DDA fabric AllReduce LL one-shot and two-shot tiers
+ * @brief MPI end-to-end tests for the DDA fabric AllReduce LL and LL128 tiers
  *
  * Mirrors test/DdaAllReduceTests.cpp but uses MPI + ncclCommInitRank instead of
  * ncclCommInitAll. Correctness is checked against the analytic sum; the COLL log
@@ -46,6 +46,9 @@ constexpr size_t kTwoShotBaseCount = 262176;
 
 constexpr char kOneShotLogNeedle[] = "taking DDA fabric LL one-shot path";
 constexpr char kTwoShotLogNeedle[] = "taking DDA fabric LL two-shot path";
+
+constexpr char kLL128OneShotLogNeedle[] = "taking DDA fabric LL128 one-shot path";
+constexpr char kLL128TwoShotLogNeedle[] = "taking DDA fabric LL128 two-shot path";
 
 bool isGfx1250Device()
 {
@@ -182,6 +185,8 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
     if(!validateTestPrerequisites(kMinProcessesForMPI))
         GTEST_SKIP() << "Need at least 2 MPI ranks";
 
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "2097152");
+
     int nRanks = MPIEnvironment::world_size;
     const size_t count = twoShotCountForRanks(nRanks);
     if(count == 0)
@@ -189,6 +194,55 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
                      << nRanks;
 
     runAllReduce(count, kTwoShotLogNeedle, "DdaMPI_AllReduce/LLTwoShotMultiRank");
+}
+
+// The LL128 tiers sit behind the LL ones in ncclAllReduceDdaFabricLL, each gated
+// on its own threshold. Under the defaults the LL tiers claim everything up to
+// 16 MiB while an LL128 slot tops out near the same size, which leaves LL128 a
+// few hundred bytes of window at 4 ranks and none at 8. Rather than chase that,
+// the two below zero the thresholds of the tiers ahead so the size under test
+// lands unambiguously on the tier being exercised.
+//
+// IMPORTANT: RCCL_PARAM caches on first read, per process, so whichever test in
+// the binary reads a threshold first fixes it for every later one -- including
+// the LL tests above. Each of these has to run in its own process:
+//
+//   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128OneShot*
+//   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128TwoShot*
+//
+// Run in a process that already touched those thresholds, the guards are inert
+// and the COLL-log assertion reports whichever tier actually claimed the message.
+
+// 256 KiB of f32 is inside the 32 MiB LL128 one-shot threshold and inside a slot
+// at any supported rank count, so with the LL tiers switched off it is the LL128
+// one-shot tier that claims it.
+TEST_F(DdaMPI_AllReduce, LL128OneShotMultiRank)
+{
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+
+    runAllReduce(kOneShotCount, kLL128OneShotLogNeedle, "DdaMPI_AllReduce/LL128OneShotMultiRank");
+}
+
+// Zeroing the LL128 one-shot threshold as well leaves the two-shot tier as the
+// only claimant. The count reuses the LL two-shot shape rules -- the message has
+// to divide into per-rank shards and each shard has to be a whole number of
+// 16-byte chunks -- which the LL128 two-shot tier applies identically.
+TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard ll128OneShotGuard("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "0");
+
+    int          nRanks = MPIEnvironment::world_size;
+    const size_t count  = twoShotCountForRanks(nRanks);
+    if(count == 0)
+        GTEST_SKIP() << "Could not find a two-shot-aligned element count for nRanks=" << nRanks;
+
+    runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
 }
 
 #endif // MPI_TESTS_ENABLED

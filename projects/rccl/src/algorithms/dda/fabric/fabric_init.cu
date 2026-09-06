@@ -66,8 +66,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
   // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
-  size_t bytes =
-    ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled, ll128Enabled);
+  size_t bytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled,
+                                        ll128Enabled, ll128Thresh);
   if (bytes == 0) {
     return ncclSuccess;
   }
