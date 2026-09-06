@@ -172,36 +172,11 @@ For full walkthroughs, see :doc:`how-to/profile/mode` and :doc:`how-to/analyze/c
 Flags reference
 ==================
 
-This isn't an exhaustive list of flags; run ``rocprof-compute profile -h`` or ``rocprof-compute analyze -h`` for the complete set. The following are the most commonly used with ``profile`` and ``analyze``:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 18 60
-
-   * - Flag
-     - Mode
-     - Effect
-   * - ``-n``, ``--name``
-     - profile
-     - Names the run and sets the output subdirectory under ``workloads/``.
-   * - ``-k``, ``--kernel``
-     - profile, analyze
-     - Filters to kernels whose name matches the given substring. See :ref:`profiling-kernel-filtering`.
-   * - ``-d``, ``--dispatch``
-     - profile, analyze
-     - Filters to the given 1-based dispatch indices or ranges (``start:end`` or ``start-end``). See :ref:`profiling-dispatch-filtering`.
-   * - ``-b``, ``--block``
-     - profile, analyze
-     - Limits collection or analysis to the given analysis report blocks; in profile mode this also speeds up counter collection. Can't combine with ``--roof-only`` or ``--set``. See :ref:`profiling-hw-component-filtering`.
-   * - ``--roof-only``
-     - profile
-     - Runs only the roofline micro-benchmarks. Can't combine with ``--block``, ``--set``, or ``--bench-only``. See :ref:`standalone-roofline`.
-   * - ``-p``, ``--path``
-     - analyze
-     - Points analyze at one or more profiled output directories; repeat or space-separate for :ref:`baseline comparison <analysis-baseline-comparison>`.
-   * - ``--output-format``
-     - analyze
-     - Selects the analysis report format: ``stdout`` (default), ``txt``, ``csv``, or ``db``. See :ref:`glance-output-formats`.
+ROCm Compute Profiler supports many flags for filtering kernels, dispatches, and
+hardware blocks during profiling and analysis, and for selecting the analysis output
+format. See :doc:`how-to/profile/mode` for the full list of profile mode flags and
+:doc:`how-to/analyze/mode` for analyze mode flags, or run ``rocprof-compute profile -h``
+or ``rocprof-compute analyze -h`` for the complete set.
 
 .. _glance-output-formats:
 
