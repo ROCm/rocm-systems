@@ -31,8 +31,8 @@ TEST_F(TraceConfigTest, DefaultValues)
     EXPECT_EQ(default_config.vmIdMask, 0);
     EXPECT_EQ(default_config.simd_sel, 0xF);
     EXPECT_EQ(default_config.sampleRate, 625);
+    EXPECT_EQ(default_config.spm_sample_interval_type, 0u);
     EXPECT_EQ(default_config.perfMASK, ~0u);
-    EXPECT_TRUE(default_config.spm_sq_32bit_mode);
     EXPECT_FALSE(default_config.spm_has_core1);
     EXPECT_EQ(default_config.se_mask, 0x11);
 }

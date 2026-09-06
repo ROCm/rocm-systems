@@ -46,6 +46,17 @@ public:
     bool IsGFX12() const override { return true; }
     bool IsGFX1250() const override { return true; }
 
+    uint32_t EncodeSpmBlockIndex(uint32_t inst_index, uint32_t sa_index,
+                                 uint32_t wgp_index) const override
+    {
+        return (sa_index << 5) | (wgp_index << 1) | inst_index;
+    }
+    uint32_t DecodeSpmInstanceIndex(const GpuBlockInfo* block_info,
+                                    uint32_t            block_index) const override
+    {
+        return gfx12_cntx_prim::decode_spm_instance_index(block_info, block_index);
+    }
+
     virtual int GetAccumLowID() const override { return 1; };
     virtual int GetAccumHiID() const override { return 1; };
     virtual int GetSQGAccumID() const override { return 13; };
