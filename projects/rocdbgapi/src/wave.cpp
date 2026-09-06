@@ -69,10 +69,16 @@ wave_t::~wave_t ()
     raise_event (AMD_DBGAPI_EVENT_KIND_WAVE_COMMAND_TERMINATED);
 }
 
+cluster_t &
+wave_t::cluster () const
+{
+  return workgroup ().cluster ();
+}
+
 const dispatch_t &
 wave_t::dispatch () const
 {
-  return m_workgroup.dispatch ();
+  return cluster ().dispatch ();
 }
 
 queue_t &
@@ -993,10 +999,13 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
       return;
 
     case AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD:
-      if (!workgroup ().group_ids ())
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
-      utils::get_info (value_size, value, *workgroup ().group_ids ());
-      return;
+      {
+        auto ids = workgroup ().group_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
 
     case AMD_DBGAPI_WAVE_INFO_WAVE_NUMBER_IN_WORKGROUP:
       if (!m_wave_in_group)
@@ -1035,6 +1044,28 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
     case AMD_DBGAPI_WAVE_INFO_LANE_COUNT:
       utils::get_info (value_size, value, lane_count ());
       return;
+
+    case AMD_DBGAPI_WAVE_INFO_CLUSTER:
+      utils::get_info (value_size, value, cluster ().id ());
+      return;
+
+    case AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD:
+      {
+        auto ids = cluster ().cluster_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
+
+    case AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER:
+      {
+        auto ids = workgroup ().group_ids_in_cluster ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);

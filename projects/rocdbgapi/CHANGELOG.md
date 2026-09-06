@@ -3,7 +3,31 @@
 Full documentation for AMD Debugger API is available at
 [rocm.docs.amd.com/rocdbgapi](https://rocm.docs.amd.com/projects/ROCdbgapi/en/latest/index.html).
 
-## rocm-dbgapi-0.80 for ROCm-X
+## rocm-dbgapi-0.81 for ROCm-X
+### Added
+- `amd_dbgapi_cluster_get_info` to query various information about a given
+  cluster.
+
+- A new error code, `AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID`
+  that is returned when the cluster id passed to an API function is invalid.
+
+- `amd_dbgapi_workgroup_get_info` adds a new query named
+  `AMD_DBGAPI_WORKGROUP_INFO_CLUSTER` to get the cluster a workgroup belongs
+  to and a query named `AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD_IN_CLUSTER`
+  to get the workgroup's coordinates within its cluster.
+
+- `amd_dbgapi_wave_get_info` adds a query named
+  `AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD` to get the cluster coordinates
+  of a wave, `AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER` to get the
+  wave's workgroup's coordinates within its cluster, and a query named
+  `AMD_DBGAPI_WAVE_INFO_CLUSTER` to get the cluster a wave's workgroup belongs
+  to.
+
+- `amd_dbgapi_dispatch_get_info` add a query named
+  `AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES` to get the cluster sizes in
+  work-items.
+
+## rocm-dbgapi-0.80
 ### Added
 - amd_dbgapi_process_get_info() adds a new query to get a mask spanning
   over all the bits used by all the address spaces.  The query is called

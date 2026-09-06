@@ -20,6 +20,7 @@
 
 #include "workgroup.h"
 #include "agent.h"
+#include "cluster.h"
 #include "dispatch.h"
 #include "memory.h"
 #include "process.h"
@@ -27,6 +28,12 @@
 
 namespace amd::dbgapi
 {
+
+const dispatch_t &
+workgroup_t::dispatch () const
+{
+  return cluster ().dispatch ();
+}
 
 queue_t &
 workgroup_t::queue () const
@@ -50,6 +57,25 @@ const architecture_t &
 workgroup_t::architecture () const
 {
   return queue ().architecture ();
+}
+
+std::optional<const std::array<uint32_t, 3>>
+workgroup_t::group_ids_in_cluster () const
+{
+  const auto &num_wgs = cluster ().num_wgs ();
+  if (!num_wgs.has_value ())
+    return std::nullopt;
+
+  const auto nwgs = num_wgs.value ();
+  dbgapi_assert (m_group_ids.has_value ());
+  const auto &gids = m_group_ids.value ();
+
+  std::array<uint32_t, 3> ids
+    { gids[0] % nwgs[0],
+      gids[1] % nwgs[1],
+      gids[2] % nwgs[2]};
+
+  return ids;
 }
 
 void
@@ -146,10 +172,31 @@ workgroup_t::get_info (amd_dbgapi_workgroup_info_t query, size_t value_size,
       return;
 
     case AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD:
-      if (!group_ids ())
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
-      utils::get_info (value_size, value, *group_ids ());
-      return;
+      {
+        auto ids = group_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
+
+    case AMD_DBGAPI_WORKGROUP_INFO_CLUSTER:
+      {
+        auto ids = cluster ().cluster_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, cluster ().id ());
+        return;
+      }
+
+    case AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD_IN_CLUSTER:
+      {
+        auto ids = group_ids_in_cluster ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
