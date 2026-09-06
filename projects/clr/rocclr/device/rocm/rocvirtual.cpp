@@ -3454,6 +3454,41 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
 }
 
 // ================================================================================================
+// Submit all accumulated buffer copies as ONE batched submission. Caller must hold execution().
+void VirtualGPU::flushPendingSdmaCopies() {
+  if (pendingSdmaCopies_.empty()) {
+    return;
+  }
+  std::vector<amd::BatchCopyOp> ops;
+  ops.swap(pendingSdmaCopies_);
+
+  // Sync caches for every op (mirror submitBatchCopyMemory).
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+  for (const auto& op : ops) {
+    Memory* s = dev().getRocMemory(op.srcMemory);
+    Memory* d = dev().getRocMemory(op.dstMemory);
+    if (s == nullptr || d == nullptr) {
+      LogError("flushPendingSdmaCopies: invalid memory objects");
+      return;
+    }
+    d->syncCacheFromHost(*this, syncFlags);
+    s->syncCacheFromHost(*this);
+  }
+
+  if (!blitMgr().copyBufferBatch(ops)) {
+    LogError("flushPendingSdmaCopies: batch copy failed");
+  } else {
+    for (const auto& op : ops) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+  // Join any parallel engine-group signals into the tracker's current signal.
+  if (!Barriers().IsExternalSignalListEmpty()) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
+}
+
 void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -3462,6 +3497,29 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& cmd) {
 
   cl_command_type type = cmd.type();
   bool entire = cmd.isEntireMemory();
+
+  // SDMA batch: coalesce ONLY H2D/D2H copies (exactly one host-direct-access side) into one
+  // batched SDMA submission. D2D stays on the normal per-copy path (it would otherwise route
+  // to the concurrent shader-blit path). Completion carried by the submission-batch marker.
+  if (DEBUG_CLR_SDMA_BATCH && type == CL_COMMAND_COPY_BUFFER) {
+    Memory* srcMem = dev().getRocMemory(&cmd.source());
+    Memory* dstMem = dev().getRocMemory(&cmd.destination());
+    const bool hostSrc = (srcMem != nullptr) && srcMem->isHostMemDirectAccess();
+    const bool hostDst = (dstMem != nullptr) && dstMem->isHostMemDirectAccess();
+    // Exactly one host side => H2D or D2H => defer into the SDMA batch.
+    if (hostSrc != hostDst) {
+      pendingSdmaCopies_.emplace_back(&cmd.source(), &cmd.destination(), cmd.srcOrigin()[0],
+                                      cmd.dstOrigin()[0], cmd.size()[0], cmd.copyMetadata());
+      if (pendingSdmaCopies_.size() >= DEBUG_CLR_SDMA_BATCH_DEPTH) {
+        flushPendingSdmaCopies();
+      }
+      profilingEnd();
+      return;
+    }
+    // D2D / H2H: drain any pending H2D/D2H first so this copy stays ordered after its
+    // producers, then fall through to the normal (unbatched) copy path below.
+    flushPendingSdmaCopies();
+  }
 
   if (!copyMemory(type, cmd.source(), cmd.destination(), entire, cmd.srcOrigin(), cmd.dstOrigin(),
                   cmd.size(), cmd.srcRect(), cmd.dstRect(), cmd.copyMetadata())) {
@@ -5223,6 +5281,11 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Make sure VirtualGPU has an exclusive access to the resources
     std::scoped_lock lock(execution());
 
+    // Flush deferred SDMA-batch copies so this kernel is ordered after any producer copy.
+    if (DEBUG_CLR_SDMA_BATCH) {
+      flushPendingSdmaCopies();
+    }
+
     profilingBegin(vcmd);
 
     if (vcmd.dynDataPrefetchConfig().isEnabled()) {
@@ -5250,6 +5313,10 @@ void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
+  // Flush any deferred SDMA-batch copies so this marker is ordered after them.
+  if (DEBUG_CLR_SDMA_BATCH) {
+    flushPendingSdmaCopies();
+  }
   if (vcmd.CpuWaitRequested()) {
     force_irq_ = IS_WINDOWS;
     // It should be safe to call flush directly if there are not pending dispatches without
