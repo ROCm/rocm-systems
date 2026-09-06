@@ -41,10 +41,29 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+namespace rocjitsu::test {
+
+class SoCTestAccess {
+public:
+  static uint32_t dispatch_pool_threads(const SoC &soc) {
+    return soc.dispatch_pool_ ? soc.dispatch_pool_->thread_count() : 0;
+  }
+};
+
+} // namespace rocjitsu::test
+
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
+
+class SerializedHotHookPlugin final : public rocjitsu::ExecutionPlugin {
+public:
+  SerializedHotHookPlugin() : rocjitsu::ExecutionPlugin("serialized_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
 
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
@@ -90,6 +109,83 @@ TEST(ConfigLoaderTest, LoadCdna2Config) {
   EXPECT_LE(loaded.device.simd_count, loaded.device.num_shader_engines *
                                           loaded.device.num_shader_arrays_per_engine *
                                           loaded.device.num_cu_per_sh * loaded.device.simd_per_cu);
+}
+
+std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]},
+            {"name":"se1","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.cp.req_1","dst":"xcd0.se1.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
+        {"src":"xcd0.se1.cu0.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  simdojo::SimulationEngine engine(loaded.engine_config);
+  engine.topology().set_root(loaded.take_root());
+  loaded.wire_links(engine.topology());
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t KD_ADDR = 0x1000;
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  soc->memory()->write32(KD_ADDR + sizeof(kernel_descriptor_t), 0xFFFFFFFF);
+
+  auto *xcd = soc->xcd(0);
+  auto *cp = xcd->command_processor();
+  cp->set_dispatch_threads(2);
+  assert(cp->dispatch_threads() == 2);
+
+  test::AqlQueue queue(soc->memory(), cp);
+  queue.dispatch(KD_ADDR, 128, 64);
+
+  engine.step();
+
+  return {dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
+          dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -175,6 +271,35 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 
   for (const auto &build : loaded.extra_gpu_builds)
     EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
+}
+
+TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  soc->set_dispatch_threads(8);
+  EXPECT_EQ(soc->dispatch_threads(), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
+
+  soc->set_dispatch_threads(1);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
+}
+
+TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  soc->set_dispatch_threads(8);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<SerializedHotHookPlugin>()));
+  soc->set_plugin_group(group);
+
+  EXPECT_EQ(soc->dispatch_threads(), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -322,7 +447,8 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
                     { "key": "num_wf_slots", "value": "20" },
                     { "key": "sgprs_per_wf", "value": "104" },
                     { "key": "vgprs_per_wf", "value": "256" },
-                    { "key": "lds_size_kb", "value": "64" }
+                    { "key": "lds_size_kb", "value": "64" },
+                    { "key": "functional_quantum", "value": "7" }
                   ]
                 }]
               },
@@ -367,6 +493,7 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->num_shader_engines(), 2u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 3u);
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
+  EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
@@ -1244,6 +1371,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
 }
 
+TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
+  auto [se0_wfs, se1_wfs] = run_two_spi_dispatch();
+
+  EXPECT_EQ(se0_wfs, 2u);
+  EXPECT_EQ(se1_wfs, 0u);
+}
+
 TEST(CheckpointTest, SaveAndRestoreMemory) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,"exec_mode":"clocked",
     "vm":{"arch":"cdna3"},
@@ -1716,6 +1850,71 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, ClockedDispatchStaysEventDriven) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "exec_mode":"clocked",
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &raw), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+  auto *cp = handle->soc->xcd(0)->command_processor();
+  cp->set_dispatch_threads(8);
+  EXPECT_EQ(cp->dispatch_threads(), 1u);
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t kKernelAddress = 0x1000;
+  constexpr uint32_t kCode[] = {0xBF800000u, 0xBF810000u}; // s_nop; s_endpgm
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd),
+                                    kKernelAddress);
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(kCode), sizeof(kCode),
+                                    kKernelAddress + sizeof(kd));
+
+  test::AqlQueue queue(handle->soc->memory(), cp);
+  queue.dispatch(kKernelAddress, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  int active = 0;
+  const auto tick_before_doorbell = handle->engine->global_time();
+  EXPECT_EQ(rj_vm_step(handle.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(handle->engine->global_time(), tick_before_doorbell);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu->wf(0), nullptr);
+  EXPECT_EQ(cu->wf(0)->trace_inst_count_, 0u);
 }
 
 TEST(CApiTest, CheckpointRoundTrip) {

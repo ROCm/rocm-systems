@@ -435,6 +435,7 @@ add_executable(
     instruction_cache_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
+    cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
