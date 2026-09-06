@@ -44,8 +44,8 @@ def build_doxyfile():
 build_doxyfile()
 
 # -- Project information -----------------------------------------------------
-project = "Rocprofiler SDK"
-copyright = "2023-2025, Advanced Micro Devices, Inc."
+project = "ROCprofiler-SDK"
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 author = "Advanced Micro Devices, Inc."
 
 project_root = os.path.normpath(os.path.join(os.getcwd(), "..", ".."))
@@ -98,9 +98,19 @@ nitpick_ignore = [
 # a list of builtin themes.
 
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocprofiler-sdk/source/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_title = f"ROCprofiler-SDK {version} Documentation"
+
+# Generate llms.txt
+rocm_docs_generate_llms = True
