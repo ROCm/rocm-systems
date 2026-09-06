@@ -1377,11 +1377,35 @@ manifest classifies it as payload loss and `derive_manifest.py` fails the build 
 count drifts from its recorded baseline, so a newly-captured struct-input API cannot
 lose its payload unnoticed.
 
-### Recorded Failures Are Not Replay Failures
+### Fail-Loud Scope Exclusions
 
-A recorded call that *failed* is reproduced, not repaired: when the archived return is
-non-zero and replay reproduces the same error, that is the faithful outcome and the
-dispatcher reports it as such instead of as a handler failure.
+Some calls cannot be reproduced in a different process no matter how much of the
+argument is recorded. Rather than pass a null or a stale value and let the runtime
+report something unattributable, these are `UNREPLAYABLE_PLAYBACK_APIS`: the handler
+returns `hipErrorNotSupported` (fatal unless `--continue-on-error`), names itself and
+its reason on stderr, and the replay summary lists the archive as incomplete. Capture
+warns once at record time as well, so the incompleteness is visible when the recording
+is made and not only when someone tries to replay it. The exclusions are:
+
+- **Host callbacks** — `hipLaunchHostFunc`, `hipLaunchHostFunc_spt`,
+  `hipStreamAddCallback`, `hipStreamAddCallback_spt`. The callback is a function pointer
+  in the recording process; there is nothing to call at replay.
+- **Host nodes in a graph** — `hipGraphAddHostNode`, `hipGraphHostNodeSetParams`,
+  `hipGraphExecHostNodeSetParams`: the same function pointer reached through the graph
+  API, which is why a graph containing one is refused at instantiate.
+- **Cross-process handle import** — `hipMemImportFromShareableHandle`,
+  `hipMemPoolImportFromShareableHandle`. The exported fd or HANDLE is meaningful only
+  inside the exporting process and its peers, which a later replay is not.
+- **Multi-device launch by host function address** —
+  `hipLaunchCooperativeKernelMultiDevice`, `hipExtLaunchMultiKernelMultiDevice`.
+  `hipLaunchParams` names each kernel by a host function address and, unlike the
+  single-device spellings, has no entry point that takes a `hipFunction_t` instead.
+- **Host-object lifetime callbacks** — `hipUserObjectCreate`, whose destructor is a host
+  function pointer with the same problem as a stream callback.
+
+A recorded call that *failed* is a separate case and is not an exclusion: when the
+archived return is non-zero and replay reproduces the same error, that is the faithful
+outcome and the dispatcher reports it as such instead of as a handler failure.
 
 ## Relationship to Original HRR Code
 

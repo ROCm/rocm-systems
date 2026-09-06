@@ -52,6 +52,20 @@
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
 
+void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
+                           const char* reason) {
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        if (!ctx.unreplayable_apis.emplace(api, reason ? reason : "").second)
+            return;
+    }
+    fprintf(stderr,
+            "[HRR] %s: NOT REPLAYABLE — %s. The call is in the archive but its "
+            "effect cannot be reproduced here, so it is skipped; this replay is "
+            "not a faithful reproduction of the recording.\n",
+            api, reason ? reason : "(unspecified)");
+}
+
 void hrr_note_recorded_error(PlaybackContext& ctx, const char* api,
                              int recorded_ret) {
     {

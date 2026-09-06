@@ -310,6 +310,9 @@ enum class HrrReplayClass {
   kErrorStub,  // ERROR_STUB_PLAYBACK_APIS — named graph-construction warning.
   kHandlerError,  // A real handler ran and returned a HIP error.
   kCrash,      // A real handler took the replay process down with a signal.
+  kUnreplayable,  // UNREPLAYABLE_PLAYBACK_APIS — refused by name, with the
+                  // reason, rather than attempted with recorded arguments that
+                  // cannot mean anything here.
 };
 
 inline const char* hrr_replay_class_name(HrrReplayClass c) {
@@ -319,6 +322,7 @@ inline const char* hrr_replay_class_name(HrrReplayClass c) {
     case HrrReplayClass::kErrorStub:    return "ERROR_STUB";
     case HrrReplayClass::kHandlerError: return "HANDLER_ERROR";
     case HrrReplayClass::kCrash:        return "CRASH";
+    case HrrReplayClass::kUnreplayable: return "UNREPLAYABLE";
   }
   return "?";
 }
@@ -400,6 +404,13 @@ inline std::string hrr_noop_marker(const std::string& api) {
 
 inline std::string hrr_error_stub_marker(const std::string& api) {
   return "[HRR] " + api + ": not reconstructable at replay";
+}
+
+// An unreplayable API also returns hipErrorNotSupported, so its event appears
+// in the failed-API list too. This marker is what tells the two apart: a
+// declared refusal with a reason, rather than a handler that tried and failed.
+inline std::string hrr_unreplayable_marker(const std::string& api) {
+  return "[HRR] " + api + ": NOT REPLAYABLE";
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +512,10 @@ inline bool hrr_replay_aborted(const std::string& merged_output) {
 // hrr_info_api_counts() and the second with hrr_replay_aborted().
 inline HrrReplayClass hrr_observed_replay_class(const std::string& merged_output,
                                                 const std::string& api) {
+  // Checked before the failed-API list: an unreplayable handler reports the
+  // event as failed as well, and the refusal is the more specific fact.
+  if (merged_output.find(hrr_unreplayable_marker(api)) != std::string::npos)
+    return HrrReplayClass::kUnreplayable;
   if (hrr_replay_failed_apis(merged_output).count(api))
     return HrrReplayClass::kHandlerError;
   if (merged_output.find(hrr_error_stub_marker(api)) != std::string::npos)
