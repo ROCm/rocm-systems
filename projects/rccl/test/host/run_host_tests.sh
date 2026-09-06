@@ -86,7 +86,7 @@ do_deps() {
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   $sudo apt-get update
   $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
-    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm
+    moreutils libgtest-dev libgmock-dev libfmt-dev lcov
 }
 
 do_rccl_configure() {
@@ -265,14 +265,19 @@ do_coverage() {
     llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
       || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
 
+    # Filter /test/ and nvtx here too so the per-binary text + HTML reports carry
+    # the same denominator as the lcov export below (and the overall summary that
+    # unions those tracefiles); otherwise the numbers next to each other mislead.
     llvm-cov report "$exe" \
       -instr-profile="$dir/merged.profdata" \
+      --ignore-filename-regex='(/test/|nvtx)' \
       --show-branch-summary --show-region-summary \
       > "$dir/coverage.txt" \
       || { echo "    error: llvm-cov report failed for $name" >&2; rc=1; continue; }
 
     llvm-cov show "$exe" \
       -instr-profile="$dir/merged.profdata" \
+      --ignore-filename-regex='(/test/|nvtx)' \
       -format=html -output-dir="$dir/html" \
       --show-branches=count \
       || { echo "    error: llvm-cov show failed for $name" >&2; rc=1; continue; }
@@ -352,8 +357,9 @@ do_coverage() {
       >/dev/null 2>&1; then
       echo "    overall html report: $odir/html/index.html"
     else
+      # A genhtml rendering hiccup should not redden a job whose tests all
+      # passed and whose tracefiles were all written -- warn but leave rc.
       echo "    warning: genhtml failed -- overall html report not generated" >&2
-      rc=1
     fi
   fi
   echo "    overall tracefile:   $odir/combined.lcov"
