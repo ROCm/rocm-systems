@@ -10971,8 +10971,27 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
                 sizeof(patched_descriptor));
     const std::vector<uint32_t> first_body = text_words_at_offset(
         patched, first_access->trampoline_offset, first_access->trampoline_size);
-    EXPECT_NE(std::ranges::search(first_body, *save_first).begin(), first_body.end());
-    EXPECT_NE(std::ranges::search(first_body, *restore_first).begin(), first_body.end());
+    ASSERT_TRUE(first_access->private_state_layout);
+    const auto private_limit = address_free_scratch_private_limit(arch);
+    ASSERT_TRUE(private_limit);
+    SpillManager expected_vgpr_manager(first_access->private_state_layout->ephemeral_base,
+                                       *private_limit);
+    const auto expected_vgpr_spill = build_vgpr_spill_sequence(
+        expected_vgpr_manager, *first_access->scratch_vgpr, first_access->spilled_vgpr_count, arch);
+    ASSERT_TRUE(expected_vgpr_spill);
+    SpillManager expected_scalar_manager(expected_vgpr_spill->total_private_bytes, *private_limit);
+    constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
+    const auto expected_scalar_spill =
+        build_sgpr_spill_sequence(expected_scalar_manager, *test_moi_exec_save_sgpr(result),
+                                  kRuntimeWorkgroupGateSgprCount, reservoir, arch);
+    ASSERT_TRUE(expected_scalar_spill);
+    EXPECT_TRUE(contains_subsequence(first_body, expected_scalar_spill->save_words));
+    EXPECT_TRUE(contains_subsequence(first_body, expected_scalar_spill->restore_words));
+    EXPECT_EQ(first_access->required_private_segment_size,
+              expected_scalar_spill->total_private_bytes);
+    EXPECT_FALSE(contains_subsequence(first_body, *save_first))
+        << "spill-backed access bodies must not clobber inactive reservoir lanes";
+    EXPECT_FALSE(contains_subsequence(first_body, *restore_first));
     const auto entry_prologue =
         std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
                           &ConSanPatchInfo::kind);

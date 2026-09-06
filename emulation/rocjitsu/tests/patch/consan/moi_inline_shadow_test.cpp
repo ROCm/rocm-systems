@@ -1285,6 +1285,30 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       sizeof(uint32_t);
   ASSERT_GT(relocated_guest_word, 1u);
   ASSERT_FALSE(access_words.empty());
+  ASSERT_TRUE(full_access->scratch_vgpr);
+  ASSERT_GT(full_access->spilled_vgpr_count, 0u);
+  SpillManager expected_vgpr_manager(full_access->private_state_layout->ephemeral_base,
+                                     kMaxCdnaAddressFreeScratchPrivateBytes);
+  const auto expected_vgpr_spill = build_vgpr_spill_sequence(
+      expected_vgpr_manager, *full_access->scratch_vgpr, full_access->spilled_vgpr_count, kArch);
+  ASSERT_TRUE(expected_vgpr_spill);
+  SpillManager expected_scalar_manager(expected_vgpr_spill->total_private_bytes,
+                                       kMaxCdnaAddressFreeScratchPrivateBytes);
+  const uint16_t transfer_vgpr =
+      static_cast<uint16_t>(*full_access->scratch_vgpr + full_access->spilled_vgpr_count - 1u);
+  const auto expected_scalar_spill =
+      build_sgpr_spill_sequence(expected_scalar_manager, full_assignment->exec_save_sgpr,
+                                kConSanMoiInlineExecSaveSgprCount, transfer_vgpr, kArch);
+  ASSERT_TRUE(expected_scalar_spill);
+  EXPECT_TRUE(contains_subsequence(access_words, expected_scalar_spill->save_words));
+  EXPECT_TRUE(contains_subsequence(access_words, expected_scalar_spill->restore_words));
+  EXPECT_EQ(full_access->required_private_segment_size, expected_scalar_spill->total_private_bytes);
+  const auto unsafe_lane_save = instrumentation::build_v_writelane_b32(
+      transfer_vgpr, full_assignment->exec_save_sgpr, /*lane=*/0u, kArch);
+  ASSERT_TRUE(unsafe_lane_save);
+  EXPECT_FALSE(contains_subsequence(access_words, *unsafe_lane_save))
+      << "a spill-backed lane reservoir corrupts inactive VGPR lanes because v_writelane "
+         "ignores EXEC";
   const int16_t encoded_empty_exec_distance = static_cast<int16_t>(access_words.front() & 0xffffu);
   ASSERT_GE(encoded_empty_exec_distance, 0);
   const uint64_t empty_exec_continuation_word =

@@ -215,9 +215,13 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
 
 /// Build the common scalar-preservation transaction selected by resource
 /// planning. Dynamic-stack owners borrow the already-established VGPR spill
-/// frame; fixed-stack owners use the planned lane-backed reservoir. Engine
-/// policy decides whether scalar spilling is enabled, but no engine privately
-/// interprets the owner stack model or reservoir geometry.
+/// frame. Fixed-stack owners with a live scratch window use that window as a
+/// lane-backed reservoir; spill-backed windows instead transfer scalar state
+/// through private memory. The latter distinction is required under partial
+/// EXEC: v_writelane ignores EXEC, so a lane reservoir whose ordinary VGPR
+/// save only covered active lanes would corrupt newly reconverged guest lanes.
+/// Engine policy decides whether scalar spilling is enabled, but no engine
+/// privately interprets the owner stack model or reservoir geometry.
 [[nodiscard]] std::optional<SgprSpillSequence> build_moi_sgpr_spill_sequence(
     const ProgramInventory &inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
@@ -253,10 +257,29 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
   }
   (void)managers;
   (void)private_layout_base;
+  if (vgpr_spill != nullptr) {
+    if (vgpr_spill->uses_dynamic_stack_frame || vgpr_spill->vgpr_count == 0u) {
+      warnings.emplace_back("ConSan MOI fixed-stack scalar spill has no preserved transfer VGPR");
+      return std::nullopt;
+    }
+    // Start beyond the complete VGPR spill extent. Scalar slots are local to
+    // this non-nested probe transaction, so they may be reused by another
+    // site's independent spill manager. The last spilled VGPR is already
+    // preserved until after scalar restoration and is therefore a legal
+    // transfer register without changing the planned allocation.
+    SpillManager scalar_manager(vgpr_spill->total_private_bytes, *private_limit);
+    const uint16_t transfer_vgpr =
+        static_cast<uint16_t>(vgpr_spill->vgpr_base + vgpr_spill->vgpr_count - 1u);
+    auto sequence = build_sgpr_spill_sequence(scalar_manager, *point.moi_exec_save_sgpr, count,
+                                              transfer_vgpr, arch);
+    if (!sequence) {
+      warnings.emplace_back("ConSan MOI could not encode the private-memory scalar spill sequence");
+      return std::nullopt;
+    }
+    return sequence;
+  }
   const uint32_t reservoir_end = static_cast<uint32_t>(resources.base) + resources.count + 1u;
-  if (reservoir_end > REGISTER_SET_MAX_VGPRS || resources.required_vgpr_count < reservoir_end ||
-      (vgpr_spill && (vgpr_spill->vgpr_base != resources.base ||
-                      vgpr_spill->vgpr_count != resources.count + 1u))) {
+  if (reservoir_end > REGISTER_SET_MAX_VGPRS || resources.required_vgpr_count < reservoir_end) {
     warnings.emplace_back(
         "ConSan MOI fixed-stack scalar spill has no planned lane-backed VGPR reservoir");
     return std::nullopt;
