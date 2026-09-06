@@ -1277,13 +1277,19 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
   // gfx1250 can support high channel counts with fewer than 8 GPUs;
   // skip the nRanks < 8 clamp so NCCL_MIN_NCHANNELS is respected.
+  //
+  // When the request cannot be honored, clamp down to what is allowed rather
+  // than to 2. Setting 2 leaves the user with *fewer* channels than the default
+  // they would have had without touching the variable, which is the opposite of
+  // what they asked for -- and the tuning guidance recommends 112 for exactly
+  // the 2-4 GPU case that hits the first clamp.
   if (comm->nRanks < 8 && 64 < minNchannels && !comm->MNNVL && !isGfx1250) {
-    minNchannels = 2;
-    WARN("NCCL_MIN_NCHANNELS set by environment is ignored due to less than 8 GPUs.");
+    WARN("NCCL_MIN_NCHANNELS set by environment (%d) is capped to 64 with fewer than 8 GPUs.", minNchannels);
+    minNchannels = 64;
   }
   if (minNchannels > maxChannels) {
-    minNchannels = 2;
-    WARN("NCCL_MIN_NCHANNELS set by environment is ignored due to greater than max allowed %d channels.", maxChannels);
+    WARN("NCCL_MIN_NCHANNELS set by environment (%d) is capped to the maximum of %d channels.", minNchannels, maxChannels);
+    minNchannels = maxChannels;
   }
 
   // Honor NCCL_MIN_NRINGS/NCCL_MAX_NRINGS.
