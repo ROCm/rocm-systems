@@ -334,7 +334,20 @@ constexpr rocprofiler_agent_t default_agent =
                         .logical_node_id            = 0,
                         .logical_node_type_id       = 0,
                         .runtime_visibility         = {0, 0, 0, 0, 0},
-                        .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{})};
+                        .uuid    = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{}),
+                        .fw_info = {.mec2_version     = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .mec_version      = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .rlc_version      = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .rlc_srlc_version = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .rlc_srlg_version = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .rlc_srls_version = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .sdma2_version    = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .sdma_version     = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .smc_version      = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .sos_version      = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .ta_ras_version   = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .ta_xgmi_version  = ROCPROFILER_FIRMWARE_VERSION_NONE,
+                                    .vcn_version      = ROCPROFILER_FIRMWARE_VERSION_NONE}};
 
 RocAttachDispatchTable**
 get_attach_table()

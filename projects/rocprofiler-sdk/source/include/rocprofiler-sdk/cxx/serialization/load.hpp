@@ -304,6 +304,7 @@ load(ArchiveT& ar, rocprofiler_agent_v0_t& data)
     ROCP_SDK_LOAD_DATA_FIELD(node_id);
     ROCP_SDK_LOAD_DATA_FIELD(logical_node_id);
     ROCP_SDK_LOAD_DATA_FIELD(logical_node_type_id);
+    ROCP_SDK_LOAD_DATA_FIELD(fw_info);
 
     auto generate = [&](auto name, const auto*& value, auto& size) {
         using value_type =
@@ -320,6 +321,25 @@ load(ArchiveT& ar, rocprofiler_agent_v0_t& data)
     generate("mem_banks", data.mem_banks, data.mem_banks_count);
     generate("caches", data.caches, data.caches_count);
     generate("io_links", data.io_links, data.io_links_count);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocprofiler_agent_firmware_info_v0_t& data)
+{
+    ROCP_SDK_LOAD_DATA_FIELD(mec2_version);
+    ROCP_SDK_LOAD_DATA_FIELD(mec_version);
+    ROCP_SDK_LOAD_DATA_FIELD(rlc_version);
+    ROCP_SDK_LOAD_DATA_FIELD(rlc_srlc_version);
+    ROCP_SDK_LOAD_DATA_FIELD(rlc_srlg_version);
+    ROCP_SDK_LOAD_DATA_FIELD(rlc_srls_version);
+    ROCP_SDK_LOAD_DATA_FIELD(sdma2_version);
+    ROCP_SDK_LOAD_DATA_FIELD(sdma_version);
+    ROCP_SDK_LOAD_DATA_FIELD(smc_version);
+    ROCP_SDK_LOAD_DATA_FIELD(sos_version);
+    ROCP_SDK_LOAD_DATA_FIELD(ta_ras_version);
+    ROCP_SDK_LOAD_DATA_FIELD(ta_xgmi_version);
+    ROCP_SDK_LOAD_DATA_FIELD(vcn_version);
 }
 
 template <typename ArchiveT>
