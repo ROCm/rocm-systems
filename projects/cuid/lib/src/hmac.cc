@@ -16,7 +16,7 @@
 #include <fstream>
 #include <iostream>
 
-#include "sha256.h"
+#include "rocm/sha2/sha256.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN

@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -33,7 +34,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -73,7 +76,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -92,7 +97,7 @@ jobs:
     - name: Run clang-format
       working-directory: projects/rocprofiler-sdk
       run: |
-        FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        FORMAT_FILES=$(find samples source tests benchmark ../../shared/sha256 -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
         command -v git
         command -v clang-format
         git --version
@@ -120,7 +125,8 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -158,7 +164,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -171,7 +179,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         OUTFILE=missing_newline.txt
-        for i in $(find source tests samples benchmark docker cmake -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        for i in $(find source tests samples benchmark docker cmake ../../shared/sha256 -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
         if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
           echo -e "\nError! Source code missing new line at end of file...\n"
           echo -e "\nFiles:\n"
@@ -185,7 +193,8 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
 
     - name: Set up Python
       uses: actions/setup-python@v5

@@ -11,7 +11,6 @@ set(common_sources
     logging.cpp
     md5sum.cpp
     regex.cpp
-    sha256.cpp
     simple_timer.cpp
     static_object.cpp
     static_tl_object.cpp
@@ -47,6 +46,38 @@ add_library(rocprofiler-sdk-common-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-common-library ALIAS
             rocprofiler-sdk-common-library)
 
+# SHA-256 comes from shared/sha256; sha256.hpp here is a shim over it. The cache variable
+# is project-prefixed so it cannot collide with the equivalent entry in another
+# rocm-systems project configured in the same build.
+set(ROCPROFILER_SDK_ROCM_SHA256_DIR
+    "${PROJECT_SOURCE_DIR}/../../shared/sha256"
+    CACHE PATH "Path to the shared SHA-256 component")
+if(NOT TARGET rocm-sha256)
+    if(NOT EXISTS "${ROCPROFILER_SDK_ROCM_SHA256_DIR}/CMakeLists.txt")
+        message(
+            FATAL_ERROR
+                "Shared SHA-256 not found at ${ROCPROFILER_SDK_ROCM_SHA256_DIR}. Set "
+                "ROCPROFILER_SDK_ROCM_SHA256_DIR when building rocprofiler-sdk outside "
+                "the rocm-systems tree.")
+    endif()
+    add_subdirectory(${ROCPROFILER_SDK_ROCM_SHA256_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
+    # sha256.cpp got these through common_sources. Applied only when this project created
+    # the target, so another consumer is not given our flags.
+    #
+    # The headers/abseil/fmt entries and the definition restore ROCP_CI_LOG_IF to the
+    # macro logging.hpp defines. Without them sha256.cc falls back to a stderr note and
+    # this project silently loses the fatal-under-CI check on updating a finalized digest.
+    target_compile_definitions(rocm-sha256 PRIVATE ROCM_SHA256_ROCPROFILER_LOGGING)
+    target_link_libraries(
+        rocm-sha256
+        PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
+                $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
+                $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+                $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
+                $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>)
+endif()
+
 add_subdirectory(container)
 add_subdirectory(memory)
 
@@ -56,7 +87,8 @@ target_include_directories(rocprofiler-sdk-common-library
 
 target_link_libraries(
     rocprofiler-sdk-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+    PUBLIC $<BUILD_INTERFACE:rocm-sha256>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>

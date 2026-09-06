@@ -10,6 +10,7 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
@@ -26,6 +27,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
@@ -135,6 +137,7 @@ jobs:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
+          shared/sha256
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocr-runtime
