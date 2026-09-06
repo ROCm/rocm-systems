@@ -3681,6 +3681,34 @@ bool KernelBlitManager::initHeap(device::Memory* heap_to_initialize, device::Mem
 
 amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
                                            size_t& partial) const {
+  // KFD cannot pin file-backed MAP_SHARED pages for DMA on XNACK=0 devices;
+  // the SVM ioctl stalls indefinitely.  Fall back to staged copy instead.
+  const uintptr_t lo = reinterpret_cast<uintptr_t>(hostMem);
+  const uintptr_t hi = lo + pinSize;
+  FILE* maps = fopen("/proc/self/maps", "r");
+  if (maps) {
+    char line[512];
+    while (fgets(line, sizeof(line), maps)) {
+      uintptr_t mlo, mhi;
+      char perms[8];
+      char path[256];
+      path[0] = '\0';
+      if (sscanf(line, "%lx-%lx %7s %*s %*s %*s %255[^\n]",
+                 &mlo, &mhi, perms, path) < 3)
+        continue;
+      if (mlo >= hi || mhi <= lo)
+        continue;
+      if (perms[3] == 's' && path[0] == '/') {
+        fclose(maps);
+        ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+                "pinHostMemory: file-backed MAP_SHARED %p+%zu; using staged copy",
+                hostMem, pinSize);
+        return nullptr;
+      }
+    }
+    fclose(maps);
+  }
+
   size_t pinAllocSize;
   const static bool SysMem = true;
   amd::Memory* amdMemory;
