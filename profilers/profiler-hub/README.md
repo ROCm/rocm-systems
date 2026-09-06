@@ -17,6 +17,7 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 ## Requirements
 
 - CMake 3.21+
+- Ninja (used by the CMake presets)
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
@@ -39,6 +40,31 @@ sudo zypper install sqlite3-devel spdlog-devel fmt-devel
 ```
 
 ## Building
+
+### Using CMake Presets (recommended)
+
+`CMakePresets.json` ships two presets, `debug` and `release`. Each defines a
+configure, build, and test preset under the same name, so the same name is used
+throughout the workflow.
+
+| Preset | `CMAKE_BUILD_TYPE` | Logging | Binary dir |
+|--------|--------------------|---------|------------|
+| `debug` | Debug | ON | `build/debug` |
+| `release` | Release | OFF | `build/release` |
+
+Both presets use the Ninja generator, export `compile_commands.json`, and build
+tests and benchmarks.
+
+```bash
+cmake --list-presets              # show available presets
+
+cmake --preset debug              # configure
+cmake --build --preset debug      # build
+ctest --preset debug              # run tests (--output-on-failure is preset)
+```
+
+Replace `debug` with `release` for an optimized build. Presets can be overridden
+per invocation, e.g. `cmake --preset debug -DPROFILER_HUB_ENABLE_COVERAGE=ON`.
 
 ### Standalone Build
 
@@ -63,7 +89,7 @@ cmake --build build -j$(nproc)
 ## Installation
 
 ```bash
-cmake --install build --prefix /opt/rocm
+cmake --install build/release --prefix /opt/rocm
 ```
 
 ## Usage
