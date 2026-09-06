@@ -286,7 +286,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     if(tracing_on)
     {
         std::cerr << "  \u2022 Perfetto trace: " << output_dir
-                  << "/perfetto-trace.proto\n";
+                  << "/perfetto-trace.pftrace\n";
     }
 
     if(rocpd_on || tracing_on)
@@ -301,7 +301,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     if(tracing_on)
     {
         std::cerr << "  \u2022 Perfetto: Open " << output_dir
-                  << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
+                  << "/perfetto-trace.pftrace in https://ui.perfetto.dev\n";
     }
     std::cerr << "\n";
 }
@@ -580,7 +580,7 @@ group_topic_table()
         { "tracing", "Tracing-specific options", { "[TRACING OPTIONS]" } },
         { "profiling", "Profile output format options", { "[PROFILE OPTIONS]" } },
         { "output",
-          "Output format selection (proto/rocpd/json/text)",
+          "Output format selection (pftrace/rocpd/json/text)",
           { "[OUTPUT FORMAT OPTIONS]" } },
         { "sampling",
           "Sampling frequency and timer options",

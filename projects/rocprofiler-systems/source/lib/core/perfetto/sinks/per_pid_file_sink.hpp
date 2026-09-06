@@ -14,7 +14,7 @@ class output_file_registry;
 
 namespace core
 {
-// Cached-mode sink: writes per-pid bytes to one .proto file per pid.
+// Cached-mode sink: writes per-pid bytes to one .pftrace file per pid.
 // The parent_pid receives the default filename; every other pid receives the
 // suffix-stamped variant, matching the historical cached-output convention.
 class per_pid_file_sink

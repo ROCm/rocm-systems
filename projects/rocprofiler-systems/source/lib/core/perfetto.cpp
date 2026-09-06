@@ -120,7 +120,7 @@ start()
     {
         if(!_tmp_file)
         {
-            _tmp_file = config::get_tmp_file("perfetto-trace", "proto");
+            _tmp_file = config::get_tmp_file("perfetto-trace", "pftrace");
             _tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
         }
     }

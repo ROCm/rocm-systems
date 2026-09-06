@@ -1035,7 +1035,7 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="run-args-output/",
-            trace_file="perfetto-run-args-trace.proto",
+            trace_file="perfetto-run-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
             run_only=True,
@@ -1076,7 +1076,7 @@ class TestRocprofilerSystemsSample(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="sample-args-output/",
-            trace_file="perfetto-sample-args-trace.proto",
+            trace_file="perfetto-sample-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
         )

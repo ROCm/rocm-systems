@@ -198,7 +198,7 @@ class TestJacobi(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Laplacian Kernel Count Validation",
-            perfetto_file="merged.proto",
+            perfetto_file="merged.pftrace",
             categories=["rocm_hip_stream"],
             print_output=True,
             pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
@@ -208,7 +208,7 @@ class TestJacobi(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="hipHostFree Validation",
-            perfetto_file="merged.proto",
+            perfetto_file="merged.pftrace",
             categories=["rocm_hip_api"],
             pass_regex=[r"hipHostFree\s*\|\s*[1-9]"],
         )
