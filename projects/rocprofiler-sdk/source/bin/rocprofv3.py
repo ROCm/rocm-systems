@@ -392,7 +392,13 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
 
 class booleanArgAction(argparse.Action):
     def __call__(self, parser, args, value, option_string=None):
-        setattr(args, self.dest, strtobool(value))
+        try:
+            setattr(args, self.dest, strtobool(value))
+        except ValueError:
+            parser.error(
+                f"argument {option_string}: invalid boolean value: '{value}' "
+                f"(expected one of: true/false, yes/no, on/off, 1/0)"
+            )
 
 
 # Categories recognized by --ompt-trace
