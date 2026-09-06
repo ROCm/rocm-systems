@@ -779,6 +779,77 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
   return testSuccess;
 }
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+static testResult_t deregisterTestWindows(
+    ncclComm_t* comms, void** sendRegHandles, void** recvRegHandles, void** biasRegHandles,
+    int count) {
+  for (int i = 0; i < count; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+    // Symmetric windows are drained by ncclDevrFinalize during comm destroy;
+    // explicit deregister here can leave lsaFlatBase in a state where
+    // cuMemAddressFree double-frees during ncclCommDestroy (MI455 GIN path).
+    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
+      continue;
+    }
+#endif
+    if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
+    if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
+    if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
+  }
+  return testSuccess;
+}
+
+static testResult_t freeTestDeviceBuffers(
+    void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
+  for (int i = 0; i < count; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+    if (sendbuffs[i]) {
+      NCCLCHECK(ncclMemFree(sendbuffs[i]));
+      sendbuffs[i] = nullptr;
+    }
+    if (recvbuffs[i]) {
+      NCCLCHECK(ncclMemFree(recvbuffs[i]));
+      recvbuffs[i] = nullptr;
+    }
+    if (test_bias && bias[i]) {
+      NCCLCHECK(ncclMemFree(bias[i]));
+      bias[i] = nullptr;
+    }
+    if (datacheck && expected[i]) {
+      NCCLCHECK(ncclMemFree(expected[i]));
+      expected[i] = nullptr;
+    }
+#else
+    if (sendbuffs[i]) {
+      CUDACHECK(cudaFree(sendbuffs[i]));
+      sendbuffs[i] = nullptr;
+    }
+    if (recvbuffs[i]) {
+      CUDACHECK(cudaFree(recvbuffs[i]));
+      recvbuffs[i] = nullptr;
+    }
+    if (test_bias && bias[i]) {
+      CUDACHECK(cudaFree(bias[i]));
+      bias[i] = nullptr;
+    }
+    if (datacheck && expected[i]) {
+      CUDACHECK(cudaFree(expected[i]));
+      expected[i] = nullptr;
+    }
+#endif
+  }
+  return testSuccess;
+}
+#endif
+
+static testResult_t destroyTestComms(ncclComm_t* comms, int count) {
+  for (int i = 0; i < count; i++) {
+    NCCLCHECK(ncclCommDestroy(comms[i]));
+  }
+  return testSuccess;
+}
+
 testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter) {
   size_t count = args->nbytes / wordSize(type);
 
@@ -1767,28 +1838,26 @@ testResult_t threadInit(struct threadArgs* args) {
 
   TESTCHECK(threadRunTests(args));
 
-  // Cleanup: deregister buffers and destroy communicators
-  for (int i=0; i<args->nGpus; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)args->sendRegHandles[i]));
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)args->recvRegHandles[i]));
-    } else
-#endif
-    {
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->recvRegHandles[i]));
-      if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(args->comms[i], args->biasRegHandles[i]));
-    }
-#endif
+  // Symmetric GIN teardown: stream sync, devCommDestroy, then comm destroy
+  // (ncclDevrFinalize drains windows), then ncclMemFree. Skip explicit
+  // SYMMETRIC_REGISTER window deregister — it races cuMemAddressFree on MI455.
+  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-    if (deviceImpl) {
+  if (deviceImpl) {
+    for (int i = 0; i < args->nGpus; i++) {
       NCCLCHECK(ncclDevCommDestroy(args->comms[i], args->devComms+i));
     }
-#endif
-    NCCLCHECK(ncclCommDestroy(args->comms[i]));
   }
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  TESTCHECK(deregisterTestWindows(args->comms, args->sendRegHandles, args->recvRegHandles,
+                                  args->biasRegHandles, args->nGpus));
+#endif
+  TESTCHECK(destroyTestComms(args->comms, args->nGpus));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  TESTCHECK(freeTestDeviceBuffers(args->sendbuffs, args->recvbuffs, args->bias, args->expected,
+                                  args->nGpus));
+#endif
 
   return testSuccess;
 }
@@ -2716,44 +2785,44 @@ testResult_t run() {
 #endif
 
   if (!parallel_init) {
-    for(int i=0; i<nGpus*nThreads; ++i) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-      if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-        NCCLCHECK(ncclCommWindowDeregister(comms[i], (ncclWindow_t)sendRegHandles[i]));
-        NCCLCHECK(ncclCommWindowDeregister(comms[i], (ncclWindow_t)recvRegHandles[i]));
-      } else
-#endif
-      {
-        if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
-        if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
-        if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
-      }
-#endif
+    TESTCHECK(testStreamSynchronize(nGpus*nThreads, streams.data(), comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-      if (deviceImpl) {
+    if (deviceImpl) {
+      for (int i = 0; i < nGpus*nThreads; i++) {
         NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
       }
-#endif
-      NCCLCHECK(ncclCommDestroy(comms[i]));
     }
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    TESTCHECK(deregisterTestWindows(comms, sendRegHandles.data(), recvRegHandles.data(),
+                                    biasRegHandles.data(), nGpus*nThreads));
+#endif
+    TESTCHECK(destroyTestComms(comms, nGpus*nThreads));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    TESTCHECK(freeTestDeviceBuffers(sendbuffs.data(), recvbuffs.data(), bias.data(), expected.data(),
+                                    nGpus*nThreads));
+#else
+    for (int i = 0; i < nGpus*nThreads; i++) {
+      if (sendbuffs[i]) {
+        CUDACHECK(cudaFree((char*)sendbuffs[i]));
+        sendbuffs[i] = nullptr;
+      }
+      if (recvbuffs[i]) {
+        CUDACHECK(cudaFree((char*)recvbuffs[i]));
+        recvbuffs[i] = nullptr;
+      }
+      if (bias[i]) {
+        CUDACHECK(cudaFree((char*)bias[i]));
+        bias[i] = nullptr;
+      }
+      if (datacheck && expected[i]) {
+        CUDACHECK(cudaFree((char*)expected[i]));
+        expected[i] = nullptr;
+      }
+    }
+#endif
   }
   free(comms);
-
-  // Free off CUDA allocated memory
-  for (int i=0; i<nGpus*nThreads; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
-    if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
-    if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
-    if (bias[i]) NCCLCHECK(ncclMemFree((char*)bias[i]));
-    if (datacheck) NCCLCHECK(ncclMemFree(expected[i]));
-#else
-    if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
-    if (recvbuffs[i]) CUDACHECK(cudaFree((char*)recvbuffs[i]));
-    if (bias[i]) CUDACHECK(cudaFree((char*)bias[i]));
-    if (datacheck) CUDACHECK(cudaFree(expected[i]));
-#endif
-  }
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
   if (bw_count[0] > 0) {
@@ -2779,8 +2848,14 @@ testResult_t run() {
   reporter.writeFile();
   writeErrors();
 
-  // 'cuda-memcheck --leak-check full' requires this
-  cudaDeviceReset();
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+  // cudaDeviceReset after symmetric VMM teardown can trip heap checks on MI455 GIN.
+  if (!(test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER))
+#endif
+  {
+    // 'cuda-memcheck --leak-check full' requires this
+    cudaDeviceReset();
+  }
 
   if (errors[0] || bw[0] < check_avg_bw*(0.9))
     return testNumResults;

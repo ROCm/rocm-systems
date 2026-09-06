@@ -13,6 +13,9 @@
  */
 
 #include "gin/gin_host_anvil_sdma.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/fabric/fabric_mem_handler.h"
+#include "alloc.h"
 #include "comm.h"
 #include "dev_runtime.h"
 #include "bootstrap.h"
@@ -26,9 +29,18 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <new>
 
 static std::map<void*, int> bufferRegRefcount;
+static std::map<void*, ncclFabricMemHandler*> fabricBufferHandlers;
+static std::map<void*, CUmemGenericAllocationHandle> fabricBufferHandles;
+static std::map<void*, int> fabricBufferRefcount;
 static std::mutex pluginMutex;
+
+static void ginAnvilCuMemRelease(CUmemGenericAllocationHandle handle) {
+  if (rcclSkipCuMemFree()) return;
+  (void)cuMemRelease(handle);
+}
 
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
@@ -106,6 +118,7 @@ struct ginAnvilMemHandle {
   void* lsaSelfAddr;
   size_t size;
   uintptr_t* remote_vas_dev;
+  bool fabricMem;
 };
 
 struct ginAnvilListenCtx {
@@ -132,6 +145,15 @@ void ncclGinAnvilPluginTestResetHostState(void) {
     g_pendingByComm.erase(comm);
   }
   bufferRegRefcount.clear();
+  for (auto& entry : fabricBufferHandlers) {
+    delete entry.second;
+  }
+  fabricBufferHandlers.clear();
+  for (auto& entry : fabricBufferHandles) {
+    ginAnvilCuMemRelease(entry.second);
+  }
+  fabricBufferHandles.clear();
+  fabricBufferRefcount.clear();
 }
 
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
@@ -288,19 +310,149 @@ static ncclResult_t ginAnvilFinalize(void* ctx) {
   return ncclSuccess;
 }
 
-static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mrFlags,
-                                     void** mhandle, void** ginHandle) {
-  ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
-  struct ncclDevrState* devr = &cctx->comm->devrState;
+static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, size_t size, ginAnvilMemHandle* mh,
+                                           void** mhandle, void** ginHandle) {
+  struct ncclComm* comm = cctx->comm;
+  ncclFabricMemHandler* handler = nullptr;
+  CUmemGenericAllocationHandle memHandle{};
+  CUdeviceptr memAddr = 0;
+  size_t memSize = 0;
+  int numSegments = 0;
+  ncclResult_t ret = ncclSuccess;
+  uintptr_t* remote_vas_host = nullptr;
+  bool localRetainedHandle = false;
 
-  ginAnvilMemHandle* mh = nullptr;
-  NCCLCHECK(ncclCalloc(&mh, 1));
+  NCCLCHECK(ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(data), size, &memAddr, &memSize, &numSegments));
+  if (numSegments != 1) {
+    WARN("GIN anvil-sdma fabric: multi-segment MR not supported yet (segments=%d data=%p size=%zu)", numSegments, data,
+         size);
+    return ncclSystemError;
+  }
+  if (size > memSize) {
+    WARN("GIN anvil-sdma fabric: registration size %zu exceeds mapped segment size %zu for %p", size, memSize, data);
+    return ncclSystemError;
+  }
+
+  const uintptr_t offset = reinterpret_cast<uintptr_t>(data) - reinterpret_cast<uintptr_t>(memAddr);
+
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto& refcount = fabricBufferRefcount[data];
+    if (refcount == 0) {
+      handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, cctx->nranks, comm->memManager);
+      if (handler == nullptr) {
+        return ncclSystemError;
+      }
+      CUresult cuRes = cuMemRetainAllocationHandle(&memHandle, reinterpret_cast<void*>(memAddr));
+      if (cuRes != CUDA_SUCCESS) {
+        delete handler;
+        return ncclSystemError;
+      }
+      localRetainedHandle = true;
+      ret = handler->addSelfDeviceMem(reinterpret_cast<void*>(memAddr), memHandle, memSize);
+      if (ret != ncclSuccess) {
+        delete handler;
+        (void)cuMemRelease(memHandle);
+        return ret;
+      }
+      ret = handler->exchangeMemPtrs();
+      if (ret != ncclSuccess) {
+        delete handler;
+        (void)cuMemRelease(memHandle);
+        return ret;
+      }
+      fabricBufferHandlers[data] = handler;
+      fabricBufferHandles[data] = memHandle;
+      localRetainedHandle = false;
+      INFO(NCCL_INIT, "GIN anvil-sdma fabric: exported addr=%p memBase=%p size=%zu offset=%zu", data,
+           reinterpret_cast<void*>(memAddr), memSize, static_cast<size_t>(offset));
+    } else {
+      handler = fabricBufferHandlers[data];
+    }
+    refcount++;
+  }
+
+  mh->addr = data;
+  mh->lsaSelfAddr = data;
+  mh->size = size;
+  mh->fabricMem = true;
+  mh->remote_vas_dev = nullptr;
+
+  if (hipMalloc(&mh->devHandle, sizeof(ncclGinAnvilSdmaMemHandle)) != hipSuccess) {
+    ret = ncclSystemError;
+    goto failFabricRef;
+  }
+
+  remote_vas_host = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
+  if (!remote_vas_host) {
+    ret = ncclSystemError;
+    goto failFabricDevHandle;
+  }
+  for (int pe = 0; pe < cctx->nranks; pe++) {
+    void* peerPtr = nullptr;
+    NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(pe, &peerPtr), ret, failFabricRemote);
+    remote_vas_host[pe] = reinterpret_cast<uintptr_t>(peerPtr) + offset;
+  }
+  if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
+      hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks, hipMemcpyHostToDevice) !=
+        hipSuccess) {
+    ret = ncclSystemError;
+    goto failFabricRemote;
+  }
+  free(remote_vas_host);
+  remote_vas_host = nullptr;
+
+  {
+    ncclGinAnvilSdmaMemHandle hostMh;
+    hostMh.baseAddr = reinterpret_cast<uintptr_t>(data);
+    hostMh.remote_vas = mh->remote_vas_dev;
+    hostMh.vmmStride = 0;
+    (void)hipMemcpy(mh->devHandle, &hostMh, sizeof(ncclGinAnvilSdmaMemHandle), hipMemcpyHostToDevice);
+  }
+
+  *mhandle = mh;
+  *ginHandle = mh->devHandle;
+  return ncclSuccess;
+
+failFabricRemote:
+  if (remote_vas_host) free(remote_vas_host);
+failFabricDevHandle:
+  if (mh->devHandle) CUDACHECKIGNORE(hipFree(mh->devHandle));
+failFabricRef:
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto it = fabricBufferRefcount.find(data);
+    if (it != fabricBufferRefcount.end()) {
+      it->second--;
+      if (it->second <= 0) {
+        auto hit = fabricBufferHandlers.find(data);
+        if (hit != fabricBufferHandlers.end()) {
+          delete hit->second;
+          fabricBufferHandlers.erase(hit);
+        }
+        auto handleIt = fabricBufferHandles.find(data);
+        if (handleIt != fabricBufferHandles.end()) {
+          ginAnvilCuMemRelease(handleIt->second);
+          fabricBufferHandles.erase(handleIt);
+        }
+        fabricBufferRefcount.erase(it);
+      }
+    }
+  }
+  if (localRetainedHandle) {
+    ginAnvilCuMemRelease(memHandle);
+  }
+  return ret;
+}
+
+static ncclResult_t ginAnvilRegMrSymLsa(ginAnvilCollCtx* cctx, void* data, size_t size, ginAnvilMemHandle* mh,
+                                        void** mhandle, void** ginHandle) {
+  struct ncclDevrState* devr = &cctx->comm->devrState;
 
   void* lsaSelfAddr = nullptr;
   NCCLCHECK(ncclDevrGetLsaSelfAddr(devr, data, &lsaSelfAddr));
   if (lsaSelfAddr == nullptr) {
     WARN("GIN anvil-sdma: could not resolve LSA flat addr for %p", data);
-    free(mh);
     return ncclSystemError;
   }
 
@@ -313,7 +465,6 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
       if (rc != 0) {
         WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr, size);
         bufferRegRefcount.erase(data);
-        free(mh);
         return ncclSystemError;
       }
       INFO(NCCL_INIT, "GIN anvil-sdma: registered addr=%p lsaSelf=%p +%zu", data, lsaSelfAddr, size);
@@ -324,10 +475,10 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   mh->addr = data;
   mh->lsaSelfAddr = lsaSelfAddr;
   mh->size = size;
+  mh->fabricMem = false;
   mh->remote_vas_dev = nullptr;
 
   if (hipMalloc(&mh->devHandle, sizeof(ncclGinAnvilSdmaMemHandle)) != hipSuccess) {
-    free(mh);
     return ncclSystemError;
   }
 
@@ -335,7 +486,6 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   uintptr_t* remote_vas_host = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
   if (!remote_vas_host) {
     CUDACHECKIGNORE(hipFree(mh->devHandle));
-    free(mh);
     return ncclSystemError;
   }
   for (int pe = 0; pe < cctx->nranks; pe++) {
@@ -346,7 +496,6 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
         hipSuccess) {
     free(remote_vas_host);
     CUDACHECKIGNORE(hipFree(mh->devHandle));
-    free(mh);
     return ncclSystemError;
   }
   free(remote_vas_host);
@@ -362,6 +511,24 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   return ncclSuccess;
 }
 
+static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mrFlags,
+                                     void** mhandle, void** ginHandle) {
+  ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
+  ginAnvilMemHandle* mh = nullptr;
+  NCCLCHECK(ncclCalloc(&mh, 1));
+
+  ncclResult_t ret = ncclSuccess;
+  if (ginAnvilUseFabricMem(cctx->comm)) {
+    ret = ginAnvilRegMrSymFabric(cctx, data, size, mh, mhandle, ginHandle);
+  } else {
+    ret = ginAnvilRegMrSymLsa(cctx, data, size, mh, mhandle, ginHandle);
+  }
+  if (ret != ncclSuccess) {
+    free(mh);
+  }
+  return ret;
+}
+
 static ncclResult_t ginAnvilRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
                                            uint64_t mrFlags, void** mhandle, void** ginHandle) {
   return ginAnvilRegMrSym(collComm, data, size, type, mrFlags, mhandle, ginHandle);
@@ -373,12 +540,32 @@ static ncclResult_t ginAnvilDeregMrSym(void* collComm, void* mhandle) {
 
   if (mh->addr) {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    auto it = bufferRegRefcount.find(mh->addr);
-    if (it != bufferRegRefcount.end()) {
-      it->second--;
-      if (it->second <= 0) {
-        if (mh->lsaSelfAddr) (void)ncclGinAnvilIpcTableUnregister(mh->lsaSelfAddr);
-        bufferRegRefcount.erase(it);
+    if (mh->fabricMem) {
+      auto it = fabricBufferRefcount.find(mh->addr);
+      if (it != fabricBufferRefcount.end()) {
+        it->second--;
+        if (it->second <= 0) {
+          auto hit = fabricBufferHandlers.find(mh->addr);
+          if (hit != fabricBufferHandlers.end()) {
+            delete hit->second;
+            fabricBufferHandlers.erase(hit);
+          }
+          auto handleIt = fabricBufferHandles.find(mh->addr);
+          if (handleIt != fabricBufferHandles.end()) {
+            ginAnvilCuMemRelease(handleIt->second);
+            fabricBufferHandles.erase(handleIt);
+          }
+          fabricBufferRefcount.erase(it);
+        }
+      }
+    } else {
+      auto it = bufferRegRefcount.find(mh->addr);
+      if (it != bufferRegRefcount.end()) {
+        it->second--;
+        if (it->second <= 0) {
+          if (mh->lsaSelfAddr) (void)ncclGinAnvilIpcTableUnregister(mh->lsaSelfAddr);
+          bufferRegRefcount.erase(it);
+        }
       }
     }
   }

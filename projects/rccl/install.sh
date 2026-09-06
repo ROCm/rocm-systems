@@ -95,7 +95,7 @@ function display_help()
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
-    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
+    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc (incompatible with --rocshmem-gin)"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
@@ -204,6 +204,10 @@ done
 
 if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
     echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
+    exit 1
+fi
+if [[ "${build_rocshmem_gin}" == true && "${device_linker}" == false ]]; then
+    echo "Error: --rocshmem-gin requires the device linker; do not pass --no-device-linker"
     exit 1
 fi
 
