@@ -807,9 +807,10 @@ function(rj_add_consan_device_conformance_cases)
                 _mode_value STREQUAL "inline-shadow"
                 AND _workload_name STREQUAL "Gfx1250LargeLdsPipeline"
             )
-                # This takes about 25 seconds by itself but can exceed the
-                # default 60 seconds under full simulator contention.
-                set(_workload_timeout 120)
+                # This takes about 44 seconds by itself, has approached 120
+                # seconds under contention, and can cross that bound in the
+                # full -j16 simulator gate.
+                set(_workload_timeout 240)
             elseif(
                 _mode_value STREQUAL "supercollider"
                 AND _device_TARGET STREQUAL "gfx1250"
