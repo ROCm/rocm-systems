@@ -2,6 +2,7 @@
 
 cmake_minimum_required(VERSION 3.16.0)
 
+# Temporary no-op change on aqlprofile to exercise TheRock Multi-Arch CI.
 ## Set module name and project name.
 set ( AQLPROFILE_NAME "hsa-amd-aqlprofile" )
 set ( AQLPROFILE_TARGET "${AQLPROFILE_NAME}64" )
