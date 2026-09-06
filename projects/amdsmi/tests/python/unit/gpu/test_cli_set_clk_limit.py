@@ -131,6 +131,9 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
         "amdsmi.amdsmi_interface",
         "amdsmi.amdsmi_exception",
         "amdsmi.amdsmi_wrapper",
+        # set_value.py imports this by bare name; a stub left behind by a
+        # sibling suite would shadow the real CLI module.
+        "amdsmi_cli_exceptions",
     )
 
     @classmethod
@@ -140,6 +143,8 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
         # Snapshot any real amdsmi already loaded so the stub does not leak into
         # sibling suites sharing the interpreter; restored in tearDownClass.
         cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
+        for name in cls._SAVED_MODULE_NAMES:
+            sys.modules.pop(name, None)
         cls.interface = _install_fake_amdsmi()
         cls.module = _load_set_value_module()
 
@@ -304,6 +309,8 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
         cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
+        for name in cls._SAVED_MODULE_NAMES:
+            sys.modules.pop(name, None)
         cls.interface = _install_fake_amdsmi()
         # Extra surface the set_gpu clk-limit branch touches beyond the snap
         # helper: the clock-info entry point, the set entry point, the clk-type

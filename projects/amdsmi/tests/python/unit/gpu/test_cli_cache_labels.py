@@ -89,6 +89,17 @@ class _FakeLibraryException(Exception):
         return str(self)
 
 
+# Every sys.modules key this suite replaces, snapshotted and restored around the
+# class so the stubs never reach a sibling suite in the same interpreter.
+_CLI_MODULES = (
+    "amdsmi",
+    "amdsmi.amdsmi_interface",
+    "amdsmi.amdsmi_exception",
+    "amdsmi_helpers",
+    "amdsmi_cli_exceptions",
+)
+
+
 def _install_fake_modules():
     """Register a stub ``amdsmi`` package plus the sibling CLI modules.
 
@@ -212,8 +223,21 @@ class TestCliCacheLabels(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        # Clear the CLI modules so the fake amdsmi wins the import race, keeping a
+        # snapshot to restore afterwards.
+        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
+        for name in _CLI_MODULES:
+            sys.modules.pop(name, None)
         cls.interface = _install_fake_modules()
         cls.static_module = _load_static_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, mod in getattr(cls, "_saved_modules", {}).items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     def _run_cache(self, fmt):
         commands = object.__new__(self.static_module.StaticCommands)
