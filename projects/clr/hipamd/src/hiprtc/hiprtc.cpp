@@ -105,7 +105,7 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
   bool no_builtin_header = false;
   std::vector<std::string> opt, compile_options;
   opt.reserve(numOptions);
-  compile_options.reserve(numOptions + 4);
+  compile_options.reserve(numOptions + 6);
   for (int i = 0; i < numOptions; i++) {
     if (std::string(options[i]) == std::string("-fgpu-rdc")) {
       fgpu_rdc = true;
@@ -117,6 +117,9 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
       no_builtin_header = true;
     }
   }
+  // Always block system C/C++ headers to match NVRTC behavior (AIRUNTIME-2028)
+  compile_options.push_back("-nostdinc");
+  compile_options.push_back("-nostdinc++");
 
   // Do not include the default hiprtc header if the app passes --hiprtc-no-builtin-header option.
   // This is to avoid conflicts with std type traits defined in hiprtc header. Once the actual fix
