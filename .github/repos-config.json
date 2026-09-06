@@ -28,6 +28,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "cuid",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "hip",
       "url": "ROCm/hip",
       "branch": "develop",
@@ -223,6 +232,33 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocjitsu",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "emulation",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "mirage",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "emulation",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "amdgpu-windows-interop",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "shared",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     }
   ]
