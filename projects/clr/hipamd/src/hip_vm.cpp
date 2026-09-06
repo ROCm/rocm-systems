@@ -288,6 +288,24 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
   } else {
     *granularity = dev_info.virtualMemAllocGranularityRecommended_;
   }
+  // On RDNA4 (gfx1201), the runtime-reported device VMM granularity (4 KB) is
+  // insufficient: GPU kernels accessing VMM-mapped memory at 4 KB-aligned
+  // boundaries trigger illegal memory access faults.  Override to 2 MB for
+  // device allocations; host/pinned memory is left at the runtime default.
+  //
+  // The override can be tuned at runtime via HIP_VMM_GRANULARITY (bytes).
+  if (!useHostDevice) {
+    constexpr size_t kDefaultDeviceGranularity = 2 * 1024 * 1024;  // 2 MB
+    const char* env_granularity = getenv("HIP_VMM_GRANULARITY");
+    if (env_granularity != nullptr) {
+      size_t val = strtoul(env_granularity, nullptr, 10);
+      if (val > 0) {
+        *granularity = val;
+      }
+    } else {
+      *granularity = kDefaultDeviceGranularity;
+    }
+  }
 
   HIP_RETURN(hipSuccess);
 }
