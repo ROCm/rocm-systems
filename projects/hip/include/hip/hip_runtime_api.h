@@ -3204,7 +3204,7 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
  * @brief Queries the Id of a stream.
  *
  * @param[in] stream  Stream to be queried
- * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
+ * @param[in,out] streamId  Pointer to an unsigned long long in which the stream's id is returned
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
  * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
@@ -3302,7 +3302,7 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  *@brief queries stream attribute.
  * @param[in] stream - Stream to geet attributes from
  * @param[in] attr   - Attribute ID for the attribute to query
- * @param[out] value  - Attribute value output
+ * @param[out] value_out  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
