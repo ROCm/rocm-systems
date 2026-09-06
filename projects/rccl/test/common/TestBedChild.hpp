@@ -33,7 +33,9 @@ namespace RcclUnitTesting
       CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_REGISTER_MEM     = 12, // RegisterMem()
+      // CHILD_DEREGISTER_MEM   = 13, // DeregisterMemInternal()
+      NUM_CHILD_COMMANDS     = 13
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -49,7 +51,8 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
-      "STOP"
+      "STOP",
+      "REGISTER_MEM"
     };
 
     // These variables remain constant for life of TestBedChild
@@ -79,6 +82,7 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<hipGraph_t>>> graphs;         // Graphs for executing collectives per group call
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
     std::vector<std::vector<std::vector<bool>>> graphEnabled; 
+    MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
@@ -122,5 +126,13 @@ namespace RcclUnitTesting
 
     // Destroys graphs
     ErrCode DestroyGraphs();
+
+    ErrCode RegisterMem();
+    
+  private:
+    ErrCode DeregisterMemInternal_impl(int groupId, int collId, int localRank);
+
+    ErrCode DeallocateMemInternal_impl(int groupId, int collId, int localRank);
+
   };
 }

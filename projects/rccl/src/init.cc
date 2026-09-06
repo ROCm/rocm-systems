@@ -3761,6 +3761,10 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     }
   }
 
+  if (comm->rmaState.rmaCeState.initialized) {
+    NCCLCHECKGOTO(ncclRmaCeFinalize(comm), ret, fail);
+  }
+
   if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
     WARN("ncclProxyStop: comm %p (rank = %d) destroys proxy resource error %d", comm, comm->rank, ret);
   }

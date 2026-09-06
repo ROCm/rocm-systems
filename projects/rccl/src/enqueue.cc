@@ -1271,6 +1271,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool netRegistered[2] = {false, false};
   bool ipcRegistered[2] = {false, false};
 
+  // Check Pointer & Length Alignment (Direct DMA requires at least 16-byte alignment)
+  const bool isAligned = ((uintptr_t)sendAddr % 16 == 0) && (sendBytes % 16 == 0) && ((uintptr_t)recvAddr % 16 == 0) && (recvBytes % 16 == 0);
+
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
     // Assume SIMPLE protocol to start with to determine number of channels
     stepSize[dir] = comm->p2pChunkSize;
@@ -1338,7 +1341,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
     }
 
-    if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
+    if (p2pTasks[dir] && p2pTasks[dir]->allowUB && isAligned ) {
       if (network[dir]) {
         bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
         if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
@@ -1347,13 +1350,14 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           for (int part = 0; part < nChannelsMax; part++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
                                                   comm->p2pChannelShiftSize);
-            struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
+            struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers; 
             int peerRank = dir ? sendRank : recvRank;
-            struct ncclConnector* conn =
+            struct ncclConnector* conn =  
               dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-            if (conn->conn.flags & NCCL_DIRECT_NIC)
+            if (conn->conn.flags & NCCL_DIRECT_NIC) {
               ncclRegisterP2pNetBuffer(comm, addrs[dir], bytes[dir], conn, &regFlag, &handles[dir][part],
-                                       &plan->cleanupQueue);
+                                     &plan->cleanupQueue);
+            }
             if (!regFlag) break;
           }
           netRegistered[dir] = regFlag ? true : false;
@@ -1361,8 +1365,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       } else if (bytes[dir] > 0 && addrs[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend) {
         int peerRank = dir ? sendRank : recvRank;
         int regFlag = 0;
-        int channelId =
-          ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
+        int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes,
+                                              comm->p2pChannelShiftSize);
         struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
@@ -1370,8 +1374,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
           // We require users registering buffers on both sides
           NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
-                                                 &plan->cleanupQueue),
-                        ret, cleanup);
+                                               &plan->cleanupQueue),ret, cleanup);
           if (regFlag) {
             if (dir == 0 && (conn->conn.flags & NCCL_P2P_WRITE)) recvAddr = regAddr;
             else if (dir == 1 && (conn->conn.flags & NCCL_P2P_READ)) sendAddr = regAddr;
@@ -3791,6 +3794,17 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
+static inline bool rcclBuffersOverlap(const void* sendbuf, const void* recvbuf, size_t totalBytes) {
+  if (!sendbuf || !recvbuf || totalBytes == 0) return false;
+  uintptr_t s_start = reinterpret_cast<uintptr_t>(sendbuf);
+  uintptr_t s_end   = s_start + totalBytes;
+  uintptr_t r_start = reinterpret_cast<uintptr_t>(recvbuf);
+  uintptr_t r_end   = r_start + totalBytes;
+
+  // Interval intersection check
+  return (s_start < r_end) && (r_start < s_end);
+}
+
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
@@ -3834,6 +3848,15 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
 
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+      size_t totalBytes = comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      // Check if sendbuff and recvbuff overlap
+      bool isOverlapping = rcclBuffersOverlap(info->sendbuff, info->recvbuff, totalBytes);
+      if (isOverlapping && info->coll == ncclFuncAlltoAll) {
+        WARN("AllToAll: Overlapping/In-Place buffers detected [%p, %p) vs [%p, %p). "
+            "this may lead to data corruption.",
+            info->sendbuff, (const char*)(info->sendbuff) + totalBytes,
+            info->recvbuff, (const char*)(info->recvbuff) + totalBytes);    
+      }
 
       // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
       // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
@@ -3954,12 +3977,22 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // For cuda graph checking
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
-        if (info->coll == ncclFuncAlltoAll) {
+        if (info->coll == ncclFuncAlltoAll) { 
+          bool sendLocalValid = false;
+          bool recvLocalValid = false;
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &sendReg));
           NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &recvReg));
-          allowUB = captured || (sendReg != NULL && recvReg != NULL);
+          if (sendReg) NCCLCHECK(ncclRegLocalIsValid(sendReg, &sendLocalValid));
+          if (recvReg) NCCLCHECK(ncclRegLocalIsValid(recvReg, &recvLocalValid));   
+
+          /**
+           * To do : using allowUB = (captured || (sendLocalValid && recvLocalValid)); for alltoall, 
+           * with symmetric memory, in Graphmode, with sequence of buffer sizes where max is not aligned 
+           * to 128 bytes, results in data validation errors. setting this to false, until it is resolved.
+           */
+          allowUB = false;
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
                                     (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),

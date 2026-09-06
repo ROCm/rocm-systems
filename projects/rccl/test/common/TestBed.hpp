@@ -46,21 +46,24 @@ namespace RcclUnitTesting
                    std::vector<int>              const& numCollectivesInGroup,
                    std::vector<int>              const& numStreamsPerGroup,
                    int                           const  numGroupCalls = 1,
-                   bool                          const  useBlocking   = true);
+                   bool                          const  useBlocking   = true,
+                   MemAllocType                  const  memAllocType  = MEM_ALLOC_HIP);
 
     // Prepare TestBed for use with GPUs across multiple child processes
     void InitComms(std::vector<std::vector<int>> const& deviceIdsPerChild,
                    int  const numCollectivesInGroup = 1,
                    int  const numStreamsPerGroup    = 1,
                    int  const numGroupCalls         = 1,
-                   bool const useBlocking           = true);
+                   bool const useBlocking           = true,
+                   MemAllocType const memAllocType  = MEM_ALLOC_HIP);
 
     // Prepare TestBed for use with GPUs on a single child process
     void InitComms(int  const numGpus,
                    int  const numCollectivesInGroup = 1,
                    int  const numStreamsPerGroup    = 1,
                    int  const numGroupCalls         = 1,
-                   bool const useBlocking           = true);
+                   bool const useBlocking           = true,
+                   MemAllocType const memAllocType  = MEM_ALLOC_HIP);
 
     // Set collectives arguments for specified collective / rank
     // Setting scalarsPerRank to non-null will create custom reduction operator
@@ -75,7 +78,7 @@ namespace RcclUnitTesting
                            int             const groupId       = 0,
                            int             const rank          = -1,
                            int             const streamIdx     = 0);
-
+                                                   
     // Allocate memory for specified collective / rank
     // - Requires SetCollectiveArgs to have been called already
     // Using collId = -1 (default) applies settings to all collectives in group
@@ -184,7 +187,8 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& inPlaceList,
                         std::vector<bool>           const& managedMemList,
                         std::vector<bool>           const& useHipGraphList,
-                        bool                        const& enableSweep = true);
+                        bool                        const& enableSweep = true,
+                        MemAllocType                       memAllocType = MEM_ALLOC_HIP);
 
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);
@@ -195,5 +199,19 @@ namespace RcclUnitTesting
   protected:
     // Ends the specified child process
     void StopChild(int const childId);
+  
+  private:
+    // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
+    // compatibility with existing tests, and extend registration for symmetric memory
+    void AllocateMemInternal(bool   const inPlace = false,
+                                    bool   const useManagedMem = false,
+                                    int    const groupId  = -1,
+                                    int    const collId   = -1,
+                                    int    const rank     = -1,
+                                    bool   const userRegistered = false);
+
+    void RegisterMemInternal(int    const groupId,
+                             int    const collId,
+                             int    const rank);
   };
 }
