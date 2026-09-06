@@ -2071,9 +2071,14 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
         if (comm->rank == 0) {
-          const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
-          INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
-               task->count * ncclTypeSize(task->datatype), nvlsSync);
+          if (!ncclDevrIsOneLsaTeam(comm)) {
+            INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
+                 task->count * ncclTypeSize(task->datatype));
+          } else {
+            const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
+            INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
+                 task->count * ncclTypeSize(task->datatype), nvlsSync);
+          }
         }
 
         ncclIntruQueueEnqueue(&planner->planQueue, plan);
@@ -3852,21 +3857,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
       }
 
-      // Trigger CE initialization on the first CE-capable collective.
-      // This covers collectives whose user buffers ARE registered (AllGather,
-      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
-      // ceCollTaskAppend path when user buffers are not symmetrically registered.
-      // Without this trigger, CE AllReduce-only workloads would never initialize
-      // the CE runtime (ceARTmpBuf stays NULL).
-      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
-          comm->nNodes == 1 && comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-        struct ncclCeInitTask* ceTask;
-        NCCLCHECK(ncclCalloc(&ceTask, 1));
-        ceTask->comm = comm;
-        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-      }
-
       // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
       bool ceAllReduceFits = false;
@@ -3877,6 +3867,23 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // path; keep it graph-capture-safe by gating on !ceCapturing like ceAvailable.
       bool hierCeAvailable =
         !ceCapturing && ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
+      // ceCollTaskAppend path when user buffers are not symmetrically registered.
+      // Without this trigger, CE AllReduce-only workloads would never initialize
+      // the CE runtime (ceARTmpBuf stays NULL). Hierarchical CE is multi-node by
+      // construction, so it needs the same trigger despite nNodes > 1.
+      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
+          (comm->nNodes == 1 || hierCeAvailable) && comm->ceColl.baseUCSymReadyPtr == NULL &&
+          ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
       if (info->coll == ncclFuncAllReduce) {
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);

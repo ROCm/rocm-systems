@@ -96,10 +96,10 @@ protected:
         debugGuard_.reset();
     }
 
-    // Batch buffer for ncclPrepUCSync: capacity = NCCL_CE_SYNC_OPS_PER_RANK_UC * nRanks.
+    // Batch buffer for ncclPrepUCSync: capacity is based on the LSA-local team.
     std::vector<hipStreamBatchMemOpParams> makePrepSyncBatch() const
     {
-        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->nRanks;
+        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaSize;
         return std::vector<hipStreamBatchMemOpParams>(batchSize);
     }
 
@@ -357,22 +357,21 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     }
 }
 
-// SYNC-02: ncclPrepUCSync produces exactly 2*(nRanks-1) ops (one WRITE +
-//          one WAIT per remote rank).
+// SYNC-02: ncclPrepUCSync produces one WRITE and one WAIT per remote LSA rank.
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
-    const int nRanks = ceComm->nRanks;
+    const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
-    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (nRanks - 1)))
-        << "expected 2*(nRanks-1) ops for nRanks=" << nRanks;
+    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
+        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize;
 }
 
 // SYNC-03: No WRITE_VALUE op targets the local rank's own ready slot.
 TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
-    const int rank = ceComm->rank;
+    const int lsaRank = ceComm->devrState.lsaSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
 
@@ -381,7 +380,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
     // on the host-side pointer is valid for comparison with batch op addresses,
     // which are also expressed as host-visible hipDeviceptr_t values.
     uint32_t*      readyPtrs = reinterpret_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr);
-    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[rank]);
+    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[lsaRank]);
     int selfTargets = 0;
     for(size_t i = 0; i < opIdx; ++i)
     {
@@ -390,7 +389,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
             ++selfTargets;
     }
     EXPECT_EQ(selfTargets, 0)
-        << "A WRITE_VALUE op targeted rank " << rank << "'s own ready slot";
+        << "A WRITE_VALUE op targeted LSA rank " << lsaRank << "'s own ready slot";
 }
 
 // SYNC-04: ceSeqNum wraps correctly from UINT32_MAX → 0.

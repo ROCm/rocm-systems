@@ -104,7 +104,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
-  size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
+  // Sized from the LSA team once ncclDevrInitOnce has populated devrState.
+  size_t ceDevBaseSize = 0;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
   size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
@@ -113,6 +114,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
   // Symmetric memory runtime must be initialized before any window registration.
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
+
+  // Sync window holds one ready and one complete slot per LSA-local rank.
+  ceDevBaseSize = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16) * 2;
 
   // Local-only control words (no peer access -> no window registration needed).
   CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierSync, 2 * sizeof(uint32_t),
@@ -138,7 +142,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.ceSyncWin = (struct ncclDevrWindow*)ceWinDevHost->winHost;
 
   comm->ceColl.baseUCSymReadyOffset = 0;
-  comm->ceColl.baseUCSymComplOffset = alignUp(comm->nRanks * sizeof(uint32_t), 16);
+  comm->ceColl.baseUCSymComplOffset = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16);
   comm->ceColl.baseUCSymReadyPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymReadyOffset;
   comm->ceColl.baseUCSymComplPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymComplOffset;
   comm->ceColl.ceSeqNum = 0;
@@ -365,6 +369,7 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
+  // Sync slots are addressed through LSA pointers, so index by LSA rank.
   int myLsaRank = comm->devrState.lsaSelf;
   int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
@@ -418,12 +423,15 @@ static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete
   ncclResult_t ret = ncclSuccess;
   hipStreamBatchMemOpParams* writeParams = nullptr;
   size_t writeIdx = 0;
-  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  // Sync slots are addressed through LSA pointers, so index by LSA rank.
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
+  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
 
-  NCCLCHECKGOTO(ncclCalloc(&writeParams, comm->nRanks), ret, fail);
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  NCCLCHECKGOTO(ncclCalloc(&writeParams, lsaSize), ret, fail);
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     void* peerDstPtr;
     NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
     writeParams[writeIdx] = {};
@@ -449,11 +457,14 @@ static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isCompl
                                             uint32_t* completePtrs, uint32_t waitValue,
                                             hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
   ncclResult_t ret = ncclSuccess;
-  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  // Sync slots are addressed through LSA pointers, so index by LSA rank.
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
+  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
 
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     void* peerDstPtr;
     NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
     batchParams[*opIdx] = {};
@@ -478,6 +489,9 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
     NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
   #endif
 
+  // Sync slots are addressed through LSA pointers, so index by LSA rank.
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
@@ -493,8 +507,8 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   }
 
   // Waits always go in batchParams (submitted by ncclMemOpSync; reset follows if capturing).
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address =
@@ -514,20 +528,25 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   ncclResult_t ret = ncclSuccess;
   void* ceSyncHandle = NULL;
   int lsaSize = comm->devrState.lsaSize;
+  bool useMCSync = false;
+  size_t batchSize = 0;
+  size_t opIdx = 0;
+  hipStreamBatchMemOpParams* batchParams = nullptr;
 
   // Get pointers to the ready and complete synchronization arrays
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
+  // Multicast synchronization is not available across scale-up cliques.
+  useMCSync = comm->nvlsSupport && !comm->p2pCrossClique;
+
   // Allocate enough slots for all possible ops
-  size_t batchSize = (comm->nvlsSupport ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
-  size_t opIdx = 0;
+  batchSize = (useMCSync ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * lsaSize;
 
   // Prepare batch memory operations for synchronization
-  hipStreamBatchMemOpParams* batchParams = nullptr;
   NCCLCHECKGOTO(ncclCalloc(&batchParams, batchSize), ret, fail);
 
-  if (comm->nvlsSupport) {
+  if (useMCSync) {
     NCCLCHECKGOTO(ncclPrepMCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   } else {
     NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
@@ -597,13 +616,22 @@ fail:
   goto exit;
 }
 
+// Safe to call more than once on the same params.
 void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
+  params->srcs = nullptr;
   if (params->dsts) free(params->dsts);
+  params->dsts = nullptr;
   if (params->sizes) free(params->sizes);
+  params->sizes = nullptr;
+  params->numOps = 0;
+  params->intraBatchSync = false;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) free(params->attrs);
+  params->attrs = nullptr;
   if (params->attrIdxs) free(params->attrIdxs);
+  params->attrIdxs = nullptr;
+  params->numAttrs = 0;
 #endif
 }
 
@@ -1990,38 +2018,55 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
-  switch (args->func) {
-  case ncclFuncAllGather:
-    NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAlltoAll:
-    NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAlltoAllv:
-    NCCLCHECKGOTO(ncclCeAlltoAllv(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncScatter:
-    NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncGather:
-    NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAllReduce:
+  // Hierarchical path: inter-node RMA plus intra-node CE. Keyed on LSA coverage
+  // rather than node count, so a multi-clique single-NVL-domain comm whose LSA
+  // spans every rank still takes the LSA-local path below.
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    switch (args->func) {
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclHierCeAlltoAll(comm, plan, stream), ret, fail);
+      break;
+    default:
+      WARN("Hierarchical CE collective not supported for %s", ncclFuncToString(args->func));
+      ret = ncclInvalidUsage;
+    }
+  } else {
+    switch (args->func) {
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAllv:
+      NCCLCHECKGOTO(ncclCeAlltoAllv(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncScatter:
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncGather:
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAllReduce:
       // CE init runs (in ncclCommGroupRegisterSymmetric) before doLaunches, so
       // ceARTmpBuf is guaranteed non-NULL by the time we get here.
-    if (comm->ceColl.ceARTmpBuf == NULL) {
-      WARN("CE AllReduce invoked before CE init; this should not happen");
-      ret = ncclInvalidUsage;
-      break;
-    }
+      if (comm->ceColl.ceARTmpBuf == NULL) {
+        WARN("CE AllReduce invoked before CE init; this should not happen");
+        ret = ncclInvalidUsage;
+        break;
+      }
       // Pass args->recvWin so ncclCeAllReduce can take the fast path
       // (AG written directly into user recvbuff, no final D2D copy).
-    NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
-                                  stream, args->recvWin),
-                  ret, fail);
-    break;
-  default:
-    ret = ncclInvalidUsage;
+      NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
+                                    stream, args->recvWin),
+                    ret, fail);
+      break;
+    default:
+      ret = ncclInvalidUsage;
+    }
   }
   // DDA path: results were staged in scratch (args->recvBuff). Copy them back to
   // the user's recv buffer. Copy-back semantics are collective-specific:
