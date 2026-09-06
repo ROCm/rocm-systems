@@ -129,24 +129,42 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
-option(BUILD_CUID "Build CUID library" OFF)
+# CUID support. QUIET, not REQUIRED: the dependency is optional. Where
+# libamdcuid is absent the CUID entry points are still in the ABI and return
+# AMDSMI_STATUS_NOT_SUPPORTED, so amd-smi builds on a tree that has not built
+# the CUID project.
+find_package(amdcuid CONFIG QUIET)
+
+# option(), not cmake_dependent_option(): the latter sets a normal variable when
+# its condition is false, shadowing a `-DBUILD_CUID=ON` the user asked for and
+# suppressing the diagnostic below.
+option(BUILD_CUID "Link libamdcuid and enable the CUID API" "${amdcuid_FOUND}")
+
+if(BUILD_CUID AND NOT amdcuid_FOUND)
+    message(
+        FATAL_ERROR
+        "BUILD_CUID=ON but no amdcuid package was found. Install libamdcuid or "
+        "add its prefix to CMAKE_PREFIX_PATH."
+    )
+endif()
+
+# Relocating the sysfs root lets any unprivileged user report a forged
+# AMDSMI_CUID_SOURCE_DRIVER, so the override is compiled out unless a build asks
+# for it. The CUID source test turns it on and skips itself when it is off.
+option(
+    AMDSMI_CUID_TEST_SYSFS_OVERRIDE
+    "Honour AMDSMI_CUID_SYSFS_ROOT so the driver-sourced CUID branch is testable. Never in a release build."
+    OFF
+)
 
 if(BUILD_CUID)
-    set(ROCM_DIR_CORE "/opt/rocm/core")
-    # include CUID library
-    find_library(
-        AMDCUID_LIB
-        NAMES libamdcuid_static.a amdcuid_static
-        HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
-        REQUIRED
-    )
-    find_path(
-        AMDCUID_INCLUDE_DIR
-        NAMES amd_cuid.h
-        HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
-        REQUIRED
-    )
-endif(BUILD_CUID)
+    message(STATUS "CUID support: enabled (amdcuid ${amdcuid_VERSION})")
+elseif(amdcuid_FOUND)
+    message(STATUS "CUID support: disabled (BUILD_CUID=OFF)")
+else()
+    message(STATUS "CUID support: disabled (amdcuid package not found)")
+endif()
+
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
 #   Otherwise: build one library (BUILD_SHARED_LIBS).
@@ -211,8 +229,15 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB})
-        target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+        target_link_libraries(${_TARGET} PRIVATE amdcuid::amdcuid)
+
+        if(AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+            message(
+                WARNING
+                "AMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON: AMDSMI_CUID_SYSFS_ROOT can forge the CUID source field. Do not ship this build."
+            )
+            target_compile_definitions(${_TARGET} PRIVATE AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+        endif()
     endif()
 
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)

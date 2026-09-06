@@ -1,0 +1,11 @@
+schema: spec-driven
+created: 2026-08-20
+# implemented: the amdgpu sysfs surface exists and was verified on two W6800s.
+# The kernel side is not in this repository.
+status: implemented
+# D7 of pin-cuid-cross-layer-contract is authoritative for the provisioned seed
+# length. This proposal's cuid_seed requirement follows it (exactly 32 bytes);
+# an earlier revision said "at most 32" and was wrong against both the shipped
+# kernel and its two sibling proposals.
+defers_to:
+  - pin-cuid-cross-layer-contract

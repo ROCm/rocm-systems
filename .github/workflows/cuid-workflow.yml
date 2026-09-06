@@ -19,6 +19,56 @@ env:
   ROCM_DIR: /opt/rocm
 
 jobs:
+  vectors-drift-check:
+    name: CUID Conformance Vectors
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      # Same shape as the clang-tidy job: this is a self-hosted runner shared
+      # with container jobs that run as root, so a job running bare as the
+      # unprivileged `runner` user cannot delete their leftovers and
+      # actions/checkout's clean step dies with EACCES on .git/FETCH_HEAD.
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm -u root
+
+    steps:
+      # Container runs as root, so clean any root-owned leftovers before checkout.
+      # GITHUB_WORKSPACE is a bind-mounted directory, not just its contents.
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/cuid/tests/vectors
+          sparse-checkout-cone-mode: false
+
+      # What this verifies, exactly: that cuid_vectors.txt is what the
+      # cuid_vectors.py sitting beside it produces. That catches a hand-edited
+      # table -- the only way a vector can decay in the direction of the bug it
+      # was meant to catch -- and nothing else.
+      #
+      # It does NOT verify that the amdgpu driver runs the same table. The
+      # kernel tree carries byte-identical copies of both files under
+      # tools/testing/selftests/amdgpu/, and the cross-layer comparison lives
+      # there, in check_vectors_drift.py, which sha256-compares both files
+      # against $AMDCUID_LIBRARY_TREE. That gate runs on the kernel side only,
+      # and only when that variable is set. Nothing in this repository notices
+      # if the kernel's copy diverges from this one.
+      #
+      # TODO(cuid): make the cross-layer comparison run from this side too.
+      # Pinning the kernel copy by digest here was considered and rejected: the
+      # digest would have to be bumped in lockstep with every legitimate change
+      # to the vectors, so it would fail on the correct change and pass on the
+      # drift it is meant to catch. The real fix is a shared source of truth --
+      # vendoring the generator from one tree into the other at a recorded
+      # revision, or having this job check out the kernel tree and run
+      # check_vectors_drift.py with AMDCUID_LIBRARY_TREE pointed here.
+      - name: Check the conformance vectors match their generator
+        run: python3 projects/cuid/tests/vectors/cuid_vectors.py --check
+
   build-and-test:
     name: Build and Test
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}

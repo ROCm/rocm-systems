@@ -500,6 +500,143 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cuid_info
+
+Description: Returns the Component Unified ID (CUID) of the device together with
+its provenance. Prefer this over `amdsmi_get_gpu_device_uuid`, which returns a
+legacy device UUID rather than a CUID.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`primary` | Canonical CUID as a UUIDv8 string. Empty when the caller lacks the privilege to read it, since the primary payload embeds the raw serial number. An empty value is not an error
+`derived` | Derived (secondary) CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
+`component_type` | On-wire Component Type by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
+`source` | Which stage of the staged lookup answered: `DRIVER`, `STORE`, `LIBRARY` or `UNKNOWN`. Only `DRIVER` is authoritative
+`auxiliary` | `True` when the identity was synthesised from non-privileged information because no hardware serial was reachable. Such a value changes when the OS is reinstalled and is not unique across nodes
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_cuid_info(device)
+            print("Derived CUID:", info['derived'])
+            print("Component type:", info['component_type'])
+            print("Source:", info['source'])
+            print("Auxiliary:", info['auxiliary'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cuid_seed
+
+Description: Provisions the node-wide CUID derivation seed. The seed is
+node-wide, not per device: provisioning replaces every derived CUID handed out
+on this node and leaves every primary CUID unchanged, so it is an administrative
+invalidation rather than a routine operation. Requires elevation.
+
+Input parameters:
+
+* `seed` exactly `AMDSMI_CUID_SEED_SIZE` (32) bytes of secret material. Any
+  other size is corruption, not a shorter secret
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_cuid_seed` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_API_FAILED` - API call failed
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    with open("/path/to/cuid.seed", "rb") as f:
+        amdsmi.amdsmi_set_cuid_seed(f.read())
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cuid_seed_info
+
+Description: Reports whether the node-wide CUID derivation seed is provisioned,
+and a fingerprint of it. The seed itself is never returned.
+
+Input parameters: `None`
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`provisioned` | `True` when an administrator has provisioned a seed; `False` when the public canonical fallback seed is in use, in which case every derived CUID on this node is reproducible by anyone
+`fingerprint` | First 8 octets of the unkeyed SHA-256 of the seed in use, as lowercase hex
+
+A node with no provisioned seed is a success, not a failure: it reports
+`provisioned` as `False` and the fingerprint of the public canonical fallback
+seed. A seed store this caller is not allowed to read is distinct from that: it
+raises `AMDSMI_STATUS_NO_PERM` and reports no state at all, since the node may
+well be provisioned.
+
+Exceptions that can be thrown by `amdsmi_get_cuid_seed_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_API_FAILED` - API call failed
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    info = amdsmi.amdsmi_get_cuid_seed_info()
+    print("Provisioned:", info['provisioned'])
+    print("Fingerprint:", info['fingerprint'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_enumeration_info
 
 Description: Returns enumeration information for the given GPU

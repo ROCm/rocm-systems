@@ -27,8 +27,19 @@ class PciUtil {
                                  (static_cast<uint16_t>(bytes[1]) << 8));
   }
 
-  // Endianness conversion utilities
-  static uint64_t le64_to_be64(uint64_t value);
+  // Load a 64-bit little-endian config-space field, in practice the PCIe Device
+  // Serial Number: its capability holds two dwords, low half first. Do not
+  // byte-swap the result. Config space is little-endian and the payload is
+  // packed little-endian, and the kernel's pci_get_dsn() assembles the dwords
+  // low-first too, so a swap here names the same card with a byte-reversed
+  // serial and hence a different CUID than the driver reports.
+  static uint64_t load_le64(const uint8_t bytes[8]) {
+    uint64_t value = 0;
+    for (size_t i = 0; i < 8; ++i) {
+      value |= static_cast<uint64_t>(bytes[i]) << (8 * i);
+    }
+    return value;
+  }
 };
 
 #endif  // PCI_UTIL_H
