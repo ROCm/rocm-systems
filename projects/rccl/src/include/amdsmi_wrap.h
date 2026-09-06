@@ -492,17 +492,19 @@ constexpr bool amdSmiFabricLayoutIs8Gpu =
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 224;
 
-constexpr bool amdSmiFabricLayoutIs16Gpu =
-  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+// 27.x enlarged the union without moving this window, so the two layouts below share it.
+constexpr bool amdSmiFabricV1WindowIsAt16GpuOffsets =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
-  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset;
+
+constexpr bool amdSmiFabricLayoutIs16Gpu =
+  amdSmiFabricV1WindowIsAt16GpuOffsets && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
   offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
 
-// 27.x enlarged the union without moving the v1 window. No exact size, so a later v2 growth does not break the build.
+// No exact size, so a later v2 growth does not break the build.
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
-  sizeof(amdsmi_fabric_info_v1_t) == 244 && kAmdSmiFabricHeaderIsExtended &&
-  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
-  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
+  amdSmiFabricV1WindowIsAt16GpuOffsets && kAmdSmiFabricHeaderIsExtended &&
   offsetof(amdsmi_fabric_info_t, reserved) >= kAmdSmiFabricV1PayloadEnd;
 
 static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
