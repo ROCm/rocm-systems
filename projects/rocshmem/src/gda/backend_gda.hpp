@@ -33,14 +33,16 @@
 
 #include "backend_bc.hpp"
 #include "gda_enums.hpp"
-#include "gda/gda_symm_table.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp" //TODO useless?
 #include "memory/hip_allocator.hpp"
 #include "context_incl.hpp"
 #include "gda_context_proxy.hpp"
-#include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "gda/queue_pair/queue_pair_common.hpp"
+#include "gda/queue_pair/queue_pair_device.hpp"
+#include "gda/queue_pair/queue_pair_host.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
@@ -49,7 +51,6 @@ namespace rocshmem {
 
 class GDAContext;
 class GDAHostContext;
-class QueuePair;
 class HostInterface;
 
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
@@ -92,13 +93,13 @@ class GDABackend : public Backend {
   /**
    * @brief Device-visible flat table of symmetric user-buffer registrations.
    *
-   * Sized num_pes * num_nics_ * symm_capacity_ QpSymmEntry records, allocated
+   * Sized num_pes * num_nics_ * symm_capacity_ SymmBufferInfo records, allocated
    * in setup_gpu_qps() so QPs capture stable slice pointers. Layout: the slice
    * for (pe, nic) starts at (pe * num_nics_ + nic) * symm_capacity_ and holds
    * one entry per registration slot, pre-specialized to that (pe, nic). Each QP
    * points at the slice for its own (dest_pe, nic_idx). Null pre-ROCm-7.0.
    */
-  QpSymmEntry *symm_entries_{nullptr};
+  SymmBufferInfo *symm_buffers_{nullptr};
 
   /**
    * @brief Device-resident shared registration count (live slots per slice).
@@ -110,12 +111,12 @@ class GDABackend : public Backend {
   int *symm_count_{nullptr};
 
   /**
-   * @brief Host mirror of symm_entries_ and its capacity/count.
+   * @brief Host mirror of symm_buffers_ and its capacity/count.
    *
    * The mirror is updated on the host at register/unregister and (re-)uploaded
-   * to symm_entries_; symm_count_host_ mirrors *symm_count_.
+   * to symm_buffers_; symm_count_host_ mirrors *symm_count_.
    */
-  std::vector<QpSymmEntry> host_symm_entries_{};
+  std::vector<SymmBufferInfo> host_symm_buffers_{};
   int symm_capacity_{0};
   int symm_count_host_{0};
 
@@ -142,8 +143,7 @@ class GDABackend : public Backend {
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
 
-  uint32_t inline_threshold = 8;
-  QueuePair *host_qps = nullptr;
+  std::vector<QueuePairHost> host_qps;
   QueuePair *gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;
@@ -186,7 +186,7 @@ class GDABackend : public Backend {
    * Total number of QPs created =
    * num_qps_per_pe * num_pes;
    */
-  uint32_t num_qps {1};
+  size_t num_qps {1};
 
   /**
    * @brief Select one or more NICs based on topology/env vars.
@@ -207,6 +207,17 @@ class GDABackend : public Backend {
 
   NicDevice& nic_for_qp(int qp_idx) {
     return nic_devices_[nic_idx_for_qp(qp_idx)];
+  }
+
+  size_t flat_pe_nic_idx(int pe, int nic_idx) const {
+    return static_cast<size_t>(pe) * static_cast<size_t>(num_nics_) + static_cast<size_t>(nic_idx);
+  }
+
+  const SymmBufferInfo * get_symm_buffers_slice(int pe, int nic_idx) const {
+    if (!symm_buffers_) {
+      return nullptr;
+    }
+    return &symm_buffers_[flat_pe_nic_idx(pe, nic_idx) * symm_capacity_];
   }
 
   /**
@@ -551,9 +562,23 @@ class GDABackend : public Backend {
   void cleanup_heap_memory_rkey();
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
-  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+
+#if defined(GDA_IONIC)
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void ionic_create_cqs(int ncqes);
+  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void bnxt_create_cqs(int ncqes);
+  void bnxt_create_qps(int sq_length);
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
   void mlx5_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void mlx5_create_qps(int sq_length);
+#endif // defined(GDA_MLX5)
 
   /**
    * @brief Setup InfiniBand Resources
@@ -599,15 +624,11 @@ class GDABackend : public Backend {
    * @brief Create all CQs with a of length ncqes
    */
   void create_cqs(int ncqes);
-  void bnxt_create_cqs(int ncqes);
-  void ionic_create_cqs(int ncqes);
 
   /**
    * @brief Create all QPs with a SQ of length sq_length
    */
   void create_qps(int sq_length);
-  void bnxt_create_qps(int sq_length);
-  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs
@@ -645,7 +666,6 @@ class GDABackend : public Backend {
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
   void create_parent_domain(NicDevice &nic);
-  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -748,22 +768,23 @@ class GDABackend : public Backend {
    * @brief structures holding the function pointers to the direct verbs functionality
    * of each network driver.
    */
+  ionicdv_funcs_t ionic_dv;
+
+  /**
+   * @brief handle used for the dlopen of the IONIC library
+   */
+  void *ionicdv_handle_{nullptr};
+
+  /**
+   * @brief structures holding the function pointers to the direct verbs functionality
+   * of each network driver.
+   */
   bnxtdv_funcs_t bnxt_re_dv;
 
   /**
    * @brief handle used for the dlopen of the BCOM library
    */
   void *bnxtdv_handle_{nullptr};
-
-  /**
-   * @brief initialize function table for BCOM direct verbs support
-   */
-  int bnxt_dv_dl_init();
-
-  /**
-   * @brief open bnxt dv lib
-   */
-  static void* bnxt_dv_dlopen();
 
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
@@ -776,27 +797,7 @@ class GDABackend : public Backend {
    */
   void *mlx5dv_handle_{nullptr};
 
-  /**
-   * @brief initialize function table for MLNX direct verbs support
-   */
-  int mlx5_dv_dl_init();
-
-  /**
-   * @brief open mlx5 dv lib
-   */
-  static void* mlx5_dv_dlopen();
-
-  /**
-   * @brief structures holding the function pointers to the direct verbs functionality
-   * of each network driver.
-   */
-  ionicdv_funcs_t ionic_dv;
-
-  /**
-   * @brief handle used for the dlopen of the IONIC library
-   */
-  void *ionicdv_handle_{nullptr};
-
+#if defined(GDA_IONIC)
   /**
    * @brief initialize function table for IONIC direct verbs support
    */
@@ -806,6 +807,31 @@ class GDABackend : public Backend {
    * @brief open ionic dv lib
    */
   static void* ionic_dv_dlopen();
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  /**
+   * @brief initialize function table for BCOM direct verbs support
+   */
+  int bnxt_dv_dl_init();
+
+  /**
+   * @brief open bnxt dv lib
+   */
+  static void* bnxt_dv_dlopen();
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
+  /**
+   * @brief initialize function table for MLNX direct verbs support
+   */
+  int mlx5_dv_dl_init();
+
+  /**
+   * @brief open mlx5 dv lib
+   */
+  static void* mlx5_dv_dlopen();
+#endif // defined(GDA_MLX5)
 };
 
 }  // namespace rocshmem

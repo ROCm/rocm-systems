@@ -39,12 +39,13 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
-#include <gda/queue_pair.hpp>
+#include <gda/gda_enums.hpp>
+#include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
-#include <gda/backend_gda.hpp>
 #include <gda/debug_gda.hpp>
 #include <envvar.hpp>
 #include <gda/topology.hpp>
+#include <bit.hpp>
 #include <util.hpp>
 #include <constants.hpp>
 #include <rocshmem/rocshmem_common.hpp>
@@ -55,6 +56,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <map>
+#include <new>
 #include <unistd.h>
 #include <vector>
 #include <string>
@@ -89,6 +91,10 @@ int wrap_ibv_dereg_mr(struct ibv_mr* mr);
 // Internal types
 ///////////////////////////////////////////////////////////////////////////////
 
+static inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
+static inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
+static inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
+
 struct GinNicDevice {
   std::string nic_name;
   struct ibv_device* device = nullptr;
@@ -116,11 +122,11 @@ struct gin_dest_info {
 
 struct rocshmem_gin_qp_set {
   // GPU QP initialization — must be a member to access QueuePair private fields via friend
-  int initialize_gpu_qp(QueuePair* gpu_qp, int idx);
+  int initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx);
 
   int nRanks;
   int myRank;
-  int provider;  // GDAProvider enum
+  GDAProvider provider;  // GDAProvider enum
 
   // NIC state (owned by this set)
   GinNicDevice nic;
@@ -150,7 +156,10 @@ struct rocshmem_gin_qp_set {
   QueuePair* host_qps = nullptr;
   QueuePair* gpu_qps = nullptr;
 
-  uint32_t inline_threshold = 8;
+  // Dummy atomic fetch location
+  uint64_t fetch_atomic_dummy;
+  struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
+
   uint32_t sq_size = envvar::gda::sq_size;
 };
 
@@ -232,7 +241,7 @@ static int gin_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
 // NIC discovery and IB device open
 ///////////////////////////////////////////////////////////////////////////////
 
-static int gin_detect_provider(struct ibv_device_attr* attr) {
+static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
 #if defined(GDA_BNXT)
   if (attr->vendor_id == GDA_BNXT_VENDOR_ID) return GDAProvider::BNXT;
 #endif
@@ -242,7 +251,7 @@ static int gin_detect_provider(struct ibv_device_attr* attr) {
 #if defined(GDA_MLX5)
   if (attr->vendor_id == GDA_MLX5_VENDOR_ID) return GDAProvider::MLX5;
 #endif
-  return -1;
+  return GDAProvider::UNSET;
 }
 
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
@@ -290,8 +299,8 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
       continue;
     }
 
-    int provider = gin_detect_provider(&dev_attr);
-    if (provider < 0) {
+    GDAProvider provider = gin_detect_provider(&dev_attr);
+    if (provider == GDAProvider::UNSET) {
       LOG_WARN("GIN QP factory: device %s vendor_id=0x%x not recognized as IONIC/BNXT/MLX5, skipping",
                ibv.get_device_name(dev_list[d]), dev_attr.vendor_id);
       ibv.close_device(ctx);
@@ -542,7 +551,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
         struct ibv_cq_ex* cq_ex = nullptr;
         if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
-        if (!cq_ex) cq_ex = ibv_create_cq_ex(set->nic.context, &cq_attr);
+        if (!cq_ex) cq_ex = ibv.create_cq_ex(set->nic.context, &cq_attr);
         if (!cq_ex) return -1;
         set->ibv_cqs[i] = ibv.cq_ex_to_cq(cq_ex);
         if (!set->ibv_cqs[i]) return -1;
@@ -665,7 +674,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
       attr.cap.max_send_wr = set->sq_size;
       attr.cap.max_send_sge = 1;
       attr.cap.max_recv_sge = 1;
-      attr.cap.max_inline_data = set->inline_threshold;
+      attr.cap.max_inline_data = QueuePairTraits<QueuePairIONIC>::InlineThreshold;
       attr.sq_sig_all = 0;
       attr.qp_type = IBV_QPT_RC;
       attr.comp_mask = IBV_QP_INIT_ATTR_PD;
@@ -698,7 +707,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
         ib_qp_attr.cap.max_recv_wr = 0;
         ib_qp_attr.cap.max_send_sge = 1;
         ib_qp_attr.cap.max_recv_sge = 0;
-        ib_qp_attr.cap.max_inline_data = set->inline_threshold;
+        ib_qp_attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
         ib_qp_attr.qp_type = IBV_QPT_RC;
         ib_qp_attr.sq_sig_all = 0;
 
@@ -792,7 +801,6 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
   case GDAProvider::MLX5:
     {
       set->mlx5_qps.resize(n);
-      set->inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
 
       for (int i = 0; i < n; i++) {
         int err = set->mlx5dv.create_qp(set->mlx5_qps[i], set->nic.context, set->nic.pd_orig, set->sq_size);
@@ -928,7 +936,7 @@ static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set* set, struct gin_dest_i
 // Does NOT set lkey/rkey (GIN uses put_nbi for per-buffer keys).
 ///////////////////////////////////////////////////////////////////////////////
 
-int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair* gpu_qp, int idx) {
+int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx) {
   switch (this->provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -951,22 +959,27 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair* gpu_qp, int idx) {
       ionic_dv_cq dvcq;
       ionic_dv.get_cq(&dvcq, ibv_cqs[idx], udma_idx);
 
-      gpu_qp->cq_dbreg = &gpu_db_ptr[dvctx.cq_qtype];
-      gpu_qp->cq_dbval = dvcq.q.db_val;
-      gpu_qp->cq_mask = dvcq.q.mask;
-      gpu_qp->ionic_cq_buf = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
-
       ionic_dv_qp dvqp;
       ionic_dv.get_qp(&dvqp, ibv_qps[idx]);
 
-      gpu_qp->sq_dbreg = &gpu_db_ptr[dvctx.sq_qtype];
-      gpu_qp->sq_dbval = dvqp.sq.db_val;
-      gpu_qp->sq_mask = dvqp.sq.mask;
-      gpu_qp->ionic_sq_buf = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+      // QueuePairIONIC constructor arguments
+      uint32_t qpn = ibv_qps[idx]->qp_num;
 
-      gpu_qp->qp_num = ibv_qps[idx]->qp_num;
-      gpu_qp->inline_threshold = 32;
-    // lkey/rkey left at 0 — GIN uses put_nbi
+      ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+      uint64_t*     sq_dbreg = &gpu_db_ptr[dvctx.sq_qtype];
+      uint64_t      sq_dbval = dvqp.sq.db_val;
+      uint16_t      sq_mask  = dvqp.sq.mask;
+
+      ionic_v1_cqe* cq_buf   = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
+      uint64_t*     cq_dbreg = &gpu_db_ptr[dvctx.cq_qtype];
+      uint64_t      cq_dbval = dvcq.q.db_val;
+      uint16_t      cq_mask  = dvcq.q.mask;
+
+      // QueuePair is either QueuePairIONIC or QueuePairMux
+      new (host_gpu_qp)
+          QueuePair{QueuePairIONIC{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
+                                   ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
+                                   ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
       return 0;
     }
 #endif
@@ -992,37 +1005,40 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair* gpu_qp, int idx) {
       err = this->bnxt_re_dv.init_obj(&dv_obj, BNXT_RE_DV_OBJ_CQ);
       if (err) return -1;
 
-      memset(&gpu_qp->bnxt_cq, 0, sizeof(bnxt_device_cq));
-      gpu_qp->bnxt_cq.buf = this->bnxt_scqs[idx].buf;
-      gpu_qp->bnxt_cq.depth = this->bnxt_scqs[idx].depth;
-      gpu_qp->bnxt_cq.id = dv_cq.cqn;
-
-    // Export SQ
-      memset(&gpu_qp->bnxt_sq, 0, sizeof(bnxt_device_sq));
-      gpu_qp->bnxt_sq.buf = this->bnxt_qps[idx].sq_buf;
-      gpu_qp->bnxt_sq.depth = this->bnxt_qps[idx].mem_info.sq_slots;
-      gpu_qp->bnxt_sq.id = this->ibv_qps[idx]->qp_num;
-      gpu_qp->bnxt_sq.msntbl = this->bnxt_qps[idx].msntbl;
-      gpu_qp->bnxt_sq.msn_tbl_sz = this->bnxt_qps[idx].msn_tbl_sz;
-      gpu_qp->bnxt_sq.psn_sz_log2 = std::log2(this->bnxt_qps[idx].mem_info.sq_psn_sz);
-      gpu_qp->bnxt_sq.mtu = 128 << this->nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
-
       // Export doorbell
-      if (hipHostRegister(this->bnxt_qps[idx].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault) != hipSuccess)
+      void* gpu_dbr_ptr = nullptr;
+      if (hipHostRegister(bnxt_qps[idx].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault) != hipSuccess)
         return -1;
-      if (hipHostGetDevicePointer((void**)&gpu_qp->bnxt_dbr, bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess)
+      if (hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess)
         return -1;
 
-      gpu_qp->qp_num = this->ibv_qps[idx]->qp_num;
-      gpu_qp->inline_threshold = inline_threshold;
+      // QueuePairBNXT constructor arguments
+      uint32_t qpn = ibv_qps[idx]->qp_num;
+
+      uint64_t* dbr = static_cast<uint64_t*>(gpu_dbr_ptr);
+
+      void*    sq_buf      = bnxt_qps[idx].sq_buf;
+      uint32_t sq_depth    = bnxt_qps[idx].mem_info.sq_slots;
+      void*    msntbl      = bnxt_qps[idx].msntbl;
+      uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
+      uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
+      uint32_t mtu         = 128 << nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
+
+      void*    cq_buf   = bnxt_scqs[idx].buf;
+      uint32_t cq_depth = bnxt_scqs[idx].depth;
+
+      // QueuePair is either QueuePairBNXT or QueuePairMux
+      new (host_gpu_qp)
+          QueuePair{QueuePairBNXT{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey, dbr,
+                                  bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
+                                                 psn_sz_log2, mtu},
+                                  bnxt_device_cq{cq_buf, cq_depth}}};
 
       LOG_TRACE("gin_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
                 "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
-                "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%lu inline=%u",
-                idx, gpu_qp->qp_num, gpu_qp->bnxt_sq.buf, gpu_qp->bnxt_sq.depth, gpu_qp->bnxt_sq.id,
-                gpu_qp->bnxt_cq.buf, gpu_qp->bnxt_cq.depth, gpu_qp->bnxt_cq.id, (void*)gpu_qp->bnxt_dbr,
-                (void*)this->bnxt_qps[idx].db_region_attr->dbr, gpu_qp->bnxt_sq.msntbl, gpu_qp->bnxt_sq.msn_tbl_sz,
-                gpu_qp->bnxt_sq.psn_sz_log2, (unsigned long)gpu_qp->bnxt_sq.mtu, gpu_qp->inline_threshold);
+                "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%u",
+                idx, qpn, sq_buf, sq_depth, qpn, cq_buf, cq_depth, dv_cq.cqn, dbr,
+                bnxt_qps[idx].db_region_attr->dbr, msntbl, msn_tbl_sz, psn_sz_log2, mtu);
       return 0;
     }
 #endif
@@ -1034,18 +1050,28 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair* gpu_qp, int idx) {
       int hip_dev_id = -1;
       if (hipGetDevice(&hip_dev_id) != hipSuccess) return -1;
 
-      gpu_qp->mlx5_cq = gda_mlx5_device_cq((mlx5_cqe64*)qp.cq, qp.cq_dbrec);
-
       void* gpu_db_ptr = nullptr;
       if (gin_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE, &gpu_db_ptr, hip_dev_id) != 0)
         return -1;
 
-      gpu_qp->mlx5_sq = gda_mlx5_device_sq{(gda_mlx5_wqe*)qp.sq, &qp.qp_dbrec[MLX5_SND_DBR],
-                                           (gda_mlx5_doorbell*)gpu_db_ptr, qp.sq_depth};
+      // QueuePairMLX5 constructor arguments
+      uint32_t qpn = qp.qpn;
 
-      gpu_qp->qp_num = qp.qpn;
-      gpu_qp->inline_threshold = inline_threshold;
-      // lkey/rkey: for MLX5, keys are big-endian. Left at 0 for GIN.
+      gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
+      // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
+      __be32*            sq_dbrec = &qp.qp_dbrec[MLX5_SND_DBR];
+      gda_mlx5_doorbell* sq_db    = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
+      uint16_t           sq_depth = static_cast<uint16_t>(qp.sq_depth);
+
+      mlx5_cqe64* cq_buf   = reinterpret_cast<mlx5_cqe64*>(qp.cq);
+      __be32*     cq_dbrec = qp.cq_dbrec;
+
+      // QueuePair is either QueuePairMLX5 or QueuePairMux
+      new (host_gpu_qp)
+          QueuePair{QueuePairMLX5{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
+                                  gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
+                                  gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
+
       return 0;
     }
 #endif
@@ -1180,14 +1206,18 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     set->host_qps = (QueuePair*)malloc(qp_size);
     if (!set->host_qps) goto fail;
 
-    for (int i = 0; i < nRanks; i++) {
-      new (&set->host_qps[i]) QueuePair(set->nic.pd_orig, set->provider);
-      if (hipMemcpy(&set->gpu_qps[i], &set->host_qps[i], sizeof(QueuePair), hipMemcpyHostToDevice) != hipSuccess)
-        goto fail;
+    // Register dummy fetch atomic location to return atomic fetch values (never read)
+    set->fetch_atomic_dummy_mr = ibv.reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
+                                            sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
+    if (!set->fetch_atomic_dummy_mr) goto fail;
 
+    for (int i = 0; i < nRanks; i++) {
       // 9. Initialize GPU-specific state (doorbells, CQ/SQ buffers)
-      if (set->initialize_gpu_qp(&set->gpu_qps[i], i) != 0) goto fail;
+      if (set->initialize_host_gpu_qp(&set->host_qps[i], i) != 0) goto fail;
     }
+
+    if (hipMemcpy(set->gpu_qps, set->host_qps, qp_size, hipMemcpyHostToDevice) != hipSuccess)
+      goto fail;
 
     // Build array of QueuePair pointers for the GPU context
     QueuePair** host_ptrs = (QueuePair**)malloc(nRanks * sizeof(QueuePair*));
@@ -1222,11 +1252,11 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
   if (!qp_set) return;
 
   // Destroy QueuePair objects
-  if (qp_set->host_qps) {
-    for (int i = 0; i < qp_set->nRanks; i++) qp_set->host_qps[i].~QueuePair();
-    free(qp_set->host_qps);
-  }
+  if (qp_set->host_qps) free(qp_set->host_qps);
   if (qp_set->gpu_qps) (void)hipFree(qp_set->gpu_qps);
+
+  // Unregister dummy fetch atomic location
+  if (qp_set->fetch_atomic_dummy_mr) wrap_ibv_dereg_mr(qp_set->fetch_atomic_dummy_mr);
 
 #if defined(GDA_BNXT)
   if (qp_set->provider == GDAProvider::BNXT) {
@@ -1307,8 +1337,8 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set, void* addr, size_t size, i
   if (!mr) return -1;
 
   *out_mr = mr;
-  *out_lkey = mr->lkey;
-  *out_rkey = mr->rkey;
+  *out_lkey = QueuePair::to_provider_endianness(mr->lkey);
+  *out_rkey = QueuePair::to_provider_endianness(mr->rkey);
   return 0;
 }
 
@@ -1364,8 +1394,8 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set, void* addr, size_t siz
   if (!mr) return -1;
 
   *out_mr = mr;
-  *out_lkey = mr->lkey;
-  *out_rkey = mr->rkey;
+  *out_lkey = QueuePair::to_provider_endianness(mr->lkey);
+  *out_rkey = QueuePair::to_provider_endianness(mr->rkey);
   return 0;
 }
 
@@ -1381,10 +1411,10 @@ void rocshmem_gin_dereg_mr(void* mr) {
 
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {
   if (!qp_set) return -1;
-  return qp_set->provider;
+  return static_cast<int>(qp_set->provider);
 }
 
-static bool gin_validate_device(int provider, struct ibv_device_attr* dev_attr) {
+static bool gin_validate_device(GDAProvider provider, struct ibv_device_attr* dev_attr) {
 #if defined(GDA_BNXT)
   if (provider == GDAProvider::BNXT) {
     const uint32_t supported_bnxt_part_ids[] = {0x1760 /* BCM57608 */};
@@ -1428,8 +1458,8 @@ int rocshmem_gin_probe_devices(void) {
       continue;
     }
 
-    int provider = gin_detect_provider(&dev_attr);
-    if (provider < 0 || !gin_validate_device(provider, &dev_attr)) {
+    GDAProvider provider = gin_detect_provider(&dev_attr);
+    if (provider == GDAProvider::UNSET || !gin_validate_device(provider, &dev_attr)) {
       ibv.close_device(ctx);
       continue;
     }

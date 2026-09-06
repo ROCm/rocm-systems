@@ -295,6 +295,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
+  if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+    add_dependencies(${_dev_target} copy_rocshmem_headers)
+  endif()
   # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
   # symbols resolve during the per-arch device.elf link step.
   # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
@@ -1086,13 +1089,7 @@ if(GENERATE_SYM_KERNELS)
 
     add_custom_command(
       OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link}
-        ${_bc_dir}/queue_pair.bc
-        ${_bc_dir}/queue_pair_mlx5.bc
-        ${_bc_dir}/queue_pair_bnxt.bc
-        ${_bc_dir}/queue_pair_ionic.bc
-        ${_cm_bc}
-        -o ${_qp_raw}
+      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
       COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
       COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
         ${_qp_raw}.ll > ${_qp_raw}.clean.ll
@@ -1149,6 +1146,9 @@ add_custom_target(device_linker_build ALL
 	DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_linker_build copy_rocshmem_headers)
+endif()
 if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
   # The fat objects above include GIN device headers, which pull in rocSHMEM
   # headers installed to ext/rocshmem/include by the ExternalProject.
@@ -1186,3 +1186,6 @@ set(DEVICE_LINKER_OBJECTS
 # ===========================================================================
 add_custom_target(device_ir DEPENDS ${ALL_IR_FILES})
 add_dependencies(device_ir hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_ir copy_rocshmem_headers)
+endif()

@@ -27,7 +27,7 @@
 
 namespace rocshmem {
 namespace gda {
-  enum provider {
+  enum class provider : int {
     UNSET,
     IONIC,
     BNXT,

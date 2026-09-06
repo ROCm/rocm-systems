@@ -107,7 +107,7 @@ void GDABackend::init() {
   configure_nic_policy();
 
   LOG_TRACE("PE %d QP config: num_nics=%d, qps_per_pe_default_ctx=%zu, "
-            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%u, "
+            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%zu, "
             "nic_policy=%s",
             my_pe, num_nics_, qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_,
             num_qps_per_pe, num_qps,
@@ -616,7 +616,7 @@ int GDABackend::buffer_register(void *addr, size_t length) {
 
   /* Register with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = host_qps[i].buffer_register((uintptr_t)addr, length);
+    err = host_qps[i].buffer_register(addr, length);
     if (ROCSHMEM_SUCCESS != err) {
       qp_registration_failed = true;
     }
@@ -641,7 +641,7 @@ int GDABackend::buffer_unregister(void *addr) {
 
   /* Deregister with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    err = host_qps[i].buffer_unregister(addr);
     if (ROCSHMEM_SUCCESS != err) {
       return ROCSHMEM_ERROR;
     }
@@ -752,7 +752,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
                                           [[maybe_unused]] size_t length,
                                           [[maybe_unused]] void **registered_addr) {
 #if HIP_VERSION >= 70200000
-  if (registered_addr == nullptr || symm_entries_ == nullptr) {
+  if (registered_addr == nullptr || symm_buffers_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -842,7 +842,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 
   std::vector<uint32_t> rkeys(static_cast<size_t>(num_pes) * num_nics_, 0);
   for (int n = 0; n < num_nics_; n++) {
-    rkeys[my_pe * num_nics_ + n] = mrs[n]->rkey;
+    rkeys[flat_pe_nic_idx(my_pe, n)] = mrs[n]->rkey;
   }
   symm_allgather(rkeys.data(), sizeof(uint32_t) * num_nics_);
 
@@ -876,14 +876,12 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 
   for (int pe = 0; pe < num_pes; pe++) {
     for (int n = 0; n < num_nics_; n++) {
-      QpSymmEntry &e =
-          host_symm_entries_[(static_cast<size_t>(pe) * num_nics_ + n) *
-                                 symm_capacity_ + slot];
+      SymmBufferInfo &e = host_symm_buffers_[flat_pe_nic_idx(pe, n) * symm_capacity_ + slot];
       e.local_base = key;
       e.remote_base = bases[pe];
       e.length = length;
-      e.rkey = rkeys[static_cast<size_t>(pe) * num_nics_ + n];
-      e.lkey = lkeys[n];
+      e.lkey = QueuePair::to_provider_endianness(lkeys[n]);
+      e.rkey = QueuePair::to_provider_endianness(rkeys[flat_pe_nic_idx(pe, n)]);
     }
   }
 
@@ -892,8 +890,8 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
    * for simplicity, then publish by bumping the shared count last so a device
    * reader never observes count > populated entries.
    */
-  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
-                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
                       hipMemcpyHostToDevice));
   symm_count_host_ = slot + 1;
   CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
@@ -968,9 +966,8 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
   if (slot != last && last >= 0) {
     for (int pe = 0; pe < num_pes; pe++) {
       for (int n = 0; n < num_nics_; n++) {
-        size_t base =
-            (static_cast<size_t>(pe) * num_nics_ + n) * symm_capacity_;
-        host_symm_entries_[base + slot] = host_symm_entries_[base + last];
+        size_t base = flat_pe_nic_idx(pe, n) * symm_capacity_;
+        host_symm_buffers_[base + slot] = host_symm_buffers_[base + last];
       }
     }
     for (auto &kv : gda_symm_records_) {
@@ -980,8 +977,8 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
       }
     }
   }
-  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
-                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
                       hipMemcpyHostToDevice));
   symm_count_host_ = (last >= 0) ? last : 0;
   CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
@@ -1064,7 +1061,7 @@ void GDABackend::symmetric_buffer_unregister_all() {
 
 int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
 #if HIP_VERSION >= 70200000
-  if (addr == nullptr || symm_entries_ == nullptr) {
+  if (addr == nullptr || symm_buffers_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -1674,7 +1671,7 @@ void GDABackend::setup_heap_memory_rkey() {
 
   CHECK_HIP(hipHostMalloc(&heap_rkey, rkeys_size));
   for (int n = 0; n < num_nics_; n++) {
-    heap_rkey[my_pe * num_nics_ + n] = nic_devices_[n].heap_mr->rkey;
+    heap_rkey[flat_pe_nic_idx(my_pe, n)] = nic_devices_[n].heap_mr->rkey;
   }
 
   hipStream_t stream;
@@ -1711,16 +1708,14 @@ void GDABackend::cleanup_heap_memory_rkey() {
 }
 
 void GDABackend::setup_gpu_qps() {
-  size_t qp_objs_count;
-  size_t qp_objs_mem_size;
-
-  qp_objs_count    = num_qps;
-  qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
+  size_t qp_objs_mem_size = sizeof(QueuePair) * num_qps;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
 
-  host_qps = (QueuePair*) malloc(qp_objs_mem_size);
-  CHECK_NNULL(host_qps, "malloc (host_qps)");
+  QueuePair *host_gpu_qps = static_cast<QueuePair*>(malloc(qp_objs_mem_size));
+  CHECK_NNULL(host_gpu_qps, "malloc (host_gpu_qps)");
+
+  host_qps.reserve(num_qps);
 
 #if HIP_VERSION >= 70200000
   /*
@@ -1736,62 +1731,42 @@ void GDABackend::setup_gpu_qps() {
     symm_capacity = 1;
   }
   symm_capacity_ = symm_capacity;
-  size_t num_entries =
-      static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_entries_),
-                      num_entries * sizeof(QpSymmEntry)));
-  CHECK_HIP(hipMemset(symm_entries_, 0, num_entries * sizeof(QpSymmEntry)));
+  size_t num_symm_buffers = static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_buffers_),
+                      num_symm_buffers * sizeof(SymmBufferInfo)));
+  CHECK_HIP(hipMemset(symm_buffers_, 0, num_symm_buffers * sizeof(SymmBufferInfo)));
   CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_count_), sizeof(int)));
   CHECK_HIP(hipMemset(symm_count_, 0, sizeof(int)));
-  host_symm_entries_.assign(num_entries, QpSymmEntry{});
+  host_symm_buffers_.assign(num_symm_buffers, SymmBufferInfo{});
   symm_count_host_ = 0;
 #endif
 
-  const auto &heap_bases = heap.get_heap_bases();
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
-    int qp_dest_pe = static_cast<int>(i % num_pes);
-    /* Cache the peer heap base so the heap translation is load-free. */
-    host_qps[i].remote_heap_base =
-        reinterpret_cast<uintptr_t>(heap_bases[qp_dest_pe]);
-#if HIP_VERSION >= 70200000
-    /* Point the QP at the registration slice for its (dest_pe, nic_idx). */
-    int qp_nic_idx = nic_idx_for_qp(static_cast<int>(i));
-    host_qps[i].symm_count = symm_count_;
-    host_qps[i].symm_entries =
-        symm_entries_ + (static_cast<size_t>(qp_dest_pe) * num_nics_ +
-                         qp_nic_idx) * symm_capacity_;
-#endif
-    CHECK_HIP(hipMemcpy(&gpu_qps[i], &host_qps[i], sizeof(QueuePair), hipMemcpyDefault));
-
-    initialize_gpu_qp(&gpu_qps[i], i);
+  for (size_t i = 0; i < num_qps; i++) {
+    initialize_gpu_qp(&host_gpu_qps[i], i);
   }
+
+  CHECK_HIP(hipMemcpy(gpu_qps, host_gpu_qps, qp_objs_mem_size, hipMemcpyDefault));
+  free(host_gpu_qps);
 }
 
 void GDABackend::cleanup_gpu_qps() {
-  size_t qp_objs_count;
+  /* Calls QueuePairHost::~QueuePairHost on all elements in host_qps */
+  host_qps.clear();
 
-  qp_objs_count = num_qps;
-
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    host_qps[i].~QueuePair();
-  }
-
-  free(host_qps);
-
+  /* QueuePair is trivially destructible, can just free it */
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
 
 #if HIP_VERSION >= 70200000
-  if (symm_entries_ != nullptr) {
-    CHECK_HIP(hipFree(symm_entries_));
-    symm_entries_ = nullptr;
+  if (symm_buffers_ != nullptr) {
+    CHECK_HIP(hipFree(symm_buffers_));
+    symm_buffers_ = nullptr;
   }
   if (symm_count_ != nullptr) {
     CHECK_HIP(hipFree(symm_count_));
     symm_count_ = nullptr;
   }
-  host_symm_entries_.clear();
+  host_symm_buffers_.clear();
   symm_capacity_ = 0;
   symm_count_host_ = 0;
 #endif
@@ -2068,15 +2043,29 @@ void GDABackend::create_queues() {
 
   mlx5_qps.resize(num_qps);
 
-  if (gda_provider == GDAProvider::BNXT) {
-    bnxt_create_cqs(ncqes);
-    bnxt_create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::IONIC) {
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
     ionic_create_cqs(ncqes);
     create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::MLX5) {
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_create_cqs(ncqes);
+    bnxt_create_qps(sq_size);
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
     // mlx5_create_qps also creates the associated CQs
     mlx5_create_qps(sq_size);
+    break;
+#endif
+  default:
+    create_cqs(ncqes);
+    create_qps(sq_size);
+    break;
   }
 
   alternate_qp_ports();
@@ -2172,9 +2161,11 @@ void GDABackend::create_parent_domain(NicDevice &nic) {
   CHECK_NNULL(nic.pd_parent, "ibv_alloc_parent_domain");
   dump_ibv_pd(nic.pd_parent);
 
+#if defined(GDA_IONIC)
   if (gda_provider == GDAProvider::IONIC) {
     ionic_setup_parent_domain(nic, &pattr);
   }
+#endif // defined(GDA_IONIC)
 }
 
 void GDABackend::create_cqs(int cqe) {
@@ -2205,17 +2196,24 @@ void GDABackend::create_cqs(int cqe) {
 
 void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
+#if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
+    mlx5_qps[conn_num].dump(conn_num);
     break;
+#endif
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }
@@ -2227,13 +2225,32 @@ void GDABackend::create_qps(int sq_length) {
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;
   attr.cap.max_send_sge    = 1;
-  attr.cap.max_inline_data = inline_threshold;
   attr.sq_sig_all          = 0;
   attr.qp_type             = IBV_QPT_RC;
   attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
 
-  if (gda_provider == GDAProvider::IONIC) {
+  /* Set provider-specific QP creation attibutes
+   * Note that only ionic actually uses this code path currently */
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairIONIC>::InlineThreshold;
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairMLX5>::InlineThreshold;
+    break;
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    break;
   }
 
   for (size_t i = 0; i < qps.size(); i++) {

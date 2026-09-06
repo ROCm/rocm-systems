@@ -158,3 +158,23 @@ function(add_rocshmem_targets)
     set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
 
 endfunction()
+
+# copy files in the list-valued variable ${FILE_LIST_VAR} from ${SRC_DIR} to ${DST_DIR}
+# appends the destination file location to the list-valued variable ${OUTPUT_LIST_VAR}
+function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
+  foreach(file_name ${${FILE_LIST_VAR}})
+    set(src_file "${SRC_DIR}/${file_name}")
+    set(dst_file "${DST_DIR}/${file_name}")
+    get_filename_component(dst_file_dir "${dst_file}" DIRECTORY)
+    add_custom_command(
+      OUTPUT "${dst_file}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
+      DEPENDS "${src_file}"
+      COMMENT "Copying ${src_file} -> ${dst_file}"
+      VERBATIM
+    )
+    list(APPEND ${OUTPUT_LIST_VAR} "${dst_file}")
+  endforeach()
+  set(${OUTPUT_LIST_VAR} ${${OUTPUT_LIST_VAR}} PARENT_SCOPE)
+endfunction()

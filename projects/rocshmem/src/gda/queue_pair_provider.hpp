@@ -22,37 +22,33 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine PROFILE
-#cmakedefine BUILD_DEBUG_TRACE_HOST
-#cmakedefine BUILD_DEBUG_TRACE_DEVICE
-#cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_SDMA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine GDA_MUX
-#cmakedefine HAVE_EXTERNAL_MPI
-#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_
+#define LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_
 
-#define ROCSHMEM_VENDOR_MAJOR_VERSION @PROJECT_VERSION_MAJOR@
-#define ROCSHMEM_VENDOR_MINOR_VERSION @PROJECT_VERSION_MINOR@
-#define ROCSHMEM_VENDOR_PATCH_VERSION @PROJECT_VERSION_PATCH@
-#define ROCSHMEM_VERSION              "@PROJECT_VERSION@"
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
-#define ROCSHMEM_VENDOR_STRING   "@ROCSHMEM_VENDOR_STRING@"
+#if   defined(GDA_MUX)
+#include "queue_pair_mux.hpp"
+#elif defined(GDA_IONIC)
+#include "gda/ionic/queue_pair_ionic.hpp"
+#elif defined(GDA_BNXT)
+#include "gda/bnxt/queue_pair_bnxt.hpp"
+#elif defined(GDA_MLX5)
+#include "gda/mlx5/queue_pair_mlx5.hpp"
+#endif
 
-#define ROCSHMEM_GIT_HASH        "@ROCSHMEM_GIT_HASH@"
-#define ROCSHMEM_INSTALL_PREFIX  "@CMAKE_INSTALL_PREFIX@"
-#define ROCSHMEM_OFFLOAD_TARGETS "@ROCSHMEM_OFFLOAD_TARGETS@"
-#define ROCSHMEM_BUILD_TYPE      "@CMAKE_BUILD_TYPE@"
+namespace rocshmem {
+
+#if   defined(GDA_MUX)
+using QueuePair = QueuePairMux;
+#elif defined(GDA_IONIC)
+using QueuePair = QueuePairIONIC;
+#elif defined(GDA_BNXT)
+using QueuePair = QueuePairBNXT;
+#elif defined(GDA_MLX5)
+using QueuePair = QueuePairMLX5;
+#endif
+
+}  // namespace rocshmem
+
+#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_

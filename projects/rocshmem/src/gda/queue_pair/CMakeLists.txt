@@ -22,10 +22,11 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
-if(GDA_IONIC)
+###############################################################################
+# ADD ROCSHMEM TARGET FOR FILES IN CURRENT DIRECTORY
+###############################################################################
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    backend_gda_ionic.cpp
+    queue_pair_host.cpp
 )
-endif()

@@ -26,7 +26,7 @@
 
 #include <rocshmem/rocshmem.hpp>
 #include "gda/context_gda_device.hpp"
-#include "gda/queue_pair.hpp"
+#include "gda/queue_pair_provider.hpp"
 #include "assembly.hpp"
 #include "verify_results_kernels.hpp"
 
@@ -60,26 +60,11 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
 
     QueuePair &qp = gda_ctx->qps[target];
 
-    uintptr_t local_base =
-        reinterpret_cast<uintptr_t>(gda_ctx->base_heap[pe]);
-    uintptr_t remote_base =
-        reinterpret_cast<uintptr_t>(gda_ctx->base_heap[target]);
-
     int wg_id = hipBlockIdx_x;
 
-    uintptr_t r_buf_offset =
-        reinterpret_cast<uintptr_t>(&r_buf[wg_id]) - local_base;
-    void *remote_r_buf = reinterpret_cast<void *>(remote_base + r_buf_offset);
-
-    char *my_data_s = data_s_buf + size * wg_id;
-    uintptr_t data_r_offset =
-        reinterpret_cast<uintptr_t>(data_r_buf + size * wg_id) - local_base;
-    void *remote_data_r = reinterpret_cast<void *>(remote_base + data_r_offset);
-
-    uint64_t *my_sig = &sig_addr[wg_id];
-    uintptr_t sig_offset =
-        reinterpret_cast<uintptr_t>(my_sig) - local_base;
-    void *remote_sig = reinterpret_cast<void *>(remote_base + sig_offset);
+    void *data_s = &data_s_buf[wg_id * size];
+    void *data_r = &data_r_buf[wg_id * size];
+    uint64_t *sig = &sig_addr[wg_id];
 
     // Drain all setup loads from HBM before entering the timed loop.
 #if defined(__GFX12__)
@@ -96,28 +81,27 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
       int val = i + 1;
 
       if (op_type <= 1) {
-        void *src = (op_type == 0) ? static_cast<void *>(&val)
-                                   : static_cast<void *>(my_data_s);
+        void *src = (op_type == 0) ? static_cast<void *>(&val) : data_s;
         if (op_type == 1) {
-          *reinterpret_cast<int *>(my_data_s) = val;
+          *reinterpret_cast<int *>(data_s) = val;
         }
         if (pe == 0) {
-          qp.put_nbi_single(remote_r_buf, src, sizeof(int), true);
+          qp.put_nbi_single(&r_buf[wg_id], src, sizeof(int));
           while (uncached_load(&r_buf[wg_id]) != val) {}
         } else {
           while (uncached_load(&r_buf[wg_id]) != val) {}
-          qp.put_nbi_single(remote_r_buf, src, sizeof(int), true);
+          qp.put_nbi_single(&r_buf[wg_id], src, sizeof(int));
         }
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          qp.put_nbi_single(remote_data_r, my_data_s, size, false);
-          qp.atomic_add_single(remote_sig, 1);
-          while (uncached_load(my_sig) < expected) {}
+          qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
+          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
+          while (uncached_load(sig) < expected) {}
         } else {
-          while (uncached_load(my_sig) < expected) {}
-          qp.put_nbi_single(remote_data_r, my_data_s, size, false);
-          qp.atomic_add_single(remote_sig, 1);
+          while (uncached_load(sig) < expected) {}
+          qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
+          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
         }
       }
     }
