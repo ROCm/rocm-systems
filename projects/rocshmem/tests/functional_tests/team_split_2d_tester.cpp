@@ -31,13 +31,13 @@ using namespace rocshmem;
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-TeamSplit2DTester::TeamSplit2DTester(TesterArguments args) : Tester(args) 
+TeamSplit2DTester::TeamSplit2DTester(TesterArguments args) : Tester(args)
 {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   if (n_pes % xrange) {
-    fprintf(stderr, 
+    fprintf(stderr,
       "Test needs world size divisible by %d, cannot continue test \n",
       xrange);
     exit(-1);
@@ -47,9 +47,9 @@ TeamSplit2DTester::TeamSplit2DTester(TesterArguments args) : Tester(args)
   x_team = ROCSHMEM_TEAM_INVALID;
   y_team = ROCSHMEM_TEAM_INVALID;
 
-  if (rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, 
+  if (rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
                                     &team_world_dup) != ROCSHMEM_SUCCESS){
-    fprintf(stderr, 
+    fprintf(stderr,
             "ERROR: Unable to start test. Error in rocshmem_team_split_strided\n");
     exit(-1);
   }
@@ -80,7 +80,7 @@ void TeamSplit2DTester::preLaunchKernel() {
   int ret = 0;
   x_team = ROCSHMEM_TEAM_INVALID;
   y_team = ROCSHMEM_TEAM_INVALID;
-  ret = rocshmem_team_split_2d(team_world_dup, xrange, nullptr, 0, &x_team, 
+  ret = rocshmem_team_split_2d(team_world_dup, xrange, nullptr, 0, &x_team,
                                nullptr, 0, &y_team);
   if (ret != 0){
     fprintf(stderr,
@@ -99,7 +99,7 @@ void TeamSplit2DTester::postLaunchKernel() {
     fprintf(stderr, "PE %d FAIL: y_team is invalid\n", my_pe);
     test_failed++;
   }
-  
+
   int x_size = rocshmem_team_n_pes(x_team);
   if (x_size != xrange){
     fprintf(stderr,
