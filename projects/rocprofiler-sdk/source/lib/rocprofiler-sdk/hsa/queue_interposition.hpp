@@ -71,10 +71,19 @@ struct QueueState
     std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
 
     /// Signal-less admission latch (§1.5.4). Plain bool, guarded by gate_lock: set
-    /// by the destroy path's close_admission_and_snapshot() so no later batch can
+    /// by the destroy path's close_admission_and_snapshot_locked() so no later batch can
     /// register against this queue's window, read in signal_less_batch_eligible()
     /// which already holds gate_lock. Never an atomic -- one lock orders both.
     bool admission_closed = false;
+
+    /// F1 lifetime interlock. drain_mu is held by whoever dereferences real_rdid for
+    /// a bounded HW drain; destroy_queue() holds it across its whole sequence and
+    /// clears rdid_valid+real_rdid under it BEFORE the runtime queue can be freed, so
+    /// finalization's "skip if it disappeared" test (rdid_valid) is race-free. Leaf:
+    /// acquired only at the TOP of the two drain sequences, never under gate_lock /
+    /// doorbell map / hub / owner registry / the queue registry lock.
+    std::mutex drain_mu   = {};
+    bool       rdid_valid = false;  // guarded by drain_mu; set true at publication
 };
 
 using queue_state_ptr_t = std::shared_ptr<QueueState>;
@@ -223,6 +232,12 @@ destroy_queue_state(const hsa_queue_t* queue);
 void
 fence_all_queue_gates();
 
+// F1 teardown HW drain across every live queue, race-free against a concurrent
+// hsa_queue_destroy (the drain_mu/rdid_valid interlock). One shared absolute
+// deadline. Caller holds no hub, registry, gate, or drain lock.
+void
+drain_all_queues_hw(uint64_t deadline_ns);
+
 /// The hardware queue has consumed every packet we submitted. The inline path's
 /// analogue of `_active_kernels == 0`, which only the legacy path maintains.
 inline bool
@@ -236,18 +251,22 @@ hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
 // register against this queue's window) AND read next_submit_pos, ordered by the
 // same lock that serialises every publishing critical section. Returns that
 // snapshot P. No separate fence and no atomic are needed.
+//
+// _locked: the caller holds state.drain_mu (F1). State-based, not pointer-based, so
+// no relookup races the queue's destruction. The pointer-taking overloads are gone.
 uint64_t
-close_admission_and_snapshot(const hsa_queue_t* queue);
+close_admission_and_snapshot_locked(QueueState& state);
 
 /// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until this queue's
 /// hardware read index has caught up with the sampled submit position `P`, so
 /// every packet in that snapshot -- hence every registered START -- has been
 /// consumed by the CP before the caller decides anything was lost (§1.3 Path 4).
 ///
-/// False on deadline; true immediately with no state or when P is already drained.
-/// Takes no lock: P was snapshotted under gate_lock by close_admission_and_snapshot.
+/// False on deadline; true immediately when real_rdid is null or P is already
+/// drained. _locked: the caller holds state.drain_mu, so real_rdid cannot be freed
+/// under the load (F1). State-based; the pointer-taking overload is gone.
 bool
-wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t submit_pos, uint64_t deadline_ns);
+wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t deadline_ns);
 
 /**
  * @brief Check if queue interposition has been installed

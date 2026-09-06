@@ -1,21 +1,5 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import os
 # -*- coding: utf-8 -*-
@@ -1107,6 +1091,7 @@ struct_amdsmi_enumeration_info_t._fields_ = [
     ('hip_id', ctypes.c_uint32),
     ('hip_uuid', ctypes.c_char * 256),
     ('oam_id', ctypes.c_uint32),
+    ('physical_acc_id', ctypes.c_uint32),
 ]
 
 amdsmi_enumeration_info_t = struct_amdsmi_enumeration_info_t
@@ -1298,7 +1283,10 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('subsystem_id', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
     ('flags', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 18),
+    ('physical_acc_id', ctypes.c_uint32),
+    ('chip_rev_id', ctypes.c_uint32),
+    ('external_rev_id', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 15),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
@@ -1977,7 +1965,27 @@ amdsmi_gpu_block_t__enumvalues = {
     65536: 'AMDSMI_GPU_BLOCK_JPEG',
     131072: 'AMDSMI_GPU_BLOCK_IH',
     262144: 'AMDSMI_GPU_BLOCK_MPIO',
-    262144: 'AMDSMI_GPU_BLOCK_LAST',
+    524288: 'AMDSMI_GPU_BLOCK_MMSCH',
+    1048576: 'AMDSMI_GPU_BLOCK_MP5',
+    2097152: 'AMDSMI_GPU_BLOCK_ATU',
+    4194304: 'AMDSMI_GPU_BLOCK_DACC_BE',
+    8388608: 'AMDSMI_GPU_BLOCK_ECLR',
+    16777216: 'AMDSMI_GPU_BLOCK_KPX_SERDES',
+    33554432: 'AMDSMI_GPU_BLOCK_LSDMA',
+    67108864: 'AMDSMI_GPU_BLOCK_MPART',
+    134217728: 'AMDSMI_GPU_BLOCK_MPIFOE',
+    268435456: 'AMDSMI_GPU_BLOCK_MPRAS',
+    536870912: 'AMDSMI_GPU_BLOCK_NBIF',
+    1073741824: 'AMDSMI_GPU_BLOCK_NBIO',
+    2147483648: 'AMDSMI_GPU_BLOCK_OXRP',
+    4294967296: 'AMDSMI_GPU_BLOCK_PCIE_PL',
+    8589934592: 'AMDSMI_GPU_BLOCK_PCS_XGMI',
+    17179869184: 'AMDSMI_GPU_BLOCK_PIE',
+    34359738368: 'AMDSMI_GPU_BLOCK_CS',
+    68719476736: 'AMDSMI_GPU_BLOCK_SHUB',
+    137438953472: 'AMDSMI_GPU_BLOCK_SSBDCI',
+    274877906944: 'AMDSMI_GPU_BLOCK_UCIE_PCS',
+    274877906944: 'AMDSMI_GPU_BLOCK_LAST',
     9223372036854775808: 'AMDSMI_GPU_BLOCK_RESERVED',
 }
 AMDSMI_GPU_BLOCK_INVALID = 0
@@ -2001,7 +2009,27 @@ AMDSMI_GPU_BLOCK_VCN = 32768
 AMDSMI_GPU_BLOCK_JPEG = 65536
 AMDSMI_GPU_BLOCK_IH = 131072
 AMDSMI_GPU_BLOCK_MPIO = 262144
-AMDSMI_GPU_BLOCK_LAST = 262144
+AMDSMI_GPU_BLOCK_MMSCH = 524288
+AMDSMI_GPU_BLOCK_MP5 = 1048576
+AMDSMI_GPU_BLOCK_ATU = 2097152
+AMDSMI_GPU_BLOCK_DACC_BE = 4194304
+AMDSMI_GPU_BLOCK_ECLR = 8388608
+AMDSMI_GPU_BLOCK_KPX_SERDES = 16777216
+AMDSMI_GPU_BLOCK_LSDMA = 33554432
+AMDSMI_GPU_BLOCK_MPART = 67108864
+AMDSMI_GPU_BLOCK_MPIFOE = 134217728
+AMDSMI_GPU_BLOCK_MPRAS = 268435456
+AMDSMI_GPU_BLOCK_NBIF = 536870912
+AMDSMI_GPU_BLOCK_NBIO = 1073741824
+AMDSMI_GPU_BLOCK_OXRP = 2147483648
+AMDSMI_GPU_BLOCK_PCIE_PL = 4294967296
+AMDSMI_GPU_BLOCK_PCS_XGMI = 8589934592
+AMDSMI_GPU_BLOCK_PIE = 17179869184
+AMDSMI_GPU_BLOCK_CS = 34359738368
+AMDSMI_GPU_BLOCK_SHUB = 68719476736
+AMDSMI_GPU_BLOCK_SSBDCI = 137438953472
+AMDSMI_GPU_BLOCK_UCIE_PCS = 274877906944
+AMDSMI_GPU_BLOCK_LAST = 274877906944
 AMDSMI_GPU_BLOCK_RESERVED = 9223372036854775808
 amdsmi_gpu_block_t = ctypes.c_uint64 # enum
 
@@ -2702,6 +2730,31 @@ struct_amdsmi_npm_info_t._fields_ = [
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
+
+# values for enumeration 'amdsmi_compute_tray_type_t'
+amdsmi_compute_tray_type_t__enumvalues = {
+    0: 'AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN',
+    1: 'AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P',
+    2: 'AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R',
+    3: 'AMDSMI_COMPUTE_TRAY_TYPE_TITAN',
+}
+AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN = 0
+AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P = 1
+AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R = 2
+AMDSMI_COMPUTE_TRAY_TYPE_TITAN = 3
+amdsmi_compute_tray_type_t = ctypes.c_uint32 # enum
+class struct_amdsmi_tray_info_t(Structure):
+    pass
+
+struct_amdsmi_tray_info_t._pack_ = 1 # source:False
+struct_amdsmi_tray_info_t._layout_ = 'ms'
+struct_amdsmi_tray_info_t._fields_ = [
+    ('max_acc_per_tray', ctypes.c_uint32),
+    ('tray_type', amdsmi_compute_tray_type_t),
+    ('reserved', ctypes.c_uint32 * 14),
+]
+
+amdsmi_tray_info_t = struct_amdsmi_tray_info_t
 
 # values for enumeration 'amdsmi_ptl_data_format_t'
 amdsmi_ptl_data_format_t__enumvalues = {
@@ -3782,9 +3835,13 @@ except AttributeError:
 amdsmi_fabric_size_constants_t__enumvalues = {
     32: 'AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE',
     16: 'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
+    64: 'AMDSMI_FABRIC_MAX_BITMAP_SIZE',
+    37: 'AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS',
 }
 AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE = 32
 AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16
+AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64
+AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS = 37
 amdsmi_fabric_size_constants_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_fabric_type_t'
@@ -3827,6 +3884,48 @@ AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE = 3
 AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR = 4
 AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN = 5
 amdsmi_fabric_accelerator_vpod_state_t = ctypes.c_uint32 # enum
+class struct_amdsmi_fabric_ppod_data_t(Structure):
+    pass
+
+struct_amdsmi_fabric_ppod_data_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_ppod_data_t._layout_ = 'ms'
+struct_amdsmi_fabric_ppod_data_t._fields_ = [
+    ('accelerator_id', ctypes.c_uint32),
+    ('ppod_id', ctypes.c_ubyte * 16),
+    ('ppod_size', ctypes.c_uint32),
+    ('local_accelerators', ctypes.c_uint32 * 16),
+    ('local_accelerator_count', ctypes.c_uint32),
+    ('bandwidth', ctypes.c_uint32),
+    ('latency', ctypes.c_uint32),
+]
+
+amdsmi_fabric_ppod_data_t = struct_amdsmi_fabric_ppod_data_t
+class struct_amdsmi_fabric_vpod_data_t(Structure):
+    pass
+
+struct_amdsmi_fabric_vpod_data_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_vpod_data_t._layout_ = 'ms'
+struct_amdsmi_fabric_vpod_data_t._fields_ = [
+    ('vpod_id', ctypes.c_uint32),
+    ('vpod_size', ctypes.c_uint32),
+    ('vpod_active_accelerators', ctypes.c_uint32 * 32),
+    ('addr_mode', amdsmi_fabric_npa_address_mode_t),
+]
+
+amdsmi_fabric_vpod_data_t = struct_amdsmi_fabric_vpod_data_t
+class struct_amdsmi_fabric_station_data_t(Structure):
+    pass
+
+struct_amdsmi_fabric_station_data_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_station_data_t._layout_ = 'ms'
+struct_amdsmi_fabric_station_data_t._fields_ = [
+    ('station_flags', ctypes.c_uint32),
+    ('num_stations', ctypes.c_ubyte),
+    ('lane_en_bitmap', ctypes.c_ubyte * 64),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+amdsmi_fabric_station_data_t = struct_amdsmi_fabric_station_data_t
 class struct_amdsmi_fabric_info_v1_t(Structure):
     pass
 
@@ -3848,6 +3947,33 @@ struct_amdsmi_fabric_info_v1_t._fields_ = [
 ]
 
 amdsmi_fabric_info_v1_t = struct_amdsmi_fabric_info_v1_t
+class struct_amdsmi_fabric_info_v2_t(Structure):
+    pass
+
+struct_amdsmi_fabric_info_v2_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_info_v2_t._layout_ = 'ms'
+struct_amdsmi_fabric_info_v2_t._fields_ = [
+    ('fabric_type', amdsmi_fabric_type_t),
+    ('accel_state', amdsmi_fabric_accelerator_vpod_state_t),
+    ('ppod', amdsmi_fabric_ppod_data_t),
+    ('vpod', amdsmi_fabric_vpod_data_t),
+    ('station', amdsmi_fabric_station_data_t),
+    ('ppod_mask', ctypes.c_uint32),
+    ('vpod_mask', ctypes.c_uint32),
+    ('station_mask', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 37),
+]
+
+amdsmi_fabric_info_v2_t = struct_amdsmi_fabric_info_v2_t
+
+# values for enumeration 'amdsmi_fabric_info_version_t'
+amdsmi_fabric_info_version_t__enumvalues = {
+    0: 'AMDSMI_FABRIC_INFO_VERSION_1',
+    4205903874: 'AMDSMI_FABRIC_INFO_VERSION_2',
+}
+AMDSMI_FABRIC_INFO_VERSION_1 = 0
+AMDSMI_FABRIC_INFO_VERSION_2 = 4205903874
+amdsmi_fabric_info_version_t = ctypes.c_uint32 # enum
 class struct_amdsmi_fabric_info_t(Structure):
     pass
 
@@ -3856,6 +3982,7 @@ class union_fabric_info_(Union):
     _layout_ = 'ms'
     _fields_ = [
     ('v1', amdsmi_fabric_info_v1_t),
+    ('v2', amdsmi_fabric_info_v2_t),
      ]
 
 struct_amdsmi_fabric_info_t._pack_ = 1 # source:False
@@ -3865,7 +3992,6 @@ struct_amdsmi_fabric_info_t._fields_ = [
     ('fabric_version', ctypes.c_uint32),
     ('fabric_info', union_fabric_info_),
     ('reserved', ctypes.c_uint32 * 15),
-    ('PADDING_0', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_fabric_info_t = struct_amdsmi_fabric_info_t
@@ -3873,6 +3999,118 @@ try:
     amdsmi_get_gpu_fabric_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_fabric_info
     amdsmi_get_gpu_fabric_info.restype = amdsmi_status_t
     amdsmi_get_gpu_fabric_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_info_t)]
+except AttributeError:
+    pass
+
+# values for enumeration 'amdsmi_fabric_config_version_t'
+amdsmi_fabric_config_version_t__enumvalues = {
+    1: 'AMDSMI_FABRIC_PPOD_CONFIG_V1',
+    1: 'AMDSMI_FABRIC_VPOD_CONFIG_V1',
+    1: 'AMDSMI_FABRIC_STATION_CONFIG_V1',
+}
+AMDSMI_FABRIC_PPOD_CONFIG_V1 = 1
+AMDSMI_FABRIC_VPOD_CONFIG_V1 = 1
+AMDSMI_FABRIC_STATION_CONFIG_V1 = 1
+amdsmi_fabric_config_version_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_fabric_ppod_field_t'
+amdsmi_fabric_ppod_field_t__enumvalues = {
+    1: 'AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID',
+    2: 'AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID',
+    4: 'AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE',
+    8: 'AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS',
+    16: 'AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH',
+    32: 'AMDSMI_FABRIC_PPOD_FIELD_LATENCY',
+}
+AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID = 1
+AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID = 2
+AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE = 4
+AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS = 8
+AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH = 16
+AMDSMI_FABRIC_PPOD_FIELD_LATENCY = 32
+amdsmi_fabric_ppod_field_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_fabric_vpod_field_t'
+amdsmi_fabric_vpod_field_t__enumvalues = {
+    1: 'AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID',
+    2: 'AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE',
+    4: 'AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS',
+    8: 'AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE',
+}
+AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID = 1
+AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE = 2
+AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS = 4
+AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE = 8
+amdsmi_fabric_vpod_field_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_fabric_df_field_t'
+amdsmi_fabric_df_field_t__enumvalues = {
+    1: 'AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS',
+    2: 'AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP',
+    4: 'AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS',
+}
+AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS = 1
+AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP = 2
+AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS = 4
+amdsmi_fabric_df_field_t = ctypes.c_uint32 # enum
+class struct_amdsmi_fabric_ppod_config_t(Structure):
+    pass
+
+struct_amdsmi_fabric_ppod_config_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_ppod_config_t._layout_ = 'ms'
+struct_amdsmi_fabric_ppod_config_t._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('mask', ctypes.c_uint32),
+    ('commit', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('data', amdsmi_fabric_ppod_data_t),
+]
+
+amdsmi_fabric_ppod_config_t = struct_amdsmi_fabric_ppod_config_t
+class struct_amdsmi_fabric_vpod_config_t(Structure):
+    pass
+
+struct_amdsmi_fabric_vpod_config_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_vpod_config_t._layout_ = 'ms'
+struct_amdsmi_fabric_vpod_config_t._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('mask', ctypes.c_uint32),
+    ('commit', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('data', amdsmi_fabric_vpod_data_t),
+]
+
+amdsmi_fabric_vpod_config_t = struct_amdsmi_fabric_vpod_config_t
+class struct_amdsmi_fabric_station_config_t(Structure):
+    pass
+
+struct_amdsmi_fabric_station_config_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_station_config_t._layout_ = 'ms'
+struct_amdsmi_fabric_station_config_t._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('mask', ctypes.c_uint32),
+    ('commit', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('data', amdsmi_fabric_station_data_t),
+]
+
+amdsmi_fabric_station_config_t = struct_amdsmi_fabric_station_config_t
+try:
+    amdsmi_set_gpu_fabric_ppod_config = _libraries['libamd_smi.so'].amdsmi_set_gpu_fabric_ppod_config
+    amdsmi_set_gpu_fabric_ppod_config.restype = amdsmi_status_t
+    amdsmi_set_gpu_fabric_ppod_config.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_ppod_config_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_gpu_fabric_vpod_config = _libraries['libamd_smi.so'].amdsmi_set_gpu_fabric_vpod_config
+    amdsmi_set_gpu_fabric_vpod_config.restype = amdsmi_status_t
+    amdsmi_set_gpu_fabric_vpod_config.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_vpod_config_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_gpu_fabric_station_config = _libraries['libamd_smi.so'].amdsmi_set_gpu_fabric_station_config
+    amdsmi_set_gpu_fabric_station_config.restype = amdsmi_status_t
+    amdsmi_set_gpu_fabric_station_config.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_station_config_t)]
 except AttributeError:
     pass
 try:
@@ -4284,6 +4522,12 @@ try:
     amdsmi_get_npm_info = _libraries['libamd_smi.so'].amdsmi_get_npm_info
     amdsmi_get_npm_info.restype = amdsmi_status_t
     amdsmi_get_npm_info.argtypes = [amdsmi_node_handle, ctypes.POINTER(struct_amdsmi_npm_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_tray_info = _libraries['libamd_smi.so'].amdsmi_get_tray_info
+    amdsmi_get_tray_info.restype = amdsmi_status_t
+    amdsmi_get_tray_info.argtypes = [amdsmi_node_handle, ctypes.POINTER(struct_amdsmi_tray_info_t)]
 except AttributeError:
     pass
 try:
@@ -4946,7 +5190,11 @@ __all__ = \
     'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING',
     'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID',
     'AMDSMI_COMPUTE_PARTITION_QPX', 'AMDSMI_COMPUTE_PARTITION_SPX',
-    'AMDSMI_COMPUTE_PARTITION_TPX', 'AMDSMI_CONTAINER_DOCKER',
+    'AMDSMI_COMPUTE_PARTITION_TPX',
+    'AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P',
+    'AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R',
+    'AMDSMI_COMPUTE_TRAY_TYPE_TITAN',
+    'AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN', 'AMDSMI_CONTAINER_DOCKER',
     'AMDSMI_CONTAINER_LXC', 'AMDSMI_CPER_NOTIFY_TYPE_BOOT',
     'AMDSMI_CPER_NOTIFY_TYPE_CMC', 'AMDSMI_CPER_NOTIFY_TYPE_CPE',
     'AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT',
@@ -4995,10 +5243,23 @@ __all__ = \
     'AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED',
     'AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN',
     'AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE',
-    'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
+    'AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP',
+    'AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS',
+    'AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS',
+    'AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS',
+    'AMDSMI_FABRIC_INFO_VERSION_1', 'AMDSMI_FABRIC_INFO_VERSION_2',
+    'AMDSMI_FABRIC_MAX_BITMAP_SIZE', 'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN',
+    'AMDSMI_FABRIC_PPOD_CONFIG_V1',
+    'AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID',
+    'AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH',
+    'AMDSMI_FABRIC_PPOD_FIELD_LATENCY',
+    'AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS',
+    'AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID',
+    'AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE',
+    'AMDSMI_FABRIC_STATION_CONFIG_V1',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE',
@@ -5019,6 +5280,11 @@ __all__ = \
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN',
     'AMDSMI_FABRIC_TYPE_UALINK', 'AMDSMI_FABRIC_TYPE_UALLINK',
     'AMDSMI_FABRIC_TYPE_UALOE', 'AMDSMI_FABRIC_TYPE_UNKNOWN',
+    'AMDSMI_FABRIC_VPOD_CONFIG_V1',
+    'AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE',
+    'AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS',
+    'AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID',
+    'AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE',
     'AMDSMI_FINE_DECODER_ACTIVITY', 'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_FINE_GRAIN_MEM_ACTIVITY', 'AMDSMI_FREQ_IND_INVALID',
     'AMDSMI_FREQ_IND_MAX', 'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD',
@@ -5061,16 +5327,26 @@ __all__ = \
     'AMDSMI_FW_ID_SEC_POLICY_STAGE2', 'AMDSMI_FW_ID_SMU',
     'AMDSMI_FW_ID_TA_RAS', 'AMDSMI_FW_ID_TA_XGMI', 'AMDSMI_FW_ID_UVD',
     'AMDSMI_FW_ID_VCE', 'AMDSMI_FW_ID_VCN', 'AMDSMI_FW_ID__MAX',
-    'AMDSMI_GPU_BLOCK_ATHUB', 'AMDSMI_GPU_BLOCK_DF',
+    'AMDSMI_GPU_BLOCK_ATHUB', 'AMDSMI_GPU_BLOCK_ATU',
+    'AMDSMI_GPU_BLOCK_CS', 'AMDSMI_GPU_BLOCK_DACC_BE',
+    'AMDSMI_GPU_BLOCK_DF', 'AMDSMI_GPU_BLOCK_ECLR',
     'AMDSMI_GPU_BLOCK_FIRST', 'AMDSMI_GPU_BLOCK_FUSE',
     'AMDSMI_GPU_BLOCK_GFX', 'AMDSMI_GPU_BLOCK_HDP',
     'AMDSMI_GPU_BLOCK_IH', 'AMDSMI_GPU_BLOCK_INVALID',
-    'AMDSMI_GPU_BLOCK_JPEG', 'AMDSMI_GPU_BLOCK_LAST',
+    'AMDSMI_GPU_BLOCK_JPEG', 'AMDSMI_GPU_BLOCK_KPX_SERDES',
+    'AMDSMI_GPU_BLOCK_LAST', 'AMDSMI_GPU_BLOCK_LSDMA',
     'AMDSMI_GPU_BLOCK_MCA', 'AMDSMI_GPU_BLOCK_MMHUB',
-    'AMDSMI_GPU_BLOCK_MP0', 'AMDSMI_GPU_BLOCK_MP1',
-    'AMDSMI_GPU_BLOCK_MPIO', 'AMDSMI_GPU_BLOCK_PCIE_BIF',
-    'AMDSMI_GPU_BLOCK_RESERVED', 'AMDSMI_GPU_BLOCK_SDMA',
-    'AMDSMI_GPU_BLOCK_SEM', 'AMDSMI_GPU_BLOCK_SMN',
+    'AMDSMI_GPU_BLOCK_MMSCH', 'AMDSMI_GPU_BLOCK_MP0',
+    'AMDSMI_GPU_BLOCK_MP1', 'AMDSMI_GPU_BLOCK_MP5',
+    'AMDSMI_GPU_BLOCK_MPART', 'AMDSMI_GPU_BLOCK_MPIFOE',
+    'AMDSMI_GPU_BLOCK_MPIO', 'AMDSMI_GPU_BLOCK_MPRAS',
+    'AMDSMI_GPU_BLOCK_NBIF', 'AMDSMI_GPU_BLOCK_NBIO',
+    'AMDSMI_GPU_BLOCK_OXRP', 'AMDSMI_GPU_BLOCK_PCIE_BIF',
+    'AMDSMI_GPU_BLOCK_PCIE_PL', 'AMDSMI_GPU_BLOCK_PCS_XGMI',
+    'AMDSMI_GPU_BLOCK_PIE', 'AMDSMI_GPU_BLOCK_RESERVED',
+    'AMDSMI_GPU_BLOCK_SDMA', 'AMDSMI_GPU_BLOCK_SEM',
+    'AMDSMI_GPU_BLOCK_SHUB', 'AMDSMI_GPU_BLOCK_SMN',
+    'AMDSMI_GPU_BLOCK_SSBDCI', 'AMDSMI_GPU_BLOCK_UCIE_PCS',
     'AMDSMI_GPU_BLOCK_UMC', 'AMDSMI_GPU_BLOCK_VCN',
     'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_INIT_ALL_PROCESSORS',
     'AMDSMI_INIT_AMD_APUS', 'AMDSMI_INIT_AMD_CPUS',
@@ -5260,13 +5536,13 @@ __all__ = \
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
-    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
-    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
-    'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
-    'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
-    'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
-    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
-    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_compute_tray_type_t',
+    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
+    'amdsmi_counter_value_t', 'amdsmi_cper_guid_t',
+    'amdsmi_cper_hdr_t', 'amdsmi_cper_notify_type_t',
+    'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
+    'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
+    'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
@@ -5276,17 +5552,23 @@ __all__ = \
     'amdsmi_event_group_t', 'amdsmi_event_handle_t',
     'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
-    'amdsmi_fabric_accelerator_vpod_state_t', 'amdsmi_fabric_info_t',
-    'amdsmi_fabric_info_v1_t', 'amdsmi_fabric_label_t',
-    'amdsmi_fabric_npa_address_mode_t',
-    'amdsmi_fabric_size_constants_t',
+    'amdsmi_fabric_accelerator_vpod_state_t',
+    'amdsmi_fabric_config_version_t', 'amdsmi_fabric_df_field_t',
+    'amdsmi_fabric_info_t', 'amdsmi_fabric_info_v1_t',
+    'amdsmi_fabric_info_v2_t', 'amdsmi_fabric_info_version_t',
+    'amdsmi_fabric_label_t', 'amdsmi_fabric_npa_address_mode_t',
+    'amdsmi_fabric_ppod_config_t', 'amdsmi_fabric_ppod_data_t',
+    'amdsmi_fabric_ppod_field_t', 'amdsmi_fabric_size_constants_t',
+    'amdsmi_fabric_station_config_t', 'amdsmi_fabric_station_data_t',
     'amdsmi_fabric_telem_id_to_string',
     'amdsmi_fabric_telemetry_category_mask_t',
     'amdsmi_fabric_telemetry_category_t',
     'amdsmi_fabric_telemetry_dataset_t',
     'amdsmi_fabric_telemetry_instance_t',
     'amdsmi_fabric_telemetry_item_t', 'amdsmi_fabric_telemetry_t',
-    'amdsmi_fabric_type_t', 'amdsmi_first_online_core_on_cpu_socket',
+    'amdsmi_fabric_type_t', 'amdsmi_fabric_vpod_config_t',
+    'amdsmi_fabric_vpod_data_t', 'amdsmi_fabric_vpod_field_t',
+    'amdsmi_first_online_core_on_cpu_socket',
     'amdsmi_free_fabric_telemetry', 'amdsmi_freq_ind_t',
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
@@ -5405,11 +5687,11 @@ __all__ = \
     'amdsmi_get_soc_pstate', 'amdsmi_get_socket_handles',
     'amdsmi_get_socket_info', 'amdsmi_get_supported_power_cap',
     'amdsmi_get_temp_metric', 'amdsmi_get_threads_per_core',
-    'amdsmi_get_ttm_info', 'amdsmi_get_utilization_count',
-    'amdsmi_get_vcn_busy_percent', 'amdsmi_get_violation_status',
-    'amdsmi_get_xgmi_info', 'amdsmi_get_xgmi_plpd',
-    'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
-    'amdsmi_gpu_control_counter',
+    'amdsmi_get_tray_info', 'amdsmi_get_ttm_info',
+    'amdsmi_get_utilization_count', 'amdsmi_get_vcn_busy_percent',
+    'amdsmi_get_violation_status', 'amdsmi_get_xgmi_info',
+    'amdsmi_get_xgmi_plpd', 'amdsmi_gpu_block_t',
+    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_ras_policy_info_t', 'amdsmi_gpu_ras_policy_v4_0_t',
@@ -5465,7 +5747,10 @@ __all__ = \
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_compute_partition_mem_alloc_mode',
     'amdsmi_set_gpu_event_notification_mask',
-    'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',
+    'amdsmi_set_gpu_fabric_ppod_config',
+    'amdsmi_set_gpu_fabric_station_config',
+    'amdsmi_set_gpu_fabric_vpod_config', 'amdsmi_set_gpu_fan_speed',
+    'amdsmi_set_gpu_memory_partition',
     'amdsmi_set_gpu_memory_partition_mode',
     'amdsmi_set_gpu_od_clk_info', 'amdsmi_set_gpu_od_volt_info',
     'amdsmi_set_gpu_overdrive_level', 'amdsmi_set_gpu_pci_bandwidth',
@@ -5483,8 +5768,9 @@ __all__ = \
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',
     'amdsmi_topo_get_p2p_status', 'amdsmi_topology_nearest_t',
-    'amdsmi_ttm_info_t', 'amdsmi_uma_carveout_info_t',
-    'amdsmi_uma_carveout_option_t', 'amdsmi_utilization_counter_t',
+    'amdsmi_tray_info_t', 'amdsmi_ttm_info_t',
+    'amdsmi_uma_carveout_info_t', 'amdsmi_uma_carveout_option_t',
+    'amdsmi_utilization_counter_t',
     'amdsmi_utilization_counter_type_t', 'amdsmi_vbios_info_t',
     'amdsmi_version_t', 'amdsmi_violation_status_t',
     'amdsmi_virtualization_mode_t', 'amdsmi_voltage_metric_t',
@@ -5510,11 +5796,17 @@ __all__ = \
     'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',
-    'struct_amdsmi_fabric_label_t',
+    'struct_amdsmi_fabric_info_v2_t', 'struct_amdsmi_fabric_label_t',
+    'struct_amdsmi_fabric_ppod_config_t',
+    'struct_amdsmi_fabric_ppod_data_t',
+    'struct_amdsmi_fabric_station_config_t',
+    'struct_amdsmi_fabric_station_data_t',
     'struct_amdsmi_fabric_telemetry_dataset_t',
     'struct_amdsmi_fabric_telemetry_instance_t',
     'struct_amdsmi_fabric_telemetry_item_t',
     'struct_amdsmi_fabric_telemetry_t',
+    'struct_amdsmi_fabric_vpod_config_t',
+    'struct_amdsmi_fabric_vpod_data_t',
     'struct_amdsmi_freq_volt_region_t', 'struct_amdsmi_frequencies_t',
     'struct_amdsmi_frequency_range_t', 'struct_amdsmi_fw_info_t',
     'struct_amdsmi_gpu_cache_info_t', 'struct_amdsmi_gpu_metrics_t',
@@ -5548,8 +5840,8 @@ __all__ = \
     'struct_amdsmi_retired_page_record_t',
     'struct_amdsmi_smu_fw_version_t', 'struct_amdsmi_sock_info_t',
     'struct_amdsmi_temp_range_refresh_rate_t',
-    'struct_amdsmi_topology_nearest_t', 'struct_amdsmi_ttm_info_t',
-    'struct_amdsmi_uma_carveout_info_t',
+    'struct_amdsmi_topology_nearest_t', 'struct_amdsmi_tray_info_t',
+    'struct_amdsmi_ttm_info_t', 'struct_amdsmi_uma_carveout_info_t',
     'struct_amdsmi_uma_carveout_option_t',
     'struct_amdsmi_utilization_counter_t',
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',

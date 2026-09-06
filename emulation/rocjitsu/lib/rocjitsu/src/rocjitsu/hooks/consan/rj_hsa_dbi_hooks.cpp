@@ -13,7 +13,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_registry_lifecycle.h"
 
-#include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"

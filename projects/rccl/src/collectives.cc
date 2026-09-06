@@ -17,6 +17,7 @@
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "ce_coll.h"
@@ -425,6 +426,16 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclEnqueueCheck(&info);
     }
 #endif // ENABLE_ROCSHMEM
+#if defined(ENABLE_ROCSHMEM_GIN)
+    // GIN LSA/SDMA is checked before DDA on purpose, so an eligible call takes this path even below
+    // the DDA threshold. It measured at parity or better on small sizes.
+    if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
+           comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
+      NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
+      return ncclSuccess;
+    }
+#endif
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
     if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
                        kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {

@@ -7,7 +7,7 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/hooks/hsa_tool_lifetime.h"
 
-#include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/hooks/hsa_api_function_patch.h"
 #include "rocjitsu/hooks/hsa_code_object_file_snapshot.h"

@@ -7,8 +7,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"

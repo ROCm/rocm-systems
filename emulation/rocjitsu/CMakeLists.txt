@@ -448,11 +448,11 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 # simulator, KMD interposer, ROCR, hooks, and configuration subsystems so it is
 # safe for compiler processes that repeatedly load and unload it.
 set(_rj_waitcheck_sources
-    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/def_use_chain.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/gfx1250_vgpr_msb.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/indirect_branch_discovery.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rj_waitcheck.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/waitcheck.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/def_use_chain.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/gfx1250_vgpr_msb.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/indirect_branch_discovery.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/rj_waitcheck.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/waitcheck.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/amdgpu_code_object.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/amdgpu_kernel_metadata.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/basic_block.cpp
@@ -559,13 +559,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_waitcheck
         PRIVATE
             "LINKER:${_rj_waitcheck_linker_options}"
-            "LINKER:--version-script=${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rocjitsu_waitcheck.map"
+            "LINKER:--version-script=${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/rocjitsu_waitcheck.map"
     )
     set_target_properties(
         rocjitsu_waitcheck
         PROPERTIES
             LINK_DEPENDS
-                "${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rocjitsu_waitcheck.map"
+                "${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/rocjitsu_waitcheck.map"
     )
 endif()
 

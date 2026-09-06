@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/executable.h"
 
 #include <algorithm>

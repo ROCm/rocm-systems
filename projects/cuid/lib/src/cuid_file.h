@@ -4,25 +4,27 @@
 #ifndef CUID_FILE_H
 #define CUID_FILE_H
 
-#include "include/amd_cuid.h"
-#include "src/cuid_util.h"
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#include "include/amd_cuid.h"
+#include "src/cuid_util.h"
 
 /**
  * @brief Lock types for file operations
  */
 enum class CuidLockType {
-  SHARED,   ///< Shared lock for reading (multiple readers allowed)
-  EXCLUSIVE ///< Exclusive lock for writing (single writer, no readers)
+  SHARED,    ///< Shared lock for reading (multiple readers allowed)
+  EXCLUSIVE  ///< Exclusive lock for writing (single writer, no readers)
 };
 
 /**
@@ -48,7 +50,7 @@ enum class CuidLockType {
  *   if (lock.acquire()) { ... write operations ... }
  */
 class CuidFileLock {
-public:
+ public:
   /**
    * @brief Construct a file lock for the given CUID file path
    * @param file_path Path to the CUID file (lock file will be file_path +
@@ -56,7 +58,7 @@ public:
    * @param lock_type Type of lock to acquire (SHARED for read, EXCLUSIVE for
    * write)
    */
-  CuidFileLock(const std::string &file_path, CuidLockType lock_type);
+  CuidFileLock(const std::string& file_path, CuidLockType lock_type);
 
   /**
    * @brief Destructor - automatically releases the lock
@@ -64,10 +66,10 @@ public:
   ~CuidFileLock();
 
   // Non-copyable, non-movable (RAII resource)
-  CuidFileLock(const CuidFileLock &) = delete;
-  CuidFileLock &operator=(const CuidFileLock &) = delete;
-  CuidFileLock(CuidFileLock &&) = delete;
-  CuidFileLock &operator=(CuidFileLock &&) = delete;
+  CuidFileLock(const CuidFileLock&) = delete;
+  CuidFileLock& operator=(const CuidFileLock&) = delete;
+  CuidFileLock(CuidFileLock&&) = delete;
+  CuidFileLock& operator=(CuidFileLock&&) = delete;
 
   /**
    * @brief Acquire the lock (blocking)
@@ -104,9 +106,9 @@ public:
    * @brief Get the lock file path
    * @return Path to the lock file
    */
-  const std::string &get_lock_file_path() const { return lock_file_path_; }
+  const std::string& get_lock_file_path() const { return lock_file_path_; }
 
-private:
+ private:
   std::string lock_file_path_;
   CuidLockType lock_type_;
   int lock_fd_;
@@ -115,39 +117,36 @@ private:
 
 struct CuidFileEntry {
   amdcuid_device_type_t device_type;
-  uint32_t device_index = 0; // e.g., 0 for GPU:0, 1 for GPU:1
+  uint32_t device_index = 0;  // e.g., 0 for GPU:0, 1 for GPU:1
 
-  amdcuid_id_t primary_cuid; // Only available in privileged file
+  amdcuid_id_t primary_cuid;  // Only available in privileged file
   amdcuid_id_t derived_cuid;
 
-  uint64_t hardware_fingerprint = 0; // Only available in privileged file
+  uint64_t hardware_fingerprint = 0;  // Only available in privileged file
   uint16_t vendor_id = 0;
   uint16_t device_id = 0;
   uint8_t revision_id = 0;
 
   // Device-specific information
-  uint16_t family = 0;    // For CPU
-  uint16_t model = 0;     // For CPU
-  uint16_t pci_class = 0; // For PCIe devices (GPU, NIC)
-  uint16_t unit_id = std::numeric_limits<uint16_t>::max(); // For CPU and GPU
-  std::string device_node; // For GPU: /sys/class/drm/renderD128, NIC:
-                           // /sys/class/net/eth0
-  uint16_t package_id =
-      std::numeric_limits<uint16_t>::max(); // For CPU, aka physical id, akin to
-                                            // socket id
-  uint16_t core_id =
-      std::numeric_limits<uint16_t>::max(); // For CPU, aka core id within the
-                                            // package
-  std::string bdf;                          // PCIe Bus:Device.Function
-  std::string mac_address;                  // For NIC
+  uint16_t family = 0;                                      // For CPU
+  uint16_t model = 0;                                       // For CPU
+  uint16_t pci_class = 0;                                   // For PCIe devices (GPU, NIC)
+  uint16_t unit_id = std::numeric_limits<uint16_t>::max();  // For CPU and GPU
+  std::string device_node;  // For GPU: /sys/class/drm/renderD128, NIC:
+                            // /sys/class/net/eth0
+  uint16_t package_id = std::numeric_limits<uint16_t>::max();  // For CPU, aka physical id, akin to
+                                                               // socket id
+  uint16_t core_id = std::numeric_limits<uint16_t>::max();     // For CPU, aka core id within the
+                                                               // package
+  std::string bdf;                                             // PCIe Bus:Device.Function
+  std::string mac_address;                                     // For NIC
 
-  bool is_temporary = false; // Indicates if the CUID is temporary (not derived
-                             // from a true hardware fingerprint)
+  bool is_temporary = false;  // Indicates if the CUID is temporary (not derived
+                              // from a true hardware fingerprint)
 
-  time_t last_update; // Unix timestamp
+  time_t last_update;  // Unix timestamp
 
-  CuidFileEntry()
-      : device_type(AMDCUID_DEVICE_TYPE_NONE), device_index(0), last_update(0) {
+  CuidFileEntry() : device_type(AMDCUID_DEVICE_TYPE_NONE), device_index(0), last_update(0) {
     memset(primary_cuid.bytes, 0, sizeof(primary_cuid.bytes));
     memset(derived_cuid.bytes, 0, sizeof(derived_cuid.bytes));
   }
@@ -157,36 +156,33 @@ struct CuidFileEntry {
  * @brief CUID File handler for reading and writing device CUID information
  */
 class CuidFile {
-public:
+ public:
   /**
    * @brief Constructor
    * @param file_path Path to the CUID file (e.g., /tmp/cuid or /tmp/priv_cuid)
    * @param is_privileged Whether this is a privileged file (includes primary
    * CUIDs)
    */
-  CuidFile(const std::string &file_path, bool is_privileged = false);
+  CuidFile(const std::string& file_path, bool is_privileged = false);
 
   amdcuid_status_t load();
   amdcuid_status_t save();
-  amdcuid_status_t add_entry(const CuidFileEntry &entry);
-  amdcuid_status_t remove_entry(const amdcuid_id_t &handle);
+  amdcuid_status_t add_entry(const CuidFileEntry& entry);
+  amdcuid_status_t remove_entry(const amdcuid_id_t& handle);
 
-  const std::vector<CuidFileEntry> &get_entries() const { return entries_; }
+  const std::vector<CuidFileEntry>& get_entries() const { return entries_; }
 
-  amdcuid_status_t find_by_device_node(const std::string &device_node,
-                                       CuidFileEntry &entry) const;
-  amdcuid_status_t find_by_bdf(const std::string &bdf,
-                               CuidFileEntry &entry) const;
-  amdcuid_status_t find_by_package_id(uint16_t package_id,
-                                      CuidFileEntry &entry) const;
+  amdcuid_status_t find_by_device_node(const std::string& device_node, CuidFileEntry& entry) const;
+  amdcuid_status_t find_by_bdf(const std::string& bdf, CuidFileEntry& entry) const;
+  amdcuid_status_t find_by_package_id(uint16_t package_id, CuidFileEntry& entry) const;
   amdcuid_status_t find_by_device_type(amdcuid_device_type_t device_type,
-                                       CuidFileEntry &entry) const;
-  amdcuid_status_t find_by_derived_cuid(const amdcuid_id_t &derived_cuid,
-                                        CuidFileEntry &entry) const;
+                                       CuidFileEntry& entry) const;
+  amdcuid_status_t find_by_derived_cuid(const amdcuid_id_t& derived_cuid,
+                                        CuidFileEntry& entry) const;
 
   void clear() { entries_.clear(); }
   bool exists() const;
-  const std::string &get_file_path() const { return file_path_; }
+  const std::string& get_file_path() const { return file_path_; }
 
   /**
    * @brief Check if this is a privileged file
@@ -194,27 +190,27 @@ public:
   bool is_privileged() const { return is_privileged_; }
 
   // static utility to group entries by device type
-  void get_grouped_entries(std::map<amdcuid_device_type_t,
-                                    std::vector<CuidFileEntry>> &grouped) const;
+  void get_grouped_entries(
+      std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>>& grouped) const;
 
-private:
+ private:
   std::string file_path_;
   bool is_privileged_;
   std::vector<CuidFileEntry> entries_;
 
   // Helper functions
-  amdcuid_device_type_t string_to_device_type(const std::string &str) const;
-  amdcuid_id_t string_to_cuid(const std::string &str) const;
-  std::string trim(const std::string &str) const;
-  bool parse_section_header(const std::string &line,
-                            amdcuid_device_type_t &type, uint32_t &index) const;
+  amdcuid_device_type_t string_to_device_type(const std::string& str) const;
+  amdcuid_id_t string_to_cuid(const std::string& str) const;
+  std::string trim(const std::string& str) const;
+  bool parse_section_header(const std::string& line, amdcuid_device_type_t& type,
+                            uint32_t& index) const;
 };
 
 /**
  * @brief Utility class for generating CUID files from discovered devices
  */
 class CuidFileGenerator {
-public:
+ public:
   /**
    * @brief Generate unprivileged CUID file from device manager
    * @param devices Vector of discovered devices
@@ -223,8 +219,8 @@ public:
    * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
    */
   static amdcuid_status_t generate_unpriv_from_devices(
-      const std::vector<std::shared_ptr<class CuidDevice>> &devices,
-      const std::string &unprivileged_file = CuidUtilities::cuid_file());
+      const std::vector<std::shared_ptr<class CuidDevice>>& devices,
+      const std::string& unprivileged_file = CuidUtilities::cuid_file());
 
   /**
    * @brief Generate privileged CUID file from device manager
@@ -234,8 +230,8 @@ public:
    * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
    */
   static amdcuid_status_t generate_priv_from_devices(
-      const std::vector<std::shared_ptr<class CuidDevice>> &devices,
-      const std::string &privileged_file = CuidUtilities::priv_cuid_file());
+      const std::vector<std::shared_ptr<class CuidDevice>>& devices,
+      const std::string& privileged_file = CuidUtilities::priv_cuid_file());
 };
 
-#endif // CUID_FILE_H
+#endif  // CUID_FILE_H

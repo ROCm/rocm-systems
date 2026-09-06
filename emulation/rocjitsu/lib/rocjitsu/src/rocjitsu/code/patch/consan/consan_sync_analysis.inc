@@ -7,7 +7,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 
-#include "rocjitsu/analysis/kernel_scope.h"
+#include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"

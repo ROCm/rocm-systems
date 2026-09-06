@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_CODE_BASIC_BLOCK_H_
 #define ROCJITSU_CODE_BASIC_BLOCK_H_
 
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decode_result.h"

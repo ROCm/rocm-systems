@@ -41,8 +41,8 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>

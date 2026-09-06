@@ -23,6 +23,7 @@ from amdisa import (
     Rdna3Profile,
     Rdna3_5Profile,
     Rdna4Profile,
+    load_isa_variants,
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
@@ -74,6 +75,26 @@ def _group_isa_additions_args(entries: list[str] | None) -> dict[str, list[str]]
                 f'--isa-additions entry must have non-empty name and path, got: {entry}'
             )
         grouped.setdefault(name, []).append(xml_path)
+    return grouped
+
+
+def _group_isa_variant_args(entries: list[str] | None) -> dict[str, str]:
+    """Group one ``NAME:JSON`` variant manifest per logical ISA name."""
+    grouped: dict[str, str] = {}
+    for entry in entries or []:
+        if ':' not in entry:
+            raise ValueError(
+                f'--isa-variants entry must be name:json_path, got: {entry}'
+            )
+        name, json_path = entry.split(':', 1)
+        if not name or not json_path:
+            raise ValueError(
+                '--isa-variants entry must have non-empty name and path, '
+                f'got: {entry}'
+            )
+        if name in grouped:
+            raise ValueError(f'--isa-variants repeated for ISA {name!r}')
+        grouped[name] = json_path
     return grouped
 
 
@@ -212,6 +233,7 @@ def _run(args) -> None:
     """Parse the input XMLs and generate the requested outputs."""
     try:
         addition_xmls = _group_isa_additions_args(getattr(args, 'isa_additions', None))
+        variant_jsons = _group_isa_variant_args(getattr(args, 'isa_variants', None))
     except ValueError as error:
         print(f'error: {error}', file=sys.stderr)
         sys.exit(1)
@@ -235,11 +257,21 @@ def _run(args) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    unknown_variant_names = set(variant_jsons) - logical_names
+    if unknown_variant_names:
+        names = ', '.join(sorted(unknown_variant_names))
+        print(
+            f'error: --isa-variants names not present in ISA inputs: {names}',
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     specs = []
     for name, logical_name, xml_path, profile in parsed_inputs:
         spec = Parser(xml_path, profile, addition_xmls.get(logical_name, ())).parse()
         _apply_codegen_identity(spec, name)
+        if variant_path := variant_jsons.get(logical_name):
+            load_isa_variants(spec, variant_path)
         sem = derive_all_semantics(spec)
         specs.append((spec.arch_name, spec, sem))
 
@@ -360,6 +392,13 @@ def main() -> None:
         metavar='NAME:XML',
         help='apply an ISA additions XML file to the named ISA. May be repeated; '
         'files are applied in command-line order.',
+    )
+    arg_parser.add_argument(
+        '--isa-variants',
+        action='append',
+        default=[],
+        metavar='NAME:JSON',
+        help='attach one target-feature/legality manifest to the named ISA.',
     )
     arg_parser.add_argument(
         '--gen-isas',

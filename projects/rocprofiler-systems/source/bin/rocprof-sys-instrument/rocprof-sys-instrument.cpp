@@ -13,7 +13,7 @@
 #include "internal_libs.hpp"
 #include "log.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>

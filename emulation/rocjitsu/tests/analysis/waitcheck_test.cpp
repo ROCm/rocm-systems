@@ -3,8 +3,8 @@
 
 #include "../tools/waitcheck_fixture.h"
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
-#include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
