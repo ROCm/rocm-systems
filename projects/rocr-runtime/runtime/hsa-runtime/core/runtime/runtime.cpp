@@ -984,6 +984,10 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  if (!asyncSignals_.empty()) hsa_signal_handle((*asyncSignals_)->control.wake)->StoreRelease(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
