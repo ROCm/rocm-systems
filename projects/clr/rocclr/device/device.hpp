@@ -33,6 +33,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -1724,8 +1725,10 @@ class Device : public RuntimeObject {
     uint32_t num_grids;
     uint64_t prev_sum;
     uint64_t all_sum;
-    struct MGSyncData sgs;
-    uint num_wg;
+    uint32_t num_wg;
+    // 256 covers the largest cache line across supported GPUs, so the counter's
+    // atomics never share a line with the fields above.
+    alignas(256) struct MGSyncData sgs;
   };
 
   // Attributes that could be retrived from hsa_amd_memory_pool_link_info_t.
@@ -1771,6 +1774,14 @@ class Device : public RuntimeObject {
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
   static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
+  // The single-grid counter is placed on its own cache line so its device-scope
+  // atomic traffic does not evict the read-only fields sharing MGSyncInfo.
+  static constexpr size_t kSGSyncLineSize = 256;
+
+  static_assert(offsetof(MGSyncInfo, sgs) == 256,
+                "MGSyncInfo layout must match struct mg_info in device-libs cg.cl");
+  static_assert(sizeof(MGSyncInfo) == 512,
+                "MGSyncInfo layout must match struct mg_info in device-libs cg.cl");
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.

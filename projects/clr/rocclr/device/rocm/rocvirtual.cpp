@@ -4835,7 +4835,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           syncInfo->mgs = reinterpret_cast<Device::MGSyncData*>(
               dev().MGSync() + Device::kMGInfoSizePerDevice * vcmd->firstDevice());
         } else if (singleGridSync) {
-          syncInfo = reinterpret_cast<Device::MGSyncInfo*>(allocKernArg(Device::kSGInfoSize, 64));
+          // Align the allocation so the padded sgs field lands on its own cache line.
+          syncInfo = reinterpret_cast<Device::MGSyncInfo*>(
+              allocKernArg(Device::kSGInfoSize, Device::kSGSyncLineSize));
           syncInfo->mgs = nullptr;
         }
         if (multiGridSync || singleGridSync) {
