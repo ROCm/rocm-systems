@@ -37,6 +37,11 @@
 #include <unordered_set>
 #include <vector>
 
+namespace YAML
+{
+class Node;
+}
+
 namespace rocprofiler
 {
 namespace counters
@@ -132,6 +137,13 @@ setCustomCounterDefinition(const CustomCounterDefinition& def);
 
 bool
 has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
+
+/**
+ * Validate extra counter YAML structure
+ * Returns std::nullopt if valid, or error message if invalid
+ */
+std::optional<std::string>
+validateExtraCounterYAML(const YAML::Node& root);
 }  // namespace counters
 }  // namespace rocprofiler
 

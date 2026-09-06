@@ -36,3 +36,19 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc1-extra-counters)
+
+# Test that invalid YAML files cause rocprofv3 to fail with error
+foreach(invalid_yaml malformed missing_root missing_counters missing_name empty_arch
+                     no_event_expr event_no_block block_no_event)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-extra-counters-invalid-${invalid_yaml}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+            ${CMAKE_CURRENT_BINARY_DIR}/input.txt -E
+            ${CMAKE_CURRENT_BINARY_DIR}/invalid_${invalid_yaml}.yaml --
+            $<TARGET_FILE:vector-ops>
+        DEPENDS vector-ops COPY invalid_${invalid_yaml}.yaml
+        TIMEOUT 10
+        LABELS "integration-tests"
+        WILL_FAIL TRUE)
+endforeach()
