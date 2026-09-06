@@ -88,8 +88,11 @@ void dfs_reverse_post_order(const BasicBlock &start,
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-VGPR access properties into decoded instruction
-  // metadata so future ISA variants cannot bypass this completeness gate.
+  // TODO: Move indirect-access properties into decoded instruction metadata so
+  // future ISA variants cannot bypass this completeness gate. The scalar
+  // s_movrel* family displaces an SGPR index through M0 the same way and has no
+  // equivalent gate here, so consumers needing one scan mnemonics themselves
+  // (code/patch/probe_live_in.cpp).
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -161,9 +164,15 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  // The flag is inert when an ExecMaskAnalysis is supplied, which would silently
+  // give a caller that set it the conservative answer instead.
+  assert(!(exec && options.exec_masked_defs_kill) &&
+         "exec_masked_defs_kill has no effect alongside an ExecMaskAnalysis");
+  exec_masked_defs_kill_ = options.exec_masked_defs_kill;
   // Own the EXEC-state analysis; the backward dataflow is deferred to the first
   // query (ensure_analyzed), which consults it for kills. May be null: kills then
-  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill).
+  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill)
+  // unless exec_masked_defs_kill declared the scope runs under one mask.
   exec_ = std::move(exec);
   deferred_blocks_.assign(blocks.begin(), blocks.end());
   scoped_blocks_.reserve(blocks.size());
@@ -232,9 +241,12 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   }
 
   // Without an EXEC-state analysis, treat every program point as `Unknown` so
-  // kill_defs never promotes an EXEC-masked vector def to a kill.
+  // kill_defs never promotes an EXEC-masked vector def to a kill, unless the
+  // caller declared the whole scope runs under one mask (exec_masked_defs_kill).
   const auto exec_before = [this](const Instruction &inst) {
-    return exec_ ? exec_->before(inst) : ExecState::Unknown;
+    if (exec_)
+      return exec_->before(inst);
+    return exec_masked_defs_kill_ ? ExecState::Full : ExecState::Unknown;
   };
 
   const bool filter_live_before = restrict_live_before_to_instructions;

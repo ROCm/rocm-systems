@@ -2064,6 +2064,32 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
+// A probe reading v31 without defining it wants workitem_id_x, which only the
+// kernel's own entry prologue produces. Nothing in the instrumentation path
+// supplies it, so the site is rejected rather than silently handed whatever the
+// instrumented kernel left in v31.
+TEST(InstrumentorProbePatch, ProbeWithImplicitLiveInFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovV0FromV31, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v31"), std::string::npos)
+      << "error was: " << result.errors.front();
+  EXPECT_NE(result.errors.front().find("before defining it"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 // A probe call needs the kernel's SGPR allocation to bound temp selection. On a
 // descriptorless object that bound is unknown, so the call fails closed rather than
 // fall back to the device-wide default (which could pick temps past the allocation).
@@ -2220,8 +2246,11 @@ protected:
 
   // Patch a probe that clobbers one special register on a zero-scratch kernel
   // whose anchor (v_mov v3, v2) needs no spill, isolating the save/restore.
+  // The compare's vsrc1 is v0, so the body defines v0 before reading it. A probe
+  // that read v0 cold would be rejected as having an implicit live-in, which is
+  // a different gate than the special-state preservation under test here.
   std::vector<uint32_t> patch_probe_clobbering(uint32_t probe_clobber_word) {
-    Caved c = patch_spill({kMovV3V2, endpgm()}, {probe_clobber_word, setpc()},
+    Caved c = patch_spill({kMovV3V2, endpgm()}, {kMovV0Zero, probe_clobber_word, setpc()},
                           /*private_bytes=*/0);
     EXPECT_EQ(c.scratch, 0u) << "special-state preservation needs no scratch";
     return c.cave;
@@ -2595,37 +2624,40 @@ TEST_F(Rdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at
 // even for a probe whose special-state write the summary might miss. The VOPC
 // encodings are arch-specific single words, so each test passes its own.
 TEST_F(Cdna3ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Cdna3ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7C940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7C940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }
