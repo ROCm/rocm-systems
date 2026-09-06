@@ -38,6 +38,55 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
+  auto replacement = std::make_shared<InterruptCallbackState>(std::move(cb));
+  std::vector<std::shared_ptr<InterruptCallbackState>> retired;
+  {
+    std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+    retired_interrupt_cb_states_.push_back(
+        std::exchange(interrupt_cb_state_, std::move(replacement)));
+    retired = retired_interrupt_cb_states_;
+  }
+  const bool reentrant = std::any_of(retired.begin(), retired.end(), [](const auto &state) {
+    std::lock_guard<std::mutex> state_lock(state->mutex);
+    return state->calls_by_thread.contains(std::this_thread::get_id());
+  });
+  if (!reentrant) {
+    if (interrupt_callback_drain_hook_for_testing_)
+      interrupt_callback_drain_hook_for_testing_();
+    for (const auto &state : retired) {
+      std::unique_lock<std::mutex> state_lock(state->mutex);
+      state->cv.wait(state_lock, [&state] { return state->active_calls == 0; });
+    }
+  }
+  prune_retired_interrupt_callbacks();
+}
+
+CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_callback() {
+  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+  auto state = interrupt_cb_state_;
+  if (!state->callback)
+    return {};
+  std::lock_guard<std::mutex> state_lock(state->mutex);
+  const std::thread::id thread_id = std::this_thread::get_id();
+  ++state->active_calls;
+  ++state->calls_by_thread[thread_id];
+  return InterruptCallbackLease(this, std::move(state), thread_id);
+}
+
+void CommandProcessor::invoke_interrupt_callback(uint32_t process_id, uint32_t event_id) {
+  if (auto interrupt = acquire_interrupt_callback())
+    interrupt(process_id, event_id);
+}
+
+void CommandProcessor::prune_retired_interrupt_callbacks() {
+  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+  std::erase_if(retired_interrupt_cb_states_, [](const auto &state) {
+    std::lock_guard<std::mutex> state_lock(state->mutex);
+    return state->active_calls == 0;
+  });
+}
+
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
@@ -554,8 +603,9 @@ void CommandProcessor::startup() {
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
-  if (interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
+  completion_->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
+    invoke_interrupt_callback(process_id, event_id);
+  });
 }
 
 void CommandProcessor::shutdown() {
@@ -780,7 +830,7 @@ void CommandProcessor::register_queue(HwQueue queue) {
 }
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                              uint64_t status) {
+                                              uint64_t status, bool publish_interrupt) {
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   {
@@ -790,28 +840,47 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
     });
     if (queue == hw_queues_.end() || queue->exception_status_va == 0)
       return false;
+    queue->exception_suspended = true;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
   }
-
-  memory_->write64(exception_status_va, status, process_id);
-  if (interrupt_cb_)
-    interrupt_cb_(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-  while (memory_->read64(exception_status_va, process_id) == status &&
-         std::chrono::steady_clock::now() < deadline)
-    std::this_thread::yield();
 
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
-        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+        if (!wave->is_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id) {
+          wave->set_fatal_exception_pending(true);
           wave->set_debug_suspended(true);
+        }
       }
     });
   }
+  if (!publish_interrupt)
+    return true;
+
+  const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
+  memory_->write64(exception_status_va, combined_status, process_id);
+  invoke_interrupt_callback(process_id, exception_event_id);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (memory_->read64(exception_status_va, process_id) == combined_status &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
   return true;
+}
+
+uint64_t CommandProcessor::read_process_memory64(uint64_t address, uint32_t process_id) const {
+  if (!memory_)
+    return 0;
+  uint64_t value = 0;
+  // The exact read covers page-table mappings, local identity mappings, and
+  // daemon client-memory access without fabricating a partial record. Gating
+  // this with is_fetchable() rejects ROCr's local host-backed CWSR header for a
+  // nonzero VMID before the passthrough path gets a chance to read it.
+  const auto bytes = std::span<uint8_t>(reinterpret_cast<uint8_t *>(&value), sizeof(value));
+  return memory_->read_block_exact(address, bytes, process_id) == AccessOutcome::Complete ? value
+                                                                                          : 0;
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
@@ -897,7 +966,7 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
         // here while the debugger still holds the gate would leave the later
         // debugger resume with nothing to release, and the already-fetched
         // packets would sit until an unrelated doorbell arrived.
-        if (changed && !suspended && !q.debug_suspended)
+        if (changed && !suspended && !q.debug_suspended && !q.exception_suspended)
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
@@ -952,7 +1021,7 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
-        } else if (!q.runtime_suspended) {
+        } else if (!q.runtime_suspended && !q.exception_suspended) {
           wake_command_processor |= std::exchange(q.debug_work_deferred, false);
         }
       }
@@ -1128,11 +1197,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     // signal. Re-broadcasting every ~10ms ensures late-created events see
     // the idle state within a bounded window.
     if (poll_count % 100 == 0) {
-      // Snapshot the idle queues' process ids under the lock, then fire interrupt_cb_
-      // OUTSIDE it. interrupt_cb_ is an external KFD-layer callback whose internal
-      // locking is opaque to the CP; invoking it while holding hw_queue_mutex_ risks a
-      // lock-order inversion if that callback ever takes a lock held elsewhere while
-      // acquiring hw_queue_mutex_.
+      // Snapshot the idle queues and interrupt callback under their respective
+      // locks, then invoke the external KFD-layer callback outside both. Its
+      // internal locking is opaque to the CP.
       std::vector<uint32_t> idle_pids;
       {
         std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
@@ -1146,9 +1213,8 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
             idle_pids.push_back(hw_queues_[i].process_id);
         }
       }
-      if (interrupt_cb_)
-        for (uint32_t pid : idle_pids)
-          interrupt_cb_(pid, 0);
+      for (uint32_t pid : idle_pids)
+        invoke_interrupt_callback(pid, 0);
     }
 
     if (poll_count % 5000 == 1) {
@@ -1182,8 +1248,7 @@ HwQueueState *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < new_queue_states_.size(); ++i) {
     size_t idx = (start + i) % new_queue_states_.size();
     auto &qs = new_queue_states_[idx];
-    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
-        hw_queues_[idx].runtime_suspended)
+    if (hw_queues_[idx].is_sdma || hw_queues_[idx].suspended())
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % new_queue_states_.size();
@@ -1734,7 +1799,7 @@ void CommandProcessor::on_cu_idle() {
   // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1762,7 +1827,7 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     if (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1794,8 +1859,7 @@ bool CommandProcessor::step() {
 
 void CommandProcessor::process_queues() {
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-        hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].is_sdma || hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -2190,7 +2254,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
-  if (queue.debug_suspended || queue.runtime_suspended) {
+  if (queue.suspended()) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
@@ -2541,10 +2605,6 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   for (size_t i = 0; i < hw_queues_.size(); ++i)
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
 
-  // Ensure interrupt callback is set on completion tracker.
-  if (completion_ && interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
-
   size_t entries_after = 0;
   for (auto &qs : new_queue_states_)
     entries_after += qs.entries.size();
@@ -2566,8 +2626,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     progress = false;
 
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-          hw_queues_[qi].runtime_suspended)
+      if (hw_queues_[qi].is_sdma || hw_queues_[qi].suspended())
         continue;
       auto &qs = new_queue_states_[qi];
 
@@ -2666,7 +2725,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
   // Process any new non-kernel entries (barrier-kind packets).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -3192,8 +3251,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     case sdma::OP_TRAP: {
       uint32_t event_id = dw(1) & 0x0FFFFFFF;
-      if (interrupt_cb_)
-        interrupt_cb_(queue.process_id, event_id);
+      invoke_interrupt_callback(queue.process_id, event_id);
       pkt_dwords = sdma::TRAP_SIZE;
       break;
     }
@@ -3289,7 +3347,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // that can refuse has to be settled BEFORE the decrement: once the
         // value drops, the waiter may already have observed it, and faulting
         // afterwards leaves a signal that fired with no notification behind it.
-        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt_cb_;
+        auto interrupt = acquire_interrupt_callback();
+        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt;
         uint64_t sig_base = addr_va - 8; // Signal layout: value at offset 8.
         uint64_t mailbox_ptr = 0;
         uint32_t event_id = 0;
@@ -3335,7 +3394,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
           // Zero means the id was never read, not "wake everything".
           if (event_id != 0)
-            interrupt_cb_(queue.process_id, event_id);
+            interrupt(queue.process_id, event_id);
           else
             util::Logger::vm("SDMA: signal at 0x", std::hex, sig_base, std::dec,
                              " has no event id; not broadcasting");

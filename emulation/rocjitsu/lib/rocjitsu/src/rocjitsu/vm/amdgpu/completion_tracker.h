@@ -44,6 +44,12 @@ public:
   }
   void set_grid_retired_callback(GridRetiredCallback cb) { grid_retired_cb_ = std::move(cb); }
 
+  /// @brief Exercise the configured interrupt sink without constructing a dispatch.
+  void invoke_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
+    if (interrupt_cb_)
+      interrupt_cb_(process_id, event_id);
+  }
+
   /// @brief Notify that a workgroup has completed all its wavefronts.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id, std::vector<HwQueueState> &queues);
 

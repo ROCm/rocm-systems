@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -83,6 +84,10 @@ struct HwQueue {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
+  bool exception_suspended = false;
+  [[nodiscard]] bool suspended() const {
+    return debug_suspended || runtime_suspended || exception_suspended;
+  }
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
@@ -154,7 +159,12 @@ public:
   void set_doorbell_base(uint32_t process_id, void *base);
 
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
-  void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
+  /// @brief Replace the interrupt sink and drain callbacks from older generations.
+  /// @details External replacement is a quiescence point: once this returns, no
+  /// worker can retain or invoke an older callback. Reentrant replacement only
+  /// publishes the new generation; a later external replacement drains all
+  /// retained generations after the invoking callback unwinds.
+  void set_interrupt_callback(InterruptCallback cb);
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
   void set_scratch_backing_resolver(ScratchBackingResolver cb) {
@@ -206,12 +216,9 @@ public:
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                     uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
-  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const {
-    return memory_ && memory_->is_fetchable(address, process_id)
-               ? memory_->read64(address, process_id)
-               : 0;
-  }
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool publish_interrupt = true);
+  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const;
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -369,12 +376,82 @@ public:
     return queue != hw_queues_.end() && queue->runtime_suspended;
   }
 
+  [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->exception_suspended;
+  }
+
   /// @brief Test-only count of executed command-processor doorbell passes.
   [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
     return doorbell_handle_count_.load(std::memory_order_relaxed);
   }
 
+  /// @brief Exercise the synchronized interrupt path without constructing a queue.
+  void invoke_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
+    invoke_interrupt_callback(process_id, event_id);
+  }
+  /// @brief Exercise CompletionTracker's forwarding path after startup.
+  void invoke_completion_interrupt_callback_for_test(uint32_t process_id, uint32_t event_id) {
+    assert(completion_ != nullptr);
+    completion_->invoke_interrupt_callback_for_test(process_id, event_id);
+  }
+  /// @brief Observe an external callback replacement immediately before it drains.
+  /// @details Tests must install this hook before starting the replacing thread.
+  void set_interrupt_callback_drain_hook_for_testing(std::function<void()> hook) {
+    interrupt_callback_drain_hook_for_testing_ = std::move(hook);
+  }
+
 private:
+  struct InterruptCallbackState {
+    explicit InterruptCallbackState(InterruptCallback callback = {})
+        : callback(std::move(callback)) {}
+
+    InterruptCallback callback;
+    std::mutex mutex;
+    std::condition_variable cv;
+    size_t active_calls = 0;
+    std::unordered_map<std::thread::id, size_t> calls_by_thread;
+  };
+
+  class InterruptCallbackLease {
+  public:
+    InterruptCallbackLease() = default;
+    InterruptCallbackLease(CommandProcessor *owner, std::shared_ptr<InterruptCallbackState> state,
+                           std::thread::id thread_id)
+        : owner_(owner), state_(std::move(state)), thread_id_(thread_id) {}
+    InterruptCallbackLease(const InterruptCallbackLease &) = delete;
+    InterruptCallbackLease &operator=(const InterruptCallbackLease &) = delete;
+    InterruptCallbackLease(InterruptCallbackLease &&other) noexcept
+        : owner_(std::exchange(other.owner_, nullptr)), state_(std::move(other.state_)),
+          thread_id_(other.thread_id_) {}
+    ~InterruptCallbackLease() {
+      if (!state_)
+        return;
+      {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        --state_->active_calls;
+        auto calls = state_->calls_by_thread.find(thread_id_);
+        if (--calls->second == 0)
+          state_->calls_by_thread.erase(calls);
+        state_->cv.notify_all();
+      }
+      owner_->prune_retired_interrupt_callbacks();
+    }
+
+    explicit operator bool() const { return static_cast<bool>(state_); }
+    void operator()(uint32_t process_id, uint32_t event_id) const {
+      state_->callback(process_id, event_id);
+    }
+
+  private:
+    CommandProcessor *owner_ = nullptr;
+    std::shared_ptr<InterruptCallbackState> state_;
+    std::thread::id thread_id_;
+  };
+
   struct ClusterWorkgroupPlacement;
   struct ClusterBarrierState;
 
@@ -699,8 +776,21 @@ private:
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
   void ensure_doorbell_monitor();
   bool scan_doorbells();
+  [[nodiscard]] InterruptCallbackLease acquire_interrupt_callback();
+  void invoke_interrupt_callback(uint32_t process_id, uint32_t event_id);
+  void prune_retired_interrupt_callbacks();
 
-  InterruptCallback interrupt_cb_;
+  /// @brief Guards the current generation of the external interrupt callback.
+  /// @details Callers lease one immutable generation under this leaf mutex and
+  /// invoke it after unlocking. Replacement publishes its new generation first.
+  /// External replacement then drains every retained older generation; reentrant
+  /// replacement cannot wait for its own lease, so it leaves retirement to a
+  /// later external replacement or to the final lease release.
+  std::mutex interrupt_cb_mutex_;
+  std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
+      std::make_shared<InterruptCallbackState>();
+  std::vector<std::shared_ptr<InterruptCallbackState>> retired_interrupt_cb_states_;
+  std::function<void()> interrupt_callback_drain_hook_for_testing_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;

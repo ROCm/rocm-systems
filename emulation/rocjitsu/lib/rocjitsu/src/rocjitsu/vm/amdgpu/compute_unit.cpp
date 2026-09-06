@@ -35,8 +35,7 @@ namespace rocjitsu {
 namespace amdgpu {
 bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
                                                         uint64_t status) {
-  auto *cp = raw_cu().command_processor();
-  return cp && cp->signal_queue_exception(queue_id, process_id, status);
+  return raw_cu().defer_queue_exception(queue_id, process_id, status);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -287,22 +286,30 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   wf.reset();
 }
 
-void ComputeUnitCore::flush_wg_completions() {
+void ComputeUnitCore::flush_cp_notifications() {
   // Loops because a notification can retire more work and queue another
-  // completion behind it; draining to empty keeps that from waiting for whatever
+  // notification behind it; draining to empty keeps that from waiting for whatever
   // takes the wave-state lock next.
   for (;;) {
+    std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_wg_completions_.empty())
+      if (pending_queue_exceptions_.empty() && pending_wg_completions_.empty())
         return;
+      exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
     }
     // The lock is released here, so taking hw_queue_mutex_ below cannot invert
     // against the CP's dispatch path.
     if (!cp_)
       return;
+    for (const auto &exception : exceptions) {
+      if (queue_exception_handler_)
+        queue_exception_handler_(exception.queue_id, exception.process_id, exception.status);
+      else
+        cp_->signal_queue_exception(exception.queue_id, exception.process_id, exception.status);
+    }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
@@ -853,6 +860,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
+        active->clear_trap_queue_exception_status();
         // A fresh handler entry owns the halt state from here on; a marker left
         // over from a previous stop would attribute this entry's HALT to an
         // s_sendmsghalt that has already been resumed past.
