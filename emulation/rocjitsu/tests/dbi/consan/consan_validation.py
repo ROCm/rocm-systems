@@ -1922,6 +1922,15 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,
         },
+        # Decode and combined each retain an exact measured oracle. Their
+        # instrumented warmups merely repeat the same complete execution and
+        # make the two-mode process exceed its bound under Record/Replay.
+        # Measured-only production-cadence runs complete in about 149 and 131
+        # seconds respectively, so preserve both modes with a bounded margin.
+        "tp1-decode-combined": {
+            "sharktank_skip_warmup": True,
+            "run_timeout_seconds": 360,
+        },
         # Running all three TP2 modes in one instrumented process retains two
         # 252-MB rank report buffers across independent model lifecycles and
         # exceeds the emulator bound. Keep the reviewed family fault on
