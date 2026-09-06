@@ -16,6 +16,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
+#include <set>
 
 #include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 
@@ -89,6 +90,15 @@ struct PlaybackContext {
 
     // Code-object modules loaded by hash (not by recorded module handle)
     std::unordered_map<std::string, hipModule_t> co_modules;
+
+    // Fat binaries that carry no device code for the replay GPU, by blob hash.
+    // A process registers every fat binary its shared libraries contain, not
+    // just the ones it can run: a CDNA capture of a CK-linked app still
+    // registers CK's RDNA-only WMMA instances. The capturing runtime never
+    // notices, because registration does not extract device code — only an
+    // eager load does. Remembering them keeps the load from being retried, and
+    // re-reported, on every repeat registration of the same binary.
+    std::set<std::string> co_no_device_code;
 
     // Kernel function cache: mangled name -> resolved hipFunction_t.
     // Populated on first launch of each kernel; avoids repeated hipModuleGetFunction

@@ -655,6 +655,109 @@ hipError_t capture_hipMemcpyWithStream(void* dst, const void* src,
 // Module shims
 // ---------------------------------------------------------------------------
 
+// Is this buffer something hipModuleLoadData can load at replay?
+//
+// amd::Program::binary() hands back a bare pointer and length with no promise
+// the memory is still the program's own. A code object whose buffer the
+// runtime has already released reads back as whatever the allocator put there
+// next, at exactly the recorded length, and nothing downstream notices: the
+// bytes hash cleanly, land in code_objects/, and only fail at replay with
+// "device kernel image is invalid" (HIP 200). Checking the magic turns that
+// into a capture-time warning and a launch that resolves by name instead.
+static bool image_looks_loadable(const void* data, size_t size) {
+  if (!data || size < 8) return false;
+  const auto* p = static_cast<const char*>(data);
+  if (std::memcmp(p, "\x7f" "ELF", 4) == 0) return true;
+  if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
+                  hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0)
+    return true;
+  if (size >= hip::symbols::kOffloadBundleUncompressedMagicStrSize - 1 &&
+      std::memcmp(p, hip::symbols::kOffloadBundleUncompressedMagicStr,
+                  hip::symbols::kOffloadBundleUncompressedMagicStrSize - 1) == 0)
+    return true;
+  return false;
+}
+
+// Hash of the code object behind an amd::Program, recorded once and reused.
+//
+// Keyed by program because a launch has to name the same bytes the module load
+// recorded: Triton/inductor emits the generic entry symbol "triton_" from
+// dozens of distinct code objects, so name-only resolution at replay binds
+// every "triton_" launch to one arbitrary kernel and faults (HIP error 719).
+//
+// The cache is also what keeps the read *timely*. Populating it lazily at first
+// launch meant re-reading binary() long after the module was built, which is
+// where the stale-buffer problem above showed up in practice — an inductor
+// module's 6.5 KB code object came back as Triton MLIR source text. Module load
+// seeds the cache now, so the launch path only re-reads for programs that were
+// never loaded through a module shim (fat binaries registered at static init).
+//
+// An entry records which image it hashed, not just the hash, because an
+// amd::Program is freed when its module is unloaded and the next one can land
+// on the same address — inductor churns through modules, so this happens. A
+// hash keyed on the address alone then hands the later program the earlier
+// one's code object, and its launches resolve to nothing at replay ("not found
+// in any loaded module"). Comparing the image pointer and length settles it
+// without dereferencing either.
+struct ProgramCodeObject {
+  const void*      image;
+  size_t           size;
+  hrr_cap::Hash128 hash;
+};
+// g_prog_hash_mu guards g_prog_hash *and* every call HRR makes into
+// amd::Program::binary(). The latter is `return binary_[&device];` — a
+// non-const, inserting std::unordered_map::operator[] that the runtime does
+// not lock. Reading a span is therefore a write as far as binary_ is
+// concerned: the first read for a device the program was not built for
+// inserts an empty entry and can rehash the bucket array. Two capture threads
+// launching kernels from the same program would otherwise do that
+// concurrently. Serializing HRR's reads here keeps us off that path.
+static std::mutex g_prog_hash_mu;
+static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
+
+// Fetch a program's device binary as (pointer, length) without touching it.
+// Caller must hold g_prog_hash_mu.
+static void program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
+  data = nullptr;
+  size = 0;
+  if (!prog) return;
+  const int dev = hip::ihipGetDevice();
+  const amd::Device* device = hip::g_devices[dev]->devices()[0];
+  const auto& bin = prog->binary(*device);
+  data = std::get<0>(bin);
+  size = std::get<1>(bin).first;
+}
+
+static void program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+  program_binary_span_locked(prog, data, size);
+}
+
+static void remember_program_hash(const amd::Program* prog, const void* image, size_t size,
+                                  hrr_cap::Hash128 h) {
+  if (!prog) return;
+  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+  g_prog_hash[prog] = ProgramCodeObject{image, size, h};
+}
+
+// Hash an already-read device binary span, refusing anything that does not
+// look like a loadable image. Returns {0,0} when there is nothing safe to
+// record. Takes the span rather than re-reading it so callers that already
+// have one do not go back through amd::Program::binary(); must not be called
+// with g_prog_hash_mu held (write_code_object takes the writer locks).
+static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8_t* data,
+                                           size_t size) {
+  if (!data || !size) return {0, 0};
+  if (!image_looks_loadable(data, size)) {
+    LogPrintfWarning("[HRR capture] program %p: %llu bytes at %p are not a loadable image"
+                     " (no ELF/bundle magic) — not recording a code object for it;"
+                     " launches will resolve by kernel name",
+                     (const void*)prog, (unsigned long long)size, (const void*)data);
+    return {0, 0};
+  }
+  return hrr_cap::writer::write_code_object(data, size);
+}
+
 // Helper: get the actual device binary from a successfully loaded hipModule_t.
 // The caller passes an in-memory image (which may be a fat binary bundle, not
 // a raw ELF).  The runtime unbundles/extracts the device ELF internally and
@@ -663,47 +766,34 @@ hipError_t capture_hipMemcpyWithStream(void* dst, const void* src,
 static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   amd::Program* prog = as_amd(reinterpret_cast<cl_program>(module));
   if (!prog) return {0, 0};
-  const int dev = hip::ihipGetDevice();
-  const amd::Device* device = hip::g_devices[dev]->devices()[0];
-  const auto& bin = prog->binary(*device);
-  const uint8_t* data = std::get<0>(bin);
-  const size_t   size = std::get<1>(bin).first;
-  if (!data || !size) return {0, 0};
-  return hrr_cap::writer::write_code_object(data, size);
+  const uint8_t* image = nullptr;
+  size_t size = 0;
+  program_binary_span(prog, image, size);
+  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
+  remember_program_hash(prog, image, size, h);
+  return h;
 }
-
-// Code-object hash for a launched kernel, derived from its owning amd::Program's
-// device binary — the SAME bytes hashed by write_module_code_object() at module
-// load — so replay can resolve the launch to the exact recorded code object.
-//
-// This is the fix for non-unique kernel names: Triton/inductor emits the generic
-// entry symbol "triton_" from dozens of distinct code objects, so name-only
-// resolution at replay binds every "triton_" launch to one arbitrary kernel and
-// faults (HIP error 719). Recording the hash disambiguates them.
-//
-// Hashing is per-program (cached), so we pay it once per code object rather than
-// on every one of millions of launches.
-static std::mutex g_prog_hash_mu;
-static std::unordered_map<const amd::Program*, hrr_cap::Hash128> g_prog_hash;
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   if (!kernel) return {0, 0};
   amd::Program* prog = &kernel->program();
   if (!prog) return {0, 0};
+  const uint8_t* image = nullptr;
+  size_t size = 0;
+  // One critical section for the span read and the lookup: the span read is
+  // the part that must not race (see g_prog_hash_mu above), and folding the
+  // lookup in costs nothing since we hold the lock anyway.
   {
     std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+    program_binary_span_locked(prog, image, size);
     auto it = g_prog_hash.find(prog);
-    if (it != g_prog_hash.end()) return it->second;
+    if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
+      return it->second.hash;
   }
-  hrr_cap::Hash128 h{0, 0};
-  const int dev = hip::ihipGetDevice();
-  const amd::Device* device = hip::g_devices[dev]->devices()[0];
-  const auto& bin = prog->binary(*device);
-  const uint8_t* data = std::get<0>(bin);
-  const size_t   size = std::get<1>(bin).first;
-  if (data && size) h = hrr_cap::writer::write_code_object(data, size);
-  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-  g_prog_hash[prog] = h;
+  // Miss. Hash outside the lock — write_code_object takes the writer's own
+  // locks, and hashing the same image twice is harmless (content-addressed).
+  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
+  remember_program_hash(prog, image, size, h);
   return h;
 }
 
@@ -765,6 +855,14 @@ hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
         }
         fclose(fh);
       }
+    }
+    // Seed the launch-path cache with the file bytes, so a kernel from this
+    // module never falls back to re-reading the program's binary later.
+    if (amd::Program* prog = as_amd(reinterpret_cast<cl_program>(*module))) {
+      const uint8_t* image = nullptr;
+      size_t size = 0;
+      program_binary_span(prog, image, size);
+      remember_program_hash(prog, image, size, h);
     }
     hrr_args_hipModuleLoad a{};
     a.ret        = static_cast<int32_t>(r);
