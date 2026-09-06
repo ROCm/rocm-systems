@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # AMD's custom query pack (amd-sit-sast-scv/cpp-queries) ships inside this bundle --
       # no GHCR login or token needed to pull it.
@@ -104,7 +104,7 @@ jobs:
             --output=sarif-results/cpp.sarif
       # Upload SARIF to GitHub Security > Code scanning alerts tab
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           sarif_file: sarif-results/cpp.sarif
           category: "/language:${{ matrix.language }}"

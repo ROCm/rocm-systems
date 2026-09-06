@@ -77,7 +77,7 @@ jobs:
       gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -95,7 +95,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-systems/.github
 
@@ -168,7 +168,7 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
