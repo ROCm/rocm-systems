@@ -18,6 +18,7 @@
 #include "vdi_common.hpp"
 #include "device/comgrctx.hpp"
 #include "device/devhostcall.hpp"
+#include "device/devrpc.hpp"
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/rocvirtual.hpp"
@@ -218,6 +219,7 @@ Device::~Device() {
   // This guards OCL teardown; for HIP the drain already ran via RuntimeTearDown,
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
+  destroyRpcBuffer();
 
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
@@ -4427,6 +4429,7 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
+    dev->flushRpc();
     std::string hostnameStr = GetLocalHostName();
     std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
     std::string kernelName;
@@ -4568,11 +4571,122 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
 }
 
 // ================================================================================================
+void* Device::getOrCreateRpcBuffer() {
+  amd::ScopedLock l(active_queue_access_);
+
+  if (void* existing = rpcBuffer_.load(std::memory_order_acquire)) return existing;
+
+  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
+  rpcPortCount_ = static_cast<uint32_t>(
+      std::min(static_cast<uint64_t>(info().maxComputeUnits_ * wavesPerCu), amd::kMaxRpcPortCount));
+
+  auto size = amd::getRpcBufferSize(info().wavefrontWidth_, rpcPortCount_);
+
+  void* buffer = context().svmAlloc(size, 64, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
+  if (!buffer) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to allocate RPC buffer for device %p", this);
+    return nullptr;
+  }
+  std::memset(buffer, 0, size);
+
+  if (!amd::enableRpc(*this, buffer, rpcPortCount_)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to enable RPC for device %p", this);
+    context().svmFree(buffer);
+    return nullptr;
+  }
+
+  rpcBuffer_.store(buffer, std::memory_order_release);
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created RPC buffer %p (ports=%u, size=%zu) for device %p",
+          buffer, rpcPortCount_, size, this);
+  return buffer;
+}
+
+// ================================================================================================
+bool Device::initRpcForProgram(hsa_executable_t executable) {
+  if (!amd::rpcAvailable()) return true;
+
+  hsa_agent_t agent = getBackendDevice();
+  hsa_executable_symbol_t rpc_symbol;
+
+  // Exit early if the program does not require an RPC server.
+  hsa_status_t status =
+      Hsa::executable_get_symbol_by_name(executable, "__llvm_rpc_client", &agent, &rpc_symbol);
+  if (status != HSA_STATUS_SUCCESS) {
+    return true;
+  }
+
+  hsa_symbol_kind_t sym_type;
+  status = Hsa::executable_symbol_get_info(rpc_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &sym_type);
+  if (status != HSA_STATUS_SUCCESS || sym_type != HSA_SYMBOL_KIND_VARIABLE) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: __llvm_rpc_client is not a variable symbol");
+    return false;
+  }
+
+  size_t sym_size = 0;
+  status = Hsa::executable_symbol_get_info(rpc_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE,
+                                           &sym_size);
+  if (status != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to get __llvm_rpc_client size");
+    return false;
+  }
+
+  if (sym_size != amd::getRpcClientSize()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Invalid size of __llvm_rpc_client");
+    return false;
+  }
+
+  void* sym_addr = nullptr;
+  status = Hsa::executable_symbol_get_info(rpc_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS,
+                                           &sym_addr);
+  if (status != HSA_STATUS_SUCCESS || !sym_addr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to get __llvm_rpc_client address");
+    return false;
+  }
+
+  void* buffer = getOrCreateRpcBuffer();
+  if (!buffer) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to create RPC buffer for device");
+    return false;
+  }
+  auto client_staging = std::make_unique<char[]>(amd::getRpcClientSize());
+  amd::initRpcClient(client_staging.get(), buffer, rpcPortCount_);
+
+  status = Hsa::memory_copy(sym_addr, client_staging.get(), sym_size);
+  if (status != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "RPC: Failed to copy RPC client to device symbol");
+    return false;
+  }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "RPC: Initialized __llvm_rpc_client at device %p (sym_addr=%p, ports=%u)", sym_addr,
+          buffer, rpcPortCount_);
+  return true;
+}
+
+// ================================================================================================
 void Device::DestroyExtSemaphore(void* extSemaphore) {
   if (extSemaphore == nullptr) return;
   auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
   hsa_amd_external_semaphore_handle_close(*holder);
   delete holder;
+}
+
+// ================================================================================================
+void Device::flushRpc() {
+  if (void* buffer = rpcBuffer_.load(std::memory_order_acquire)) {
+    amd::flushRpc(buffer);
+  }
+}
+
+void Device::destroyRpcBuffer() {
+  if (void* buffer = rpcBuffer_.load(std::memory_order_acquire)) {
+    // Drain any reports the device pushed before we release the buffer.
+    amd::flushRpc(buffer);
+    amd::disableRpc(buffer);
+    context().svmFree(buffer);
+    rpcBuffer_.store(nullptr, std::memory_order_release);
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Destroyed RPC buffer for device %p", this);
+  }
 }
 
 }  // namespace amd::roc
