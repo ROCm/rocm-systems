@@ -38,6 +38,11 @@ struct Fallback : public Backend {
                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
                   std::shared_ptr<IStream> stream) override;
 
+    void enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
+                        size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+                        ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
+                        std::shared_ptr<AsyncFailoverState> failover) override;
+
     // Once we can import gtest.h and make test suites or test friends everything
     // below here should be made protected.
     ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
@@ -56,4 +61,5 @@ extern "C" {
 void async_io_bind_params(void *userargs);
 void async_io_cpu_copy(void *userargs);
 void async_io_advance(void *userargs);
+void async_failover_gate(void *userargs);
 }
