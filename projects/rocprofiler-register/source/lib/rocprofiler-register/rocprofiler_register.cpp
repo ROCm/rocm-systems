@@ -461,8 +461,33 @@ struct rocp_scan_data
 
 auto existing_scanned_data = rocp_scan_data{};
 
+bool
+is_attachment_enabled()
+{
+#if defined(ROCP_REG_DEFAULT_ATTACHMENT) && ROCP_REG_DEFAULT_ATTACHMENT != 0
+    constexpr auto default_attachment_enabled = true;
+#else
+    constexpr auto default_attachment_enabled = false;
+#endif
+
+    return common::get_env("ROCP_TOOL_ATTACH", default_attachment_enabled);
+}
+
+enum class tool_request_kind : uint8_t
+{
+    none,
+    implicit_symbol,
+    explicit_request,
+};
+
+enum class tool_load_context : uint8_t
+{
+    registration,
+    attachment,
+};
+
 rocp_scan_data
-rocp_reg_scan_for_tools()
+rocp_reg_scan_for_tools(bool _attachment_enabled, tool_load_context _load_context)
 {
     auto* _configure_func = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
     auto  _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
@@ -471,8 +496,54 @@ rocp_reg_scan_for_tools()
         common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
                         !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
 
-    bool _found_tool =
-        (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
+    const auto _implicit_tool =
+        (rocprofiler_configure != nullptr || _configure_func != nullptr);
+    const auto _attachment_in_progress = (_load_context == tool_load_context::attachment);
+    // Preload ownership affects selection only when attachment is enabled, a configure
+    // symbol exists, and no explicit environment request has already settled the choice.
+    // Preloading rocprofiler-register only supplies registration infrastructure; it does
+    // not request startup profiling. A preload counts only when that library itself
+    // defines rocprofiler_configure.
+    const auto _preloaded_tool =
+        (_attachment_enabled && !_attachment_in_progress && _implicit_tool &&
+         !_force_tool &&
+         binary::preloaded_library_defines_symbol(
+             common::get_env("LD_PRELOAD", std::string{}), "rocprofiler_configure"));
+    // A runtime attachment request is explicit even when FORCE_LOAD=0 was inherited
+    // from the target environment. At this point the client has supplied a tool path and
+    // the SDK must be loaded so the attachment can proceed.
+    const auto _explicit_tool = _attachment_in_progress || _force_tool || _preloaded_tool;
+    auto       _tool_request  = tool_request_kind::none;
+    if(_explicit_tool)
+        _tool_request = tool_request_kind::explicit_request;
+    else if(_implicit_tool)
+        _tool_request = tool_request_kind::implicit_symbol;
+
+    // An ambient rocprofiler_configure symbol is not sufficient to choose startup
+    // profiling when attachment was explicitly requested. Framework libraries can export
+    // a dormant configure entry point; loading the SDK for that symbol would prevent the
+    // lightweight attachment library from creating its listener. Explicit profiler
+    // configuration still takes precedence over attachment.
+    const auto _found_tool =
+        (_tool_request == tool_request_kind::explicit_request ||
+         (_tool_request == tool_request_kind::implicit_symbol && !_attachment_enabled));
+
+    if(_tool_request == tool_request_kind::implicit_symbol && _attachment_enabled)
+    {
+        static auto _warning_once = std::once_flag{};
+        std::call_once(_warning_once, []() {
+            LOG(WARNING)
+                << "Attachment is enabled, so an implicitly discovered "
+                   "rocprofiler_configure symbol will not activate "
+                   "rocprofiler-sdk at startup. "
+                   "Attachment initialization will be attempted instead. To explicitly "
+                   "request startup profiling, set ROCPROFILER_REGISTER_FORCE_LOAD=1. "
+                   "Alternatively, leave it unset and set ROCP_TOOL_LIBRARIES or "
+                   "ROCPROFILER_REGISTER_LIBRARY, or list a tool library exporting "
+                   "rocprofiler_configure directly in LD_PRELOAD (for example, "
+                   "librocprofiler-sdk-tool.so).";
+        });
+    }
 
     static void*                       rocprofiler_lib_handle    = nullptr;
     static rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
@@ -792,16 +863,18 @@ rocp_add_registered_library_api_table(const char*                        common_
 }
 
 rocprofiler_register_error_code_t
-rocp_invoke_registrations(bool invoke_all)
+rocp_invoke_registrations(bool invoke_all, tool_load_context load_context)
 {
     auto _lk = common::checked_lock{ registration_mutex };
     if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
+    const auto _attachment_enabled = is_attachment_enabled();
     for(auto& itr : registered)
     {
         if(itr && (!itr->propagated || invoke_all))
         {
-            auto _scan_result = rocp_reg_scan_for_tools();
+            auto _scan_result =
+                rocp_reg_scan_for_tools(_attachment_enabled, load_context);
 
             // rocprofiler_set_api_table has been found and we have pass the API data
             auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
@@ -939,19 +1012,12 @@ rocprofiler_register_library_api_table(
     auto _lk = common::checked_lock{ registration_mutex };
     if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
-    auto _scan_result = rocp_reg_scan_for_tools();
+    const auto _attachment_enabled = is_attachment_enabled();
+    auto       _scan_result =
+        rocp_reg_scan_for_tools(_attachment_enabled, tool_load_context::registration);
 
     // rocprofiler library is dlopened and we have the functor to pass the API data
     auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
-
-#if defined(ROCP_REG_DEFAULT_ATTACHMENT) && ROCP_REG_DEFAULT_ATTACHMENT != 0
-    constexpr auto default_attachment_enabled = true;
-#else
-    constexpr auto default_attachment_enabled = false;
-#endif
-
-    auto _attachment_enabled =
-        common::get_env("ROCP_TOOL_ATTACH", default_attachment_enabled);
 
     rocp_import* _import_match = nullptr;
     for(auto& itr : import_info)
@@ -1065,6 +1131,16 @@ rocprofiler_register_library_api_table(
 
         LOG(INFO) << "Successfully registered for proxy queue creation";
     }
+    else if(_activate_rocprofiler && _attachment_enabled &&
+            _import_match->library_idx == ROCP_REG_HSA &&
+            !is_attachment_library_registered())
+    {
+        LOG(WARNING) << "Attachment is enabled, but rocprofiler-sdk was explicitly "
+                        "activated at "
+                        "startup. The attachment listener will not be initialized; use "
+                        "either startup "
+                        "profiling or attachment for this process.";
+    }
 
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
                                                           import_func,
@@ -1137,7 +1213,7 @@ rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_P
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_nonpropagated_registrations()
 {
-    return rocp_invoke_registrations(false);
+    return rocp_invoke_registrations(false, tool_load_context::registration);
 }
 
 //
@@ -1152,7 +1228,7 @@ rocprofiler_register_invoke_prestore_loads() ROCPROFILER_REGISTER_PUBLIC_API;
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations()
 {
-    return rocp_invoke_registrations(true);
+    return rocp_invoke_registrations(true, tool_load_context::registration);
 }
 
 rocprofiler_register_error_code_t
@@ -1218,12 +1294,13 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     // No previous tool library was attached
     if(prev_tool_lib_path.empty())
     {
-        auto status = rocprofiler_register_invoke_all_registrations();
+        auto status = rocp_invoke_registrations(true, tool_load_context::attachment);
         if(status != ROCP_REG_SUCCESS)
         {
             LOG(ERROR) << "error during invoke_all_registrations: " << status;
             return status;
         }
+        if(existing_scanned_data.attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
         prev_tool_lib_path = tool_lib_path;
     }
 

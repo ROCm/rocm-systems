@@ -10,6 +10,7 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-rocattach REQUIRED)
+find_package(rocprofiler-register QUIET)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -170,6 +171,48 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Verify ROCP_TOOL_ATTACH takes precedence over a framework-owned, implicitly discovered
+# rocprofiler_configure symbol so the listener is still created. Standalone SDK builds
+# skip this cross-component test when using an older rocprofiler-register package.
+if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ATTACHMENT_CLIENT_SELECTION)
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-parallel-attach-test
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+    # FORCE_LOAD=0 suppresses startup loading, but must not suppress the explicit SDK load
+    # requested later by rocprofiler_register_attach().
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-force-load-zero-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-parallel-attach-test
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_REGISTER_FORCE_LOAD=0"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+else()
+    message(
+        STATUS
+            "Skipping rocattach-implicit-configure-test: rocprofiler-register lacks attachment client selection"
+        )
+endif()
 
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
