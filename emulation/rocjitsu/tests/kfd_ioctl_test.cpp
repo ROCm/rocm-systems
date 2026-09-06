@@ -41,6 +41,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -3681,6 +3682,159 @@ TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
   }
   // No crash / no leak reported == pass. (pid intentionally unused past scope.)
   (void)pid;
+}
+
+// ROCr places its own VA for a device allocation: it reserves the range with a
+// PROT_NONE mmap, calls ALLOC_MEMORY_OF_GPU with that va_addr, and then asks the
+// driver to back it with MAP_MEMORY_TO_GPU -- no mmap of the KFD fd ever follows
+// for VRAM. MAP is therefore the only chance the driver gets to make the range
+// usable, so it must back the reservation and enter it into the process page
+// table. Regression: MAP only mapped an allocation that already had a host
+// pointer, which a caller-placed allocation never has, so the range stayed
+// absent from the page table and accesses only "worked" by falling through to
+// passthrough.
+TEST_F(KfdIoctlTest, MapMemoryBacksCallerPlacedAllocation) {
+  constexpr size_t kSize = 2 * rocjitsu::KfdProcess::kPageSize;
+  void *reserved =
+      mmap(nullptr, kSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  const auto gpu_va = reinterpret_cast<uint64_t>(reserved);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = gpu_va;
+  alloc.size = kSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  EXPECT_EQ(alloc.va_addr, gpu_va);
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  map.n_devices = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+
+  auto proc = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(proc, nullptr);
+  {
+    std::shared_lock<std::shared_mutex> lock(proc->page_table_mutex_);
+    for (uint64_t offset = 0; offset < kSize; offset += rocjitsu::KfdProcess::kPageSize) {
+      auto page = proc->page_table_.find((gpu_va + offset) >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, proc->page_table_.end()) << "gpu_va+" << offset << " is not mapped";
+      ASSERT_EQ(page->second.host_extents.size(), 1u);
+      EXPECT_EQ(page->second.host_extents.front().host_ptr,
+                static_cast<uint8_t *>(reserved) + offset);
+    }
+  }
+
+  // The adopted reservation must be readable/writable storage: the caller mapped
+  // it PROT_NONE, so a page table entry pointing at pages the driver never
+  // unprotected would fault on first access.
+  auto *backing = static_cast<volatile uint32_t *>(reserved);
+  backing[0] = 0xfeedfaceu;
+  EXPECT_EQ(backing[0], 0xfeedfaceu);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = alloc.handle;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  unmap.n_devices = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+
+  munmap(reserved, kSize);
+}
+
+// FREE releases the allocation record, so it must also drop the page-table
+// entries for it -- a client is not required to UNMAP first. Regression: FREE
+// skipped the teardown for any caller-placed allocation, which was inert while
+// such an allocation never had a host pointer and became live once MAP started
+// backing them, stranding PTEs that point into memory the caller may reuse.
+TEST_F(KfdIoctlTest, FreeWithoutUnmapDropsCallerPlacedPageTableEntries) {
+  constexpr size_t kSize = rocjitsu::KfdProcess::kPageSize;
+  void *reserved =
+      mmap(nullptr, kSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  const auto gpu_va = reinterpret_cast<uint64_t>(reserved);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = gpu_va;
+  alloc.size = kSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  map.n_devices = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto proc = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(proc, nullptr);
+  const uint64_t page = gpu_va >> rocjitsu::KfdProcess::kPageShift;
+  {
+    std::shared_lock<std::shared_mutex> lock(proc->page_table_mutex_);
+    ASSERT_NE(proc->page_table_.find(page), proc->page_table_.end());
+  }
+
+  // No UNMAP: FREE alone must leave nothing behind.
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  {
+    std::shared_lock<std::shared_mutex> lock(proc->page_table_mutex_);
+    EXPECT_EQ(proc->page_table_.find(page), proc->page_table_.end());
+  }
+
+  munmap(reserved, kSize);
+}
+
+// A caller-placed VA need not be a host VA at all: a client may hand the driver
+// a GPU-only address it never reserved in its own address space. Backing it is
+// then impossible, and MAP must tolerate that -- report success and leave the
+// range unbacked (the pre-existing passthrough behaviour) rather than fail the
+// ioctl for a client that used to get away with it.
+TEST_F(KfdIoctlTest, MapMemoryToleratesCallerPlacedVaThatIsNotAHostVa) {
+  constexpr uint64_t kGpuOnlyVa = 0x0000210000000000ULL;
+  constexpr size_t kSize = rocjitsu::KfdProcess::kPageSize;
+
+  // Precondition: the VA really is absent from this process's address space, so
+  // the driver cannot back it. mincore reports ENOMEM for an unmapped range.
+  std::array<uint8_t, 1> resident{};
+  ASSERT_EQ(mincore(reinterpret_cast<void *>(kGpuOnlyVa), kSize, resident.data()), -1);
+  ASSERT_EQ(errno, ENOMEM);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = kGpuOnlyVa;
+  alloc.size = kSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  map.n_devices = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+
+  auto proc = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(proc, nullptr);
+  {
+    std::shared_lock<std::shared_mutex> lock(proc->page_table_mutex_);
+    EXPECT_EQ(proc->page_table_.count(kGpuOnlyVa >> rocjitsu::KfdProcess::kPageShift), 0u);
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
