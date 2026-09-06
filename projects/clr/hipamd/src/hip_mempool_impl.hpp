@@ -283,6 +283,9 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   /// Check if memory is active and belongs to the busy heap
   bool IsBusyMemory(amd::Memory* memory) const { return busy_heap_.IsActiveMemory(memory); }
 
+  /// Check if memory has already been freed and is in the free heap
+  bool IsFreedMemory(amd::Memory* memory) const { return free_heap_.IsActiveMemory(memory); }
+
   /// Releases all allocations from free_heap_. It can be called on Stream or Device synchronization
   /// @note The caller must make sure it's safe to release memory
   void ReleaseFreedMemory();

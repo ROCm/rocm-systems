@@ -110,6 +110,17 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool 
 }
 
 // ================================================================================================
+bool Device::IsFreedPoolMemory(amd::Memory* memory) {
+  std::scoped_lock lock(lock_);
+  for (auto* pool : mem_pools_) {
+    if (pool->IsFreedMemory(memory)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ================================================================================================
 void Device::ReleaseFreedMemory() {
   std::scoped_lock lock(lock_);
   for (auto* pool : mem_pools_) {
