@@ -205,6 +205,16 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
+bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
+  // AlltoAll has no symmetric kernel. If we do not yield when CE will dispatch,
+  // gfx1250 DDA (default below 4 MiB) returns before enqueue and CE AlltoAll
+  // never initializes -- the CeMPI_AlltoAll tests fail with "CE: rank" absent
+  // even though NCCL_CTA_POLICY=2 and the buffers are symmetrically registered.
+  return !ceAlltoAllAllowed &&
+         rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                        kDdaAlltoAllGfx1250ThresholdBytes);
+}
+
 // Check if symmteric kernels is requested for this collective
 bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
                                 const void* sendbuff, void* recvbuff) {
@@ -378,6 +388,26 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
+// Registered-window CE predicate that matches taskAppend for AlltoAll (CTA_POLICY_ZERO
+// is checked by the caller). Only invoked when DDA would otherwise early-return.
+static ncclResult_t alltoAllRegisteredCeAllowed(ncclComm* comm, const void* sendbuff, void* recvbuff,
+                                                ncclDataType_t datatype, cudaStream_t stream, bool* allowed) {
+  *allowed = false;
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  *allowed = !ncclCudaGraphValid(ceGraph) && !hasSysmemSegment &&
+             (ncclCeAvailable(comm, ncclFuncAlltoAll, (int)ncclSum, datatype, winRegType) ||
+              ncclHierCeAvailable(comm, ncclFuncAlltoAll, (int)ncclSum, datatype, winRegType));
+  return ncclSuccess;
+}
+
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -437,9 +467,21 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclSuccess;
     }
 #endif
-    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
-                       kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
+    // Symmetric kernels are not supported for AlltoAll, so unlike AllGather we cannot
+    // gate DDA on !symEligible. When registered-window CE would dispatch, DDA must
+    // not early-return. Skip the window/graph probes unless DDA is actually enabled
+    // for this size and CTA_POLICY_ZERO is set -- the default AlltoAll path pays nothing.
+    const size_t totalBytes = comm->nRanks * count * ncclTypeSize(datatype);
+    bool ceAlltoAllAllowed = false;
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+        rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                       kDdaAlltoAllGfx1250ThresholdBytes)) {
+      NCCLCHECK(alltoAllRegisteredCeAllowed(comm, sendbuff, recvbuff, datatype, stream, &ceAlltoAllAllowed));
+      if (ceAlltoAllAllowed) {
+        INFO(NCCL_COLL, "AllToAll: yielding DDA to CE (NCCL_CTA_POLICY_ZERO)");
+      }
+    }
+    if (rcclAlltoAllShouldTakeDdaPath(comm, totalBytes, ceAlltoAllAllowed)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         const int64_t llThresh = rcclParamDdaLLThreshold();

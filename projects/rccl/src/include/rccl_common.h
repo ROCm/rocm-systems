@@ -210,6 +210,12 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 // the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
                                     bool symEligible, bool ceAllReduceAllowed);
+// Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
+// symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
+// `ceAlltoAllAllowed` is the caller's "taskAppend will take registered-window CE"
+// bit (CTA_POLICY_ZERO + ncclCeAvailable / hier CE, not capturing, no sysmem).
+// When that bit is set, DDA must yield so NCCL_CTA_POLICY=2 actually reaches CE.
+bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
