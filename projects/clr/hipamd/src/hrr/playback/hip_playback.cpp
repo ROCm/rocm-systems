@@ -624,11 +624,56 @@ static void decode_kernel_args(
     std::vector<void*>& arg_ptrs,
     std::vector<std::vector<uint8_t>>& arg_storage,
     RegionLaunchState* rls = nullptr,
-    std::vector<std::tuple<unsigned, uint64_t, void*>>* dbg_ptrs_out = nullptr) {
+    std::vector<std::tuple<unsigned, uint64_t, void*>>* dbg_ptrs_out = nullptr,
+    std::string* dbg_args_out = nullptr) {
     (void)kernel_name;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_sink;
     const bool dbg_dump_ptrs = (dbg_ptrs_out != nullptr);
     auto& dbg_ptrs = dbg_ptrs_out ? *dbg_ptrs_out : dbg_sink;
+
+    // A pointer that the kernel's own metadata does not describe as one.
+    // Hand-written assembly kernels carry hand-written metadata, and aiter's MLA
+    // decode kernel declares a 64-bit buffer address as two 4-byte by_value i32
+    // fields — "out16" followed by a "pad". Neither half is eight bytes wide, so
+    // neither the capture-side detector nor the per-argument rescan can find a
+    // pointer in it, and the capture-time address reaches the GPU unchanged;
+    // the kernel builds a buffer descriptor from it and faults on an address
+    // belonging to the recording process. Join adjacent scalar halves and
+    // translate the pair when it resolves to a recorded allocation.
+    struct { bool valid = false; uint16_t idx = 0;
+             const uint8_t* data = nullptr; size_t store = 0; } prev_half;
+    static const bool no_rescan =
+        (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
+
+    // Reject packed-integer false positives. The capture-side detector
+    // flags any 8-byte word that resolves to a device VA, but two adjacent
+    // 32-bit struct fields {uint32 lo, uint32 hi} can coincidentally form
+    // such a value: ATen elementwise kernels embed an OffsetCalculator
+    // (per-arg uint32 strides/sizes + IntDivider magic constants) in the
+    // functor. When `hi` happens to hold a value whose top bits match the
+    // device-VA prefix (0x7e../0x7f..) and `lo` holds a small integer (a
+    // stride/size/dim), the combined 64-bit word lands inside a real
+    // allocation and gets "translated" — corrupting the OffsetCalculator
+    // and producing an out-of-bounds VM fault (e.g. the recurring
+    // elementwise_kernel_manual_unroll<...MulFunctor> crash).
+    //
+    // A genuine 64-bit device pointer carries a full 48-bit address, so its
+    // low 32 bits are part of that address and are effectively never this
+    // small. The FP, by construction, needs its HIGH word to be the VA
+    // prefix and its LOW word to be a small scalar — so a tiny low-32 value
+    // is the reliable FP signature. (Set HIP_HRR_PTR_RELAX=1 to disable.)
+    static const bool ptr_relax =
+        (std::getenv("HIP_HRR_PTR_RELAX") != nullptr);
+    auto pointer_like = [&](uint64_t v) -> bool {
+        if (ptr_relax) return true;
+        return (v & 0xFFFFFFFFULL) >= 0x10000ULL;
+    };
+    // Is this value shaped like an address at all? Below 0x10000 no device VA
+    // ever lands, and a packed integer fails pointer_like. Both paths ask this
+    // before deciding what an unresolvable value means.
+    auto va_shaped = [&](uint64_t v) -> bool {
+        return v >= 0x10000ULL && pointer_like(v);
+    };
 
     for (uint16_t i = 0; i < num_args; i++) {
         if (p + 3 > end) break;
@@ -639,6 +684,34 @@ static void decode_kernel_args(
 
         const uint8_t* data = p;
         p += arg_size;
+
+        // Every argument as capture classified it, for --dump-ptrs. A pointer
+        // reaching the GPU untranslated is invisible in the translated-pointer
+        // list precisely because nothing translated it, so the raw bytes are
+        // what identifies it.
+        if (dbg_args_out) {
+            char line[128];
+            snprintf(line, sizeof(line), "  arg[%u] kind=%u size=%u", i,
+                     value_kind, arg_size);
+            *dbg_args_out += line;
+            if (arg_size >= 8) {
+                *dbg_args_out += " words:";
+                for (uint16_t off = 0; off + 8 <= arg_size; off += 8) {
+                    uint64_t w; memcpy(&w, data + off, 8);
+                    snprintf(line, sizeof(line), " 0x%llx", (unsigned long long)w);
+                    *dbg_args_out += line;
+                }
+            }
+            // Raw bytes as well: a pointer split across two 4-byte arguments is
+            // invisible as words, and those are exactly the arguments nothing
+            // translates.
+            *dbg_args_out += " bytes:";
+            for (uint16_t off = 0; off < arg_size && off < 32; off++) {
+                snprintf(line, sizeof(line), " %02x", data[off]);
+                *dbg_args_out += line;
+            }
+            *dbg_args_out += "\n";
+        }
 
         // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
@@ -668,16 +741,22 @@ static void decode_kernel_args(
             if (!live && rec_ptr != 0 && ctx.regions_enabled)
                 live = ctx.regions.materialize_for(ctx, rec_ptr);
 
+            // A pointer-typed argument does not always hold a pointer. Kernels
+            // pass sentinels in these slots — aiter's MLA decode kernel takes a
+            // literal 1 in one — and substituting null for such a value changes
+            // what the kernel does, silently and only on replay.
+            //
+            // The two cases are told apart by shape. A value no device VA could
+            // be is a sentinel and keeps its meaning. A VA-shaped value that
+            // resolves nowhere is a pointer HRR genuinely lost, and it goes to
+            // the kernel as null so it faults at first use: the driver tends to
+            // reproduce VA layout across runs, so passing the recorded address
+            // through would more likely scribble over an unrelated live buffer
+            // than fault.
             if (!live && rec_ptr != 0) {
-                // Counted and reported, but still handed to the kernel as null.
-                // Forwarding the recorded address instead would be worse than
-                // useless: the driver tends to reproduce a VA layout across
-                // runs, so a capture-time address is quite likely to be mapped
-                // in the replay process too, and the kernel would then scribble
-                // over an unrelated live buffer with nothing to show for it. A
-                // null dereference stops at the first kernel that uses the
-                // pointer, which is the failure worth having.
                 ctx.untranslated_ptr_args.fetch_add(1, std::memory_order_relaxed);
+                const bool sentinel = !va_shaped(rec_ptr);
+                if (sentinel) live = reinterpret_cast<void*>(rec_ptr);
                 static std::mutex mu;
                 static std::set<std::string> warned;
                 char key[160];
@@ -687,9 +766,11 @@ static void decode_kernel_args(
                 if (first)
                     fprintf(stderr,
                             "[HRR] '%s' arg[%u]: recorded 0x%llx is in no known "
-                            "allocation — passing null\n",
+                            "allocation — %s\n",
                             compact_kernel_name(kernel_name).c_str(), i,
-                            (unsigned long long)rec_ptr);
+                            (unsigned long long)rec_ptr,
+                            sentinel ? "not an address, passing it through unchanged"
+                                     : "passing null so it faults at first use");
             } else {
                 // Region check: an intra-segment OOB/stale pointer, or a block to be
                 // relocated behind a guard page. No-op when no sidecar was loaded.
@@ -715,34 +796,11 @@ static void decode_kernel_args(
             // may be a genuine scalar (a large count, a double, a packed value)
             // that was mis-flagged — overwriting it with null would silently
             // corrupt it. Only rewrite the word when it actually resolves.
-            // Reject packed-integer false positives. The capture-side detector
-            // flags any 8-byte word that resolves to a device VA, but two adjacent
-            // 32-bit struct fields {uint32 lo, uint32 hi} can coincidentally form
-            // such a value: ATen elementwise kernels embed an OffsetCalculator
-            // (per-arg uint32 strides/sizes + IntDivider magic constants) in the
-            // functor. When `hi` happens to hold a value whose top bits match the
-            // device-VA prefix (0x7e../0x7f..) and `lo` holds a small integer (a
-            // stride/size/dim), the combined 64-bit word lands inside a real
-            // allocation and gets "translated" — corrupting the OffsetCalculator
-            // and producing an out-of-bounds VM fault (e.g. the recurring
-            // elementwise_kernel_manual_unroll<...MulFunctor> crash).
-            //
-            // A genuine 64-bit device pointer carries a full 48-bit address, so its
-            // low 32 bits are part of that address and are effectively never this
-            // small. The FP, by construction, needs its HIGH word to be the VA
-            // prefix and its LOW word to be a small scalar — so a tiny low-32 value
-            // is the reliable FP signature. (Set HIP_HRR_PTR_RELAX=1 to disable.)
-            static const bool ptr_relax =
-                (std::getenv("HIP_HRR_PTR_RELAX") != nullptr);
-            auto pointer_like = [&](uint64_t v) -> bool {
-                if (ptr_relax) return true;
-                return (v & 0xFFFFFFFFULL) >= 0x10000ULL;
-            };
             auto try_translate_word = [&](size_t off, const char* src) -> bool {
                 if (off + 8 > arg_size) return false;
                 uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
-                if (rec_ptr < 0x10000ULL) return false;  // null/small — never a VA
-                if (!pointer_like(rec_ptr)) return false;  // packed-int false positive
+                // null, small, or a packed-integer false positive
+                if (!va_shaped(rec_ptr)) return false;
                 void* live = ctx.translate_ptr(rec_ptr);
                 // Same bypassed-segment materialisation as a whole-pointer
                 // argument: a struct field pointing into memory HIP never saw
@@ -808,6 +866,59 @@ static void decode_kernel_args(
             }
         }
         arg_ptrs.push_back(storage.data());
+
+        const size_t store_idx = arg_storage.size() - 1;
+        if (!no_rescan && value_kind == 0 && arg_size == 4) {
+            bool joined = false;
+            if (prev_half.valid && prev_half.idx + 1 == i) {
+                uint32_t lo, hi;
+                memcpy(&lo, prev_half.data, 4);
+                memcpy(&hi, data, 4);
+                const uint64_t rec = (static_cast<uint64_t>(hi) << 32) | lo;
+                // A pointer split across two scalars is still a pointer, so it
+                // takes the same steps as the other two forms: the shared shape
+                // guard, then the bypassed-segment materialisation, then the
+                // region check. A pair that resolves nowhere stays two untouched
+                // scalars — the conservative outcome, and there is no sentinel
+                // to tell apart here.
+                void* live = nullptr;
+                if (va_shaped(rec)) {
+                    live = ctx.translate_ptr(rec);
+                    if (!live && ctx.regions_enabled)
+                        live = ctx.regions.materialize_for(ctx, rec);
+                    if (live)
+                        live = hrr_region_check_ptr(ctx, rls, kernel_name,
+                                                    prev_half.idx, rec, live);
+                }
+                if (live) {
+                    const uint64_t lv = reinterpret_cast<uint64_t>(live);
+                    const uint32_t l32 = static_cast<uint32_t>(lv);
+                    const uint32_t h32 = static_cast<uint32_t>(lv >> 32);
+                    memcpy(arg_storage[prev_half.store].data(), &l32, 4);
+                    memcpy(arg_storage[store_idx].data(), &h32, 4);
+                    if (dbg_dump_ptrs) dbg_ptrs.emplace_back(prev_half.idx, rec, live);
+                    static std::mutex mu;
+                    static std::set<std::string> warned;
+                    char key[160];
+                    snprintf(key, sizeof(key), "%s#%u", kernel_name.c_str(),
+                             prev_half.idx);
+                    bool first;
+                    { std::lock_guard<std::mutex> lk(mu); first = warned.insert(key).second; }
+                    if (first)
+                        fprintf(stderr,
+                                "[HRR] '%s' arg[%u]+arg[%u]: two scalar halves "
+                                "form 0x%llx, a recorded address the metadata "
+                                "does not call a pointer — translated to %p\n",
+                                compact_kernel_name(kernel_name).c_str(),
+                                prev_half.idx, i, (unsigned long long)rec, live);
+                    joined = true;
+                }
+            }
+            prev_half = joined ? decltype(prev_half){}
+                               : decltype(prev_half){true, i, data, store_idx};
+        } else {
+            prev_half.valid = false;
+        }
     }
 }
 
@@ -881,10 +992,12 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // the launch so the relocation is undone before the next event runs.
     RegionLaunchState rls;
     // Optional recorded->live pointer dump for one target kernel (diff tooling).
-    const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0);
+    const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
+    std::string dbg_args;
     decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
-                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr);
+                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
+                       dbg_dump_ptrs ? &dbg_args : nullptr);
 
     // Launch-attribute tail: u32 count, u32 per-entry stride, then the
     // entries. Every launch payload carries it (count 0 for a plain launch).
@@ -934,16 +1047,121 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
 
+    if (ctx.audit_host_args) {
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+            AllocKind akind = AllocKind::Device;
+            if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
+                continue;
+            if (akind == AllocKind::Device) continue;
+            static std::mutex mu;
+            static std::set<std::string> seen;
+            std::string key = kernel_name + "#" + std::to_string(idx);
+            bool first;
+            { std::lock_guard<std::mutex> lk(mu); first = seen.insert(key).second; }
+            if (first)
+                fprintf(stderr,
+                        "[HRR host-audit] kernel #%zu '%s' arg[%u] reads %s "
+                        "allocation 0x%llx+%zu, which replay reallocated but "
+                        "could not refill\n",
+                        kernel_ordinal, compact_kernel_name(kernel_name).c_str(),
+                        idx, PlaybackContext::alloc_kind_name(akind),
+                        (unsigned long long)arec, asize);
+        }
+    }
+
     if (dbg_dump_ptrs && kernel_ordinal == ctx.dump_ptrs_ordinal) {
         fprintf(stderr,
                 "[HRR ptr-dump] kernel #%zu \"%s\" recorded->live pointer args:\n",
                 kernel_ordinal, compact_kernel_name(kernel_name).c_str());
+        // Name the allocation each argument lands in. Pinned host memory is
+        // worth calling out: the application fills it with ordinary CPU
+        // stores, which no HIP call reports, so replay hands the kernel a
+        // freshly allocated buffer that never received those writes.
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+            AllocKind akind = AllocKind::Device;
+            if (live && ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
+                fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p "
+                        "(%s allocation 0x%llx+%zu, +%lld)\n", idx,
+                        (unsigned long long)rec, live,
+                        PlaybackContext::alloc_kind_name(akind),
+                        (unsigned long long)arec, asize,
+                        (long long)(reinterpret_cast<uint64_t>(live) -
+                                    reinterpret_cast<uint64_t>(abase)));
+        }
         for (auto& [idx, rec, live] : dbg_ptrs)
             fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p\n",
                     idx, (unsigned long long)rec, live);
+        fprintf(stderr, "[HRR ptr-dump] all recorded arguments as captured:\n%s",
+                dbg_args.c_str());
         fflush(stderr);
     }
 
+    // Read back what this kernel is about to read, looking for capture-time
+    // addresses. Arguments are translated on the way in, so a recorded pointer
+    // reaching the GPU has to arrive inside a buffer instead — written by an
+    // earlier kernel, or by the host into memory it shares with the device.
+    // Either way nothing rewrote it, and the kernel dereferences an address
+    // that belongs to the capturing process.
+    if (ctx.scan_args_ordinal && kernel_ordinal == ctx.scan_args_ordinal) {
+        (void)hipDeviceSynchronize();
+        if (const char* a = std::getenv("HIP_HRR_REPLAY_EXPLAIN_ADDR")) {
+            uint64_t v = strtoull(a, nullptr, 0);
+            fprintf(stderr, "[HRR arg-scan] 0x%llx is %s\n",
+                    (unsigned long long)v, ctx.explain_addr(v).c_str());
+            // Whether the allocation map says an address is live and whether the
+            // GPU can actually reach it are different questions, and a fault on
+            // an address the map calls live means the map is the thing that is
+            // wrong. Ask the runtime directly.
+            uint64_t probe = 0;
+            hipError_t pr = hipMemcpy(&probe, reinterpret_cast<void*>(v),
+                                      sizeof(probe), hipMemcpyDeviceToHost);
+            fprintf(stderr, "[HRR arg-scan] reading 8 bytes at 0x%llx: %s",
+                    (unsigned long long)v, hipGetErrorString(pr));
+            if (pr == hipSuccess)
+                fprintf(stderr, " (value 0x%llx)", (unsigned long long)probe);
+            fprintf(stderr, "\n");
+        }
+        const size_t cap = ctx.scan_args_bytes;
+        const auto ranges = ctx.recorded_ranges();
+        std::vector<uint8_t> host(cap);
+        fprintf(stderr, "[HRR arg-scan] kernel #%zu \"%s\": reading %zu bytes "
+                "behind each pointer argument\n", kernel_ordinal,
+                compact_kernel_name(kernel_name).c_str(), cap);
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            if (!live) continue;
+            // Scan from the start of the enclosing allocation, not from the
+            // argument, so bytes ahead of the pointer are covered too.
+            void*    abase    = live;
+            size_t   asize    = 0;
+            uint64_t arec     = rec;
+            ctx.live_alloc_of(live, &abase, &asize, &arec);
+            size_t n = asize ? std::min(cap, asize) : cap;
+            n -= n % 8;
+            if (!n) continue;
+            if (hipMemcpy(host.data(), abase, n, hipMemcpyDeviceToHost) != hipSuccess) {
+                fprintf(stderr, "[HRR arg-scan]   arg[%u]: unreadable\n", idx);
+                continue;
+            }
+            size_t hits = 0;
+            for (size_t off = 0; off + 8 <= n; off += 8) {
+                uint64_t w; memcpy(&w, host.data() + off, 8);
+                uint64_t base = 0; size_t sz = 0;
+                if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
+                if (++hits <= 8)
+                    fprintf(stderr, "[HRR arg-scan]   arg[%u] allocation 0x%llx "
+                            "+%zu holds 0x%llx — recorded allocation 0x%llx+%zu\n",
+                            idx, (unsigned long long)arec, off,
+                            (unsigned long long)w, (unsigned long long)base, sz);
+            }
+            if (hits)
+                fprintf(stderr, "[HRR arg-scan]   arg[%u]: %zu recorded addresses "
+                        "in %zu bytes of allocation 0x%llx\n", idx, hits, n,
+                        (unsigned long long)arec);
+        }
+        fflush(stderr);
+    }
 
     // Skip HIP event timing during graph capture: recording events on a
     // captured stream inserts them into the graph and invalidates the
@@ -1903,6 +2121,24 @@ static bool hrr_replay_zero_init() {
     return g_enabled;
 }
 
+// Byte to fill fresh replay allocations with, normally zero. Set it to
+// something no program would compute with — 0xa5, say — to find out whether a
+// kernel is consuming memory that nothing in the archive ever wrote: the
+// pattern then shows up in the values it derives, and a wild pointer built
+// from it is recognisable on sight in a fault address.
+static int hrr_replay_fill_byte() {
+    static std::once_flag once;
+    static int g_byte = 0;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_FILL_BYTE")) {
+            g_byte = static_cast<int>(strtoul(e, nullptr, 0) & 0xff);
+            fprintf(stderr, "[HRR] filling fresh allocations with 0x%02x "
+                            "(HIP_HRR_REPLAY_FILL_BYTE)\n", g_byte);
+        }
+    });
+    return g_byte;
+}
+
 // Zero-initialise a host-synchronous replay allocation, ordered.
 //
 // ROCM-27985. hipMalloc is host-synchronous by contract, so the recorded
@@ -1928,7 +2164,8 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
     if (!live || sz == 0) return;  // nothing written, so nothing to order
     if (!hrr_zero_init_needs_drain(hrr_replay_zero_init(), ctx.in_graph_capture))
         return;
-    if (hipMemsetAsync(live, 0, sz, nullptr) != hipSuccess) return;
+    if (hipMemsetAsync(live, hrr_replay_fill_byte(), sz, nullptr) != hipSuccess)
+        return;
     (void)hipStreamSynchronize(nullptr);
 }
 
@@ -2908,6 +3145,36 @@ static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
     return live;
 }
 
+// A recorded H2D payload is replayed byte for byte, so any device pointer the
+// application had placed in that host buffer arrives on the GPU as a
+// capture-time address: nothing in the pointer-translation path ever sees it.
+// Report those words rather than translate them — a payload is opaque bytes,
+// and a value that merely looks like an address may be data.
+static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
+                             uint64_t dst_rec) {
+    const uint8_t* p = static_cast<const uint8_t*>(blob);
+    const auto ranges = ctx.recorded_ranges();
+    size_t hits = 0;
+    for (size_t off = 0; off + 8 <= n; off += 8) {
+        uint64_t w;
+        memcpy(&w, p + off, 8);
+        uint64_t base = 0;
+        size_t   sz   = 0;
+        if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
+        if (++hits <= 4)
+            fprintf(stderr,
+                    "[HRR h2d-scan] payload for 0x%llx +%zu holds 0x%llx — a "
+                    "recorded address in allocation 0x%llx+%zu\n",
+                    (unsigned long long)dst_rec, off, (unsigned long long)w,
+                    (unsigned long long)base, sz);
+    }
+    if (hits)
+        fprintf(stderr,
+                "[HRR h2d-scan] payload for 0x%llx: %zu recorded addresses in "
+                "%zu bytes\n",
+                (unsigned long long)dst_rec, hits, n);
+}
+
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
@@ -2938,6 +3205,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                     (unsigned long long)dst_rec, copy_sz, avail);
             copy_sz = avail;
         }
+        if (ctx.scan_h2d) scan_h2d_payload(ctx, blob, copy_sz, dst_rec);
         if (is_async)
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else

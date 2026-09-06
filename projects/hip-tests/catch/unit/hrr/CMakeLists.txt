@@ -34,6 +34,11 @@
 #   hrr_api_matrix_test.cc — Unit_HRR_ApiMatrix_T*_Roundtrip: captures each
 #                          tier's workloads and asserts every API's replay
 #                          class still matches what HRR's generator declares.
+#   hrr_kernel_args_test.cc — What replay does with a pointer-typed kernel
+#                          argument no allocation explains: a sentinel keeps
+#                          its value, an address-shaped lost pointer becomes
+#                          null. Contains its own hidden [.][hrr-direct]
+#                          workload.
 #   hrr_regions_test.cc  — External region annotations (hrr_regions.h): CPU-only
 #                          sidecar framing tests, plus a GPU workload that carves
 #                          blocks out of one hipMalloc by pointer arithmetic and
@@ -72,6 +77,7 @@ set(TEST_SRC
     hrr_repro_workload_test.cc
     hrr_spt_workload_test.cc
     hrr_roundtrip_test.cc
+    hrr_kernel_args_test.cc
     hrr_regions_test.cc
     hrr_api_matrix_workload_test.cc
     hrr_api_matrix_test.cc

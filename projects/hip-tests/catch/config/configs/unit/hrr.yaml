@@ -518,6 +518,14 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions, memcpy]
+  Unit_HRR_KernelArgs_Direct:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [direct, kernel-args]
+  Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled:
+    <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
+    tags: [capture, playback, roundtrip, kernel-args]
   Unit_HRR_ApiMatrix_ManifestWellFormed:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]

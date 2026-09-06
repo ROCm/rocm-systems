@@ -7,6 +7,7 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -142,6 +143,21 @@ struct PlaybackContext {
     // value for the kernel launch with this 1-based ordinal. Used to diff the
     // captured vs replay pointer contract (e.g. a StreamK synchronizer base).
     size_t dump_ptrs_ordinal = 0;
+    // When non-zero, read back each pointer argument of the launch with this
+    // 1-based ordinal and report any 8-byte word that is a recorded address.
+    // A capture-time pointer in a buffer is one nothing translated, which is
+    // how a replay ends up faulting on an address from the other process.
+    size_t scan_args_ordinal = 0;
+    size_t scan_args_bytes   = 4096;  // per argument
+    // Report recorded addresses found inside replayed H2D payloads. Those
+    // bytes are restored verbatim, so a pointer among them reaches the GPU
+    // untranslated no matter how well kernel arguments are handled.
+    bool scan_h2d = false;
+    // Report every kernel that takes a pointer into host memory. Replay
+    // reallocates those buffers but cannot refill them: the application writes
+    // them with ordinary CPU stores, which no HIP call reports. A kernel
+    // reading one is reading data the archive never captured.
+    bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
@@ -401,6 +417,127 @@ struct PlaybackContext {
                        static_cast<ptrdiff_t>(rec - best_base);
         }
         return nullptr;
+    }
+
+    // Is this value an address from the capturing process — i.e. does it fall
+    // inside an allocation as *recorded*, before translation? Reports the
+    // enclosing recorded base so a hit can be traced back to the event that
+    // allocated it. Answers the question a live pointer cannot: whether a word
+    // sitting in device memory is a capture-time pointer nothing rewrote.
+    bool is_recorded_va(uint64_t v, uint64_t* base_out = nullptr,
+                        size_t* size_out = nullptr) const {
+        if (v < 0x10000ULL) return false;
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, entry] : alloc_map) {
+            if (v >= base && v < base + entry.size) {
+                if (base_out) *base_out = base;
+                if (size_out) *size_out = entry.size;
+                return true;
+            }
+        }
+        for (auto& [base, va] : vmm_va_map) {
+            if (v >= base && v < base + va.size) {
+                if (base_out) *base_out = base;
+                if (size_out) *size_out = va.size;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Recorded allocation ranges, sorted by base, for scans that test many
+    // words against them. Testing one word walks every allocation; taking a
+    // snapshot once and binary searching turns a scan of a multi-gigabyte
+    // payload from hours into seconds.
+    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges() const {
+        std::vector<std::pair<uint64_t, uint64_t>> r;
+        {
+            std::shared_lock lk(map_mutex);
+            r.reserve(alloc_map.size() + vmm_va_map.size());
+            for (auto& [base, e] : alloc_map) r.emplace_back(base, base + e.size);
+            for (auto& [base, va] : vmm_va_map) r.emplace_back(base, base + va.size);
+        }
+        std::sort(r.begin(), r.end());
+        return r;
+    }
+
+    static bool range_contains(
+        const std::vector<std::pair<uint64_t, uint64_t>>& ranges, uint64_t v,
+        uint64_t* base_out = nullptr, size_t* size_out = nullptr) {
+        if (ranges.empty() || v < ranges.front().first || v >= ranges.back().second)
+            return false;
+        auto it = std::upper_bound(
+            ranges.begin(), ranges.end(), v,
+            [](uint64_t x, const std::pair<uint64_t, uint64_t>& p) {
+                return x < p.first;
+            });
+        if (it == ranges.begin()) return false;
+        --it;
+        if (v >= it->second) return false;
+        if (base_out) *base_out = it->first;
+        if (size_out) *size_out = static_cast<size_t>(it->second - it->first);
+        return true;
+    }
+
+    // The live allocation containing a live pointer. A kernel argument usually
+    // points into the middle of a buffer, and the interesting bytes — the ones
+    // whose interpretation went wrong — can lie before it as easily as after.
+    bool live_alloc_of(const void* p, void** base_out, size_t* size_out,
+                       uint64_t* rec_base_out,
+                       AllocKind* kind_out = nullptr) const {
+        uint64_t v = reinterpret_cast<uint64_t>(p);
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, e] : alloc_map) {
+            uint64_t lb = reinterpret_cast<uint64_t>(e.live_ptr);
+            if (!lb || v < lb || v >= lb + e.size) continue;
+            if (base_out) *base_out = e.live_ptr;
+            if (size_out) *size_out = e.size;
+            if (rec_base_out) *rec_base_out = base;
+            if (kind_out) *kind_out = e.kind;
+            return true;
+        }
+        return false;
+    }
+
+    static const char* alloc_kind_name(AllocKind k) {
+        switch (k) {
+            case AllocKind::HostMalloc:     return "pinned host";
+            case AllocKind::HostRegister:   return "registered host";
+            case AllocKind::DevicePtrAlias: return "pinned host alias";
+            default:                        return "device";
+        }
+    }
+
+    // Describe an address from both sides of the replay: as a capture-time
+    // address, and as one of this process's own live allocations. A fault
+    // address that is only the former is a recorded pointer that reached the
+    // GPU; one that is the latter is this replay's own memory, and the
+    // divergence that produced it is upstream of any pointer translation.
+    std::string explain_addr(uint64_t v) const {
+        char buf[320];
+        std::string out;
+        uint64_t rbase = 0; size_t rsize = 0;
+        if (is_recorded_va(v, &rbase, &rsize)) {
+            void* live = translate_ptr(rbase);
+            snprintf(buf, sizeof(buf),
+                     "recorded allocation 0x%llx+%zu (live base %p)",
+                     (unsigned long long)rbase, rsize, live);
+            out += buf;
+        }
+        {
+            std::shared_lock lk(map_mutex);
+            for (auto& [base, entry] : alloc_map) {
+                uint64_t lb = reinterpret_cast<uint64_t>(entry.live_ptr);
+                if (!lb || v < lb || v >= lb + entry.size) continue;
+                snprintf(buf, sizeof(buf),
+                         "%slive allocation %p+%zu (recorded base 0x%llx)",
+                         out.empty() ? "" : "; ", entry.live_ptr, entry.size,
+                         (unsigned long long)base);
+                out += buf;
+                break;
+            }
+        }
+        return out.empty() ? std::string("in no allocation this replay knows") : out;
     }
 
     // Returns bytes available from a live GPU pointer to end of its backing
