@@ -830,6 +830,8 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   for (int c = 0; c < MAXCHANNELS; c++) channelCounts[c] = 0;
 #endif
 
+  int const planCollCount = nPlanColls;
+
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
@@ -837,6 +839,15 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     size_t elementSize = ncclTypeSize(task->datatype);
 
     int kind = 2 * task->isCollnet + task->isNvls;
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed loads one batch chain from the lead channel per physical block.
+    // Multi-collective plans must reuse the same channel range so every channel
+    // queues all colls (AG#1 then AG#2 via nextJump), not sequential channel slices.
+    if (task->useWarpSpeed && planCollCount > 1 && (planCollCount - nPlanColls) > 0) {
+      channelId = 0;
+      currentTraffic = 0;
+    }
+#endif
     if (kind != kindPrev) {
       trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
       kindPrev = kind;
