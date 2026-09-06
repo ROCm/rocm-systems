@@ -34,6 +34,9 @@
 #   * `MIRAGE_CARGO_PROFILE`  (release)
 #   * `MIRAGE_CARGO`          (auto)  — override cargo binary
 #
+
+# Temporary no-op change on mirage to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.20)
 project(mirage NONE)
 
