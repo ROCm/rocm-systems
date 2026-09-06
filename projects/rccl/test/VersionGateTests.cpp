@@ -88,4 +88,38 @@ TEST(VersionGateTests, CeBatchAsyncWindow)
     EXPECT_FALSE(NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
 }
 
+// cuMem works below Linux 6.8; >= 6.8 is only the recommended performance floor.
+// Capability check must not treat this as a hard functional disable. The advisory
+// log fires only when NCCL_CUMEM_ENABLE is auto (-2) or force (>0), not when 0.
+static_assert(NCCL_CUMEM_MIN_KERNEL_VERSION == NCCL_KERNEL_VERSION_CODE(6, 8), "cuMem kernel perf floor drifted");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 8)), "6.8 must be recommended");
+static_assert(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 9)), "6.9 must be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 7)), "6.7 must not be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(5, 14)), "5.14 must not be recommended");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_ADVISORY(NCCL_KERNEL_VERSION_CODE(5, 14), 0), "explicit-off must not advise");
+static_assert(NCCL_CUMEM_KERNEL_PERF_ADVISORY(NCCL_KERNEL_VERSION_CODE(5, 14), -2), "auto on 5.14 must advise");
+static_assert(NCCL_CUMEM_KERNEL_PERF_ADVISORY(NCCL_KERNEL_VERSION_CODE(5, 14), 1), "force on 5.14 must advise");
+static_assert(!NCCL_CUMEM_KERNEL_PERF_ADVISORY(NCCL_KERNEL_VERSION_CODE(6, 8), 1), "force on 6.8 must not advise");
+
+TEST(VersionGateTests, CuMemKernelPerfRecommended)
+{
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 8)));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 9)));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(6, 7)));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(NCCL_KERNEL_VERSION_CODE(5, 14)));
+}
+
+TEST(VersionGateTests, CuMemKernelPerfAdvisoryRequiresEnable)
+{
+    const int k514 = NCCL_KERNEL_VERSION_CODE(5, 14);
+    const int k68 = NCCL_KERNEL_VERSION_CODE(6, 8);
+
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k514, 0));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k514, -2));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k514, 1));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k68, -2));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k68, 1));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_PERF_ADVISORY(k68, 0));
+}
+
 }  // namespace RcclUnitTesting
