@@ -6,30 +6,56 @@
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
+
+#include <memory>
+
 #include "TestBed.hpp"
 #include "TransportUtils.hpp"
 
 namespace RcclUnitTesting
 {
 
+namespace {
+
+// ncclComm is several MiB, so keep it on the heap rather than the stack.
+using CommPtr = std::unique_ptr<ncclComm>;
+
+CommPtr MakeSetupComm(int nRanks, int nNodes, ncclPeerInfo* peerInfo)
+{
+  auto comm = std::make_unique<ncclComm>();
+  comm->rank     = 0;
+  comm->nRanks   = nRanks;
+  comm->nNodes   = nNodes;
+  comm->node     = 0;
+  comm->peerInfo = peerInfo;
+  return comm;
+}
+
+CommPtr MakeCheckComm(int* localRankToRank, ncclBootstrap* bootstrap)
+{
+  auto comm = std::make_unique<ncclComm>();
+  comm->localRank       = 0;
+  comm->localRanks      = 1;
+  comm->localRankToRank = localRankToRank;
+  comm->bootstrap       = bootstrap;
+  return comm;
+}
+
+} // namespace
+
 TEST(TransportTest, CollNetRecvSetup) {
   constexpr int nranks = 2;
   constexpr int nNodes = 2;
 
   // --- Setup comm ---
-  ncclComm comm = {};
-  comm.rank = 0;
-  comm.nRanks = nranks;
-  comm.nNodes = nNodes;
-  comm.node = 0;
   ncclPeerInfo peerInfo[3] = {};
-  comm.peerInfo = peerInfo;
+  auto comm = MakeSetupComm(nranks, nNodes, peerInfo);
 
   // --- Setup bootstrap ---
   // bootstrapAllGather reads rank/nranks from this state and is a no-op at nranks==1
   ncclComm_t bootstrapComm = nullptr;
   ASSERT_EQ(ncclCommInitAll(&bootstrapComm, 1, nullptr), ncclSuccess);
-  comm.bootstrap = bootstrapComm->bootstrap;
+  comm->bootstrap = bootstrapComm->bootstrap;
 
   // --- Setup channel ---
   ncclChannel channel = {};
@@ -67,7 +93,7 @@ TEST(TransportTest, CollNetRecvSetup) {
   collNetTransport.recv = dummyTransport;
 
   // --- Dummy inputs ---
-  ncclTopoGraph topoGraph = {};
+  auto topoGraph = std::make_unique<ncclTopoGraph>();
   ncclConnect connect = {};
   int masterRank = 0;
   int masterPeer = 1;
@@ -75,7 +101,7 @@ TEST(TransportTest, CollNetRecvSetup) {
   int type = collNetRecv;
 
   // --- Run the function ---
-  bool failed = ncclTransportCollNetSetup(&comm, &topoGraph, &channel, masterRank, masterPeer, channelId, type, &connect);
+  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId, type, &connect);
 
   // --- Assert: function should succeed (return false) ---
   ASSERT_FALSE(failed);
@@ -91,14 +117,8 @@ TEST(TransportTest, CollNetSendSetup) {
   constexpr int nNodes = 2;
 
   // --- Setup comm ---
-  ncclComm comm = {};
-  comm.rank = 0;
-  comm.nRanks = nranks;
-  comm.nNodes = nNodes;
-  comm.node = 0;
-
   ncclPeerInfo peerInfo[3] = {};
-  comm.peerInfo = peerInfo;
+  auto comm = MakeSetupComm(nranks, nNodes, peerInfo);
 
   // --- Setup channel ---
   ncclChannel channel = {};
@@ -137,7 +157,7 @@ TEST(TransportTest, CollNetSendSetup) {
   collNetTransport.send = dummyTransport;
 
   // --- Dummy inputs ---
-  ncclTopoGraph topoGraph = {};
+  auto topoGraph = std::make_unique<ncclTopoGraph>();
   ncclConnect connect = {};  // IMPORTANT: non-null since this is memcpy’d into masterConnects
   int masterRank = 0;
   int masterPeer = 1;
@@ -145,7 +165,7 @@ TEST(TransportTest, CollNetSendSetup) {
   int type = collNetSend;
 
   // --- Run the function ---
-  bool failed = ncclTransportCollNetSetup(&comm, &topoGraph, &channel, masterRank, masterPeer, channelId, type, &connect);
+  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId, type, &connect);
 
   // --- Assert: function should succeed (return false) ---
   ASSERT_FALSE(failed);
@@ -157,52 +177,43 @@ TEST(TransportTest, CollNetSendSetup) {
 
 
   TEST(TransportTest, NcclTransportCollNetCheckTestSuccess) {
-    struct ncclComm comm = {};
     struct ncclBootstrap dummyBootstrap;
-
     int rankMap[1] = {0};
-    comm.localRank = 0;
-    comm.localRanks = 1;
-    comm.localRankToRank = rankMap;
-    comm.bootstrap = &dummyBootstrap;
+    auto comm = MakeCheckComm(rankMap, &dummyBootstrap);
+
     int collNetSetupFail = 0;
-    ncclResult_t result = ncclTransportCollNetCheck(&comm, collNetSetupFail);
+    ncclResult_t result = ncclTransportCollNetCheck(comm.get(), collNetSetupFail);
     EXPECT_EQ(result, ncclSuccess);
   }
 
   TEST(TransportTest, NcclTransportCollNetCheckTestFails) {
-    ncclComm comm;
     int rankMap[1] = {0};
     ncclBootstrap bootstrap;
-
-    comm.localRank = 0;
-    comm.localRanks = 1;
-    comm.localRankToRank = rankMap;
-    comm.bootstrap = &bootstrap;
+    auto comm = MakeCheckComm(rankMap, &bootstrap);
 
     int collNetSetupFail = 1; // simulate failure on this rank
-    ncclResult_t result = ncclTransportCollNetCheck(&comm, collNetSetupFail);
+    ncclResult_t result = ncclTransportCollNetCheck(comm.get(), collNetSetupFail);
     EXPECT_EQ(result, ncclSystemError);
 }
 
 // Test for ncclTransportCollNetFree
 TEST(TransportTest, CollNetFreeTest) {
-  ncclComm comm = {};
-  comm.nChannels = 1;
-  comm.nRanks = 0; // So comm.channels[0].peers[0] is accessed
+  auto comm = std::make_unique<ncclComm>();
+  comm->nChannels = 1;
+  comm->nRanks = 0; // So comm->channels[0].peers[0] is accessed
 
-  // Access embedded array directly (don't assign to comm.channels)
-  ncclChannel* channel = &comm.channels[0];
+  // Access embedded array directly (don't assign to comm->channels)
+  ncclChannel* channel = &comm->channels[0];
 
-  // Allocate peer array for the channel (comm.nRanks + 1 for dummy peer)
-  channel->peers = new ncclChannelPeer*[comm.nRanks + 1];
-  for (int r = 0; r <= comm.nRanks; ++r) {
+  // Allocate peer array for the channel (comm->nRanks + 1 for dummy peer)
+  channel->peers = new ncclChannelPeer*[comm->nRanks + 1];
+  for (int r = 0; r <= comm->nRanks; ++r) {
     channel->peers[r] = nullptr;
   }
 
   // Create dummy peer at index nRanks
   ncclChannelPeer* peer = new ncclChannelPeer();
-  channel->peers[comm.nRanks] = peer;
+  channel->peers[comm->nRanks] = peer;
   peer->refCount = 1;
 
   // Setup dummy ncclTransportComm with only `free` implemented
@@ -225,7 +236,7 @@ TEST(TransportTest, CollNetFreeTest) {
   }
 
   // Call the function under test
-  ncclResult_t result = ncclTransportCollNetFree(&comm);
+  ncclResult_t result = ncclTransportCollNetFree(comm.get());
   ASSERT_EQ(result, ncclSuccess);
 
   // Clean up
