@@ -2600,6 +2600,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(gfx950_workloads["tp2-family"]["sharktank_mode"], "prefill")
         self.assertEqual(gfx950_workloads["tp2-decode"]["sharktank_mode"], "decode")
         self.assertEqual(gfx950_workloads["tp2-combined"]["sharktank_mode"], "combined")
+        self.assertTrue(gfx950_workloads["tp2-family"]["sharktank_skip_warmup"])
         self.assertTrue(gfx950_workloads["tp2-decode"]["sharktank_skip_warmup"])
         self.assertTrue(gfx950_workloads["tp2-combined"]["sharktank_skip_warmup"])
         self.assertEqual(

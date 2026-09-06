@@ -1851,6 +1851,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "tp2-family": {
             "sharktank_mode": "prefill",
             "record_replay_runtime_sample_stride": 256,
+            "sharktank_skip_warmup": True,
             "run_timeout_seconds": 300,
         },
         "tp2-decode": {
