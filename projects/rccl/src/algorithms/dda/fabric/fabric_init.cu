@@ -14,6 +14,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
+#include "bootstrap.h"
 #include "rccl_common.h"
 #include "param.h"
 
@@ -81,6 +82,31 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  const char* fabricMaxBlocksOverride = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
+  const int localBlocksMax = ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride);
+
+  // Warn if user override was ignored because it exceeds the CU-derived cap
+  if (fabricMaxBlocksOverride != nullptr && fabricMaxBlocksOverride[0] != '\0') {
+    char* endptr = nullptr;
+    long requestedVal = strtol(fabricMaxBlocksOverride, &endptr, 10);
+    if (endptr != fabricMaxBlocksOverride && *endptr == '\0' && requestedVal > localBlocksMax) {
+      WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
+           "The override can only lower the block count, not raise it.",
+           requestedVal, localBlocksMax, localBlocksMax);
+    }
+  }
+
+  std::vector<int> blockCaps(nRanks, 0);
+  blockCaps[comm->rank] = localBlocksMax;
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
+
+  int nBlocksMax = localBlocksMax;
+  for (int rank = 0; rank < nRanks; ++rank) {
+    if (blockCaps[rank] < nBlocksMax) {
+      nBlocksMax = blockCaps[rank];
+    }
+  }
+
   // Owned resources: handed to comm on success, freed at `fail` otherwise.
   // All declared before any goto so the cleanup label is reachable without
   // jumping over an initialization.
@@ -92,7 +118,6 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   DdaFabricBarrierState* barrierState = nullptr;
   uint32_t* epochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
-  const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
 
@@ -165,6 +190,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
        "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
        nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
        (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
+       comm->cuCount, localBlocksMax, nBlocksMax);
   return ncclSuccess;
 
 fail:

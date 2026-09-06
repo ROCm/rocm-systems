@@ -34,8 +34,6 @@ __launch_bounds__(512)
                                          const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                          FabricGpuBarrier barrier, const T* __restrict__ acc) {
 
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
