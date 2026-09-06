@@ -101,9 +101,15 @@ else()
 endif()
 find_package(OpenGL REQUIRED)
 
+# ABCE (Accelerated Blit Copy Engine) headers live in runtimes/api-headers;
+# make them available to the ROCm backend sources.
+target_include_directories(rocclr PRIVATE ${ROCCLR_SRC_DIR}/../../../runtimes/api-headers/include/abce)
+
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocappprofile.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocrctx.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocabce.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocabceblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/roccounters.cpp

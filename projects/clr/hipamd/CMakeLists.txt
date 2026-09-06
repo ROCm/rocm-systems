@@ -387,6 +387,20 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
     endif()
 
     install(DIRECTORY include DESTINATION .)
+    # amd_hip_ext_copy_engine.h includes abce_device.h, so a kernel that submits
+    # copies compiles against ABCE's device-side headers. This is that header's
+    # full include closure, and nothing more: the host-side planner and the HSA
+    # adapters stay internal to the runtime.
+    install(
+      FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_builder.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_config.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_device.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_ring_core.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_ring_device.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/abce_types.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtimes/api-headers/include/abce/sdma_packets.h
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/abce)
     if(DEFINED HIPNV_DIR)
         install(DIRECTORY ${HIPNV_DIR}/include/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
     endif()

@@ -11,6 +11,8 @@
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
+#include "device/rocm/rocabce.hpp"
+#include "device/rocm/rocabceblit.hpp"
 #include "device/rocm/roccounters.hpp"
 #include "platform/activity.hpp"
 #include "platform/kernel.hpp"
@@ -368,7 +370,14 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
   }
 
   // Extract timing and cache it
-  if (IsSdmaEngine(engine_)) {
+  if (engine_ == HwQueueEngine::SdmaAbce) {
+    // ABCE writes SDMA global-clock timestamps directly into the signal but
+    // does not submit through ROCr's async-copy API.
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
+    cached_timing_.start_ = time.start;
+    cached_timing_.end_ = time.end;
+  } else if (IsSdmaEngine(engine_)) {
     hsa_amd_profiling_async_copy_time_t time = {};
     Hsa::profiling_get_async_copy_time(signal_, &time);
     cached_timing_.start_ = time.start;
@@ -747,6 +756,7 @@ bool VirtualGPU::HwQueueTracker::Create() {
 hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_val, Timestamp* ts,
                                                       bool attach_signal) {
   amd::Command* cmd = gpu_.command();
+
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
     if (nullptr != cmd) {
@@ -839,15 +849,18 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 }
 
 // ================================================================================================
-std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine) {
+std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine,
+                                                                     uint32_t abce_ring) {
   bool explicit_wait = false;
+  const bool same_abce_ring =
+      engine == HwQueueEngine::SdmaAbce && engine_ == HwQueueEngine::SdmaAbce &&
+      abce_ring != kInvalidAbceRing && abce_ring == abce_ring_;
   // Reset all current waiting signals
   waiting_signals_.clear();
 
   // Does runtime switch the active engine?
   if (engine != engine_) {
     // Yes, return the signal from the previous operation for a wait
-    engine_ = engine;
     explicit_wait = true;
   } else {
     // Unknown engine in use, hence return a wait signal always
@@ -855,13 +868,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
       explicit_wait = true;
     } else {
       // Check if skip wait optimization is enabled. It will try to predict the same engine in ROCr
-      // and ignore the signal wait, relying on in-order engine execution
-      const Settings& settings = gpu_.dev().settings();
-      if (engine != HwQueueEngine::Compute) {
+      // and ignore the signal wait, relying on in-order engine execution.
+      if (engine == HwQueueEngine::SdmaAbce) {
+        explicit_wait = !same_abce_ring;
+      } else if (engine != HwQueueEngine::Compute) {
         explicit_wait = true;
       }
     }
   }
+  engine_ = engine;
+  abce_ring_ = engine == HwQueueEngine::SdmaAbce ? abce_ring : kInvalidAbceRing;
 
   // Check if a wait is required
   if (explicit_wait) {
@@ -2587,7 +2603,11 @@ bool VirtualGPU::create() {
   }
 
   device::BlitManager::Setup blitSetup;
-  blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  if (DEBUG_CLR_ENABLE_ABCE && roc_device_.abceEngineSet() != nullptr) {
+    blitMgr_ = new AbceBlitManager(*this, blitSetup);
+  } else {
+    blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  }
   if ((nullptr == blitMgr_) || !blitMgr_->create(roc_device_)) {
     LogError("Could not create BlitManager!");
     return false;
@@ -2754,13 +2774,15 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseSdmaEngines() {
-  if (!hasAssignedSdmaEngine()) {
-    return;
-  }
   // Release SDMA engine assignment when queue is idle
   // This allows the engine to be reassigned to other active streams
-  dev().ReleaseSdmaEngine(this);
-  ClearAssignedSdmaEngine();
+  if (hasAssignedSdmaEngine()) {
+    dev().ReleaseSdmaEngine(this);
+    ClearAssignedSdmaEngine();
+  }
+  if (auto* abce_engines = dev().abceEngineSet(); abce_engines != nullptr) {
+    abce_engines->engine_allocator().Release(this);
+  }
 }
 
 // ================================================================================================
@@ -3784,6 +3806,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 }
 
 // ================================================================================================
+
 void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
