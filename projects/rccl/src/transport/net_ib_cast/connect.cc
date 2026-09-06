@@ -10,6 +10,7 @@
 #include "p2p_cast.h"
 #include "p2p_resiliency_cast.h"
 #include "net_telemetry.h"
+#include "qp_sharing.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -79,6 +80,10 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
     return BY_ORDER;
   }
 
+  if (IbCastQpSharingEnabled()) {
+    return BY_ID;
+  }
+
   if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
     return BY_ID;
   }
@@ -90,7 +95,7 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   return requested;
 }
 
-ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
+ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int64_t cqSize) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
   {
@@ -101,7 +106,13 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
-  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
+  if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
+    WARN("NET/IB: %s: requested CQ size %ld exceeds device %s max_cqe %d, clamping",
+         __func__, cqSize, ibDev->devName, ibDev->maxCqe);
+    cqSize = ibDev->maxCqe;
+  }
+
+  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, (int)cqSize, cq_context, NULL, 0));
 
   return ncclSuccess;
 }
@@ -405,6 +416,7 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
   return ncclSuccess;
 }
 
+
 static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs, struct ncclIbQp* qp) {
   struct ibv_qp_init_attr qpInitAttr;
   enum ncclIbChannelType channel_type = (createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
@@ -413,8 +425,14 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   qpInitAttr.send_cq = createQpAttrs->cq;
   qpInitAttr.recv_cq = createQpAttrs->cq;
   qpInitAttr.qp_type = createQpAttrs->type;
-  qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest;
-  qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
+  // Scale WR depths for QP sharing
+  if (createQpAttrs->isQpSharingEnabled) {
+    qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest * createQpAttrs->cqDepthMultiplier;
+    qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest * createQpAttrs->cqDepthMultiplier;
+  } else {
+    qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest;
+    qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
+  }
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
   if (createQpAttrs->isCtsEnabled) {
@@ -439,17 +457,23 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 19));
   }
 
-  if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-    bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-    nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
-    nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-    nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-      !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
-  }
-  if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
+  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
+    // For Ionic with QP sharing, use groupIdx for UDMA mask selection
+    uint8_t mask = (createQpAttrs->qpSharingGroupIdx % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
+    if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
+      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
+      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
+        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
+    }
+    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
+      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
+    } else {
+      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
+    }
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
@@ -777,7 +801,12 @@ fail:
 // is updated accordingly. The meta data structure is then expected to be
 // delivered to the remote side (receiver) as part of the connection
 // establishment process.
-static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId) {
+// depthMult is the sizing already applied to this comm's CQs (IbCastInitCommDevBase),
+// clamped to what the device's max_cqe could actually support -- QP send/recv WR
+// depth must scale by that same, possibly-reduced, value or the QP can post more
+// work than its CQ can record completions for.
+static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId,
+                                          int depthMult) {
   uint nqps = comm->base.nqps;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
@@ -785,6 +814,9 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
   qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+  qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+  qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
+  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -876,6 +908,25 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
 // was delivered from the receiver side) on the QPs before modifying the QPs
 // to RTR.
 static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* remMeta) {
+  if (IbCastQpSharingEnabled()) {
+    comm->remCommId = remMeta->commId;
+
+    // If secondary shared QP, skip RTR/RTS -- QPs are already in RTS from primary
+    if (IbCastCommIsSecondary(&comm->base)) {
+      // Just assign remDevIdx from remote metadata
+      uint nqps = comm->base.nqps;
+      for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
+        ncclIbQp* localQp = &comm->base.qps[qpIndex];
+        ncclIbQpInfo* remQpInfo = &remMeta->qpInfo[qpIndex];
+        localQp->remDevIdx = remQpInfo->devIndex;
+      }
+      if (comm->base.resiliency) {
+        NCCLCHECK(IbCastResiliencySenderQpsToRts(comm->base.resiliency, remMeta));
+      }
+      return ncclSuccess;
+    }
+  }
+
   uint nqps = comm->base.nqps;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     ncclIbQp* localQp = &comm->base.qps[qpIndex];
@@ -904,6 +955,7 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
 
     struct ncclIbQpRtrAttr* rtrAttr = &localQp->rtrAttr;
     rtrAttr->mtu = std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu);
+    remDevInfo->mtu = rtrAttr->mtu;
     rtrAttr->linkLayer = remDevInfo->link_layer;
     rtrAttr->tc = remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET ? remMeta->tc : -1;
     rtrAttr->sl = remMeta->sl;
@@ -936,6 +988,175 @@ int IbCastGetTrafficClass(void* ctx) {
 void IbCastSetTrafficClass(void* ctx, int trafficClass) {
   ncclNetCommConfig_t* config = (ncclNetCommConfig_t*)ctx;
   if (config) config->trafficClass = trafficClass;
+}
+
+// Determine QP sharing role for sender and set up secondary if applicable.
+// On return:
+//   *outRole == QP_SHARING_SECONDARY: QPs assigned from pool, skip IbCastSenderQpsCreate
+//   *outRole == QP_SHARING_PRIMARY:   proceed with QP creation, then call RegisterPrimary
+//   *outRole == QP_SHARING_NONE:      sharing disabled/fallback, proceed normally
+static ncclResult_t IbCastQpSharingSenderSetup(
+    struct ncclIbSendComm* comm,
+    struct ncclIbHandle* handle,
+    struct ncclIbConnectionMetadata* meta,
+    const ncclNetVDeviceProps_t* remoteVProps,
+    int depthMult,
+    enum IbCastQpSharingRole* outRole) {
+
+  *outRole = QP_SHARING_NONE;
+
+  if (!IbCastQpSharingEnabled() || handle->isRMA) {
+    return ncclSuccess;
+  }
+
+  int ngroups = rcclParamIbCastCommNGroups();
+
+  // Allocate commId for this comm
+  comm->base.commId = IbCastAllocCommId(comm, true);
+  if (comm->base.commId == 0) {
+    // Fallback to non-sharing if pool exhausted
+    return ncclSuccess;
+  }
+
+  // Build probe key from peer address
+  IbCastSharedQpKey probeKey;
+  memset(&probeKey, 0, sizeof(probeKey));
+  memcpy(&probeKey.peerAddr, &handle->connectAddr, sizeof(union ncclSocketAddress));
+  IbCastStripPort(&probeKey.peerAddr);
+
+  // TODO - QP sharing
+  //        handle for Fusion/Cast where comm->base.vProps.ndevs > 1
+  //        handle for Fusion/Cast where remoteVProps->ndevs > 1
+  int probeIbDevN = (comm->base.vProps.ndevs > 0) ? comm->base.vProps.devs[0] : 0;
+  int probeRemIbDevIdx = remoteVProps->devs[0];
+
+  // Count existing refs to determine groupIdx
+  int totalRefs = IbCastCountPeerTotalRefcount(probeIbDevN, &probeKey.peerAddr, probeRemIbDevIdx, true);
+  int groupIdx = totalRefs % ngroups;
+  comm->base.sharedGroupIdx = groupIdx;
+  comm->base.remIbDevIdx = probeRemIbDevIdx;
+
+  probeKey.ibDevN = probeIbDevN;
+  probeKey.remIbDevIdx = probeRemIbDevIdx;
+  probeKey.isSend = true;
+  probeKey.groupIdx = groupIdx;
+  probeKey.qpIdx = 0;
+
+  struct IbCastSharedQp* existingSlot = IbCastFindSharedQp(&probeKey);
+
+  if (existingSlot != NULL) {
+    // SECONDARY: reuse existing QPs from pool
+    INFO(NCCL_NET, "NET/IB: %s: QP sharing SECONDARY sender commId=%u group=%d totalRefs=%d",
+         __func__, comm->base.commId, groupIdx, totalRefs);
+
+    comm->base.isSharedQpPrimary = false;
+    int primaryNqps = IbCastCountGroupQpSlots(&probeKey.peerAddr, probeRemIbDevIdx, true, groupIdx);
+    comm->base.sharedPrimaryNqps = primaryNqps;
+
+    IbCastSharedQpKey key;
+    memset(&key, 0, sizeof(key));
+    memcpy(&key.peerAddr, &probeKey.peerAddr, sizeof(union ncclSocketAddress));
+    key.isSend = true;
+    key.groupIdx = groupIdx;
+
+    int nqps = comm->base.nqps;
+    for (int q = 0; q < nqps; q++) {
+      int mappedQP = q % primaryNqps;
+      key.ibDevN = comm->base.vProps.devs[mappedQP % comm->base.vProps.ndevs];
+      key.remIbDevIdx = remoteVProps->devs[mappedQP % remoteVProps->ndevs];
+      key.qpIdx = mappedQP;
+
+      struct IbCastSharedQp* slot = IbCastFindSharedQp(&key);
+      if (slot == NULL) {
+        WARN("NET/IB: %s: QP sharing SECONDARY: could not find shared QP for qpIdx=%d group=%d", __func__, q, groupIdx);
+        // Fallback: free commId and go non-sharing
+        IbCastFreeCommId(comm->base.commId);
+        comm->base.commId = 0;
+        comm->base.sharedGroupIdx = -1;
+        *outRole = QP_SHARING_NONE;
+        return ncclSuccess;
+      }
+
+      // Copy QP info from shared pool to this comm.
+      // ctsQpSlot is not stored in the pool: CTS offload is mutually exclusive
+      // with QP sharing; the non-offload signaling path uses devIndex instead.
+      comm->base.qps[q].qp = slot->qp;
+      comm->base.qps[q].devIndex = slot->devIndex;
+      comm->base.activeQps[q] = &comm->base.qps[q];
+
+      // Populate metadata with shared QP info
+      meta->qpInfo[q].qpn = slot->qp->qp_num;
+      meta->qpInfo[q].devIndex = slot->devIndex;
+
+      slot->refcount++;
+    }
+
+    // Redirect CQs: destroy per-comm CQs and point to primary's CQs
+    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+      NCCLCHECK(wrap_ibv_destroy_cq(comm->devs[i].base.cq));
+      comm->devs[i].base.cq = existingSlot->primaryCq;
+
+      // This comm's own PD ref, taken by IbCastInitCommDevBase, is unused: as a
+      // SECONDARY it borrows the primary's QPs and CQ. Release it now so the
+      // group's PD refcount reflects one owner (the PRIMARY), matching the
+      // single release IbCastCleanupGroupCqs performs at the group's last close.
+      int secondaryIbDevN = comm->base.vProps.devs[i];
+      std::lock_guard<std::mutex> pdLock(IbCastDevs[secondaryIbDevN].mutex);
+      if (0 == --IbCastDevs[secondaryIbDevN].pdRefs) {
+        NCCLCHECK(wrap_ibv_dealloc_pd(IbCastDevs[secondaryIbDevN].pd));
+      }
+    }
+    existingSlot->cqRefcount++;
+
+    *outRole = QP_SHARING_SECONDARY;
+  } else {
+    // PRIMARY: create QPs with scaled depth, then register in pool
+    INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY sender commId=%u group=%d depthMult=%d",
+         __func__, comm->base.commId, groupIdx, depthMult);
+    comm->base.isSharedQpPrimary = true;
+    *outRole = QP_SHARING_PRIMARY;
+  }
+
+  return ncclSuccess;
+}
+
+// Register this primary sender's QPs in the shared pool.
+// Called after IbCastSenderQpsCreate when role == QP_SHARING_PRIMARY.
+static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
+    struct ncclIbSendComm* comm,
+    struct ncclIbHandle* handle,
+    const ncclNetVDeviceProps_t* remoteVProps) {
+
+  union ncclSocketAddress peerAddr;
+  memcpy(&peerAddr, &handle->connectAddr, sizeof(union ncclSocketAddress));
+  IbCastStripPort(&peerAddr);
+
+  int nqps = comm->base.nqps;
+  for (int q = 0; q < nqps; q++) {
+    IbCastSharedQpKey key;
+    memset(&key, 0, sizeof(key));
+    key.peerAddr = peerAddr;
+    key.ibDevN = comm->base.vProps.devs[q % comm->base.vProps.ndevs];
+    key.remIbDevIdx = remoteVProps->devs[q % remoteVProps->ndevs];
+    key.groupIdx = comm->base.sharedGroupIdx;
+    key.isSend = true;
+    key.qpIdx = q;
+
+    int devIdx = q % comm->base.vProps.ndevs;
+    struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&key,
+        comm->base.qps[q].qp, comm->devs[devIdx].base.cq,
+        comm->devs[devIdx].base.ibDevN, comm->base.qps[q].devIndex, 1);
+    if (entry == NULL) {
+      WARN("NET/IB: %s: QP sharing PRIMARY sender commId=%u group=%d: shared-QP pool exhausted "
+           "registering qpIdx=%d/%d", __func__, comm->base.commId, comm->base.sharedGroupIdx, q, nqps);
+      return ncclInternalError;
+    }
+    if (q == 0) {
+      entry->cqRefcount = 1;
+    }
+  }
+
+  return ncclSuccess;
 }
 
 ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
@@ -1050,9 +1271,15 @@ ib_recv_dev_list:
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
+  IbCastCommInitSharingFields(&comm->base);
+  comm->remCommId = 0;
+
   if (comm->base.resiliency) {
     NCCLCHECK(IbCastResiliencyDeviceNumSet(comm->base.resiliency, comm->base.vProps.ndevs, remoteVProps.ndevs));
   }
+
+  int depthMult;
+  depthMult = IbCastQpSharingDepthMultiplier();
 
   // Init PD, Ctx for each IB device
   comm->ar = 1; // Set to 1 for logic
@@ -1068,7 +1295,14 @@ ib_recv_dev_list:
     if (IbCastDevs[ibDevN].maxCqe > 0) {
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, cqSize), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, ((int64_t)cqSize * depthMult)), ret, fail);
+    if (depthMult > 1) {
+      // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
+      // us below what depthMult asked for, shrink depthMult to match so QP WR depth
+      // and this group's shared-QP capacityUnits never exceed what the CQ can record.
+      int achievedMult = comm->devs[i].base.cq->cqe / cqSize;
+      if (achievedMult < depthMult) depthMult = std::max(1, achievedMult);
+    }
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
     if (comm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(comm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
@@ -1079,36 +1313,58 @@ ib_recv_dev_list:
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
   meta.isRMA = handle->isRMA;
+  meta.sharedGroupIdx = -1;
+  meta.commId = 0;
+  // TODO - QP sharing
+  //        handle for Fusion/Cast where comm->base.vProps.ndevs > 1
+  meta.senderIbDevIdx = (comm->base.vProps.ndevs > 0) ? comm->base.vProps.devs[0] : -1;
 
-  // Create QPs on the sender side
-  NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
+  // QP Sharing: determine role and set up secondary if applicable
+  enum IbCastQpSharingRole sharingRole;
+  NCCLCHECKGOTO(IbCastQpSharingSenderSetup(comm, handle, &meta, &remoteVProps, depthMult, &sharingRole), ret, fail);
 
-  comm->telChId = channelId;
-  comm->telChStats = NULL;
+  // Set sharedGroupIdx before IbCastSenderQpsCreate which needs it
+  meta.sharedGroupIdx = comm->base.sharedGroupIdx;
 
-  // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
-  // the untracked value the hooks expect.
-  if (rcclTelemetryOn()) {
-    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-      int ibDevN = comm->base.vProps.devs[i];
-      int numQpsForDev = 0;
-      for (int q = 0; q < comm->base.nqps; q++)
-        if (comm->base.qps[q].devIndex == i) numQpsForDev++;
-      int numSlots = 0;
-      int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
-      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
-      int slotOffset = 0;
-      for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
-        if (comm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpStats == NULL (untracked).
-        int telSlot = startSlot + slotOffset++;
-        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
-        comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
+  if (sharingRole != QP_SHARING_SECONDARY) {
+    NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId, depthMult), ret, fail);
+    comm->telChId = channelId;
+    comm->telChStats = NULL;
+  
+    // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
+    // the untracked value the hooks expect.
+    if (rcclTelemetryOn()) {
+      for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+        int ibDevN = comm->base.vProps.devs[i];
+        int numQpsForDev = 0;
+        for (int q = 0; q < comm->base.nqps; q++)
+          if (comm->base.qps[q].devIndex == i) numQpsForDev++;
+        int numSlots = 0;
+        int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
+        if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
+        int slotOffset = 0;
+        for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
+          if (comm->base.qps[q].devIndex != i) continue;
+          // QPs past the granted slots keep telQpStats == NULL (untracked).
+          int telSlot = startSlot + slotOffset++;
+          rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
+          comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
+        }
       }
+      // Request completions are charged to the comm's first device.
+      comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
     }
-    // Request completions are charged to the comm's first device.
-    comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
+
+    if (sharingRole == QP_SHARING_PRIMARY) {
+      NCCLCHECKGOTO(IbCastQpSharingSenderRegisterPrimary(comm, handle, &remoteVProps), ret, fail);
+    }
   }
+
+  // Populate remaining QP sharing metadata
+  meta.commId = comm->base.commId;
+  // TODO - QP sharing
+  //        handle for Fusion/Cast where comm->base.vProps.ndevs > 1
+  meta.senderIbDevIdx = (comm->base.vProps.ndevs > 0) ? comm->base.vProps.devs[0] : -1;
 
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     ncclIbSendCommDev* commDev = comm->devs + i;
@@ -1341,8 +1597,13 @@ ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
 // the remote metadata structure, provided to the function (remMeta), with the
 // QPs' information so that data structure could be delivered to the remote
 // side (sender) as part of the connection establishment process.
+// depthMult is the sizing already applied to this comm's CQs (IbCastInitCommDevBase),
+// clamped to what the device's max_cqe could actually support -- QP send/recv WR
+// depth must scale by that same, possibly-reduced, value or the QP can post more
+// work than its CQ can record completions for.
 static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* remMeta,
-                                                 struct ncclIbConnectionMetadata* meta, int channelId) {
+                                                 struct ncclIbConnectionMetadata* meta, int channelId,
+                                                 int depthMult) {
   uint nqps = rComm->base.nqps;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
@@ -1354,6 +1615,10 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   // When resiliency is enabled, the number of send work requests is as the
   // number of max requests because every CTS message is signaled.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
+
+  qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+  qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
+  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1408,6 +1673,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
         return ncclInternalError;
       }
     }
+
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
     localQp->channelId = channelId;
     localQp->isDataQp = qpCreateAttrs.isDataQp;
@@ -1495,6 +1761,15 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
       qpCreateAttrs.useIonic = IbCastAinicRoce;
+      if (IbCastCommIsPrimary(&rComm->base)) {
+        // Flush QP is shared across comms in the group — enable WR depth
+        // scaling and group-based UDMA pinning so it matches the data QPs.
+        qpCreateAttrs.isQpSharingEnabled = true;
+        qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
+        qpCreateAttrs.cqDepthMultiplier = depthMult;
+      } else {
+        IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
+      }
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
@@ -1562,6 +1837,221 @@ ncclResult_t IbCastReceiverPrePostReceiveWorkRequests(struct ncclIbRecvComm* rec
   for (int i = 0; i < nqps; i++) {
     NCCLCHECK(IbCastPostReceiveWorkRequestsOnQp(recvComm, &recvComm->base.qps[i]));
   }
+  return ncclSuccess;
+}
+
+// Determine QP sharing role for receiver and set up secondary if applicable.
+// On return:
+//   *outRole == QP_SHARING_SECONDARY: QPs assigned from pool, skip IbCastReceiverQpsCreateToRts
+//   *outRole == QP_SHARING_PRIMARY:   proceed with QP creation, then call RegisterPrimary
+//   *outRole == QP_SHARING_NONE:      sharing disabled/fallback, proceed normally
+static ncclResult_t IbCastQpSharingReceiverSetup(
+    struct ncclIbRecvComm* rComm,
+    const struct ncclIbConnectionMetadata* remMeta,
+    struct ncclIbConnectionMetadata* meta,
+    enum IbCastQpSharingRole* outRole) {
+
+  *outRole = QP_SHARING_NONE;
+
+  if (!IbCastQpSharingEnabled() || remMeta->isRMA || remMeta->sharedGroupIdx < 0) {
+    return ncclSuccess;
+  }
+
+  int recvGroupIdx = remMeta->sharedGroupIdx;
+
+  // Allocate commId for this comm
+  rComm->base.commId = IbCastAllocCommId(rComm, false);
+  if (rComm->base.commId == 0) {
+    // Fallback to non-sharing if pool exhausted
+    return ncclSuccess;
+  }
+
+  // Build probe key from peer address
+  union ncclSocketAddress recvPeerAddr;
+  ncclSocketGetAddr(&rComm->base.sock, &recvPeerAddr);
+  IbCastStripPort(&recvPeerAddr);
+
+  rComm->base.sharedGroupIdx = recvGroupIdx;
+  rComm->base.remIbDevIdx = remMeta->senderIbDevIdx;
+  int recvProbeIbDevN = (rComm->base.vProps.ndevs > 0) ? rComm->base.vProps.devs[0] : 0;
+
+  IbCastSharedQpKey recvProbeKey;
+  memset(&recvProbeKey, 0, sizeof(recvProbeKey));
+  recvProbeKey.ibDevN = recvProbeIbDevN;
+  recvProbeKey.peerAddr = recvPeerAddr;
+  recvProbeKey.remIbDevIdx = remMeta->senderIbDevIdx;
+  recvProbeKey.isSend = false;
+  recvProbeKey.groupIdx = recvGroupIdx;
+  recvProbeKey.qpIdx = 0;
+
+  struct IbCastSharedQp* recvExistingSlot = IbCastFindSharedQp(&recvProbeKey);
+
+  if (recvExistingSlot != NULL) {
+    // SECONDARY receiver: reuse existing QPs
+    INFO(NCCL_NET, "NET/IB: %s: QP sharing SECONDARY receiver commId=%u group=%d",
+         __func__, rComm->base.commId, recvGroupIdx);
+
+    rComm->base.isSharedQpPrimary = false;
+    int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
+    rComm->base.sharedPrimaryNqps = primaryNqps;
+    rComm->useCtsOffload = false;
+
+    IbCastSharedQpKey recvKey;
+    memset(&recvKey, 0, sizeof(recvKey));
+    recvKey.peerAddr = recvPeerAddr;
+    recvKey.isSend = false;
+    recvKey.groupIdx = recvGroupIdx;
+
+    int nqps = rComm->base.nqps;
+    for (int q = 0; q < nqps; q++) {
+      int mappedQ = q % primaryNqps;
+      int localDevIdx = mappedQ % rComm->base.vProps.ndevs;
+      recvKey.ibDevN = rComm->base.vProps.devs[localDevIdx];
+      recvKey.remIbDevIdx = remMeta->senderIbDevIdx;
+      recvKey.qpIdx = mappedQ;
+
+      struct IbCastSharedQp* recvSlot = IbCastFindSharedQp(&recvKey);
+      if (recvSlot == NULL) {
+        WARN("NET/IB: %s: QP sharing SECONDARY recv: could not find shared QP for qpIdx=%d group=%d", __func__, q, recvGroupIdx);
+        IbCastFreeCommId(rComm->base.commId);
+        rComm->base.commId = 0;
+        rComm->base.sharedGroupIdx = -1;
+        *outRole = QP_SHARING_NONE;
+        return ncclSuccess;
+      }
+
+      // ctsQpSlot is not stored in the pool: CTS offload is mutually exclusive
+      // with QP sharing; the non-offload signaling path uses devIndex instead.
+      rComm->base.qps[q].qp = recvSlot->qp;
+      rComm->base.qps[q].devIndex = recvSlot->devIndex;
+      // remDevIdx is normally set by IbCastReceiverQpsCreateToRts, which is
+      // skipped for secondary comms; set it here or CTS rkey selection is wrong.
+      rComm->base.qps[q].remDevIdx = remMeta->qpInfo[q].devIndex;
+      rComm->base.activeQps[q] = &rComm->base.qps[q];
+
+      meta->qpInfo[q].qpn = recvSlot->qp->qp_num;
+      meta->qpInfo[q].devIndex = recvSlot->devIndex;
+
+      recvSlot->refcount++;
+    }
+
+    // Redirect CQs: destroy per-comm CQs and point to primary's CQs
+    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+      NCCLCHECK(wrap_ibv_destroy_cq(rComm->devs[i].base.cq));
+      rComm->devs[i].base.cq = recvExistingSlot->primaryCq;
+
+      // This comm's own PD ref, taken by IbCastInitCommDevBase, is unused: as a
+      // SECONDARY it borrows the primary's QPs and CQ. Release it now so the
+      // group's PD refcount reflects one owner (the PRIMARY), matching the
+      // single release IbCastCleanupGroupCqs performs at the group's last close.
+      int secondaryIbDevN = rComm->base.vProps.devs[i];
+      std::lock_guard<std::mutex> pdLock(IbCastDevs[secondaryIbDevN].mutex);
+      if (0 == --IbCastDevs[secondaryIbDevN].pdRefs) {
+        NCCLCHECK(wrap_ibv_dealloc_pd(IbCastDevs[secondaryIbDevN].pd));
+      }
+    }
+    recvExistingSlot->cqRefcount++;
+
+    // Share flush QPs from primary
+    if (rComm->flushEnabled) {
+      for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+        IbCastSharedQpKey flushKey;
+        memset(&flushKey, 0, sizeof(flushKey));
+        flushKey.ibDevN = rComm->base.vProps.devs[i];
+        flushKey.peerAddr = recvPeerAddr;
+        flushKey.remIbDevIdx = remMeta->senderIbDevIdx;
+        flushKey.isSend = false;
+        flushKey.groupIdx = recvGroupIdx;
+        flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
+
+        struct IbCastSharedQp* flushSlot = IbCastFindSharedQp(&flushKey);
+        if (flushSlot) {
+          rComm->devs[i].gpuFlush.qp.qp = flushSlot->qp;
+          flushSlot->refcount++;
+          INFO(NCCL_NET, "NET/IB: %s: SECONDARY recv sharing flush QP qpn=%u dev=%d group=%d refcount=%d commId=%u",
+               __func__, flushSlot->qp->qp_num, i, recvGroupIdx, flushSlot->refcount, rComm->base.commId);
+        } else {
+          WARN("NET/IB: %s: SECONDARY recv could not find shared flush QP for dev=%d group=%d commId=%u",
+               __func__, i, recvGroupIdx, rComm->base.commId);
+        }
+      }
+    }
+
+    *outRole = QP_SHARING_SECONDARY;
+  } else {
+    // PRIMARY receiver: create QPs with scaled depth, register in pool
+    INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d",
+         __func__, rComm->base.commId, recvGroupIdx);
+    rComm->base.isSharedQpPrimary = true;
+    rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
+    *outRole = QP_SHARING_PRIMARY;
+  }
+
+  return ncclSuccess;
+}
+
+// Register this primary receiver's QPs (and flush QPs) in the shared pool.
+// Called after IbCastReceiverQpsCreateToRts when role == QP_SHARING_PRIMARY.
+static ncclResult_t IbCastQpSharingReceiverRegisterPrimary(
+    struct ncclIbRecvComm* rComm,
+    const struct ncclIbConnectionMetadata* remMeta) {
+
+  union ncclSocketAddress recvPeerAddr;
+  ncclSocketGetAddr(&rComm->base.sock, &recvPeerAddr);
+  IbCastStripPort(&recvPeerAddr);
+
+  IbCastSharedQpKey recvKey;
+  memset(&recvKey, 0, sizeof(recvKey));
+  recvKey.peerAddr = recvPeerAddr;
+  recvKey.remIbDevIdx = remMeta->senderIbDevIdx;
+  recvKey.isSend = false;
+  recvKey.groupIdx = rComm->base.sharedGroupIdx;
+
+  int nqps = rComm->base.nqps;
+  for (int q = 0; q < nqps; q++) {
+    recvKey.ibDevN = rComm->base.vProps.devs[q % rComm->base.vProps.ndevs];
+    recvKey.qpIdx = q;
+
+    int devIdx = q % rComm->base.vProps.ndevs;
+    struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&recvKey,
+        rComm->base.qps[q].qp, rComm->devs[devIdx].base.cq,
+        rComm->devs[devIdx].base.ibDevN, rComm->base.qps[q].devIndex, 1);
+    if (entry == NULL) {
+      WARN("NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d: shared-QP pool exhausted "
+           "registering qpIdx=%d/%d", __func__, rComm->base.commId, rComm->base.sharedGroupIdx, q, nqps);
+      return ncclInternalError;
+    }
+    if (q == 0) {
+      entry->cqRefcount = 1;
+    }
+  }
+
+  // Register flush QPs in shared pool (primary only)
+  if (rComm->flushEnabled) {
+    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+      IbCastSharedQpKey flushKey;
+      memset(&flushKey, 0, sizeof(flushKey));
+      flushKey.ibDevN = rComm->base.vProps.devs[i];
+      flushKey.peerAddr = recvPeerAddr;
+      flushKey.remIbDevIdx = remMeta->senderIbDevIdx;
+      flushKey.isSend = false;
+      flushKey.groupIdx = rComm->base.sharedGroupIdx;
+      flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
+
+      struct IbCastSharedQp* flushEntry = IbCastRegisterSharedQp(&flushKey, rComm->devs[i].gpuFlush.qp.qp,
+          rComm->devs[i].base.cq, rComm->devs[i].base.ibDevN, i, 1);
+      if (flushEntry == NULL) {
+        WARN("NET/IB: %s: QP sharing PRIMARY recv: shared-QP pool exhausted registering flush QP "
+             "dev=%d group=%d commId=%u, secondaries will not be able to share it",
+             __func__, i, rComm->base.sharedGroupIdx, rComm->base.commId);
+        continue;
+      }
+      INFO(NCCL_NET, "NET/IB: %s: PRIMARY recv registered flush QP qpn=%u dev=%d group=%d commId=%u",
+           __func__, rComm->devs[i].gpuFlush.qp.qp->qp_num, i,
+           rComm->base.sharedGroupIdx, rComm->base.commId);
+    }
+  }
+
   return ncclSuccess;
 }
 
@@ -1700,8 +2190,9 @@ ib_recv:
     }
   }
 
+  IbCastCommInitSharingFields(&rComm->base);
+
   // IB setup
-  // Pre-declare variables because of goto
   struct ncclIbDev* ibDev;
   int ibDevN;
   struct ncclIbRecvCommDev* rCommDev;
@@ -1716,6 +2207,10 @@ ib_recv:
   // Metadata to send back to requestor (sender)
   struct ncclIbConnectionMetadata meta;
   memset(&meta, 0, sizeof(meta));
+
+  int recvDepthMult;
+  recvDepthMult = IbCastQpSharingDepthMultiplier();
+
   // Receiver's CQ size needs to accomodate receive requests that can generate
   // up to 2 completions (one for the CTS message and one for the completion
   // of a receive request) per QP, in the worst case.
@@ -1730,7 +2225,14 @@ ib_recv:
     if (IbCastDevs[ibDevN].maxCqe > 0) {
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, cqSize), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, ((int64_t)cqSize * recvDepthMult)), ret, fail);
+    if (recvDepthMult > 1) {
+      // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
+      // us below what recvDepthMult asked for, shrink it to match so QP WR depth and
+      // this group's shared-QP capacityUnits never exceed what the CQ can record.
+      int achievedMult = rCommDev->base.cq->cqe / cqSize;
+      if (achievedMult < recvDepthMult) recvDepthMult = std::max(1, achievedMult);
+    }
     if (rComm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
@@ -1784,7 +2286,21 @@ ib_recv:
                           1 :
                           0;
 
-  NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId), ret, fail);
+  // QP Sharing: determine role and set up secondary if applicable
+  enum IbCastQpSharingRole sharingRole;
+  NCCLCHECKGOTO(IbCastQpSharingReceiverSetup(rComm, &remMeta, &meta, &sharingRole), ret, fail);
+
+  if (sharingRole != QP_SHARING_SECONDARY) {
+    NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId, recvDepthMult), ret, fail);
+    if (sharingRole == QP_SHARING_PRIMARY) {
+      NCCLCHECKGOTO(IbCastQpSharingReceiverRegisterPrimary(rComm, &remMeta), ret, fail);
+    }
+  }
+
+  // Populate QP sharing metadata in response
+  meta.sharedGroupIdx = rComm->base.sharedGroupIdx;
+  meta.commId = rComm->base.commId;
+
   if (rComm->prepostReceiveWorkRequests) {
     NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
   }
@@ -1948,30 +2464,77 @@ fail:
   goto exit;
 }
 
+// Per-device MR cleanup for sender comms (shared between shared/non-shared paths)
+static ncclResult_t IbCastCloseSendCommDevResources(struct ncclIbSendComm* comm, int devIndex) {
+  struct ncclIbSendCommDev* commDev = comm->devs + devIndex;
+  if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
+  if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
+  if (commDev->putSignalScratchpadMr != NULL)
+    NCCLCHECK(wrap_ibv_dereg_mr(commDev->putSignalScratchpadMr));
+  if (comm->base.resiliency) {
+    NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, devIndex));
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
+    bool isSharing = IbCastCommIsSharing(&comm->base);
     if (comm->base.vProps.ndevs > 0)
       rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++)
-      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+    // Acquire QP sharing mutex only when this comm participates in sharing
+    std::unique_lock<std::mutex> lock(g_IbCastSharedQpMutex, std::defer_lock);
+    if (isSharing) lock.lock();
+
+    // QP teardown: refcount-based for shared, direct destroy for non-shared
+    struct IbCastSharedQp* slot0 = NULL;
+    for (int q = 0; q < comm->base.nqps; q++) {
+      if (comm->base.qps[q].qp == NULL) continue;
+      if (isSharing) {
+        struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, true);
+        if (slot) {
+          if (q == 0) slot0 = slot;
+          slot->refcount--;
+          if (slot->refcount <= 0 && slot->qp) {
+            INFO(NCCL_NET, "IB CAST TEARDOWN: destroying shared send QP qpn=%u group=%d qpIdx=%d",
+                 slot->qp->qp_num, slot->key.groupIdx, slot->key.qpIdx);
+            wrap_ibv_destroy_qp(slot->qp);
+            slot->qp = NULL;
+          }
+        }
+      } else {
+        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+      }
+    }
 
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
     }
 
-    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-      struct ncclIbSendCommDev* commDev = comm->devs + i;
-      if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
-      if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
-      if (commDev->putSignalScratchpadMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->putSignalScratchpadMr));
-      if (comm->base.resiliency) {
-        NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, i));
-      }
-      NCCLCHECK(IbCastDestroyBase(&commDev->base));
+    if (isSharing) {
+      IbCastFreeCommIdLocked(comm->base.commId);
     }
+
+    // Per-device resource cleanup
+    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+      NCCLCHECK(IbCastCloseSendCommDevResources(comm, i));
+      if (!isSharing) {
+        NCCLCHECK(IbCastDestroyBase(&comm->devs[i].base));
+      }
+    }
+
+    // Group CQs are torn down last: they must outlive every QP still bound
+    // to them, or ibv_destroy_cq fails with EBUSY.
+    if (isSharing && slot0) {
+      slot0->cqRefcount--;
+      if (slot0->cqRefcount <= 0) {
+        IbCastCleanupGroupCqs(slot0);
+      }
+    }
+
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
@@ -1981,42 +2544,117 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
   return ncclSuccess;
 }
 
+// Per-device flush memory cleanup (common between shared/non-shared paths).
+// Releases GPU memory, MRs, and dma-buf FDs. Does NOT destroy the flush QP.
+static ncclResult_t IbCastCloseRecvFlushMem(struct ncclIbRecvCommDev* commDev) {
+  if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
+    CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
+    commDev->gpuFlush.gpuFlushGpuMem = nullptr;
+    if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
+    commDev->gpuFlush.gpuMr = nullptr;
+    if (commDev->gpuFlush.dmabufFd > 0) { close(commDev->gpuFlush.dmabufFd); }
+  }
+  return ncclSuccess;
+}
+
+// Per-device MR cleanup for receiver comms (shared between shared/non-shared paths)
+static ncclResult_t IbCastCloseRecvCommDevResources(struct ncclIbRecvComm* comm, int devIndex) {
+  struct ncclIbRecvCommDev* commDev = comm->devs + devIndex;
+  if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
+  if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
+  if (comm->base.resiliency) {
+    NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, devIndex));
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
+    bool isSharing = IbCastCommIsSharing(&comm->base);
     if (comm->base.vProps.ndevs > 0)
       rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++)
-      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+    // Acquire QP sharing mutex only when this comm participates in sharing
+    std::unique_lock<std::mutex> lock(g_IbCastSharedQpMutex, std::defer_lock);
+    if (isSharing) lock.lock();
+
+    // Data QP teardown: refcount-based for shared, direct destroy for non-shared
+    struct IbCastSharedQp* slot0 = NULL;
+    for (int q = 0; q < comm->base.nqps; q++) {
+      if (comm->base.qps[q].qp == NULL) continue;
+      if (isSharing) {
+        struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, false);
+        if (slot) {
+          if (q == 0) slot0 = slot;
+          slot->refcount--;
+          if (slot->refcount <= 0 && slot->qp) {
+            INFO(NCCL_NET, "IB CAST TEARDOWN: destroying shared recv QP qpn=%u group=%d qpIdx=%d",
+                 slot->qp->qp_num, slot->key.groupIdx, slot->key.qpIdx);
+            wrap_ibv_destroy_qp(slot->qp);
+            slot->qp = NULL;
+          }
+        }
+      } else {
+        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+      }
+    }
 
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
     }
 
+    if (isSharing) {
+      IbCastFreeCommIdLocked(comm->base.commId);
+    }
+
+    // Per-device resource cleanup: flush QP/memory and MR teardown
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
-        if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
-          commDev->gpuFlush.gpuFlushGpuMem = nullptr;
-          if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
-          commDev->gpuFlush.gpuMr = nullptr;
-          if (commDev->gpuFlush.dmabufFd > 0) {
-            close(commDev->gpuFlush.dmabufFd);
+        // Flush memory is always per-comm
+        NCCLCHECK(IbCastCloseRecvFlushMem(commDev));
+        // Flush QP teardown: refcount-based for shared, direct destroy for non-shared
+        if (commDev->gpuFlush.qp.qp != NULL) {
+          if (isSharing) {
+            struct IbCastSharedQp* flushSlot = IbCastFindSharedQpByQpn(
+                commDev->gpuFlush.qp.qp->qp_num, false);
+            if (flushSlot) {
+              flushSlot->refcount--;
+              if (flushSlot->refcount <= 0 && flushSlot->qp) {
+                INFO(NCCL_NET, "IB CAST TEARDOWN: destroying shared flush QP qpn=%u group=%d",
+                     flushSlot->qp->qp_num, flushSlot->key.groupIdx);
+                wrap_ibv_destroy_qp(flushSlot->qp);
+                flushSlot->qp = NULL;
+                IbCastUnregisterSharedQpLocked(flushSlot);
+              }
+            } else {
+              // Not in pool (pool-exhaustion fallback) — destroy directly
+              NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
+            }
+          } else {
+            NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
           }
+          commDev->gpuFlush.qp.qp = NULL;
         }
-        if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
-      if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
-      if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
-      if (comm->base.resiliency) {
-        IbCastResiliencyDevDestroy(comm->base.resiliency, i);
+      NCCLCHECK(IbCastCloseRecvCommDevResources(comm, i));
+      if (!isSharing) {
+        NCCLCHECK(IbCastDestroyBase(&commDev->base));
       }
-      NCCLCHECK(IbCastDestroyBase(&commDev->base));
     }
+
+    // Group CQs are torn down last: they must outlive every QP still bound
+    // to them (data QPs and flush QPs above), or ibv_destroy_cq fails with EBUSY.
+    if (isSharing && slot0) {
+      slot0->cqRefcount--;
+      if (slot0->cqRefcount <= 0) {
+        IbCastCleanupGroupCqs(slot0);
+      }
+    }
+
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
