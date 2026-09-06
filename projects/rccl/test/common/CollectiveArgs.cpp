@@ -184,14 +184,28 @@ namespace RcclUnitTesting
     // pooled-worker corruption. Timing, not contents: prep rewrites these buffers.
     size_t const cap = 4u << 20;
     hipError_t errIn = hipSuccess, errOut = hipSuccess;
-    // Mirror the frees below: in-place allocates only one of the pair.
-    if (this->inputGpu.ptr && !(this->inPlace && this->funcType == ncclCollGather))
+    // In-place Attaches one buffer as an interior alias of the other, so there is a
+    // single allocation and its owner is the lower address; its own length fits inside.
+    if (this->inPlace)
     {
-      errIn = hipMemset(this->inputGpu.ptr, 0, std::min(this->numInputBytesAllocated, cap));
+      bool const inLower = this->inputGpu.ptr <= this->outputGpu.ptr;
+      void* const  own   = inLower ? this->inputGpu.ptr : this->outputGpu.ptr;
+      size_t const bytes = inLower ? this->numInputBytesAllocated : this->numOutputBytesAllocated;
+      if (own && bytes)
+      {
+        errIn = hipMemset(own, 0, std::min(bytes, cap));
+      }
     }
-    if (this->outputGpu.ptr && (!this->inPlace || this->funcType == ncclCollGather))
+    else
     {
-      errOut = hipMemset(this->outputGpu.ptr, 0, std::min(this->numOutputBytesAllocated, cap));
+      if (this->inputGpu.ptr && this->numInputBytesAllocated)
+      {
+        errIn = hipMemset(this->inputGpu.ptr, 0, std::min(this->numInputBytesAllocated, cap));
+      }
+      if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+      {
+        errOut = hipMemset(this->outputGpu.ptr, 0, std::min(this->numOutputBytesAllocated, cap));
+      }
     }
 
     // If in-place, either only inputGpu or outputGpu was allocated
