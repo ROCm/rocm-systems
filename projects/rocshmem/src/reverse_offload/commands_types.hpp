@@ -59,7 +59,9 @@ enum ro_net_types {
   RO_NET_UNSIGNED_LONG,
   RO_NET_LONG_LONG,
   RO_NET_SHORT,
-  RO_NET_LONG_DOUBLE
+  RO_NET_LONG_DOUBLE,
+  RO_NET_HALF,
+  RO_NET_BFLOAT16
 };
 
 }  // namespace rocshmem
