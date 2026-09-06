@@ -466,7 +466,7 @@ if(BUILD_TESTS)
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
 
     add_executable(rccl-UnitTestsDevRuntime
-      DevRuntimeTests.cpp
+      gin_teardown_test.cpp
       DevRuntimeTestsStubs.cc
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -481,7 +481,7 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/device
     )
 
-    set_source_files_properties(DevRuntimeTests.cpp PROPERTIES
+    set_source_files_properties(gin_teardown_test.cpp PROPERTIES
       COMPILE_DEFINITIONS
         "DEV_RUNTIME_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc\"")
 
