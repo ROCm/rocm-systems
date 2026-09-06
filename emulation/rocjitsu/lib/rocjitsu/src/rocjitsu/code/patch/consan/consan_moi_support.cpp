@@ -3,10 +3,10 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
@@ -192,7 +192,14 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
     return words;
   };
 
-  if (!target.requires_split_two_address_lds_relocation || !candidate.is_native_two_range())
+  // Preserve the combined instruction when a load overwrites its own address.
+  // Callers snapshot that address before the guest runs so evidence emission
+  // can still use it afterward. Replaying the guest from the snapshot would
+  // unnecessarily split the combined load, changing its target dependency and
+  // completion semantics. The original instruction remains safe here because
+  // its address operand is intact until the combined operation is issued.
+  if (!target.requires_split_two_address_lds_relocation || !candidate.is_native_two_range() ||
+      consan_moi_impl::moi_load_clobbers_address(candidate))
     return copy_original();
 
   const auto &ranges = candidate.site().ranges;

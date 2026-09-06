@@ -1723,6 +1723,37 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 }
 
+TEST(ConSanMoi, Gfx1250SelfClobberingTwoAddressLoadRetainsCombinedGuestSemantics) {
+  constexpr auto load = cdna5::build_vds(
+      cdna5::kDsLoad2addrB64Vds, {.offset0 = 28u, .offset1 = 30u, .addr = 30u, .vdst = 30u});
+  const std::array<uint32_t, 3> text_words = {load[0], load[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "self_clobbering_two_address_load");
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 44u;
+  options.moi_exec_save_sgpr = 80u;
+  options.set_moi_owner_epoch_vgprs(60u, 61u);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_EQ(text_words_at_offset(patched, *access->relocated_guest_instruction_offset,
+                                 load.size() * sizeof(uint32_t)),
+            (std::vector<uint32_t>{load[0], load[1]}));
+}
+
 TEST(ConSanMoi, GuestAccessRelocationRejectsIncompleteTypedRequest) {
   std::vector<std::string> errors;
   EXPECT_FALSE(
