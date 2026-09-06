@@ -1950,12 +1950,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             # workgroup cadences can miss every instrumented site, while two
             # dense invocations exceed the emulator bound. Keep the exact
             # timed oracle and omit only the redundant untimed warmup. A
-            # complete dense Record/Replay run takes roughly 165--185 seconds,
-            # so the former 180-second bound was sensitive to ordinary host
-            # variance.
+            # complete dense Record/Replay run takes roughly 344 seconds on
+            # the current host, so retain a 600-second bound for ordinary host
+            # and contention variance.
             "record_replay_runtime_sample_stride": 1,
             "sharktank_skip_warmup": True,
-            "run_timeout_seconds": 300,
+            "run_timeout_seconds": 600,
         },
         "tp2-combined": {
             "record_replay_runtime_sample_stride": 256,

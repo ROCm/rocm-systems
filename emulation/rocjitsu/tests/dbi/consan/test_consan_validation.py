@@ -2573,7 +2573,7 @@ class ConSanValidationTest(unittest.TestCase):
             },
         )
         self.assertEqual(workloads["tp2-family"]["run_timeout_seconds"], 180)
-        self.assertEqual(workloads["tp2-decode"]["run_timeout_seconds"], 300)
+        self.assertEqual(workloads["tp2-decode"]["run_timeout_seconds"], 600)
         self.assertEqual(workloads["tp2-combined"]["run_timeout_seconds"], 180)
         for workload_id, expected_mode in (
             ("tp2-family", "prefill"),
@@ -2637,7 +2637,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "qwen-prefill", 180),
                 ("gfx950", "tp2-family", 300),
                 ("gfx1250", "tp2-family", 180),
-                ("gfx1250", "tp2-decode", 300),
+                ("gfx1250", "tp2-decode", 600),
                 ("gfx1250", "tp2-combined", 180),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
