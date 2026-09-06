@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <algorithm>
+
 #include "CollectiveArgs.hpp"
 #include "gtest/gtest.h"
 
@@ -178,31 +180,18 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // Mitigation for intermittent wrong data in pooled workers (AICOMRCCL-2275).
-    // A teardown-timing effect: prep rewrites these buffers before every use.
-    // Scrub only what this function frees, and never skip the frees on error.
-    hipError_t scrubErr = hipSuccess;
-    if (this->inPlace)
+    // Mitigation (AICOMRCCL-2275): 4 MiB of device writes at teardown clears the
+    // pooled-worker corruption. Timing, not contents: prep rewrites these buffers.
+    size_t const cap = 4u << 20;
+    hipError_t errIn = hipSuccess, errOut = hipSuccess;
+    // Mirror the frees below: in-place allocates only one of the pair.
+    if (this->inputGpu.ptr && !(this->inPlace && this->funcType == ncclCollGather))
     {
-      if (this->funcType != ncclCollGather && this->inputGpu.ptr && this->numInputBytesAllocated)
-      {
-        scrubErr = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
-      }
+      errIn = hipMemset(this->inputGpu.ptr, 0, std::min(this->numInputBytesAllocated, cap));
     }
-    else
+    if (this->outputGpu.ptr && (!this->inPlace || this->funcType == ncclCollGather))
     {
-      if (this->inputGpu.ptr && this->numInputBytesAllocated)
-      {
-        scrubErr = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
-      }
-      if (this->outputGpu.ptr && this->numOutputBytesAllocated)
-      {
-        hipError_t const e = hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated);
-        if (scrubErr == hipSuccess)
-        {
-          scrubErr = e;
-        }
-      }
+      errOut = hipMemset(this->outputGpu.ptr, 0, std::min(this->numOutputBytesAllocated, cap));
     }
 
     // If in-place, either only inputGpu or outputGpu was allocated
@@ -241,7 +230,7 @@ namespace RcclUnitTesting
       this->biasRegHandle = nullptr;
     }
 
-    CHECK_HIP(scrubErr);
+    CHECK_HIP(errIn != hipSuccess ? errIn : errOut);
     return TEST_SUCCESS;
   }
 
