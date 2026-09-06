@@ -1891,12 +1891,13 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # The segmented sort is likewise a compact four-row dispatch. Its
         # current token misses the production stride entirely even though all
         # 56,884 accesses and 6,032 barriers are instrumented. Select each
-        # workgroup for validation. The clean process completes in about 68
-        # seconds through gfx950 emulation, so a 120-second target envelope
-        # bounds it without weakening the cadence.
+        # workgroup for validation. With all-supported Inline Shadow placement,
+        # the clean process completes in about 198 seconds through gfx950
+        # emulation, so a 300-second target envelope bounds every profile
+        # without weakening the production Record/Replay cadence.
         "pytorch-torch-sort": {
             "record_replay_runtime_sample_stride": 1,
-            "run_timeout_seconds": 120,
+            "run_timeout_seconds": 300,
         },
         # Inline Shadow completes the exact segmented-mode oracle in roughly
         # 43 seconds through gfx950 emulation. The shared 30-second bound is

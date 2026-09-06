@@ -2443,7 +2443,7 @@ class ConSanValidationTest(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 120
+            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300
         )
         self.assertEqual(
             workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120
@@ -2671,6 +2671,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx950", "pytorch-torch-histc", 300),
                 ("gfx1250", "pytorch-torch-histc", 30),
                 ("gfx950", "pytorch-torch-mode", 120),
+                ("gfx950", "pytorch-torch-sort", 300),
                 ("gfx1250", "pytorch-torch-mode", 30),
                 ("gfx1250", "pytorch-norm-softmax", 60),
                 ("gfx1250", "pytorch-torch-sort", 360),
