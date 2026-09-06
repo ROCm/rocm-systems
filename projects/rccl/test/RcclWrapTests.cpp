@@ -1622,10 +1622,11 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
 // satisfied, and must still choose the direct path for the unscaled ops.
 TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
 {
-    ncclComm_t            mockComm = nullptr;
-    struct ncclTopoSystem mockTopo;
-    struct ncclTopoNode   mockGpu;
-    CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+    ncclComm_t          mockComm = nullptr;
+    // ncclTopoSystem is ~13 MiB, so a stack local overflows the default 8 MiB stack.
+    auto*               mockTopo = static_cast<ncclTopoSystem*>(std::calloc(1, sizeof(ncclTopoSystem)));
+    struct ncclTopoNode mockGpu;
+    CreateMockComm(mockComm, *mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
     SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
     // CreateMockComm leaves archName null, which the DDA gate dereferences.
     mockComm->archName = const_cast<char*>("gfx950");
@@ -1656,6 +1657,7 @@ TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
     EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
 
     CleanupMockComm(mockComm);
+    std::free(mockTopo);
 }
 
 TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
