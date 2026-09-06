@@ -62,7 +62,9 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
-  RegisterSet kills = du.defs;
+  // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
+  // but are not part of scratch-allocation liveness and must not become kills.
+  RegisterSet kills = du.defs.ordinary_only();
   // Predicated defs preserve old values on at least one control-flow path, so
   // they can never be unconditional kills.
   if (du.has_predicated_def)
@@ -215,8 +217,8 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
         global_vgpr_usage_is_complete_ = false;
 
       const InstDefUse accesses(inst, gfx1250_vgpr_msb_.get(), UnknownVgprDefPolicy::ExpandAll);
-      globally_used_registers_ |= accesses.defs;
-      globally_used_registers_ |= accesses.uses;
+      globally_used_registers_ |= accesses.defs.ordinary_only();
+      globally_used_registers_ |= accesses.uses.ordinary_only();
     }
   }
 }
@@ -289,7 +291,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(inst));
-      RegisterSet upward_uses = du.uses;
+      RegisterSet upward_uses = du.uses.ordinary_only();
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
@@ -359,7 +361,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(*inst));
       live -= kills;
-      live |= du.uses;
+      live |= du.uses.ordinary_only();
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)
