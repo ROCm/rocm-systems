@@ -987,6 +987,15 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   EXPECT_FALSE(ambiguous.has_value());
   EXPECT_FALSE(ambiguous.is_well_formed());
   EXPECT_FALSE(ambiguous.operand());
+
+  ConSanMoiWorkgroupSource invalid_extraction = scalar;
+  invalid_extraction.right_shift = 17u;
+  invalid_extraction.low_bit_count = 16u;
+  EXPECT_FALSE(invalid_extraction.is_well_formed());
+
+  ConSanMoiWorkgroupSource transformed_absent;
+  transformed_absent.low_bit_count = 12u;
+  EXPECT_FALSE(transformed_absent.is_well_formed());
 }
 
 TEST(ConSanMoi, WorkgroupSourcesRejectAnyAmbiguousCoordinate) {
@@ -1358,8 +1367,8 @@ TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
     SCOPED_TRACE("mask_low=" + std::to_string(mask_low) +
                  " shift_right=" + std::to_string(extract_high));
     ConSanMoiWorkgroupSource source = ConSanMoiWorkgroupSource::private_state(kPrivateOffset);
-    source.mask_low_16 = mask_low;
-    source.shift_right_16 = extract_high;
+    source.low_bit_count = mask_low ? 16u : 0u;
+    source.right_shift = extract_high ? 16u : 0u;
     std::vector<uint32_t> words;
 
     ASSERT_TRUE(consan_detail::append_workgroup_source_value(words, source, kValueVgpr, kArch));

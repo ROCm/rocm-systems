@@ -244,13 +244,15 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
     return ConSanMoiWorkgroupSources{
         .x = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_x_ttmp)),
         .y = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_yz_ttmp),
-                                              /*shift_right_16=*/false,
-                                              /*mask_low_16=*/true),
+                                              /*right_shift=*/0u,
+                                              /*low_bit_count=*/16u),
         .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_yz_ttmp),
-                                              /*shift_right_16=*/true),
+                                              /*right_shift=*/16u),
         .cluster_workgroup_id = uses_cluster_workgroup_id && identity.cluster_workgroup_id_ttmp
                                     ? ConSanMoiWorkgroupSource::scalar(
-                                          ttmp_scalar_operand(*identity.cluster_workgroup_id_ttmp))
+                                          ttmp_scalar_operand(*identity.cluster_workgroup_id_ttmp),
+                                          /*right_shift=*/0u,
+                                          identity.cluster_workgroup_id_low_bit_count)
                                     : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,

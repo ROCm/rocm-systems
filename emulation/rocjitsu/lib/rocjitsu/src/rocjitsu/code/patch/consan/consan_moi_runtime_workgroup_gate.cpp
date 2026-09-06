@@ -114,12 +114,15 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     return false;
   }
 
-  if (source.mask_low_16) {
-    sequence.append(build_s_lshl_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch),
-                    build_s_lshr_b32(quotient, quotient, scalar_positive_inline_u32(16), arch));
+  if (source.right_shift != 0u) {
+    sequence.append(build_s_lshr_b32(quotient, coordinate,
+                                     scalar_positive_inline_u32(source.right_shift), arch));
     coordinate = quotient;
-  } else if (source.shift_right_16) {
-    sequence.append(build_s_lshr_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch));
+  }
+  if (source.low_bit_count != 0u && source.low_bit_count < 32u) {
+    const uint16_t mask_shift = scalar_positive_inline_u32(32u - source.low_bit_count);
+    sequence.append(build_s_lshl_b32(quotient, coordinate, mask_shift, arch),
+                    build_s_lshr_b32(quotient, quotient, mask_shift, arch));
     coordinate = quotient;
   }
   sequence.append(instrumentation::build_s_sub_u32(residue, residue, coordinate, arch));

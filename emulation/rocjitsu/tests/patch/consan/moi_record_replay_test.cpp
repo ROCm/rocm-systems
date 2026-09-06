@@ -1819,6 +1819,45 @@ TEST(ConSanMoi, AutomaticRecordReplayPreservesRuntimeWorkgroupTupleAcrossTargets
     const std::vector<uint32_t> patched_words =
         text_words_at_offset(patched, /*text_offset=*/0u,
                              static_cast<uint32_t>(patched.text_sections().front()->size()));
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      // TTMP6 packs the variable cluster-local XYZ coordinates in bits 11:0
+      // and fixed cluster-shape maxima above them. At the production 65,536
+      // stride, hashing the raw word makes a two-workgroup cluster contribute
+      // bit 12 permanently and therefore makes offset zero unreachable. The
+      // entry capture must normalize TTMP6 before the runtime gate consumes it.
+      constexpr uint16_t kClusterWorkgroupTtmp = 6u;
+      const uint16_t cluster_mask_shift = scalar_positive_inline_u32(20u);
+      const auto prologue =
+          std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(prologue, result.patches.end());
+      const std::vector<uint32_t> prologue_words =
+          text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+      const auto scalar_cluster =
+          test_moi_persistent_sgpr_state(result).exact_workgroup.cluster_workgroup_id();
+      const auto vector_cluster = test_moi_exact_workgroup_vgprs(result).cluster_workgroup_id();
+      ASSERT_NE(scalar_cluster.has_value(), vector_cluster.has_value());
+      if (scalar_cluster) {
+        const std::array<uint32_t, 3> normalize_cluster = {
+            build_s_mov_b32(*scalar_cluster, ttmp_scalar_operand(kClusterWorkgroupTtmp), arch),
+            build_s_lshl_b32(*scalar_cluster, *scalar_cluster, cluster_mask_shift, arch),
+            build_s_lshr_b32(*scalar_cluster, *scalar_cluster, cluster_mask_shift, arch),
+        };
+        EXPECT_TRUE(contains_subsequence(prologue_words, normalize_cluster));
+      } else {
+        const auto shift_left = instrumentation::build_v_lshlrev_b32(
+            *vector_cluster, cluster_mask_shift, *vector_cluster, arch);
+        const auto shift_right = instrumentation::build_v_lshrrev_b32(
+            *vector_cluster, cluster_mask_shift, *vector_cluster, arch);
+        ASSERT_TRUE(shift_left && shift_right);
+        const std::vector<uint32_t> copy_cluster = {
+            build_v_mov_b32_e32(*vector_cluster, ttmp_scalar_operand(kClusterWorkgroupTtmp), arch),
+            *shift_left,
+            *shift_right,
+        };
+        EXPECT_TRUE(contains_subsequence(prologue_words, copy_cluster));
+      }
+    }
     const uint16_t residue = static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 6u);
     const uint32_t initialize_workgroup_hash =
         build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch);

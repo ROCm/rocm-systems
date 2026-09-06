@@ -131,6 +131,9 @@ struct ConSanCommandProcessorWorkgroupIdentity {
   uint8_t grid_x_ttmp = 0;
   uint8_t grid_yz_ttmp = 0;
   std::optional<uint8_t> cluster_workgroup_id_ttmp;
+  /// Number of low bits carrying the variable cluster-local coordinate.
+  /// Remaining bits in the same TTMP may describe the fixed cluster shape.
+  uint8_t cluster_workgroup_id_low_bit_count = 0;
 
   bool operator==(const ConSanCommandProcessorWorkgroupIdentity &) const = default;
 };
@@ -666,7 +669,12 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             *workgroup_identity->cluster_workgroup_id_ttmp ==
                 workgroup_identity->grid_yz_ttmp)))) ||
         (workgroup_identity && workgroup_identity->cluster_workgroup_id_ttmp.has_value()) !=
-            profile.has_cluster_facilities) {
+            profile.has_cluster_facilities ||
+        (workgroup_identity && ((workgroup_identity->cluster_workgroup_id_ttmp.has_value() &&
+                                 (workgroup_identity->cluster_workgroup_id_low_bit_count == 0u ||
+                                  workgroup_identity->cluster_workgroup_id_low_bit_count > 32u)) ||
+                                (!workgroup_identity->cluster_workgroup_id_ttmp.has_value() &&
+                                 workgroup_identity->cluster_workgroup_id_low_bit_count != 0u)))) {
       return false;
     }
     if ((profile.reserved_ordinary_sgpr_count == 0u) != (profile.reserved_ordinary_sgpr_base == 0u))

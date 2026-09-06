@@ -18,6 +18,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
       .grid_x_ttmp = 9u,
       .grid_yz_ttmp = 7u,
       .cluster_workgroup_id_ttmp = 6u,
+      .cluster_workgroup_id_low_bit_count = 12u,
   };
   profile.direct_call_form = ConSanDirectCallForm::SCallI64;
   profile.code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation;

@@ -392,6 +392,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .grid_x_ttmp = 9u,
                 .grid_yz_ttmp = 7u,
                 .cluster_workgroup_id_ttmp = 6u,
+                .cluster_workgroup_id_low_bit_count = 12u,
             },
         .direct_call_form = ConSanDirectCallForm::SCallI64,
         .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
@@ -703,6 +704,12 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[4].has_cluster_facilities = false; });
   expect_invalid("cluster facilities without a cluster workgroup TTMP", [](auto &profiles) {
     profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_ttmp.reset();
+  });
+  expect_invalid("cluster workgroup TTMP without an extraction width", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_low_bit_count = 0u;
+  });
+  expect_invalid("cluster workgroup extraction wider than its packed word", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_low_bit_count = 33u;
   });
   expect_invalid("reserved SGPR base without count",
                  [](auto &profiles) { profiles[0].reserved_ordinary_sgpr_base = 1u; });

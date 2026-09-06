@@ -324,20 +324,23 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
       require_emission(
           append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
                                       arch) &&
-              (!source.mask_low_16 ||
-               (append_moi_entry_salu_write(words,
-                                            build_s_lshl_b32(destination, destination,
-                                                             scalar_positive_inline_u32(16), arch),
-                                            arch) &&
-                append_moi_entry_salu_write(words,
-                                            build_s_lshr_b32(destination, destination,
-                                                             scalar_positive_inline_u32(16), arch),
-                                            arch))) &&
-              (!source.shift_right_16 ||
+              (source.right_shift == 0u ||
                append_moi_entry_salu_write(
                    words,
-                   build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                   arch)),
+                   build_s_lshr_b32(destination, destination,
+                                    scalar_positive_inline_u32(source.right_shift), arch),
+                   arch)) &&
+              ((source.low_bit_count == 0u || source.low_bit_count == 32u) ||
+               (append_moi_entry_salu_write(
+                    words,
+                    build_s_lshl_b32(destination, destination,
+                                     scalar_positive_inline_u32(32u - source.low_bit_count), arch),
+                    arch) &&
+                append_moi_entry_salu_write(
+                    words,
+                    build_s_lshr_b32(destination, destination,
+                                     scalar_positive_inline_u32(32u - source.low_bit_count), arch),
+                    arch))),
           "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
     } else if (vector_tuple[index]) {
       const uint16_t destination = *vector_tuple[index];
@@ -794,22 +797,21 @@ build_owner_epoch_prologue_words(const MoiOwnerEpochPrologueEmissionPlan &plan, 
       if (!append_moi_entry_salu_write(words, build_s_mov_b32(coordinate, *source.scalar_src, arch),
                                        arch))
         return false;
-      if (source.mask_low_16) {
-        if (!append_moi_entry_salu_write(
-                words,
-                build_s_lshl_b32(coordinate, coordinate, scalar_positive_inline_u32(16), arch),
-                arch) ||
-            !append_moi_entry_salu_write(
-                words,
-                build_s_lshr_b32(coordinate, coordinate, scalar_positive_inline_u32(16), arch),
-                arch))
-          return false;
-      }
-      if (source.shift_right_16 &&
+      if (source.right_shift != 0u &&
           !append_moi_entry_salu_write(
-              words, build_s_lshr_b32(coordinate, coordinate, scalar_positive_inline_u32(16), arch),
+              words,
+              build_s_lshr_b32(coordinate, coordinate,
+                               scalar_positive_inline_u32(source.right_shift), arch),
               arch))
         return false;
+      if (source.low_bit_count != 0u && source.low_bit_count < 32u) {
+        const uint16_t mask_shift = scalar_positive_inline_u32(32u - source.low_bit_count);
+        if (!append_moi_entry_salu_write(
+                words, build_s_lshl_b32(coordinate, coordinate, mask_shift, arch), arch) ||
+            !append_moi_entry_salu_write(
+                words, build_s_lshr_b32(coordinate, coordinate, mask_shift, arch), arch))
+          return false;
+      }
       if (!append_moi_entry_salu_write(
               words,
               build_s_lshr_b32(temporary, coordinate, scalar_positive_inline_u32(bits), arch),

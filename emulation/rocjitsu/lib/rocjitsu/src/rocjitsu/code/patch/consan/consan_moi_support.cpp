@@ -600,17 +600,18 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
       return false;
     sequence.append(build_v_mov_b32_e32(value_vgpr, *operand, arch));
   }
-  if (source.mask_low_16) {
-    const auto shift_left = instrumentation::build_v_lshlrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    const auto shift_right = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    sequence.append(shift_left, shift_right);
-  }
-  if (source.shift_right_16) {
+  if (source.right_shift != 0u) {
     const auto shift = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
+        value_vgpr, scalar_positive_inline_u32(source.right_shift), value_vgpr, arch);
     sequence.append(shift);
+  }
+  if (source.low_bit_count != 0u && source.low_bit_count < 32u) {
+    const uint16_t mask_shift = scalar_positive_inline_u32(32u - source.low_bit_count);
+    const auto shift_left =
+        instrumentation::build_v_lshlrev_b32(value_vgpr, mask_shift, value_vgpr, arch);
+    const auto shift_right =
+        instrumentation::build_v_lshrrev_b32(value_vgpr, mask_shift, value_vgpr, arch);
+    sequence.append(shift_left, shift_right);
   }
   return sequence.finish();
 }

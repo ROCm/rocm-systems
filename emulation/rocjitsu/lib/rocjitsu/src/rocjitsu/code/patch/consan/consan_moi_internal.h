@@ -215,8 +215,9 @@ struct ConSanMoiWorkgroupSource {
   std::optional<uint16_t> scalar_src;
   std::optional<uint16_t> vector_src;
   std::optional<uint32_t> private_offset;
-  bool shift_right_16 = false;
-  bool mask_low_16 = false;
+  uint8_t right_shift = 0;
+  /// Preserve this many low bits after shifting. Zero means no mask.
+  uint8_t low_bit_count = 0;
 
   [[nodiscard]] uint8_t source_count() const {
     return static_cast<uint8_t>(scalar_src.has_value()) +
@@ -224,23 +225,26 @@ struct ConSanMoiWorkgroupSource {
            static_cast<uint8_t>(private_offset.has_value());
   }
   [[nodiscard]] bool has_value() const { return source_count() == 1u; }
-  [[nodiscard]] bool is_well_formed() const { return source_count() <= 1u; }
+  [[nodiscard]] bool is_well_formed() const {
+    return source_count() <= 1u && right_shift < 32u && low_bit_count <= 32u - right_shift &&
+           (source_count() != 0u || (right_shift == 0u && low_bit_count == 0u));
+  }
   [[nodiscard]] std::optional<uint16_t> operand() const;
 
-  [[nodiscard]] static ConSanMoiWorkgroupSource scalar(uint16_t source, bool shift_right_16 = false,
-                                                       bool mask_low_16 = false) {
+  [[nodiscard]] static ConSanMoiWorkgroupSource scalar(uint16_t source, uint8_t right_shift = 0u,
+                                                       uint8_t low_bit_count = 0u) {
     ConSanMoiWorkgroupSource result;
     result.scalar_src = source;
-    result.shift_right_16 = shift_right_16;
-    result.mask_low_16 = mask_low_16;
+    result.right_shift = right_shift;
+    result.low_bit_count = low_bit_count;
     return result;
   }
-  [[nodiscard]] static ConSanMoiWorkgroupSource vector(uint16_t source, bool shift_right_16 = false,
-                                                       bool mask_low_16 = false) {
+  [[nodiscard]] static ConSanMoiWorkgroupSource vector(uint16_t source, uint8_t right_shift = 0u,
+                                                       uint8_t low_bit_count = 0u) {
     ConSanMoiWorkgroupSource result;
     result.vector_src = source;
-    result.shift_right_16 = shift_right_16;
-    result.mask_low_16 = mask_low_16;
+    result.right_shift = right_shift;
+    result.low_bit_count = low_bit_count;
     return result;
   }
   [[nodiscard]] static ConSanMoiWorkgroupSource private_state(uint32_t offset) {
