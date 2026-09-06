@@ -196,6 +196,11 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
+      - name: Install LibIberty
+        run: |
+          apt install -y libiberty-dev
+          echo "✅ LibIberty Installed!"
+
       - name: Install Latest Nightly ROCm
         run: |
           set -euo pipefail
@@ -253,7 +258,7 @@ jobs:
             -DROCPROFSYS_BUILD_DYNINST=ON \
             -DROCPROFSYS_BUILD_TBB=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
             -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_EXAMPLES=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \
