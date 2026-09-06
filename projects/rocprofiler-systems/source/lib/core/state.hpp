@@ -151,8 +151,8 @@ public:
     using CausalBackend = backend::causal;
     using CausalMode    = mode::process_causal;
 
-    // Explicit aliases instead of `using enum` — GCC added `using enum`
-    // support only in GCC 11; the CI matrix still builds with GCC 10.3.
+    // Explicit aliases rather than `using enum`, which the GCC 11 minimum
+    // now makes available. Kept as-is; switching is a cosmetic change.
     static constexpr State PreInit   = State::PreInit;
     static constexpr State Init      = State::Init;
     static constexpr State Active    = State::Active;
@@ -207,8 +207,8 @@ class thread final
 public:
     using State = thread_lifecycle;
 
-    // Explicit aliases instead of `using enum` — GCC added `using enum`
-    // support only in GCC 11; the CI matrix still builds with GCC 10.3.
+    // Explicit aliases rather than `using enum`, which the GCC 11 minimum
+    // now makes available. Kept as-is; switching is a cosmetic change.
     static constexpr State Enabled   = State::Enabled;
     static constexpr State Internal  = State::Internal;
     static constexpr State Completed = State::Completed;

@@ -174,6 +174,10 @@ replaces Perfetto as the primary trace output.
 - Minimum required C++ standard raised from C++17 to C++20. timemory now builds
   against the `rocprofiler-systems-cppstd20` branch and spdlog was bumped to
   v1.17.0 (bundled fmt v12).
+- Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
+  C++20 support this project relies on. GCC 10 is no longer tested; configuring
+  with an older GCC now emits a CMake warning. The RHEL 8 CI and release
+  containers moved from `gcc-toolset-10` to `gcc-toolset-11`.
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
 
