@@ -20,18 +20,36 @@ function( parse_rocm_version VERSION_STRING )
         list ( GET VERSIONS 0 MAJOR )
         set ( VERSION_MAJOR ${MAJOR} PARENT_SCOPE )
         set ( TEMP_VERSION_STRING "${MAJOR}" )
+    else ()
+        # Default to 0 when the version string does not contain any numeric
+        # component at all, so downstream consumers such as rocm_version.h.in
+        # always get a valid numeric value.
+        set ( VERSION_MAJOR "0" PARENT_SCOPE )
+        set ( TEMP_VERSION_STRING "0" )
     endif ()
 
     if ( ${VERSION_COUNT} GREATER 1 )
         list ( GET VERSIONS 1 MINOR )
         set ( VERSION_MINOR ${MINOR} PARENT_SCOPE )
         set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}" )
+    else ()
+        # Default to 0 when the version string does not include a minor
+        # component (e.g. "MAJOR" only), so downstream consumers such as
+        # rocm_version.h.in always get a valid numeric value.
+        set ( VERSION_MINOR "0" PARENT_SCOPE )
+        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.0" )
     endif ()
 
     if ( ${VERSION_COUNT} GREATER 2 )
         list ( GET VERSIONS 2 PATCH )
         set ( VERSION_PATCH ${PATCH} PARENT_SCOPE )
         set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}" )
+    else ()
+        # Default to 0 when the version string does not include a patch
+        # component (e.g. "MAJOR.MINOR" only), so downstream consumers such
+        # as rocm_version.h.in always get a valid numeric value.
+        set ( VERSION_PATCH "0" PARENT_SCOPE )
+        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.0" )
     endif ()
 
     if ( ${VERSION_COUNT} GREATER 3 )
