@@ -356,18 +356,74 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
       COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
     )
 
-    # Helper macro to add one ExternalProject test and register its install
-    # ROCM_PATH keeps pointing at the real ROCm tree so find_package(HIP),
-    # libva, etc. resolve correctly. CMAKE_PREFIX_PATH is prepended with the
-    # stage dir so find_package(rocjpeg) picks up the staged config instead
-    # of any previously installed version.
+    # Assemble the search prefix for the nested test configures.
+    #
+    # In a standalone build this is just the stage dir (so find_package(rocjpeg)
+    # resolves the freshly staged config), and ROCM_PATH covers HIP, libva, etc.
+    #
+    # Under TheRock, ROCM_PATH is empty and every dependency lives in the
+    # super-project build tree. TheRock injects a dependency provider into the
+    # parent configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES), but that provider
+    # errors on any find_package() for a package it knows about yet that was not
+    # declared as a dependency -- which includes rocjpeg itself -- so it cannot
+    # be forwarded to the test configures. Instead forward the toolchain (for the
+    # HIP-aware compiler and flags) and turn the provider's package map
+    # (THEROCK_PACKAGE_DIR_<pkg>) into an ordinary CMAKE_PREFIX_PATH so the nested
+    # configures find HIP and friends by normal config search. These variables are
+    # undefined in a standalone build, leaving the prefix at just the stage dir.
+    set(ROCJPEG_TEST_PREFIX_PATH "${ROCJPEG_STAGE_DIR}")
+    foreach(_therock_pkg IN LISTS THEROCK_PROVIDED_PACKAGES)
+      if(DEFINED THEROCK_PACKAGE_DIR_${_therock_pkg})
+        list(APPEND ROCJPEG_TEST_PREFIX_PATH "${THEROCK_PACKAGE_DIR_${_therock_pkg}}")
+      endif()
+    endforeach()
+    # ExternalProject_Add splits CMAKE_ARGS on ';', so pass the multi-entry prefix
+    # through a custom LIST_SEPARATOR that the sub-build restores to ';'.
+    string(REPLACE ";" "|" ROCJPEG_TEST_PREFIX_PATH_ALT "${ROCJPEG_TEST_PREFIX_PATH}")
+
+    # Forward the toolchain only when the top-level build set one, and as an
+    # absolute path: a relative CMAKE_TOOLCHAIN_FILE is resolved against the
+    # top-level build dir, but each ExternalProject configures in its own build
+    # dir where that relative path would not resolve. Empty expands to no argument.
+    set(ROCJPEG_TEST_TOOLCHAIN_ARG "")
+    if(CMAKE_TOOLCHAIN_FILE)
+      get_filename_component(ROCJPEG_TEST_TOOLCHAIN_FILE
+        "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_BINARY_DIR}")
+      set(ROCJPEG_TEST_TOOLCHAIN_ARG
+        "-DCMAKE_TOOLCHAIN_FILE=${ROCJPEG_TEST_TOOLCHAIN_FILE}")
+    endif()
+
+    # RPATH for the installed test binaries. They install under
+    # ${ROCJPEG_TEST_BIN_DIR} (share/<project>/bin) while librocjpeg, HIP and
+    # the bundled sysdeps install to ${CMAKE_INSTALL_LIBDIR} -- so at runtime they
+    # must load the installed librocjpeg (whose own RPATH resolves its sysdeps),
+    # not the build-tree stage copy the nested configure links against. Derive the
+    # $ORIGIN-relative hop from the bin dir to the lib dir from the install
+    # variables themselves, so the RPATH tracks either path if it changes instead
+    # of hard-coding '../../..'. This keeps the tree relocatable as a whole -- the
+    # same $ORIGIN scheme librocjpeg itself uses; relocating an individual binary
+    # out of the tree is unsupported, as for any $ORIGIN-relative ROCm binary.
+    # BUILD_WITH_INSTALL_RPATH bakes it into the built binary, which the macro
+    # copies verbatim (install(PROGRAMS) does no RPATH rewriting). '|' is the
+    # LIST_SEPARATOR restored to ';' in the sub-build.
+    file(RELATIVE_PATH ROCJPEG_TEST_BIN_TO_LIB
+      "${CMAKE_INSTALL_PREFIX}/${ROCJPEG_TEST_BIN_DIR}"
+      "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+    set(ROCJPEG_TEST_INSTALL_RPATH
+      "$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}|$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}/rocm_sysdeps/lib")
+
+    # Helper macro to add one ExternalProject test and register its install.
     macro(rocjpeg_add_test_ext TEST_EXE TEST_SOURCE_DIR)
       ExternalProject_Add(test_${TEST_EXE}
         SOURCE_DIR ${TEST_SOURCE_DIR}
+        LIST_SEPARATOR "|"
         CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
-                   -DCMAKE_PREFIX_PATH=${ROCJPEG_STAGE_DIR}
+                   ${ROCJPEG_TEST_TOOLCHAIN_ARG}
+                   "-DCMAKE_PREFIX_PATH=${ROCJPEG_TEST_PREFIX_PATH_ALT}"
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+                   "-DCMAKE_INSTALL_RPATH=${ROCJPEG_TEST_INSTALL_RPATH}"
         BUILD_ALWAYS ON
         INSTALL_COMMAND ""
         DEPENDS stage_${PROJECT_NAME}
