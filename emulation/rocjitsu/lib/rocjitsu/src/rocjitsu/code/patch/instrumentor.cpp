@@ -10,6 +10,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -17,6 +18,8 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/code/relocation_function_table.h"
+#include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -25,9 +28,11 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -548,6 +553,282 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
   return plan;
 }
 
+/// @brief Blocks that can reach a transfer whose destination the CFG does not carry.
+///
+/// @details A block ending in an indirect transfer with no outgoing edge -- no
+/// in-scope successor and no ScopedCfgEdge -- is a sink the analysis invented:
+/// control really does leave through it, but liveness sees no successor and so
+/// computes an empty live-out. Every register the true destination still needs
+/// then reads as dead, which is the direction that lets a probe clobber live
+/// guest state. Any anchor that can reach such a sink must be rejected.
+///
+/// The case this exists for: BasicBlock::build records a CallEdge only when the
+/// callee returns through the exact SGPR pair the call site saved. A helper that
+/// copies the link pair first returns through the copy, so the call is demoted to
+/// an ordinary successor, no scoped return edge is produced, and the helper's
+/// return becomes exactly this kind of sink -- while the body stays reachable and
+/// so passes every other check here.
+///
+/// Asking instead whether a block can reach *a* program exit is not equivalent
+/// and is not sufficient: an unrelated exit elsewhere in the body -- an
+/// `s_endpgm`, or the `s_trap 2` a HIP assert() lowers to -- satisfies that
+/// question while leaving the unmodeled return exactly as wrong.
+///
+/// Only *indirect* transfers are treated as sinks. A direct branch whose target
+/// was cut by the kernel-entry stop is also edgeless, but that shape means one
+/// kernel branching into another's entry, which compilers do not emit; treating
+/// it as a sink would reject synthetic fixtures without covering a real hazard.
+[[nodiscard]] std::unordered_set<const BasicBlock *>
+blocks_reaching_unmodeled_exit(std::span<BasicBlock *const> blocks,
+                               std::span<const ScopedCfgEdge> edges) {
+  const std::unordered_set<const BasicBlock *> in_scope(blocks.begin(), blocks.end());
+  std::unordered_map<const BasicBlock *, std::vector<const BasicBlock *>> predecessors;
+  std::unordered_set<const BasicBlock *> has_outgoing_edge;
+
+  auto note_edge = [&](const BasicBlock *from, const BasicBlock *to) {
+    if (from == nullptr || to == nullptr || !in_scope.contains(from) || !in_scope.contains(to))
+      return;
+    predecessors[to].push_back(from);
+    has_outgoing_edge.insert(from);
+  };
+  for (const BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const BasicBlock *succ : block->successors())
+      note_edge(block, succ);
+  }
+  for (const ScopedCfgEdge &edge : edges)
+    note_edge(edge.from, edge.to);
+
+  std::vector<const BasicBlock *> worklist;
+  for (const BasicBlock *block : blocks) {
+    if (block == nullptr || has_outgoing_edge.contains(block))
+      continue;
+    const Instruction *term = block->terminator();
+    if (term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0)
+      worklist.push_back(block);
+  }
+
+  std::unordered_set<const BasicBlock *> reaching;
+  while (!worklist.empty()) {
+    const BasicBlock *block = worklist.back();
+    worklist.pop_back();
+    if (!reaching.insert(block).second)
+      continue;
+    auto it = predecessors.find(block);
+    if (it == predecessors.end())
+      continue;
+    for (const BasicBlock *pred : it->second)
+      worklist.push_back(pred);
+  }
+  return reaching;
+}
+
+/// @brief Sentinel for "this anchor is in no address-taken body".
+constexpr uint64_t kNoAddressTakenRoot = std::numeric_limits<uint64_t>::max();
+
+/// @brief The address-taken device function containing @p anchor, if any.
+///
+/// @details Walked with the same kernel-entry stops as an ordinary scope, so a
+/// body that merely falls through into a kernel does not claim that kernel's
+/// blocks. Only called for an anchor already known to be outside every kernel
+/// scope, so the cost is paid on the rejection path alone.
+[[nodiscard]] uint64_t address_taken_root_containing(
+    const std::vector<std::unique_ptr<BasicBlock>> &blocks, const BlockOffsetIndex &offset_index,
+    const BlockPositionIndex &position_index, KernelScopeSpec spec,
+    std::span<const uint64_t> address_taken_roots, const Instruction &anchor) {
+  for (const uint64_t root : address_taken_roots) {
+    BasicBlock *entry = block_for_offset(offset_index, root);
+    if (entry == nullptr)
+      continue;
+    spec.own_entries = {root};
+    for (const BasicBlock *block :
+         reachable_kernel_blocks(blocks, offset_index, position_index, *entry, spec)) {
+      if (block == anchor.parent())
+        return root;
+    }
+  }
+  return kNoAddressTakenRoot;
+}
+
+/// @brief Live-before sets for every anchor, computed one kernel scope at a time.
+///
+/// @details LivenessAnalysis models exactly one kernel CFG and silently ignores
+/// edges leaving its block span, so a single analysis over every decoded block
+/// answers from a graph that splices unrelated kernels together. Each kernel
+/// descriptor entry therefore gets its own scope, built with the same walk DBT
+/// uses (kernel_scope.h) and the same context-sensitive call/return edges
+/// (scoped_cfg_edges.h), so the two cannot disagree about which blocks belong to
+/// a kernel or about what is live across a device-function call.
+///
+/// A block reachable from more than one kernel entry (i.e., a device function called
+/// by several kernels) belongs to several scopes, and its liveness differs per
+/// calling context. Such an anchor is analyzed once per owning kernel and takes
+/// the union: a register live in any context that can reach the site must be
+/// preserved there.
+///
+/// A body whose address is only ever produced by a data relocation has no
+/// statically known caller, so what is live at its return is unknown and no
+/// analysis of the body alone can answer it. Instrumenting inside one is rejected
+/// explicitly rather than folded into the generic unreachable-anchor error --
+/// see @p address_taken_roots.
+///
+/// @param anchors (.text offset, instruction) for each site needing liveness.
+/// @param obj Scanned for relocated function-pointer slots only when an anchor is
+///        already being rejected, since the result is used solely to explain the
+///        rejection. Adopting those roots as scopes would under-approximate: such
+///        a body's return has no successor, so every register its unknown caller
+///        still needs would read as dead.
+/// @returns Live-before per anchor, or nullopt with a reason appended to
+/// @p errors when an anchor is not reachable from any kernel entry.
+[[nodiscard]] std::optional<std::unordered_map<const Instruction *, RegisterSet>>
+compute_anchor_liveness(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const std::pair<uint64_t, const Instruction *>> anchors,
+                        const AmdGpuCodeObject &obj, std::span<const uint8_t> text,
+                        rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const BlockOffsetIndex offset_index = build_block_offset_index(blocks);
+  const BlockPositionIndex position_index = build_block_position_index(blocks);
+
+  KernelScopeSpec spec;
+  for (const KernelDescriptorInfo &kernel : kernels)
+    spec.kernel_entries.insert(kernel.entry_text_offset);
+
+  // One scope per kernel entry, plus the set form used to test anchor membership.
+  struct KernelScope {
+    BasicBlock *entry = nullptr;
+    std::vector<BasicBlock *> blocks;
+    std::unordered_set<const BasicBlock *> block_set;
+    std::vector<const Instruction *> anchors;
+    std::vector<ScopedCfgEdge> edges;
+  };
+  std::vector<KernelScope> scopes;
+  scopes.reserve(kernels.size());
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    BasicBlock *entry = block_for_offset(offset_index, kernel.entry_text_offset);
+    if (entry == nullptr)
+      continue;
+    spec.own_entries = {kernel.entry_text_offset};
+    KernelScope scope;
+    scope.entry = entry;
+    scope.blocks = reachable_kernel_blocks(blocks, offset_index, position_index, *entry, spec);
+    scope.block_set.insert(scope.blocks.begin(), scope.blocks.end());
+    scopes.push_back(std::move(scope));
+  }
+
+  // Attribute each anchor to every scope that contains it, so a shared callee is
+  // analyzed in each calling kernel rather than in an arbitrary one.
+  std::unordered_map<const Instruction *, RegisterSet> live_before;
+  // Filled on first use; see the @param note on obj.
+  std::optional<std::vector<uint64_t>> address_taken_roots;
+  bool ok = true;
+  for (const auto &[offset, anchor] : anchors) {
+    bool covered = false;
+    for (KernelScope &scope : scopes) {
+      if (!scope.block_set.contains(anchor->parent()))
+        continue;
+      scope.anchors.push_back(anchor);
+      covered = true;
+    }
+    if (!covered) {
+      if (!address_taken_roots) {
+        address_taken_roots.emplace();
+        for (const RelocationFunctionTable &table : discover_relocation_function_tables(obj)) {
+          for (const RelocationFunctionPointer &entry : table.entries)
+            address_taken_roots->push_back(entry.target_text_offset);
+        }
+      }
+      const uint64_t root = address_taken_root_containing(blocks, offset_index, position_index,
+                                                          spec, *address_taken_roots, *anchor);
+      if (root != kNoAddressTakenRoot) {
+        errors.push_back(
+            "anchor_offset " + std::to_string(offset) +
+            " is inside the device function at .text offset " + std::to_string(root) +
+            ", whose address is taken by a relocated function-pointer slot and which no kernel "
+            "entry reaches directly. Its callers are not statically known, so the registers live "
+            "at the site cannot be determined; instrumenting such a body is not supported");
+      } else {
+        errors.push_back("anchor_offset " + std::to_string(offset) +
+                         " is not reachable from any kernel descriptor entry, so its live "
+                         "registers cannot be determined");
+      }
+      ok = false;
+      continue;
+    }
+    live_before.emplace(anchor, RegisterSet{});
+  }
+  if (!ok)
+    return std::nullopt;
+
+  // Reachability from the entry is not enough: no path out of the anchor may end
+  // at a transfer whose destination the CFG does not carry, or liveness computes
+  // an empty live-out there and under-reports what is live at the site. Checked
+  // per owning scope, and one failing scope rejects the site -- the union is only
+  // sound if every context that contributes to it is.
+  for (KernelScope &scope : scopes) {
+    if (scope.anchors.empty())
+      continue;
+    scope.edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+    const std::unordered_set<const BasicBlock *> unmodeled =
+        blocks_reaching_unmodeled_exit(scope.blocks, scope.edges);
+    for (const Instruction *anchor : scope.anchors) {
+      if (!unmodeled.contains(anchor->parent()))
+        continue;
+      errors.push_back(
+          "anchor_offset " + std::to_string(anchor->src_loc()) +
+          " can reach an indirect transfer with no known destination in the kernel entered at "
+          ".text offset " +
+          std::to_string(scope.entry->start_offset()) +
+          " -- typically a device function whose return could not be matched to the register its "
+          "call site saved. Liveness sees no successor there, so the registers live at the site "
+          "would be under-reported");
+      ok = false;
+    }
+  }
+  if (!ok)
+    return std::nullopt;
+
+  // Only scopes that own an anchor pay for the backward dataflow, and each stores
+  // snapshots for its own anchors alone rather than every instruction it covers.
+  for (const KernelScope &scope : scopes) {
+    if (scope.anchors.empty())
+      continue;
+    const std::span<const ScopedCfgEdge> edges = scope.edges;
+    LivenessAnalysisOptions options;
+    options.restrict_live_before_to_instructions = true;
+    options.live_before_instructions = scope.anchors;
+    options.text = text;
+    // arch + entry_block together enable gfx1250 VGPR_MSB resolution. Without
+    // them a vector operand's encoded low 8 bits are taken as the physical index,
+    // so a value live in a high bank (v260) is recorded as its bank-0 alias (v4)
+    // and the spill set misses it -- the probe would clobber it unspilled. This
+    // errs toward corruption rather than toward extra spills, so it is not a
+    // conservative default to leave unset.
+    options.arch = arch;
+    options.entry_block = scope.entry;
+    // No ExecMaskAnalysis, matching BinaryTranslator: every EXEC-masked vector
+    // def then stays Unknown and is never promoted to a kill, so live sets are
+    // over-approximated and DBI spills more than strictly necessary. That is the
+    // safe direction here. Lifting it is tracked with DBT's own use.
+    const LivenessAnalysis liveness{KernelBlockScope(scope.blocks), /*exec=*/nullptr,
+                                    std::move(options), edges};
+    for (const Instruction *anchor : scope.anchors) {
+      // live_before() answers with a static empty set when no snapshot exists,
+      // which here would read as "nothing is live" and let the probe clobber
+      // anything. Every requested anchor is in the analyzed span so this holds,
+      // but the failure mode is silent and the direction is wrong.
+      if (!liveness.has_live_before(*anchor)) {
+        errors.push_back("internal: no live-before snapshot for anchor_offset " +
+                         std::to_string(anchor->src_loc()));
+        ok = false;
+        continue;
+      }
+      live_before[anchor] |= liveness.live_before(*anchor);
+    }
+  }
+  return live_before;
+}
+
 } // namespace
 
 TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
@@ -785,18 +1066,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
 
-  // Liveness over the decoded blocks, built once and reused by every probe-call
-  // site. validate_points() already built blocks_, and obj_ owns the
-  // Instructions live_before() is keyed on.
-  // TODO: scope this to the kernel containing each anchor, like the DBT path,
-  // rather than treating every decoded block as one CFG. Safe here: kernels end
-  // in s_endpgm, so there are no false cross-kernel fallthrough edges.
-  std::vector<BasicBlock *> liveness_scope;
-  liveness_scope.reserve(blocks_.size());
-  for (const auto &block : blocks_)
-    liveness_scope.push_back(block.get());
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
-
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a
   // trampoline's target address is known before it is emitted and sites sharing
@@ -823,6 +1092,37 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // the descriptors already scanned above.
   const std::optional<uint32_t> kernel_sgpr_count =
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+
+  // Liveness for every anchor, scoped to the kernel that reaches it. Only sites
+  // that call a probe consume it; an inline-nop site clobbers nothing and needs
+  // no live set, so it must not be able to fail the patch by sitting in code no
+  // kernel entry reaches. obj_ owns the Instructions the map is keyed on.
+  std::vector<std::pair<uint64_t, const Instruction *>> anchors;
+  for (const auto &site : sites) {
+    if (!site.is_probe_call())
+      continue;
+    const Instruction *anchor = find_instruction_at_offset(site.anchor_offset);
+    if (anchor == nullptr) {
+      result.errors.emplace_back("internal: anchor instruction vanished after validation");
+      return result;
+    }
+    anchors.emplace_back(site.anchor_offset, anchor);
+  }
+  const Section *text_section = obj_.text_sections().front();
+  const std::span<const uint8_t> text_image(reinterpret_cast<const uint8_t *>(text_section->data()),
+                                            text_section->size());
+  std::unordered_map<const Instruction *, RegisterSet> anchor_liveness;
+  // With no descriptors there is no scope to build, and "unreachable anchor"
+  // would be the wrong diagnosis: the per-site kernel_sgpr_count check below
+  // already fails closed and names the actual missing thing. Reserve the
+  // unreachable-anchor error for an object that has entries which do not reach.
+  if (!anchors.empty() && !kernels.empty()) {
+    auto computed =
+        compute_anchor_liveness(blocks_, kernels, anchors, obj_, text_image, arch_, result.errors);
+    if (!computed)
+      return result;
+    anchor_liveness = std::move(*computed);
+  }
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -886,13 +1186,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
 
-      // Get liveness for this anchor
+      // Get liveness for this anchor, computed above in its kernel's scope.
       const Instruction *anchor = find_instruction_at_offset(site.anchor_offset);
       if (anchor == nullptr) {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      const RegisterSet &live = liveness.live_before(*anchor);
+      const auto live_it = anchor_liveness.find(anchor);
+      if (live_it == anchor_liveness.end()) {
+        result.errors.emplace_back("internal: no liveness was computed for anchor_offset " +
+                                   std::to_string(site.anchor_offset));
+        continue;
+      }
+      const RegisterSet &live = live_it->second;
 
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);

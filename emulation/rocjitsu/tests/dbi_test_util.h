@@ -373,12 +373,18 @@ make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
                                 /*kd_crosses_section=*/true);
 }
 
-// Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
-// .text at offset 0) so kernel_descriptors() returns two kernels, exercising the
-// orchestrator's single-kernel spill guard. Only the count matters here.
+// Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors so
+// kernel_descriptors() returns two kernels, exercising the orchestrator's
+// single-kernel spill guard -- where only the count matters, which is why both
+// entries default to .text offset 0.
+//
+// @p second_entry_text_offset moves the second kernel's entry, giving the two
+// descriptors distinct entries and therefore distinct kernel scopes. Pass it
+// when the test needs per-kernel analysis to differ between them.
 inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
                                                        uint32_t private_bytes,
-                                                       uint32_t granulated_sgpr_count = 3) {
+                                                       uint32_t granulated_sgpr_count = 3,
+                                                       uint64_t second_entry_text_offset = 0) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -455,10 +461,11 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
   // Two descriptors; entry offset is signed and relative to each descriptor's vaddr.
   for (size_t i = 0; i < kKernelCount; ++i) {
     const uint64_t kd_vaddr = rodata_vaddr + i * sizeof(KD);
+    const uint64_t entry_vaddr = text_vaddr + (i == 1 ? second_entry_text_offset : 0);
     KD desc{};
     desc.private_segment_fixed_size = private_bytes;
     desc.kernel_code_entry_byte_offset =
-        static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(kd_vaddr);
+        static_cast<int64_t>(entry_vaddr) - static_cast<int64_t>(kd_vaddr);
     AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     granulated_sgpr_count);
     std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));

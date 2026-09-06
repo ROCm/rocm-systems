@@ -17,7 +17,10 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "../amdgpu_elf_test_support.h"
 #include "../dbi_test_util.h"
+#include "rocjitsu/code/analysis/control_flow.h"
+#include "rocjitsu/code/relocation_function_table.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -2084,6 +2087,355 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("discovered kernel descriptor"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// Liveness is scoped to the kernel that reaches the anchor, so an edge into
+// *another* kernel's entry does not import that kernel's live-ins.
+//
+//   0x00  kernel A entry  s_mov_b32 s4, s0   <- reads s0, so s0 is live-in to A
+//   0x04                  s_endpgm
+//   0x08  kernel B entry  s_nop              <- anchor
+//   0x0c                  s_cbranch_scc0 -> 0x14
+//   0x10                  s_branch -> 0x00   <- edge into A's entry, cut by the stop
+//   0x14                  s_endpgm           <- B's own exit
+//
+// B keeps an exit of its own so that it is a plausible kernel. A scope whose only
+// way out is into another kernel models no exit at all, which the anchor's
+// program-exit check would reject for a different and independently correct
+// reason -- masking what this test is actually about.
+//
+// The probe-target SGPR pair is the lowest even pair that is dead at the anchor
+// and is not the s[30:31] link pair, so it reports the live set directly: with
+// kernel scoping s[0:1] is free and gets picked, whereas one CFG over every
+// decoded block follows B's branch into A, sees s0 live, and picks s[2:3].
+TEST(InstrumentorProbePatch, KernelScopedLivenessStopsAtAnotherKernelEntry) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kMovS4S0 = 0xBE840000u; // s_mov_b32 s4, s0 (SOP1 op 0).
+  constexpr uint64_t kSecondEntry = 8;       // .text offset of kernel B's entry.
+  auto target = make_gfx950_two_kernel_elf(
+      {
+          kMovS4S0,                  // 0x00: kernel A entry
+          build_s_endpgm(kArch),     // 0x04
+          0xBF800000u,               // 0x08: kernel B entry, s_nop 0 (anchor)
+          pack_sopp(5, 1),           // 0x0c: s_cbranch_scc0 -> 0x14
+          build_s_branch(-5, kArch), // 0x10: -> kernel A's entry at 0x00
+          build_s_endpgm(kArch),     // 0x14: B's own exit
+      },
+      /*private_bytes=*/0, /*granulated_sgpr_count=*/3, kSecondEntry);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  // Guard the fixture: without two distinct entries the scopes coincide and the
+  // assertion below would hold for the wrong reason.
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 2u);
+  EXPECT_NE(kernels[0].entry_text_offset, kernels[1].entry_text_offset);
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = kSecondEntry;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches[0].target_pair_base, 0u)
+      << "s[0:1] is live only through the branch into kernel A's entry, which is "
+         "outside this anchor's kernel scope";
+}
+
+// Liveness sees context-sensitive call/return edges, so a value live across a
+// call is live at an anchor inside the callee.
+//
+//   0x00  kernel entry  s_mov_b32 s0, 0        <- defines s0
+//   0x04                s_call_b64 s[4:5], +2  <- return address into s[4:5]
+//   0x08  continuation  s_mov_b32 s6, s0       <- reads s0 after the call returns
+//   0x0c                s_endpgm
+//   0x10  callee        s_nop                  <- anchor
+//   0x14                s_setpc_b64 s[4:5]     <- returns through the saved pair
+//
+// s[4:5] is live at the anchor either way (the return reads it), so the probe
+// target pair reports the edges alone: with the return edge wired in, the
+// continuation's use of s0 reaches the callee and blocks s[0:1], pushing the
+// target pair to s[2:3]. Without it the callee's exit has no successor, s0 reads
+// as dead, and the planner picks s[0:1] -- the under-approximation that would let
+// the envelope pick a register the caller still needs.
+TEST(InstrumentorProbePatch, LivenessFollowsCallAndReturnEdgesIntoCallee) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kReturnPair = 4; // s[4:5] holds the return address.
+  constexpr uint32_t kInlineZero = 128;
+  const std::vector<uint32_t> text = {
+      build_s_mov_b32(0, kInlineZero, kArch),  // 0x00: s_mov_b32 s0, 0
+      build_s_call_b64(kReturnPair, 2, kArch), // 0x04: -> callee at 0x10
+      build_s_mov_b32(6, 0, kArch),            // 0x08: s_mov_b32 s6, s0
+      build_s_endpgm(kArch),                   // 0x0c
+      0xBF800000u,                             // 0x10: s_nop 0 (anchor)
+      build_s_setpc_b64(kReturnPair, kArch),   // 0x14: return
+  };
+  auto target = make_gfx950_kernel_elf(text, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  // Guard the fixture: without a recognized call edge the callee is unreachable
+  // and the site would fail closed instead of proving anything about liveness.
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(obj, *decoder, kArch);
+  const auto caller = std::ranges::find_if(
+      blocks, [](const auto &b) { return b != nullptr && b->start_offset() == 0; });
+  ASSERT_NE(caller, blocks.end());
+  ASSERT_EQ((*caller)->call_edges().size(), 1u) << "fixture must produce a decoded call edge";
+  EXPECT_EQ((*caller)->call_edges()[0].callee->start_offset(), 0x10u);
+  EXPECT_EQ((*caller)->call_edges()[0].continuation->start_offset(), 0x08u);
+
+  Instrumentor instr(obj, kArch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0x10;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches[0].target_pair_base, 2u)
+      << "s0 is live across the call, so s[0:1] must not be taken as the probe target";
+}
+
+// Reachability from a kernel entry is not sufficient: the anchor's block must
+// also be able to leave the scope through an edge the CFG carries.
+//
+// BasicBlock::build records a CallEdge only when the callee returns through the
+// exact SGPR pair the call site saved (basic_block.cpp, the Returning
+// classification). This helper stashes the link pair and returns through the
+// copy, so the call is demoted to an ordinary successor: the body stays
+// reachable -- and so passes the kernel-scope check -- but there is no scoped
+// return edge, the helper's exit has no successor, and s0 would read as dead at
+// the anchor even though the caller reads it at 0x08. Planning against that live
+// set hands the probe s[0:1] and corrupts the guest.
+//
+//   0x00  s_mov_b32 s0, 0
+//   0x04  s_call_b64 s[6:7], +2   -> 0x10
+//   0x08  s_mov_b32 s8, s0        <- caller still needs s0 after the return
+//   0x0c  s_endpgm
+//   0x10  s_mov_b64 s[10:11], s[6:7]
+//   0x14  s_nop 0                 <- anchor
+//   0x18  s_setpc_b64 s[10:11]    <- returns through the copy, not s[6:7]
+TEST(InstrumentorProbePatch, AnchorWithNoModeledPathToProgramExitFailsClosed) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kSavedPair = 6;
+  constexpr uint16_t kCopiedPair = 10;
+  constexpr uint32_t kInlineZero = 128;
+  const std::vector<uint32_t> text = {
+      build_s_mov_b32(0, kInlineZero, kArch),          // 0x00
+      build_s_call_b64(kSavedPair, 2, kArch),          // 0x04 -> 0x10
+      build_s_mov_b32(8, 0, kArch),                    // 0x08: reads s0
+      build_s_endpgm(kArch),                           // 0x0c
+      build_s_mov_b64(kCopiedPair, kSavedPair, kArch), // 0x10
+      0xBF800000u,                                     // 0x14: s_nop 0 (anchor)
+      build_s_setpc_b64(kCopiedPair, kArch),           // 0x18
+  };
+  auto target = make_gfx950_kernel_elf(text, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  // Guard the premise: the call must NOT have been classified as returning, or
+  // the scoped return edge would exist and there would be nothing to catch.
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(obj, *decoder, kArch);
+  const auto caller = std::ranges::find_if(
+      blocks, [](const auto &b) { return b != nullptr && b->start_offset() == 0; });
+  ASSERT_NE(caller, blocks.end());
+  ASSERT_TRUE((*caller)->call_edges().empty())
+      << "fixture must produce a demoted call, not a recognized one";
+
+  Instrumentor instr(obj, kArch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0x14;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("indirect transfer with no known destination"),
+            std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// The same defect, plus an unrelated abort path. An earlier form of this gate
+// asked whether the anchor could reach *a* program exit, which the `s_trap 2`
+// below satisfies -- while the unmatched return at 0x1c stays exactly as
+// unmodeled, and s0 stays exactly as under-reported. Reaching an exit somewhere
+// says nothing about whether every path out is modeled.
+//
+//   0x00  s_mov_b32 s0, 0
+//   0x04  s_call_b64 s[6:7], +2   -> 0x10
+//   0x08  s_mov_b32 s8, s0        <- caller still needs s0 after the return
+//   0x0c  s_endpgm
+//   0x10  s_nop 0                 <- anchor
+//   0x14  s_cbranch_scc0 -> 0x20
+//   0x18  s_mov_b64 s[10:11], s[6:7]
+//   0x1c  s_setpc_b64 s[10:11]    <- unmodeled return
+//   0x20  s_trap 2                <- the assert() path that used to mask it
+TEST(InstrumentorProbePatch, AlternateExitDoesNotExcuseAnUnmodeledReturn) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kSavedPair = 6;
+  constexpr uint16_t kCopiedPair = 10;
+  constexpr uint32_t kInlineZero = 128;
+  constexpr uint32_t kSTrap2 = 0xBF920002u; // s_trap 2 (SOPP op 18), ROCr assert/abort.
+  const std::vector<uint32_t> text = {
+      build_s_mov_b32(0, kInlineZero, kArch),          // 0x00
+      build_s_call_b64(kSavedPair, 2, kArch),          // 0x04 -> 0x10
+      build_s_mov_b32(8, 0, kArch),                    // 0x08: reads s0
+      build_s_endpgm(kArch),                           // 0x0c
+      0xBF800000u,                                     // 0x10: s_nop 0 (anchor)
+      pack_sopp(5, 2),                                 // 0x14: s_cbranch_scc0 -> 0x20
+      build_s_mov_b64(kCopiedPair, kSavedPair, kArch), // 0x18
+      build_s_setpc_b64(kCopiedPair, kArch),           // 0x1c
+      kSTrap2,                                         // 0x20
+  };
+  auto target = make_gfx950_kernel_elf(text, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  // Guard both halves of the premise: the call is demoted (no CallEdge), and the
+  // trap really is recognized as a program exit, so the weaker predicate would
+  // have accepted this site.
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(obj, *decoder, kArch);
+  const auto caller = std::ranges::find_if(
+      blocks, [](const auto &b) { return b != nullptr && b->start_offset() == 0; });
+  ASSERT_NE(caller, blocks.end());
+  ASSERT_TRUE((*caller)->call_edges().empty()) << "fixture must produce a demoted call";
+  const BasicBlock *trap_block = nullptr;
+  for (const auto &b : blocks) {
+    if (b != nullptr && b->start_offset() == 0x20)
+      trap_block = b.get();
+  }
+  ASSERT_NE(trap_block, nullptr);
+  ASSERT_NE(trap_block->terminator(), nullptr);
+  ASSERT_TRUE(is_program_path_terminator(*trap_block->terminator()))
+      << "s_trap 2 must count as a program exit, or this fixture proves nothing";
+
+  Instrumentor instr(obj, kArch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0x10;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("indirect transfer with no known destination"),
+            std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// A device function whose address is only ever produced by a relocated pointer
+// slot has no statically known caller, so what its callers still need at the
+// return cannot be derived from the body. Adopting it as a scope the way DBT does
+// would answer from a return with no successor -- every such register would read
+// as dead and the probe would clobber it. The site is rejected instead, and the
+// error says which body and why rather than reporting generic unreachability.
+//
+//   word 0  kernel 0 entry  s_endpgm
+//   word 2  kernel 1 entry  s_endpgm
+//   word 4  helper entry    s_nop           <- anchor; named by a pointer slot,
+//   word 5                  s_setpc_b64        called by neither kernel
+TEST(InstrumentorProbePatch, AnchorInPointerOnlyReachableFunctionFailsClosed) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kHelperWord = 4;
+  constexpr uint16_t kHelperReturnSreg = 8;
+  const std::vector<uint32_t> words = {
+      build_s_endpgm(kArch),                       // word 0: kernel 0 entry
+      build_s_endpgm(kArch),                       // word 1
+      build_s_endpgm(kArch),                       // word 2: kernel 1 entry
+      build_s_endpgm(kArch),                       // word 3
+      build_s_nop(0, kArch),                       // word 4: helper entry (anchor)
+      build_s_setpc_b64(kHelperReturnSreg, kArch), // word 5: helper return
+  };
+  auto target = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+      words, /*kernel1_entry_word=*/2, {{.offset_word = kHelperWord, .words = 2}});
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  // Guard the fixture on both halves of the premise: the helper really is named
+  // by a relocated pointer slot, and no kernel entry reaches it.
+  const auto tables = discover_relocation_function_tables(obj);
+  ASSERT_EQ(tables.size(), 1u);
+  ASSERT_EQ(tables[0].entries.size(), 1u);
+  EXPECT_EQ(tables[0].entries[0].target_text_offset, kHelperWord * sizeof(uint32_t));
+
+  Instrumentor instr(obj, kArch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = kHelperWord * sizeof(uint32_t);
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("relocated function-pointer slot"), std::string::npos)
+      << "error was: " << result.errors.front();
+  EXPECT_EQ(result.errors.front().find("not reachable from any kernel descriptor entry"),
+            std::string::npos)
+      << "the generic unreachable-anchor error is the wrong diagnosis here";
+}
+
+// An anchor no kernel entry reaches has no scope to be analyzed in, so its live
+// set is unknown and the site fails closed rather than being planned against
+// whole-object liveness. The orphan body here is past kernel A's s_endpgm and no
+// descriptor names it.
+TEST(InstrumentorProbePatch, AnchorOutsideAnyKernelScopeFailsClosed) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({0xBF800000u, endpgm, 0xBF800000u, endpgm},
+                                       /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 8; // Orphan s_nop, unreachable from the entry at 0.
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("not reachable from any kernel"), std::string::npos)
       << "error was: " << result.errors.front();
 }
 
