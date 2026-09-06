@@ -70,6 +70,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `vram_bit_width` never being reported as `N/A`**.  
   - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
+
+- **Fixed a stack buffer overflow in `amdsmi_get_cpu_socket_current_active_freq_limit()` callers**.  
+  - `amdsmi_hsmp_freqlimit_src_names` listed only 8 of the 11 frequency-limit sources ESMI reports, and the API writes one entry per active source. Any caller sizing its `src_type` array from the published table, including the Python binding, overflowed once a socket had more than 8 limits active. The table now carries all 11 names and `src_type` documents the required capacity.
+
+- **Fixed `amdsmi_get_gpu_bad_page_info()` writing past a caller's buffer**.  
+  - The count out-parameter was overwritten with the number of retired pages before the caller's capacity was read, so the fill loop ran past a fixed-size array on any GPU reporting more pages than the caller allocated. The write is now clamped to the capacity supplied.
+
 - **Fixed an out-of-bounds read in the DRM example's RAS block listing**.  
   - `amd_smi_drm_example.cc` iterated every `amdsmi_gpu_block_t` value but indexed a 14-entry name array, so every block from `AMDSMI_GPU_BLOCK_MCA` onward read past the end of the array and printed a garbage label. The list now covers all 39 blocks and the lookup is bounds-checked.
 
@@ -129,6 +136,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - UUIDs will soon be replaced with Component Unified IDs (CUIDs). These CUIDs will be consistent across various AMD tools and products so users will be able to definitively identify their devices regardless of what tool they're using.
   - `amdsmi_get_gpu_device_cuid` has been added as an API for this upcoming change but will remain disabled until full support from the amdgpu driver is available.
   - The CLI `list` output and GPU selection now report the CUID in place of the UUID when a CUID is available, and fall back to the UUID otherwise.
+
+- **Restructured AMD SMI C++ tests into unit, integration and functional suites**.  
+  - The `amdsmitst` source tree now splits into three tiers under `tests/amd_smi_test/`: `unit/` (no device, no `amdsmi_init`), `integration/` (every API's invalid-input cases plus getters on valid input), and `functional/` (setters and multi-API workflows).
+  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - Device writes in `*FunctionalReadWrite` suites require root. Each test restores the value it changed, except for the few setters AMD SMI cannot read back, which `known_failures.md` names.
+  - Tests blocked by a known driver or library bug are skipped and tracked in `tests/amd_smi_test/known_failures.md`. Set `AMDSMI_RUN_KNOWN_FAILURES=1` to run them anyway and see their current behavior. 31 of the registered tests are quarantined this way and do not execute by default.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ## amd_smi_lib for ROCm 10.0.0
 
@@ -260,12 +276,6 @@ GPU: 0
 - **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
 
 - **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
-
-- **Restructured AMD SMI C++ tests into unit and functional suites**.  
-  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
-  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
-  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
-  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Optimized
 

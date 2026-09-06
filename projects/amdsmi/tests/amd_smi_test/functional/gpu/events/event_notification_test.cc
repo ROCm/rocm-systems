@@ -1,0 +1,116 @@
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "api_test_framework.h"
+
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
+
+// Event notification workflow: amdsmi_init_gpu_event_notification /
+// amdsmi_set_gpu_event_notification_mask / amdsmi_get_gpu_event_notification /
+// amdsmi_stop_gpu_event_notification.
+// OR of every event type into the notification bit mask.
+static uint64_t AllEventsMask() {
+  uint64_t mask = 0;
+  for (amdsmi_evt_notification_type_t e = AMDSMI_EVT_NOTIF_FIRST; e <= AMDSMI_EVT_NOTIF_LAST;
+       e = static_cast<amdsmi_evt_notification_type_t>(static_cast<uint32_t>(e) + 1)) {
+    mask |= AMDSMI_EVENT_MASK_FROM_INDEX(e);
+  }
+  return mask;
+}
+
+// ---------------- full init -> set-mask -> collect -> stop workflow ----------------
+// init/set/stop allocate and mutate per-device event-notification state, so the
+// flow is gated with the shared mutation gate.
+TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
+  AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
+  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
+
+  amdsmi::test::StatusCollector col("amdsmi_gpu_event_notification");
+  const uint64_t mask = AllEventsMask();
+  std::vector<size_t> inited;
+
+  // The mask is write-only, so the observable state is whether the setter is
+  // taken at all: it is refused until init has opened the per-device event fd.
+  for (size_t i = 0; i < gpus().size(); ++i) {
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask",
+                       "gpu=" + std::to_string(i) + " before init", kVerbose);
+    amdsmi_status_t err = amdsmi_set_gpu_event_notification_mask(gpus()[i], mask);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_INIT);
+    EXPECT_NE(err, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " took an event mask before init";
+  }
+
+  for (size_t i = 0; i < gpus().size(); ++i) {
+    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(i), kVerbose);
+    amdsmi_status_t err = amdsmi_init_gpu_event_notification(gpus()[i]);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record("init gpu=" + std::to_string(i), err,
+               ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    if (err != AMDSMI_STATUS_SUCCESS) continue;  // no init -> nothing to set/stop
+    inited.push_back(i);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask",
+                       "gpu=" + std::to_string(i) + " mask=all", kVerbose);
+    amdsmi_status_t serr = amdsmi_set_gpu_event_notification_mask(gpus()[i], mask);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, serr, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record("set_mask gpu=" + std::to_string(i), serr,
+               ::amdsmi::test::AmdsmiStatusIsExpected(serr, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    EXPECT_EQ(serr, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " refused the mask after init";
+  }
+
+  // Collect any pending events (short timeout; usually none fire during the test).
+  if (!inited.empty()) {
+    amdsmi_evt_notification_data_t data[16];
+    memset(data, 0, sizeof(data));
+    uint32_t num_elem = 16;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "timeout=100ms", kVerbose);
+    amdsmi_status_t gerr = amdsmi_get_gpu_event_notification(100, &num_elem, data);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, gerr, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_INSUFFICIENT_SIZE,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record(
+        "get_notification", gerr,
+        ::amdsmi::test::AmdsmiStatusIsExpected(
+            gerr, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_INSUFFICIENT_SIZE,
+            AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    if (gerr == AMDSMI_STATUS_SUCCESS || gerr == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
+      EXPECT_LE(num_elem, 16u) << "reported more events than the buffer holds";
+      for (uint32_t i = 0; i < num_elem && i < 16u; ++i) {
+        if (kVerbose) {
+          std::cout << "\t  event type=" << static_cast<int>(data[i].event)
+                    << " msg=" << data[i].message << std::endl;
+        }
+      }
+    }
+  }
+
+  // Restore each device's event state by releasing the notification resources.
+  for (size_t i : inited) {
+    DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "gpu=" + std::to_string(i), kVerbose);
+    amdsmi_status_t err = amdsmi_stop_gpu_event_notification(gpus()[i]);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record("stop gpu=" + std::to_string(i), err,
+               ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    if (err != AMDSMI_STATUS_SUCCESS) continue;
+
+    // Stop released the event fd, so the mask must be refused again.
+    amdsmi_status_t serr = amdsmi_set_gpu_event_notification_mask(gpus()[i], mask);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, serr, AMDSMI_STATUS_NOT_INIT);
+    EXPECT_NE(serr, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " kept taking masks after stop";
+  }
+
+  col.ExpectNoFailures();
+}

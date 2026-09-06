@@ -11,6 +11,7 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestFrequenciesRead::TestFrequenciesRead() : TestBase() {

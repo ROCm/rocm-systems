@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "rocm_smi/rocm_smi.h"
+#include "unit_fixtures.h"
 
 namespace amd::smi {
 int present_reg_state(const char* fname, rsmi_reg_type_t reg_type, rsmi_name_value_t** kv,
@@ -86,7 +87,7 @@ std::string WriteXgmiInstancesOnly(uint8_t num_instances) {
 
 // The skip-SMN path must stop on the last instance; it previously
 // looped back and read an instance header past the end of the image.
-TEST(GpuUnit, BinaryParserXgmiTwoInstancesZeroSmnRegs) {
+TEST_F(GpuUnit, BinaryParserXgmiTwoInstancesZeroSmnRegs) {
   const std::string path = WriteXgmiInstancesOnly(2);
   rsmi_name_value_t* kv = nullptr;
   uint32_t kvnum = 0;
@@ -96,12 +97,12 @@ TEST(GpuUnit, BinaryParserXgmiTwoInstancesZeroSmnRegs) {
   remove(path.c_str());
 }
 
-TEST(GpuUnit, BinaryParserXgmiZeroSmnRegs) { ExpectSmnPasses(0); }
+TEST_F(GpuUnit, BinaryParserXgmiZeroSmnRegs) { ExpectSmnPasses(0); }
 
-TEST(GpuUnit, BinaryParserXgmiOneSmnReg) { ExpectSmnPasses(1); }
+TEST_F(GpuUnit, BinaryParserXgmiOneSmnReg) { ExpectSmnPasses(1); }
 
-TEST(GpuUnit, BinaryParserXgmiTwoSmnRegs) { ExpectSmnPasses(2); }
+TEST_F(GpuUnit, BinaryParserXgmiTwoSmnRegs) { ExpectSmnPasses(2); }
 
-TEST(GpuUnit, BinaryParserXgmiThreeSmnRegs) { ExpectSmnPasses(3); }
+TEST_F(GpuUnit, BinaryParserXgmiThreeSmnRegs) { ExpectSmnPasses(3); }
 
 }  // namespace

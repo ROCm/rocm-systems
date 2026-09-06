@@ -9,22 +9,23 @@
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_lib_loader.h"
+#include "unit_fixtures.h"
 
 namespace {
 
-TEST(SystemUnit, LibLoaderFirstCandidateWins) {
+TEST_F(SystemUnit, LibLoaderFirstCandidateWins) {
   amd::smi::AMDSmiLibraryLoader loader;
   EXPECT_EQ(loader.load(std::vector<const char*>{"libm.so.6", "does_not_exist.so"}),
             AMDSMI_STATUS_SUCCESS);
 }
 
-TEST(SystemUnit, LibLoaderFallsBackWhenPrimaryMissing) {
+TEST_F(SystemUnit, LibLoaderFallsBackWhenPrimaryMissing) {
   amd::smi::AMDSmiLibraryLoader loader;
   EXPECT_EQ(loader.load(std::vector<const char*>{"does_not_exist.so.9", "libm.so.6"}),
             AMDSMI_STATUS_SUCCESS);
 }
 
-TEST(SystemUnit, LibLoaderAllCandidatesMissingFails) {
+TEST_F(SystemUnit, LibLoaderAllCandidatesMissingFails) {
   amd::smi::AMDSmiLibraryLoader loader;
   EXPECT_EQ(loader.load(std::vector<const char*>{"nope_a.so.9", "nope_b.so.9"}),
             AMDSMI_STATUS_FAIL_LOAD_MODULE);
@@ -32,7 +33,7 @@ TEST(SystemUnit, LibLoaderAllCandidatesMissingFails) {
 
 // When a candidate is already loaded in the process, the loader must still keep
 // a usable handle so load_symbol() resolves.
-TEST(SystemUnit, LibLoaderAlreadyLoadedResolvesSymbol) {
+TEST_F(SystemUnit, LibLoaderAlreadyLoadedResolvesSymbol) {
   amd::smi::AMDSmiLibraryLoader keep_open;
   ASSERT_EQ(keep_open.load("libm.so.6"), AMDSMI_STATUS_SUCCESS);
 

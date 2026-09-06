@@ -30,22 +30,31 @@ TEST_ROOT = Path(__file__).resolve().parent  # projects/amdsmi/tests/amd_smi_tes
 REPO_ROOT = TEST_ROOT.parents[3]
 DOC = "projects/amdsmi/docs/conceptual/test-design.md"
 
-TIERS = ("unit", "functional")  # top-level test-type directories
+TIERS = ("unit", "integration", "functional")  # top-level test-type directories
 COMPONENTS = ("gpu", "cpu", "nic", "ifoe", "system", "wsl")  # allowed component dirs
-# Functional tests group into per-feature leaf dirs (<component>/<feature>/),
-# except these flat components which have no sub-features (component == feature).
+# Integration and functional tests group into per-feature leaf dirs
+# (<component>/<feature>/), except these flat components which have no
+# sub-features (component == feature).
 FLAT_COMPONENTS = ("system",)
+NESTED_TIERS = ("integration", "functional")
 TEST_SUFFIX = "_test.cc"
 
 # A GTest suite name is <Component><Type>[<Operation>]:
-#   unit       -> <Component>Unit                        (no operation)
-#   functional -> <Component>Functional{ReadOnly,ReadWrite}
+#   unit        -> <Component>Unit                        (no operation)
+#   integration -> <Component>Integration                 (no operation)
+#   functional  -> <Component>Functional{ReadOnly,ReadWrite}
 SUITE_RE = re.compile(
-    r"^(Gpu|Cpu|Nic|Ifoe|System|Wsl)(Unit|FunctionalReadOnly|FunctionalReadWrite)$"
+    r"^(Gpu|Cpu|Nic|Ifoe|System|Wsl)"
+    r"(Unit|Integration|FunctionalReadOnly|FunctionalReadWrite)$"
 )
 
-# Captures the suite from TEST(Suite, Name) and TEST_F(Suite, Name).
-_TEST_MACRO_RE = re.compile(r"\bTEST(?:_F)?\(\s*([A-Za-z_]\w*)\s*,")
+# The only GTest registration macro allowed; see _check_test_macros for why.
+REQUIRED_TEST_MACRO = "TEST_F"
+
+# Captures the macro and suite of any GTest registration, e.g. TEST_F(Suite, Name).
+_TEST_MACRO_RE = re.compile(
+    r"\b(TEST|TEST_F|TEST_P|TYPED_TEST|TYPED_TEST_P)\(\s*([A-Za-z_]\w*)\s*,"
+)
 
 # Declares a functional fixture, e.g. `class TestFanRead : public TestBase`.
 _FIXTURE_DECL_RE = re.compile(r"^class\s+([A-Za-z_]\w*)\s*:\s*public\b", re.M)
@@ -61,6 +70,8 @@ def expected_suites(tier: str, component: str) -> list[str]:
     prefix = _pascal(component)
     if tier == "unit":
         return [f"{prefix}Unit"]
+    if tier == "integration":
+        return [f"{prefix}Integration"]
     return [f"{prefix}FunctionalReadOnly", f"{prefix}FunctionalReadWrite"]
 
 
@@ -84,9 +95,22 @@ def _strip_comments(text: str) -> str:
     return re.sub(r"//[^\n]*", "", text)
 
 
-def _suites_in(path: Path) -> list[str]:
-    """GTest suite names registered via TEST()/TEST_F() in a source file."""
+def _tests_in(path: Path) -> list[tuple[str, str]]:
+    """``(macro, suite)`` for every GTest registration in a source file."""
     return _TEST_MACRO_RE.findall(_strip_comments(path.read_text(errors="replace")))
+
+
+def _suites_in(path: Path) -> list[str]:
+    """GTest suite names registered in a source file."""
+    return [suite for _macro, suite in _tests_in(path)]
+
+
+def _bad_macro(path: Path, macro: str, suite: str) -> str:
+    return (
+        f"{_rel(path)}: {macro}({suite}, …) must use {REQUIRED_TEST_MACRO} — without the "
+        f"suite fixture the test runs with no amdsmi_init/enumeration, and GTest aborts "
+        f"a suite that mixes {macro} with {REQUIRED_TEST_MACRO}"
+    )
 
 
 def _bad_pattern(path: Path, suite: str) -> str:
@@ -125,14 +149,14 @@ def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> It
         )
     elif component not in COMPONENTS:
         yield (f"{_rel(path)}: unknown component '{component}'; expected one of {list(COMPONENTS)}")
-    elif tier == "functional" and component not in FLAT_COMPONENTS:
-        # Functional tests group into per-feature leaf dirs, e.g.
+    elif tier in NESTED_TIERS and component not in FLAT_COMPONENTS:
+        # These tiers group into per-feature leaf dirs, e.g.
         # functional/gpu/clock/frequencies_read_test.cc — parts are
         # (component, feature, file), so a missing feature leaf means len < 3.
         depth = len(path.relative_to(TEST_ROOT / tier).parts)
         if depth < 3:
             yield (
-                f"{_rel(path)}: functional test must live under "
+                f"{_rel(path)}: {tier} test must live under "
                 f"{tier}/{component}/<feature>/..., not directly in {tier}/{component}/"
             )
     if not path.name.endswith(TEST_SUFFIX):
@@ -140,6 +164,20 @@ def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> It
             f"{_rel(path)}: must be named '<feature>_<operation>{TEST_SUFFIX}' "
             f"(missing '{TEST_SUFFIX}' suffix)"
         )
+
+
+def _check_test_macros(path: Path) -> Iterator[str]:
+    """Every test must register with ``TEST_F``.
+
+    The suite fixtures in ``api_test_framework.h`` own the amdsmi_init, device
+    enumeration and shutdown each test depends on, so a fixture-less ``TEST()``
+    would run against an uninitialized library. GTest also rejects a suite whose
+    tests do not all share one fixture class, so a single stray ``TEST()`` aborts
+    the whole suite at runtime.
+    """
+    for macro, suite in _tests_in(path):
+        if macro != REQUIRED_TEST_MACRO:
+            yield _bad_macro(path, macro, suite)
 
 
 def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]:
@@ -164,7 +202,7 @@ def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]
 
 
 def _main_cc_tests() -> Iterator[tuple[str, str]]:
-    """Yield ``(suite, body)`` for each TEST()/TEST_F() block in main.cc.
+    """Yield ``(suite, body)`` for each TEST_F() block in main.cc.
 
     Comments are stripped first (so disabled/example tests are ignored), and
     ``body`` spans from the macro to the start of the next TEST.
@@ -176,7 +214,7 @@ def _main_cc_tests() -> Iterator[tuple[str, str]]:
     tests = list(_TEST_MACRO_RE.finditer(text))
     for current, following in zip(tests, tests[1:] + [None]):
         body_end = following.start() if following else len(text)
-        yield current.group(1), text[current.end() : body_end]
+        yield current.group(2), text[current.end() : body_end]
 
 
 def _check_main_cc() -> Iterator[str]:
@@ -240,16 +278,14 @@ def _check_main_cc_component_match() -> Iterator[str]:
 
 
 def _check_stray_test_files() -> Iterator[str]:
-    """A *_test.cc dropped outside unit/ and functional/ (e.g. the suite root)
-    would still be compiled by aux_source_directory, so flag it."""
+    """A *_test.cc dropped outside the tier dirs is excluded from CMake's
+    GLOB_RECURSE and would never be compiled, so flag it."""
     for path in sorted(TEST_ROOT.rglob(f"*{TEST_SUFFIX}")):
         parts = path.relative_to(TEST_ROOT).parts
         top = parts[0] if len(parts) > 1 else None
         if top not in TIERS:
-            yield (
-                f"{_rel(path)}: test file must live under unit/<component>/ or "
-                f"functional/<component>/ — found outside both"
-            )
+            tiers = ", ".join(f"{t}/<component>/" for t in TIERS)
+            yield f"{_rel(path)}: test file must live under one of {tiers} — found outside all"
 
 
 def collect_violations() -> list[str]:
@@ -257,7 +293,9 @@ def collect_violations() -> list[str]:
     violations: list[str] = []
     for tier, component, path in _iter_tier_sources():
         violations += _check_layout_and_naming(tier, component, path)
+        violations += _check_test_macros(path)
         violations += _check_suites(tier, component, path)
+    violations += _check_test_macros(TEST_ROOT / "main.cc")
     violations += _check_main_cc()
     violations += _check_main_cc_component_match()
     violations += _check_stray_test_files()

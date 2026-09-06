@@ -14,6 +14,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_clk_testing.h"
+#include "unit_fixtures.h"
 
 namespace {
 
@@ -94,7 +95,7 @@ constexpr char kOdFclkSingleLevel[] =
     "OD_FCLK:\n"
     "0: 1500Mhz\n";
 
-TEST(GpuUnit, OdClkRangeReadsSclkSection) {
+TEST_F(GpuUnit, OdClkRangeReadsSclkSection) {
   std::istringstream od(kOdNoFclk);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -103,7 +104,7 @@ TEST(GpuUnit, OdClkRangeReadsSclkSection) {
   EXPECT_EQ(min, 500u);
 }
 
-TEST(GpuUnit, OdClkRangeReadsMclkSection) {
+TEST_F(GpuUnit, OdClkRangeReadsMclkSection) {
   std::istringstream od(kOdNoFclk);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -115,7 +116,7 @@ TEST(GpuUnit, OdClkRangeReadsMclkSection) {
 // The regression: with no OD_FCLK section the parser reports "absent" (false)
 // and leaves the out-params untouched, so the caller derives FCLK min/max from
 // pp_dpm_fclk rather than reporting 0.
-TEST(GpuUnit, OdClkRangeFallsBackWhenFclkSectionMissing) {
+TEST_F(GpuUnit, OdClkRangeFallsBackWhenFclkSectionMissing) {
   std::istringstream od(kOdNoFclk);
   unsigned int max = 4242;
   unsigned int min = 4242;
@@ -125,7 +126,7 @@ TEST(GpuUnit, OdClkRangeFallsBackWhenFclkSectionMissing) {
 }
 
 // With OD_FCLK present the range is read directly, no fallback.
-TEST(GpuUnit, OdClkRangeReadsFclkSectionWhenPresent) {
+TEST_F(GpuUnit, OdClkRangeReadsFclkSectionWhenPresent) {
   std::istringstream od(kOdWithFclk);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -135,7 +136,7 @@ TEST(GpuUnit, OdClkRangeReadsFclkSectionWhenPresent) {
 }
 
 // A missing/empty pp_od_clk_voltage yields no section -> fall back.
-TEST(GpuUnit, OdClkRangeFallsBackOnEmptyStream) {
+TEST_F(GpuUnit, OdClkRangeFallsBackOnEmptyStream) {
   std::istringstream od("");
   unsigned int max = 7;
   unsigned int min = 7;
@@ -143,7 +144,7 @@ TEST(GpuUnit, OdClkRangeFallsBackOnEmptyStream) {
 }
 
 // Domains that have no overdrive section (e.g. SOC) are never OD-backed.
-TEST(GpuUnit, OdClkRangeRejectsNonOdDomain) {
+TEST_F(GpuUnit, OdClkRangeRejectsNonOdDomain) {
   std::istringstream od(kOdWithFclk);
   unsigned int max = 7;
   unsigned int min = 7;
@@ -151,7 +152,7 @@ TEST(GpuUnit, OdClkRangeRejectsNonOdDomain) {
 }
 
 // The bare GFXCLK/MCLK/FCLK aliases are accepted just like the OD_* headers.
-TEST(GpuUnit, OdClkRangeReadsAliasHeaders) {
+TEST_F(GpuUnit, OdClkRangeReadsAliasHeaders) {
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
   std::istringstream gfx(kOdAliasHeaders);
@@ -176,7 +177,7 @@ TEST(GpuUnit, OdClkRangeReadsAliasHeaders) {
 
 // Section present but every level parses to 0 -> reported absent so the caller
 // still falls back to pp_dpm_*.
-TEST(GpuUnit, OdClkRangeFallsBackWhenAllLevelsZero) {
+TEST_F(GpuUnit, OdClkRangeFallsBackWhenAllLevelsZero) {
   std::istringstream od(kOdFclkAllZero);
   unsigned int max = 555;
   unsigned int min = 555;
@@ -187,7 +188,7 @@ TEST(GpuUnit, OdClkRangeFallsBackWhenAllLevelsZero) {
 
 // A non-conforming line inside the section is skipped, not treated as its end,
 // so levels on both sides still contribute to the range.
-TEST(GpuUnit, OdClkRangeSkipsMalformedLineWithinSection) {
+TEST_F(GpuUnit, OdClkRangeSkipsMalformedLineWithinSection) {
   std::istringstream od(kOdFclkGarbageLine);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -198,7 +199,7 @@ TEST(GpuUnit, OdClkRangeSkipsMalformedLineWithinSection) {
 
 // An unrecognized section header (OD_VDDC_CURVE) ends FCLK parsing, so its curve
 // lines are not mistaken for FCLK levels and do not inflate the max.
-TEST(GpuUnit, OdClkRangeStopsAtUnrecognizedSectionHeader) {
+TEST_F(GpuUnit, OdClkRangeStopsAtUnrecognizedSectionHeader) {
   std::istringstream od(kOdFclkThenCurve);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -209,7 +210,7 @@ TEST(GpuUnit, OdClkRangeStopsAtUnrecognizedSectionHeader) {
 
 // Repeated section headers merge: levels from every OD_FCLK occurrence feed one
 // range. No live sysfs file repeats a header; this pins the contract.
-TEST(GpuUnit, OdClkRangeMergesRepeatedSectionHeaders) {
+TEST_F(GpuUnit, OdClkRangeMergesRepeatedSectionHeaders) {
   std::istringstream od(kOdFclkDuplicate);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;
@@ -219,7 +220,7 @@ TEST(GpuUnit, OdClkRangeMergesRepeatedSectionHeaders) {
 }
 
 // A single-level (locked-clock) section reports min == max.
-TEST(GpuUnit, OdClkRangeReadsSingleLevelSection) {
+TEST_F(GpuUnit, OdClkRangeReadsSingleLevelSection) {
   std::istringstream od(kOdFclkSingleLevel);
   unsigned int max = 0;
   unsigned int min = UINT_MAX;

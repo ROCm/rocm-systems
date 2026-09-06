@@ -16,6 +16,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "unit_fixtures.h"
 
 namespace amd::smi {
 
@@ -116,7 +117,7 @@ class LegacyCallerBuffer {
 
 }  // namespace
 
-TEST(GpuUnit, FabricInfoLayoutVersionOneRequestWritesNothingPastTheVersionOneMember) {
+TEST_F(GpuUnit, FabricInfoLayoutVersionOneRequestWritesNothingPastTheVersionOneMember) {
   auto buffer = LegacyCallerBuffer{};
   buffer.info().fabric_version = AMDSMI_FABRIC_INFO_VERSION_1;
 
@@ -127,7 +128,7 @@ TEST(GpuUnit, FabricInfoLayoutVersionOneRequestWritesNothingPastTheVersionOneMem
   EXPECT_LE(kV1WriteBound, kV1CallerSize);
 }
 
-TEST(GpuUnit, FabricInfoLayoutUnrecognizedVersionDegradesToVersionOne) {
+TEST_F(GpuUnit, FabricInfoLayoutUnrecognizedVersionDegradesToVersionOne) {
   const auto unrecognized_versions = std::array<std::uint32_t, 5>{
       1u, 2u, 3u, std::numeric_limits<std::uint32_t>::max(), 0xFAB10003u};
 
@@ -144,7 +145,7 @@ TEST(GpuUnit, FabricInfoLayoutUnrecognizedVersionDegradesToVersionOne) {
   }
 }
 
-TEST(GpuUnit, FabricInfoLayoutVersionTwoRequestFillsTheNestedMember) {
+TEST_F(GpuUnit, FabricInfoLayoutVersionTwoRequestFillsTheNestedMember) {
   const auto source = make_populated_v2();
 
   auto destination = amdsmi_fabric_info_t{};
@@ -159,7 +160,7 @@ TEST(GpuUnit, FabricInfoLayoutVersionTwoRequestFillsTheNestedMember) {
   EXPECT_EQ(std::memcmp(&destination.fabric_info.v2, &source, sizeof(source)), 0);
 }
 
-TEST(GpuUnit, FabricInfoLayoutFlattenMapsEveryVersionOneField) {
+TEST_F(GpuUnit, FabricInfoLayoutFlattenMapsEveryVersionOneField) {
   const auto source = make_populated_v2();
 
   auto destination = amdsmi_fabric_info_v1_t{};

@@ -9,6 +9,7 @@
 #include <iostream>
 
 #include "amd_smi/amdsmi.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestXGMIReadWrite::TestXGMIReadWrite() : TestBase() {
@@ -40,7 +41,6 @@ void TestXGMIReadWrite::Close() {
 }
 
 void TestXGMIReadWrite::Run(void) {
-  GTEST_SKIP_("Temporarily disabled");
   amdsmi_status_t err;
   amdsmi_xgmi_status_t err_stat;
 

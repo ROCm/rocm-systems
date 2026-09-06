@@ -17,6 +17,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 // Category mask covering all telemetry categories
@@ -450,7 +451,7 @@ static constexpr uint64_t kFirstTelemId = 0x1;
 static constexpr uint64_t kMidTelemId = 0x6000001;
 static constexpr uint64_t kLastTelemId = 0x6001011;
 
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
+TEST_F(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
   const char* name = nullptr;
 
   ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
@@ -463,12 +464,12 @@ TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
   ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
 }
 
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+TEST_F(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
   ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
+TEST_F(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
   const char* name = nullptr;
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
   ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);

@@ -40,8 +40,34 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST()` macro · Python: `unittest` |
-| **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
+| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` on a plain fixture · Python: `unittest` |
+| **Integration** | `integration/` | Yes — needs a live library and device | C++: `TEST_F()` on `ApiTest` · Python: `unittest` |
+| **Functional** | `functional/` | Yes — runs against a live device | C++: `TEST_F()` on `SelfManagedApiTest`, or the legacy `TestBase` lifecycle · Python: `unittest` |
+
+The **integration** tier owns the public `amdsmi.h` API surface: every API's
+invalid-input cases (null pointer, invalid handle), and every **getter** driven
+with valid input and checked for valid output. Invalid-input cases run even when
+the matching device is absent, since argument validation does not depend on the
+device; positive cases skip when there is nothing to drive.
+
+Only `AMDSMI_STATUS_SUCCESS` counts as a positive pass. A status meaning the
+feature is absent on this host marks that device skipped, and a case where every
+device was unsupported is reported SKIPPED. This keeps an unimplemented API from
+reading as covered.
+
+The **functional** tier owns **setters** and any API needing setup from another
+API. Every read-write test stores the original value, sets a different one,
+verifies the readback against what it set, restores the original and confirms the
+restore took, so a run leaves the device as it found it. A setter the API
+cannot read back, or whose effect the driver defers to a restart, relaxes that
+check and says why at the test. Writes require root via
+`AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
+
+A test blocked by a driver or library bug skips via
+`AMDSMI_SKIP_KNOWN_FAILURE()` and is listed in
+[`known_failures.md`](../../tests/amd_smi_test/known_failures.md). Setting
+`AMDSMI_RUN_KNOWN_FAILURES` runs those tests instead, so a fixed API shows up
+as a pass rather than staying silently skipped.
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
 meaningful timing data.
@@ -62,7 +88,9 @@ tests/amd_smi_test/
 ├── amdsmitst.exclude                # Global ASIC blacklist for --gtest_filter
 ├── detect_asic_filter.sh            # ASIC detection and per-ASIC exclusion
 │
-├── unit/                            # No hardware required; pure TEST() macro tests
+├── api_test_framework.h              # Shared fixtures, status helpers, getter macros
+│
+├── unit/                            # No hardware required; no amdsmi_init
 │   ├── gpu/
 │   │   ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
 │   │   ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
@@ -75,9 +103,16 @@ tests/amd_smi_test/
 │   │       ├── cper_mixed.cper
 │   │       └── cper_uncorrected.cper
 │   └── system/
-│       └── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
+│       ├── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
+│       └── status_string_test.cc    # amdsmi_status_code_to_string coverage
 │
-└── functional/                      # Requires live hardware; uses TestBase lifecycle
+├── integration/                     # API surface: invalid inputs for every API, getters
+│   ├── cpu/                         #   <component>/<feature>/<feature>_test.cc
+│   ├── gpu/
+│   ├── nic/
+│   └── system/
+│
+└── functional/                      # Setters and multi-API workflows; TestBase lifecycle
     ├── gpu/
     │   ├── clock/
     │   │   ├── frequencies_read{.h,_test.cc}
@@ -178,8 +213,13 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 - `<feature>` — for example: `fan`, `clock`, or `dynamic_metrics`.
 - `<operation>` — for example: `read` or `read_write`.
 
-**Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; plain
-`TEST(Suite, Name)` for unit tests.
+**Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; unit tests
+declare no class of their own.
+
+**Every test registers with `TEST_F(Suite, Name)`** — never the fixture-less `TEST()`. The suite
+fixtures in `api_test_framework.h` own the `amdsmi_init`, device enumeration and shutdown that
+each test depends on; the device-free `*Unit` fixtures live in `unit_fixtures.h`. Mixing `TEST()` into a suite that uses `TEST_F()` still compiles, but GTest
+then fails every `TEST()` case in that suite at runtime. `check_test_conventions.py` enforces this.
 
 **GTest suites registered in `main.cc` follow the `<Component><Type>[<Operation>]` scheme**:
 
@@ -187,14 +227,17 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 | :--- | :--- | :--- |
 | `<Component>FunctionalReadOnly` | functional | Only reads device/host state; no root required |
 | `<Component>FunctionalReadWrite` | functional | Modifies device/host state; root typically required |
+| `<Component>Integration` | integration | API surface on a live library; no root required |
 | `<Component>Unit` | unit | Pure logic; no device required |
 
 `<Component>` is the PascalCase name from the source path — one of `Gpu`, `Cpu`, `Nic`, `Ifoe`, or
 `System` (see [Component taxonomy](#component-taxonomy)). Functional suites always carry a `ReadOnly`
-or `ReadWrite` operation suffix; unit suites omit it. Only combinations that have tests are
-registered — currently `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`, `SystemFunctionalReadOnly`,
-`IfoeFunctionalReadOnly`, `GpuUnit`, `NicUnit`, and `SystemUnit`. This keeps component, type, and operation
-independently filterable via `--gtest_filter` wildcards.
+or `ReadWrite` operation suffix; unit and integration suites omit it. Only combinations that have
+tests are registered — currently `GpuUnit`, `SystemUnit`, `GpuIntegration`, `CpuIntegration`,
+`NicIntegration`, `SystemIntegration`, `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`,
+`CpuFunctionalReadWrite`, `NicFunctionalReadOnly`, `SystemFunctionalReadOnly` and
+`IfoeFunctionalReadOnly`. This keeps component, type, and operation independently filterable via
+`--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures
 
@@ -230,7 +273,8 @@ so a new test file added to any subdirectory is picked up on the next build with
 re-run:
 
 ```cmake
-file(GLOB_RECURSE unitSources  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE unitSources   CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE integSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/integration/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 add_executable(amdsmitst
@@ -292,11 +336,14 @@ sudo ./amdsmitst --gtest_filter="Gpu*"
 # GPU functional only
 sudo ./amdsmitst --gtest_filter="GpuFunctional*"
 
-# GPU unit only
-./amdsmitst --gtest_filter="GpuUnit*"
+# GPU API-surface tests only
+./amdsmitst --gtest_filter="GpuIntegration*"
 
-# Any component unit tests
+# Any component unit tests (no device needed)
 ./amdsmitst --gtest_filter="*Unit*"
+
+# Any component integration tests
+./amdsmitst --gtest_filter="*Integration*"
 
 # CPU tests (when added)
 ./amdsmitst --gtest_filter="Cpu*"
