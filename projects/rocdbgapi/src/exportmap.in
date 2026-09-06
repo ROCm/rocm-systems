@@ -105,3 +105,7 @@ global:	amd_dbgapi_address_dependency;
 @AMD_DBGAPI_NAME@_0.80 {
 global: amd_dbgapi_process_get_info;
 } @AMD_DBGAPI_NAME@_0.79;
+
+@AMD_DBGAPI_NAME@_0.81 {
+global: amd_dbgapi_process_set_trap_override;
+} @AMD_DBGAPI_NAME@_0.80;

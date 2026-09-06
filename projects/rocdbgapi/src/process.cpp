@@ -450,8 +450,18 @@ process_t::set_wave_launch_mode (os_wave_launch_mode_t wave_launch_mode)
         if (wave.visibility ()
             == wave_t::visibility_t::hidden_halted_at_launch)
           {
-            wave.set_state (AMD_DBGAPI_WAVE_STATE_RUN);
-            wave.set_visibility (wave_t::visibility_t::visible);
+            if (wave.stop_reason () != AMD_DBGAPI_WAVE_STOP_REASON_NONE)
+              {
+                /* keep state as stop, make visible and report exceptions  */
+                wave.report_stop_at_launch ();
+              }
+            else
+              {
+                /* The wave was halted at launch with no exception, it can now
+                   be resumed and reported to the client.  */
+                wave.set_state (AMD_DBGAPI_WAVE_STATE_RUN);
+                wave.set_visibility (wave_t::visibility_t::visible);
+              }
           }
 
       /* Changing the launch mode before resuming the queues ensures that none
@@ -560,6 +570,98 @@ process_t::set_precise_alu_exceptions (bool enabled)
       && status != AMD_DBGAPI_STATUS_SUCCESS)
     fatal_error ("os_driver::set_precise_alu_exceptions failed (%s)",
                  to_cstring (status));
+}
+
+void
+process_t::set_user_trap_override (
+  amd_dbgapi_wave_enable_trap_t requested_traps,
+  amd_dbgapi_wave_enable_trap_t requested_mask)
+{
+  os_wave_launch_trap_mask_t value{}, mask{};
+
+  /* Generic conversion from amd_dbgapi_wave_enable_trap_t to
+     os_wave_launch_trap_mask_t.  */
+  auto convert
+    = [] (os_wave_launch_trap_mask_t &out, amd_dbgapi_wave_enable_trap_t flag)
+  {
+    switch (flag)
+      {
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_NONE:
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INVALID:
+        out |= os_wave_launch_trap_mask_t::fp_invalid;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INPUT_DENORMAL:
+        out |= os_wave_launch_trap_mask_t::fp_input_denormal;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_DIVIDE_BY_ZERO:
+        out |= os_wave_launch_trap_mask_t::fp_divide_by_zero;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_OVERFLOW:
+        out |= os_wave_launch_trap_mask_t::fp_overflow;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_UNDERFLOW:
+        out |= os_wave_launch_trap_mask_t::fp_underflow;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INEXACT:
+        out |= os_wave_launch_trap_mask_t::fp_inexact;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_INT_DIVIDE_BY_ZERO:
+        out |= os_wave_launch_trap_mask_t::int_divide_by_zero;
+        break;
+      case AMD_DBGAPI_WAVE_ENABLE_TRAP_ON_ENTRY:
+        out |= os_wave_launch_trap_mask_t::wave_start;
+        break;
+      default:
+        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+      }
+  };
+
+  utils::for_each_flag (requested_traps, [&value, &convert] (auto flag)
+                        { convert (value, flag); });
+  utils::for_each_flag (requested_mask, [&mask, &convert] (auto flag)
+                        { convert (mask, flag); });
+
+  value = (m_requested_wave_trap_mask & ~mask) | (value & mask);
+
+  auto set_requested_traps = utils::make_scope_success (
+    [=] () { m_requested_wave_trap_mask = value; });
+
+  /* If this is called before the runtime is loaded (or after the runtime is
+     unloaded), only record the setting in the process_t instance. The actual
+     change to the configuration will be done when the runtime is loaded and
+     the debug mode is activated.  */
+  if (m_runtime_state != AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS)
+    return;
+
+  if ((value & ~m_supported_wave_trap_mask) != 0)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  /* Nothing to update on existing waves if the traps are already applied.  */
+  if (value == m_requested_wave_trap_mask)
+    return;
+
+  set_wave_launch_trap_override (value, mask);
+
+  update_queues ();
+
+  std::vector<queue_t *> queues;
+  queues.reserve (count<queue_t> ());
+
+  for (auto &&queue : range<queue_t> ())
+    if (!queue.is_suspended ())
+      queues.emplace_back (&queue);
+
+  suspend_queues (queues, "set enabled traps");
+
+  for (auto &&wave : range<wave_t> ())
+    {
+      wave.architecture ().wave_enable_traps (wave, value);
+      wave.architecture ().wave_disable_traps (wave, mask & ~value);
+    }
+
+  if (forward_progress_needed ())
+    resume_queues (queues, "set enabled traps");
 }
 
 std::vector<process_t *>
@@ -1654,23 +1756,30 @@ process_t::runtime_enable (os_runtime_info_t runtime_info)
     fatal_error ("Could not set the wave launch mode for %s (%s).",
                  to_cstring (id ()), to_cstring (status));
 
-  os_wave_launch_trap_mask_t supported_wave_trap_mask;
   status = os_driver ().set_wave_launch_trap_override (
     os_wave_launch_trap_override_t::apply, os_wave_launch_trap_mask_t::none,
-    os_wave_launch_trap_mask_t::none, nullptr, &supported_wave_trap_mask);
+    os_wave_launch_trap_mask_t::none, nullptr, &m_supported_wave_trap_mask);
   if (status != AMD_DBGAPI_STATUS_SUCCESS
       && status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
     fatal_error ("Could not set the wave launch trap override for %s (%s).",
                  to_cstring (id ()), to_cstring (status));
 
-  if ((m_wave_trap_mask & ~supported_wave_trap_mask) != 0)
+  if ((m_wave_trap_mask & ~m_supported_wave_trap_mask) != 0)
     fatal_error ("Unsupported wave trap mask (%s) requested for %s",
-                 to_cstring (m_wave_trap_mask & ~supported_wave_trap_mask),
+                 to_cstring (m_wave_trap_mask & ~m_supported_wave_trap_mask),
                  to_cstring (id ()));
 
+  if ((m_requested_wave_trap_mask & ~m_supported_wave_trap_mask) != 0)
+    log_info (
+      "Unsupported wave trap mask (%s) requested for %s",
+      to_cstring (m_requested_wave_trap_mask & ~m_supported_wave_trap_mask),
+      to_cstring (id ()));
+
+  /* Enable both m_wave_trap_mask (trap mask as required by dbgapi) and
+     m_requested_wave_trap_mask (trap mask required by the user).  */
   status = os_driver ().set_wave_launch_trap_override (
-    os_wave_launch_trap_override_t::apply, m_wave_trap_mask,
-    supported_wave_trap_mask);
+    os_wave_launch_trap_override_t::apply,
+    m_wave_trap_mask | m_requested_wave_trap_mask, m_supported_wave_trap_mask);
   if (status != AMD_DBGAPI_STATUS_SUCCESS
       && status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
     fatal_error ("Could not set the wave launch trap override for %s (%s).",
@@ -2564,6 +2673,37 @@ amd_dbgapi_process_unfreeze (amd_dbgapi_process_id_t process_id)
          AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
          AMD_DBGAPI_STATUS_ERROR_PROCESS_NOT_FROZEN,
          AMD_DBGAPI_STATUS_ERROR_NOT_IMPLEMENTED);
+  TRACE_END ();
+}
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_process_set_trap_override (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_wave_enable_trap_t enabled_traps,
+  amd_dbgapi_wave_enable_trap_t mask)
+{
+  TRACE_BEGIN (param_in (process_id), param_in (enabled_traps),
+               param_in (mask));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    if (process->is_frozen ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN);
+
+    process->set_user_trap_override (enabled_traps, mask);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }
 

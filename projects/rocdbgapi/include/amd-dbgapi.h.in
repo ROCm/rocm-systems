@@ -665,6 +665,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -2197,6 +2203,65 @@ typedef enum
 } amd_dbgapi_wave_creation_t;
 
 /**
+ * The traps that can be enabled or disabled.
+ *
+ * This is a bit mask: the values may be combined with bitwise-or to enable
+ * more than one trap at a time.  A wave that hits an enabled trap is reported
+ * as stopped.  The floating-point and integer exception traps are reported
+ * when the corresponding exception is raised, while
+ * ::AMD_DBGAPI_WAVE_ENABLE_TRAP_ON_ENTRY is raised for all new waves, before
+ * any instruction executes.
+ *
+ * This setting applies to all agents of the specified process and affects all
+ * waves.
+ */
+typedef enum
+{
+  /**
+   * No trap is enabled. Waves execute normally.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_NONE = 0,
+  /**
+   * Trap on an invalid floating-point operation, i.e. an operation that has no
+   * meaningful result, such as 0/0, inf - inf, sqrt of a negative number, or an
+   * operation with a signaling NaN operand.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INVALID = 1 << 0,
+  /**
+   * Trap when a denormal floating-point value is passed as input.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INPUT_DENORMAL = 1 << 1,
+  /**
+   * Trap when a finite non-zero number is divided by zero.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_DIVIDE_BY_ZERO = 1 << 2,
+  /**
+   * Trap when the rounded result would be larger than the largest finite
+   * number.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_OVERFLOW = 1 << 3,
+  /**
+   * Trap when the rounded result would be smaller than the smallest normal
+   * number.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_UNDERFLOW = 1 << 4,
+  /**
+   * Trap when the rounded result is different from the infinitely precise
+   * result.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_FP_INEXACT = 1 << 5,
+  /**
+   * Trap when an integer is divided by zero.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_INT_DIVIDE_BY_ZERO = 1 << 6,
+  /**
+   * Trap on entry. Waves trap immediately upon launch before executing any
+   * instructions.
+   */
+  AMD_DBGAPI_WAVE_ENABLE_TRAP_ON_ENTRY = 1 << 7,
+} amd_dbgapi_wave_enable_trap_t;
+
+/**
  * Set the wave creation mode for a process.
  *
  * The setting applies to all agents of the specified process.
@@ -2227,6 +2292,59 @@ typedef enum
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_set_wave_creation (
     amd_dbgapi_process_id_t process_id,
     amd_dbgapi_wave_creation_t creation) AMD_DBGAPI_VERSION_0_76;
+
+/**
+ * Set the wave trap override setting for a process.
+ *
+ * This is a read-modify-write operation over the process's set of enabled
+ * traps.  Both \p enabled_traps and \p mask are bit masks built from
+ * ::amd_dbgapi_wave_enable_trap_t values.  \p mask selects which traps are
+ * affected: only traps present in \p mask are modified, and traps absent from
+ * \p mask retain their current setting.  For each trap in \p mask, the trap is
+ * enabled if it is also present in \p enabled_traps, and disabled otherwise.
+ *
+ * The setting applies to all agents of the specified process and takes effect
+ * immediately.  It can be changed at any time, including while waves are
+ * executing.
+ *
+ * The floating-point and integer exception traps are applied both to waves
+ * created after this call and to waves that already exist, so they can be
+ * toggled mid-execution (for example, while the client is stepping through a
+ * kernel).
+ *
+ * \param[in] process_id The process being controlled.
+ *
+ * \param[in] enabled_traps The desired state of the traps selected by \p mask.
+ *
+ * \param[in] mask The set of traps to modify.  Traps not in \p mask are left
+ * unchanged.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the enabled traps have been set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  The enabled traps are not changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p enabled_traps or \p
+ * mask contains an unknown bit.  The enabled traps are not changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN The process is frozen.
+ * The enabled traps cannot be changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED One or more of the requested
+ * traps in \p enabled_traps is not supported for \p process_id.  No
+ * configuration is changed.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_set_trap_override (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_wave_enable_trap_t enabled_traps,
+  amd_dbgapi_wave_enable_trap_t mask) AMD_DBGAPI_VERSION_0_81;
 
 /** \defgroup coredump_support Generating a core dump of a process
  *

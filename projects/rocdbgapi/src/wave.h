@@ -239,6 +239,10 @@ public:
                        amd_dbgapi_lane_id_t lane_id, void *read,
                        const void *write, size_t size);
 
+  /* Raises an event to notify the client of a stopped wave at launch.  May
+     only be called if the wave had pending exceptions when created.   */
+  void report_stop_at_launch ();
+
   void get_info (amd_dbgapi_wave_info_t query, size_t value_size,
                  void *value) const;
 
