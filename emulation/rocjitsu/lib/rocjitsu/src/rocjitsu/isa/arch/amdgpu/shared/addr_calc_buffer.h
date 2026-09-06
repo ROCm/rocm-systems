@@ -67,7 +67,8 @@ constexpr uint32_t kGfx9SwizzleElemSize = 4;
 ///
 /// @details ADD_TID_ENABLE adds the lane to the index (gfx950 drops it for a linear buffer with
 /// IDXEN) and then, for non-format ops, extends STRIDE with DATA_FORMAT; SWIZZLE_ENABLE selects
-/// the swizzled layout. SOFFSET is added last and is never swizzled.
+/// the swizzled scratch layout only together with ADD_TID_ENABLE. SOFFSET is added last and is
+/// never swizzled.
 constexpr uint64_t gfx9_buffer_lane_offset(const Gfx9BufferResource &srd, bool idxen,
                                            bool format_op, uint32_t index, uint32_t offset_part,
                                            uint32_t soffset, uint32_t lane) {
@@ -76,7 +77,7 @@ constexpr uint64_t gfx9_buffer_lane_offset(const Gfx9BufferResource &srd, bool i
     index += lane;
   const uint32_t stride =
       add_lane && !format_op ? (srd.data_format << 14) | srd.stride : srd.stride;
-  if (!srd.swizzle_enable)
+  if (!srd.swizzle_enable || !srd.add_tid_enable)
     return buffer_total_offset(index, stride, offset_part, soffset);
   const uint32_t index_msb = index / srd.index_stride;
   const uint32_t index_lsb = index % srd.index_stride;
@@ -87,14 +88,15 @@ constexpr uint64_t gfx9_buffer_lane_offset(const Gfx9BufferResource &srd, bool i
          index_lsb * kGfx9SwizzleElemSize + offset_lsb + soffset;
 }
 
-/// @brief SWIZZLE_ENABLE: consecutive dwords of a lane sit INDEX_STRIDE elements apart in memory.
+/// @brief A swizzled scratch V# interleaves consecutive dwords by INDEX_STRIDE elements.
 inline void gfx9_buffer_apply_swizzle(VectorMemState &d, const Gfx9BufferResource &srd,
-                                      uint64_t exec) {
-  if (!srd.swizzle_enable)
+                                      uint64_t exec, uint64_t base_addr, uint32_t soffset) {
+  if (!srd.swizzle_enable || !srd.add_tid_enable)
     return;
   d.scratch_swizzle = true;
   d.scratch_lane_mask = exec;
   d.scratch_addr_stride = kGfx9SwizzleElemSize * srd.index_stride;
+  d.scratch_addr_base_offset = static_cast<uint32_t>((base_addr + soffset) % kGfx9SwizzleElemSize);
 }
 
 /// @brief Operands of the GFX9/CDNA buffer range check for one lane.
@@ -212,7 +214,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   if (per_element)
     d.element_lane_masks.assign(d.num_elems, exec);
   if (gfx9)
-    gfx9_buffer_apply_swizzle(d, gfx9_srd, exec);
+    gfx9_buffer_apply_swizzle(d, gfx9_srd, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.idxen || inst.offen) {
@@ -319,7 +321,7 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
   if (gfx9)
-    gfx9_buffer_apply_swizzle(d, gfx9_srd, exec);
+    gfx9_buffer_apply_swizzle(d, gfx9_srd, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.idxen || inst.offen) {
