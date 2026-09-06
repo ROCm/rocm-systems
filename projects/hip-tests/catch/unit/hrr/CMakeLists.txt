@@ -32,6 +32,11 @@
 #                          is replayed against a synthetic sidecar. Contains its
 #                          own hidden [.][hrr-direct] workload.
 #
+# hrr_test_common.h is the shared capture/replay harness (ScopedDir,
+# hrr_run_roundtrip, hrr_playback_env, hrr_playback_watchdog,
+# hrr_expect_replay_class, ...) extracted from hrr_roundtrip_test.cc.
+# Header-only, so it needs no entry in TEST_SRC.
+#
 # hrr_reader.cpp is compiled directly into the test executable so the format
 # tests can exercise the reader without a separate install step.
 
