@@ -138,7 +138,7 @@ jobs:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       # Route to the appropriate runner:
       #   1. Multi-GPU components use the multi-GPU runner
-      #   2. CPU-only components use standard GitHub runners (azure-linux-scale-rocm)
+      #   2. CPU-only components use standard GitHub runners (aws-linux-scale-rocm-prod)
       #   3. Per-component runner (set by fetch_test_configurations.py)
       # TEMPORARY: For gfx125X-dcgpu, use inputs.test_runs_on since test_runner is not
       # configured in therock-ci-config yet (limited MI455 machines)
