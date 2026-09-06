@@ -189,3 +189,56 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
     std::filesystem::remove(fake_path);
   }
 }
+
+// gpu_metrics versions we can model must build an object; versions we cannot
+// must classify as kGpuMetricNone (no object) so callers get NOT_SUPPORTED
+// rather than corrupt data. APUs expose the v2.x family: v2.0-v2.3 are
+// byte-prefix subsets read with the v2.4 layout, while v2.4 and v3.0 are exact
+// matches -- all are supported. Guard that contract here.
+TEST(GpuUnit, GPUMetricVersionSupportClassification) {
+  PRINT_VERBOSITY();
+  const bool is_partition_metrics = false;
+
+  struct VersionCase {
+    uint8_t format;
+    uint8_t content;
+    bool recognized;
+  };
+  const VersionCase cases[] = {
+      {1, 4, true},                                               // GPU metrics positive control
+      {2, 0, true},  {2, 1, true},  {2, 2, true},  {2, 3, true},  // APU v2.x prefix subsets
+      {2, 4, true},  {3, 0, true},                                // APU exact matches
+      {2, 5, false}, {4, 0, false}, {5, 0, false},                // beyond what we model
+  };
+
+  for (const auto& c : cases) {
+    SCOPED_TRACE(testing::Message() << "metrics version " << static_cast<int>(c.format) << "."
+                                    << static_cast<int>(c.content));
+    const auto blob = BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t{
+        .m_structure_size = sizeof(amd::smi::AMDGpuMetricsHeader_v1_t),
+        .m_format_revision = c.format,
+        .m_content_revision = c.content,
+    });
+    const auto fake_path =
+        WriteBlobToTempFile(blob, "amdsmi_fake_metrics_v" + std::to_string(c.format) + "_" +
+                                      std::to_string(c.content) + ".bin");
+    ASSERT_TRUE(std::filesystem::exists(fake_path));
+
+    const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
+    const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
+                                                                 fake_path.string());
+    auto metrics_ptr =
+        amd::smi::amdgpu_metrics_factory(flag, is_partition_metrics, fake_path.string());
+
+    if (c.recognized) {
+      EXPECT_NE(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone);
+      EXPECT_NE(metrics_ptr, nullptr) << "recognized version must build a metrics object";
+    } else {
+      EXPECT_EQ(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone)
+          << "unrecognized version must not map to a supported flag";
+      EXPECT_EQ(metrics_ptr, nullptr) << "unrecognized version must not build a metrics object";
+    }
+
+    std::filesystem::remove(fake_path);
+  }
+}
