@@ -244,6 +244,24 @@ sudo ./amdsmitst --gtest_filter="*Functional*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _
 sudo ./amdsmitst --gtest_filter="*Integration*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_intg_test.log 2> _c_intg_test_err.log
 ```
 
+## Running by CTest category
+
+The `amdsmitst` tests are grouped into the quality categories defined in
+`amd_smi_test/test_categories.yaml` (`quick`/`standard`/`comprehensive`/`full`)
+and can be run through CTest labels.
+
+Installed tree (how TheRock CI runs it):
+```
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L <quick|standard|comprehensive|full>
+```
+
+Local dev build (the amdsmi top-level `enable_testing()` is not set, so `ctest`
+from the build root won't discover these — run from the test dir):
+```
+cd <build>/projects/amdsmi/tests/amd_smi_test && ctest -L quick
+# or: ctest --test-dir <build>/projects/amdsmi/tests/amd_smi_test -L quick
+```
+
 ## How to Run Summary Report
 ### Command Line Options
 

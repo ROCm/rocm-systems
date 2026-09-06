@@ -1,0 +1,192 @@
+# AMD SMI (amdsmitst) Test Categories Configuration
+# Aligned with Test Filter Standardization (quick/standard/comprehensive/full).
+#
+# The amdsmitst gtest suites follow the naming scheme
+# `<Component><Type>[<Operation>]` (see docs/conceptual/test-design.md):
+#   Component : Gpu*, System*, Ifoe*   (Cpu*, Nic* reserved)
+#   Type      : *Unit*        - host-side, no hardware/root required
+#               *Functional*  - exercises a live device
+#   Operation : *ReadOnly*    - queries only, no root required
+#               *ReadWrite*   - mutates device state, root required
+#
+# AMD SMI Test Quality Definitions:
+# 1. P0 - **Quick** -  Unit & Smoke tests only (no driver, no sudo required).
+# 2. P1 - **Standard** - nightly-easy (driver, read-only, no sudo) (+ P0)
+# 3. P2 - **Comprehensive** - nightly-medium (writes, needs sudo) (+ P0/P1) - All tests
+# 4. P3 - **Full** - all tests (P0-P2)
+#
+# Running the categories:
+#   - TheRock CI: test_runner.py drives the installed tree with
+#       ctest --test-dir <install>/share/amd_smi/tests/ctest -L <category>
+#     which is self-contained (no top-level enable_testing() needed).
+#   - Local dev: enable_testing() is only called in this test subdir, not at the
+#     amdsmi top-level CMakeLists.txt, so `ctest` from the build root won't
+#     discover these. Run from the test build dir (or point ctest at it):
+#       cd <build>/projects/amdsmi/tests/amd_smi_test && ctest -L quick
+#       # or: ctest --test-dir <build>/projects/amdsmi/tests/amd_smi_test -L quick
+
+# Cross-ASIC exclusions. amdsmitst.exclude currently keeps both
+# PERMANENT_BLACKLIST_ALL_ASICS and TEMPORARY_BLACKLIST_ALL_ASICS empty, so the
+# only always-on exclude is disabled gtests.
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "P0 - Quick - Unit & Smoke tests only (no driver, no sudo required)."
+    test_patterns:
+      - "*Unit.*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "P1 - Standard - nightly-easy (driver, read-only, no sudo) (+ P0)"
+    test_patterns:
+      - "*FunctionalReadOnly.*"
+      - "*Unit.*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "P2 - Comprehensive - nightly-medium (writes, needs sudo) (+ P0/P1) - All tests"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "P3 - Full - all tests (P0-P2)"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+# GPU-arch-specific known failures, reconciled with amdsmitst.exclude and the
+# gfx-string -> ASIC map in detect_asic_filter.sh. Each entry lists every
+# category label it applies to plus an ex_gpu_<arch> label that test_runner.py
+# uses to scope the run to the current GPU. Read/write excludes are listed for
+# standard as well (harmless no-ops there, since standard omits *ReadWrite*).
+#
+# NOTE: amdsmitst.exclude also defines a `virtualization` (SRIOV/VF) filter that
+# detect_asic_filter.sh applies via runtime detection. The ctest label path keys
+# on GPU arch only and cannot detect SRIOV, so those excludes are intentionally
+# not represented here; the runtime script still applies them.
+exclude_gpu:
+  # gfx906 (Vega20): frequency / process-info reads unreliable.
+  exclude_gpu_gfx906:
+    test_patterns:
+      - "GpuFunctionalReadOnly.TestFrequenciesRead"
+      - "GpuFunctionalReadOnly.TestProcInfoRead"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx906"
+
+  # gfx908 (Arcturus): + frequency read/write.
+  exclude_gpu_gfx908:
+    test_patterns:
+      - "GpuFunctionalReadOnly.TestFrequenciesRead"
+      - "GpuFunctionalReadOnly.TestProcInfoRead"
+      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx908"
+
+  # gfx90a (MI200 / Aldebaran): fan, volt-curve, frequency, PCI, power.
+  exclude_gpu_gfx90a:
+    test_patterns:
+      - "GpuFunctionalReadOnly.FanRead"
+      - "GpuFunctionalReadOnly.TestVoltCurvRead"
+      - "GpuFunctionalReadOnly.TestFrequenciesRead"
+      - "GpuFunctionalReadWrite.FanReadWrite"
+      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+      - "GpuFunctionalReadWrite.TestPciReadWrite"
+      - "GpuFunctionalReadWrite.TestPowerReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx90a"
+
+  # gfx94X (MI300, gfx_target_version 90400-90402).
+  #   - TestVoltCurvRead: gfx94X (90400-90402) filter in amdsmitst.exclude.
+  #   - The remaining entries are the `virtualization` (SRIOV/VF) block plus
+  #     TestPerfLevelReadWrite / TestPerfDeterminism. TheRock's gfx94X-dcgpu
+  #     test lane runs on SR-IOV MI300X (MI300X_HW_SRIOV_CVS_1VF), where these
+  #     return AMDSMI_STATUS_NO_PERM. detect_asic_filter.sh applies the
+  #     virtualization set via runtime SRIOV detection; the ctest label path
+  #     can only key on GPU arch, so they are folded into the gfx94X block here.
+  #     NOTE: this intentionally diverges from amdsmitst.exclude, which keeps the
+  #     virtualization excludes in a separate runtime-detected block.
+  exclude_gpu_gfx94X:
+    test_patterns:
+      - "GpuFunctionalReadOnly.TestVoltCurvRead"
+      - "GpuFunctionalReadOnly.TestOverdriveRead"
+      - "GpuFunctionalReadOnly.TestGPUBusyRead"
+      - "GpuFunctionalReadWrite.FanReadWrite"
+      - "GpuFunctionalReadWrite.TestOverdriveReadWrite"
+      - "GpuFunctionalReadWrite.TestPowerReadWrite"
+      - "GpuFunctionalReadWrite.TestPowerCapReadWrite"
+      - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+      - "GpuFunctionalReadWrite.TestPerfDeterminism"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
+
+  # gfx103X (RDNA2 / Sienna Cichlid): perf-level read/write.
+  exclude_gpu_gfx103X:
+    test_patterns:
+      - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx103X"
+
+  # gfx110X (RDNA3) and gfx115X (RDNA3.5 APU): temperature + frequency.
+  # detect_asic_filter.sh maps gfx1100 and gfx115X to the strix_point filter.
+  exclude_gpu_gfx110X:
+    test_patterns:
+      - "GpuFunctionalReadOnly.TempRead"
+      - "GpuFunctionalReadOnly.TestFrequenciesRead"
+      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx110X"
+
+  exclude_gpu_gfx115X:
+    test_patterns:
+      - "GpuFunctionalReadOnly.TempRead"
+      - "GpuFunctionalReadOnly.TestFrequenciesRead"
+      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx115X"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
