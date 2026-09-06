@@ -36,7 +36,7 @@ std::optional<uint32_t> build_cdna3_cdna4_ds_load_word0(const ConSanAccessLoweri
   } else {
     switch (form.element_width_bits) {
     case 8:
-      base = 0xD8E80000u;
+      base = cdna4::build_ds(cdna4::kDsReadU8Ds)[0];
       break;
     case 16:
       base = 0xD8780000u;

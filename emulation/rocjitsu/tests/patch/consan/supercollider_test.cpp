@@ -3493,11 +3493,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback)
   constexpr auto readback = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
-  const auto mask = build_v_and_b32_e32_literal(4, 0xffu, 1, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto difference =
+      build_v_xor_b32_e32(3, vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(rewritten_words[7], difference);
+  const auto mask = build_v_and_b32_e32_literal(3, 0xffu, 3, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(mask);
   ASSERT_EQ(mask->size(), 2u);
-  EXPECT_EQ(rewritten_words[7], (*mask)[0]);
-  EXPECT_EQ(rewritten_words[8], (*mask)[1]);
+  EXPECT_EQ(rewritten_words[8], (*mask)[0]);
+  EXPECT_EQ(rewritten_words[9], (*mask)[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
@@ -3525,13 +3528,16 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
   const auto shift =
-      build_v_lshrrev_b32_e32(4, scalar_positive_inline_u32(16u), 1, ROCJITSU_CODE_ARCH_CDNA5);
+      build_v_lshlrev_b32_e32(3, scalar_positive_inline_u32(16u), 3, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(shift);
   EXPECT_EQ(rewritten_words[7], *shift);
-  const auto mask = build_v_and_b32_e32_literal(4, 0xffu, 4, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto difference =
+      build_v_xor_b32_e32(3, vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(rewritten_words[8], difference);
+  const auto mask = build_v_and_b32_e32_literal(3, 0x00ff0000u, 3, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(mask);
-  EXPECT_EQ(rewritten_words[8], (*mask)[0]);
-  EXPECT_EQ(rewritten_words[9], (*mask)[1]);
+  EXPECT_EQ(rewritten_words[9], (*mask)[0]);
+  EXPECT_EQ(rewritten_words[10], (*mask)[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
@@ -3563,19 +3569,22 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     const auto readback = cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
     EXPECT_EQ(rewritten_words[4], readback[0]);
     EXPECT_EQ(rewritten_words[5], readback[1]);
-    size_t mask_index = 7u;
+    size_t difference_index = 7u;
     if (high_half) {
       const auto shift =
-          build_v_lshrrev_b32_e32(4, scalar_positive_inline_u32(16u), 1, ROCJITSU_CODE_ARCH_CDNA5);
+          build_v_lshlrev_b32_e32(3, scalar_positive_inline_u32(16u), 3, ROCJITSU_CODE_ARCH_CDNA5);
       ASSERT_TRUE(shift);
       EXPECT_EQ(rewritten_words[7], *shift);
-      mask_index = 8u;
+      difference_index = 8u;
     }
-    const auto mask =
-        build_v_and_b32_e32_literal(4, 0xffffu, high_half ? 4u : 1u, ROCJITSU_CODE_ARCH_CDNA5);
+    const auto difference =
+        build_v_xor_b32_e32(3, vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(rewritten_words[difference_index], difference);
+    const auto mask = build_v_and_b32_e32_literal(3, high_half ? 0xffff0000u : 0xffffu, 3,
+                                                  ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(mask);
-    EXPECT_EQ(rewritten_words[mask_index], (*mask)[0]);
-    EXPECT_EQ(rewritten_words[mask_index + 1u], (*mask)[1]);
+    EXPECT_EQ(rewritten_words[difference_index + 1u], (*mask)[0]);
+    EXPECT_EQ(rewritten_words[difference_index + 2u], (*mask)[1]);
   };
 
   check(cdna5::kDsStoreB16Vds, false, "gfx1250_vds_store_b16");
@@ -3732,8 +3741,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {
     return candidate.spilled_vgpr_count != 0;
   });
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(patch->spilled_vgpr_count, 2u);
-  EXPECT_EQ(patch->required_private_segment_size, 8u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 1u);
+  EXPECT_EQ(patch->required_private_segment_size, 4u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3743,7 +3752,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {
   std::memcpy(&descriptor,
               result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
-  EXPECT_EQ(descriptor.private_segment_fixed_size, 8u);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 4u);
   EXPECT_EQ(
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
       1u);
@@ -3941,6 +3950,22 @@ TEST(ConSan, ProbeLdsCheckTrapModeAlignsCdna4B32AutoReportTuple) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  const std::vector<uint32_t> body = emitted_patch_words(result, result.patches.front());
+  const auto report_lo =
+      instrumentation::build_v_mov_b32_literal(6u, 0x87654321u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto report_hi =
+      instrumentation::build_v_mov_b32_literal(7u, 0x12345678u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto marker =
+      instrumentation::build_v_mov_b32_literal(8u, 0xABCDEF01u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto store_marker = instrumentation::build_flat_store_b32(6u, 8u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(report_lo);
+  ASSERT_TRUE(report_hi);
+  ASSERT_TRUE(marker);
+  ASSERT_TRUE(store_marker);
+  EXPECT_TRUE(contains_subsequence(body, *report_lo));
+  EXPECT_TRUE(contains_subsequence(body, *report_hi));
+  EXPECT_TRUE(contains_subsequence(body, *marker));
+  EXPECT_TRUE(contains_subsequence(body, *store_marker));
 }
 
 TEST(ConSan, Gfx950B128AutoReportReusesReadbackAtAccvgprBoundary) {
@@ -4178,11 +4203,76 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
   EXPECT_EQ(rewritten_words[1], text_words[1]);
   EXPECT_EQ(rewritten_words[4], 0xD8780004u); // ds_read_u16, retained offset
   EXPECT_EQ(rewritten_words[5], 0x06000002u); // readback v6, address v2
+  const auto difference =
+      instrumentation::build_v_xor_b32(6u, vector_source_vgpr(3u), 6u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(difference);
+  EXPECT_EQ(rewritten_words[7], *difference);
   const auto mask =
-      instrumentation::build_v_and_b32_literal(7u, 0xffffu, 3u, ROCJITSU_CODE_ARCH_CDNA4);
+      instrumentation::build_v_and_b32_literal(6u, 0xffffu, 6u, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(mask);
-  EXPECT_EQ(rewritten_words[7], (*mask)[0]);
-  EXPECT_EQ(rewritten_words[8], (*mask)[1]);
+  EXPECT_EQ(rewritten_words[8], (*mask)[0]);
+  EXPECT_EQ(rewritten_words[9], (*mask)[1]);
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeCoversCdna4NativeByteForms) {
+  struct Case {
+    std::array<uint32_t, 2> instruction;
+    std::string_view mnemonic;
+    ConSanPatchKind patch_kind;
+    uint32_t readback_word0;
+  };
+  constexpr std::array cases = {
+      Case{cdna4::build_ds(cdna4::kDsReadI8Ds, {.offset0 = 0x10, .addr = 2, .vdst = 3}),
+           "ds_read_i8", ConSanPatchKind::LdsLoadCheckTrap,
+           cdna4::build_ds(cdna4::kDsReadI8Ds, {.offset0 = 0x10})[0]},
+      Case{cdna4::build_ds(cdna4::kDsReadU8Ds, {.offset0 = 0x11, .addr = 2, .vdst = 3}),
+           "ds_read_u8", ConSanPatchKind::LdsLoadCheckTrap,
+           cdna4::build_ds(cdna4::kDsReadU8Ds, {.offset0 = 0x11})[0]},
+      Case{cdna4::build_ds(cdna4::kDsWriteB8Ds, {.offset0 = 0x12, .addr = 2, .data0 = 3}),
+           "ds_write_b8", ConSanPatchKind::LdsStoreCheckTrap,
+           cdna4::build_ds(cdna4::kDsReadU8Ds, {.offset0 = 0x12})[0]},
+      Case{cdna4::build_ds(cdna4::kDsWriteB8D16HiDs, {.offset0 = 0x13, .addr = 2, .data0 = 3}),
+           "ds_write_b8_d16_hi", ConSanPatchKind::LdsStoreCheckTrap,
+           cdna4::build_ds(cdna4::kDsReadU8Ds, {.offset0 = 0x13})[0]},
+      Case{cdna4::build_ds(cdna4::kDsWriteB16D16HiDs, {.offset0 = 0x14, .addr = 2, .data0 = 3}),
+           "ds_write_b16_d16_hi", ConSanPatchKind::LdsStoreCheckTrap,
+           cdna4::build_ds(cdna4::kDsReadU16Ds, {.offset0 = 0x14})[0]},
+  };
+
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    std::vector<uint32_t> text_words = {test_case.instruction[0], test_case.instruction[1]};
+    text_words.insert(text_words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    options.probe_lds_check_trap = true;
+    options.scratch_vgpr = 6;
+    options.delay_nops = 1;
+
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+    const ConSanProgramSite &site = result.program_inventory.access_sites().front();
+    EXPECT_EQ(site.mnemonic_view(), test_case.mnemonic);
+    EXPECT_TRUE(site.lowering.compare_observed_value.available());
+    EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+    EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
+    ASSERT_EQ(result.patches.size(), 1u);
+    EXPECT_EQ(result.patches.front().kind, test_case.patch_kind);
+    const std::array expected_prefix = {
+        test_case.instruction[0],
+        test_case.instruction[1],
+        build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+        test_case.readback_word0,
+        0x06000002u, // readback v6, address v2
+    };
+    EXPECT_EQ(emitted_patch_prefix<expected_prefix.size()>(result, result.patches.front()),
+              expected_prefix);
+  }
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeHonorsExactKernelFilter) {
@@ -4672,10 +4762,10 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanReportMismatchToMarkerBuffer) {
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 3u);
   ASSERT_GT(result.replacement.size(), bytes.size());
 
-  const auto mov_report_lo = build_v_mov_b32_e64_literal(4, 0x87654321u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_report_hi = build_v_mov_b32_e64_literal(5, 0x12345678u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_marker = build_v_mov_b32_e64_literal(6, 0xABCDEF01u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto store_marker = build_flat_store_b32_vaddr_vsrc(4, 6, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_report_lo = build_v_mov_b32_e64_literal(3, 0x87654321u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_report_hi = build_v_mov_b32_e64_literal(4, 0x12345678u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_marker = build_v_mov_b32_e64_literal(5, 0xABCDEF01u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto store_marker = build_flat_store_b32_vaddr_vsrc(3, 5, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mov_report_lo);
   ASSERT_TRUE(mov_report_hi);
   ASSERT_TRUE(mov_marker);

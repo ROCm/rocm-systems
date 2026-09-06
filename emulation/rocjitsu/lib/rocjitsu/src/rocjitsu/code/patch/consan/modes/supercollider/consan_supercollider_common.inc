@@ -395,10 +395,7 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
     const ConSanProgramSite &site,
     const std::optional<SplitTwoAddressLdsExpansionPlan> &expansion) {
   return static_cast<uint16_t>(
-      (is_subdword_lds_store(site) ||
-               (site.lowering.form && site.lowering.form->destination_accvgpr)
-           ? 1u
-           : 0u) +
+      ((site.lowering.form && site.lowering.form->destination_accvgpr) ? 1u : 0u) +
       (expansion && expansion->large_offset_count() != 0u ? 1u : 0u));
 }
 
@@ -413,14 +410,18 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
   return options.report_buffer_address ? 3u : 0u;
 }
 
-[[nodiscard]] bool lds_report_action_reuses_readback(const ConSanOptions &options,
-                                                     uint16_t readback_vgprs) {
+[[nodiscard]] bool lds_report_action_reuses_readback(
+    const ConSanOptions &options, const ConSanTargetProfile &target, uint16_t readback_vgprs,
+    std::optional<uint16_t> scratch_vgpr = std::nullopt) {
   // The automatic SuperCollider report is an idempotent one-word marker. Once
   // a comparison has found a mismatch, its LDS readback values need not
   // survive the marker store: clobbering them can only cause another marker
-  // store in a later chunk. Reuse a wide readback tuple instead of requiring
-  // three additional ordinary VGPRs at an AccVGPR boundary.
-  return options.report_buffer_address.has_value() && readback_vgprs >= 3u;
+  // store in a later chunk. Reserve a three-register window beginning at the
+  // readback rather than placing a disjoint report tuple after it. Automatic
+  // placement can align that window; an explicitly odd scratch base retains
+  // the disjoint fallback on targets requiring even address tuples.
+  return options.report_buffer_address.has_value() && readback_vgprs != 0u &&
+         (!target.requires_even_vgpr_tuples || !scratch_vgpr || *scratch_vgpr % 2u == 0u);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -503,8 +504,8 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
       static_cast<uint16_t>(scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
   const uint16_t core_scratch_end = static_cast<uint16_t>(
       compare_scratch_vgpr + lds_check_trap_extra_scratch_vgprs(site, split_two_address));
-  const bool reuse_readback_for_report =
-      lds_report_action_reuses_readback(options, static_cast<uint16_t>(*required_vgprs));
+  const bool reuse_readback_for_report = lds_report_action_reuses_readback(
+      options, target, static_cast<uint16_t>(*required_vgprs), scratch_vgpr);
   uint16_t report_scratch_vgpr = reuse_readback_for_report ? scratch_vgpr : core_scratch_end;
   if (!reuse_readback_for_report && options.report_buffer_address &&
       target.requires_even_vgpr_tuples && report_scratch_vgpr % 2u != 0)
@@ -573,28 +574,42 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     return std::nullopt;
   }
 
-  std::optional<std::vector<uint32_t>> masked_store_value;
+  std::optional<std::vector<uint32_t>> subdword_store_difference;
   if (is_subdword_lds_store(site)) {
-    std::vector<uint32_t> narrowed;
-    uint16_t narrow_source = *first_compare_vgpr;
+    // The readback is already zero-extended. Form the significant-bit
+    // difference in that same scratch register instead of consuming a second
+    // temporary solely to mask the guest source. This is exact for both low
+    // and high D16 source placement and keeps subword stores viable at full
+    // VGPR pressure.
+    std::vector<uint32_t> difference;
+    uint32_t significant_bit_offset = 0u;
     if (is_high_d16_lds_store(site)) {
-      const auto shift = instrumentation::build_v_lshrrev_b32(
-          compare_scratch_vgpr, scalar_positive_inline_u32(16u), *first_compare_vgpr, arch);
+      const auto shift = instrumentation::build_v_lshlrev_b32(
+          scratch_vgpr, scalar_positive_inline_u32(16u), scratch_vgpr, arch);
       if (!shift) {
-        errors.emplace_back("ConSan LDS check/trap proof could not select high store subword");
+        errors.emplace_back("ConSan LDS check/trap proof could not align high store readback");
         return std::nullopt;
       }
-      narrowed.push_back(*shift);
-      narrow_source = compare_scratch_vgpr;
+      difference.push_back(*shift);
+      significant_bit_offset = 16u;
     }
-    const auto mask = instrumentation::build_v_and_b32_literal(
-        compare_scratch_vgpr, (uint32_t{1} << form.element_width_bits) - 1u, narrow_source, arch);
-    if (!mask) {
-      errors.emplace_back("ConSan LDS check/trap proof could not mask sub-dword store value");
+    const auto xor_difference = instrumentation::build_v_xor_b32(
+        scratch_vgpr, vector_source_vgpr(*first_compare_vgpr), scratch_vgpr, arch);
+    if (!xor_difference) {
+      errors.emplace_back("ConSan LDS check/trap proof could not form sub-dword store difference");
       return std::nullopt;
     }
-    narrowed.insert(narrowed.end(), mask->begin(), mask->end());
-    masked_store_value = std::move(narrowed);
+    difference.push_back(*xor_difference);
+    const uint32_t significant_mask = ((uint32_t{1} << form.element_width_bits) - 1u)
+                                      << significant_bit_offset;
+    const auto mask = instrumentation::build_v_and_b32_literal(scratch_vgpr, significant_mask,
+                                                               scratch_vgpr, arch);
+    if (!mask) {
+      errors.emplace_back("ConSan LDS check/trap proof could not mask sub-dword store difference");
+      return std::nullopt;
+    }
+    difference.insert(difference.end(), mask->begin(), mask->end());
+    subdword_store_difference = std::move(difference);
   }
 
   std::optional<uint32_t> d16_seed_scratch;
@@ -663,8 +678,8 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     words.push_back(duplicate_load[1]);
   }
   words.push_back(*wait_dscnt);
-  if (masked_store_value)
-    words.insert(words.end(), masked_store_value->begin(), masked_store_value->end());
+  if (subdword_store_difference)
+    words.insert(words.end(), subdword_store_difference->begin(), subdword_store_difference->end());
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
@@ -690,13 +705,12 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
       }
       words.push_back(*select_compare_bank);
     }
-    const std::optional<uint16_t> effective_compare_vgpr =
-        is_subdword_lds_store(site) ? std::optional<uint16_t>(compare_scratch_vgpr) : compare_vgpr;
-    auto chunk_cmp_ne =
-        effective_compare_vgpr
-            ? consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(*effective_compare_vgpr & 0xFFu),
-                                           static_cast<uint16_t>(scratch_vgpr + i), arch)
-            : std::nullopt;
+    const auto chunk_cmp_ne =
+        is_subdword_lds_store(site) ? instrumentation::build_v_cmp_ne_u32_vcc(
+                                          scalar_positive_inline_u32(0u), scratch_vgpr, arch)
+        : compare_vgpr ? consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(*compare_vgpr & 0xFFu),
+                                                      static_cast<uint16_t>(scratch_vgpr + i), arch)
+                       : std::nullopt;
     if (!chunk_cmp_ne) {
       errors.emplace_back("ConSan LDS check/trap proof could not encode chunk compare");
       return std::nullopt;

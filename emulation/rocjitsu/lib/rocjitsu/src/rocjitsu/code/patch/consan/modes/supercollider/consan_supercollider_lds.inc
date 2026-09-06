@@ -212,19 +212,27 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       continue;
     }
     const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(target);
-    const bool reuse_readback_for_report =
-        lds_report_action_reuses_readback(options, static_cast<uint16_t>(*required_vgprs));
+    const bool reuse_readback_for_report = lds_report_action_reuses_readback(
+        options, target, static_cast<uint16_t>(*required_vgprs), options.scratch_vgpr);
+    const uint32_t core_scratch_vgprs =
+        *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, split_two_address);
+    const uint32_t scratch_before_saved_address =
+        reuse_readback_for_report
+            ? std::max(core_scratch_vgprs, report_action_scratch_vgprs(options))
+            : core_scratch_vgprs + report_alignment_padding +
+                  report_action_scratch_vgprs(options);
     const uint32_t probe_scratch_vgprs =
-        *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, split_two_address) +
-        (reuse_readback_for_report
-             ? 0u
-             : report_alignment_padding + report_action_scratch_vgprs(options)) +
-        (lds_load_clobbers_address(site) ? 1u : 0u);
+        scratch_before_saved_address + (lds_load_clobbers_address(site) ? 1u : 0u);
     const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
     const uint16_t scratch_search_start = site_context.owners.descriptor_file_offsets.size() > 1u
                                               ? 0u
                                               : min_auto_scratch_vgpr.value_or(0u);
-    const uint16_t scratch_alignment = access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
+    const uint16_t access_scratch_alignment =
+        access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
+    const uint16_t scratch_alignment =
+        reuse_readback_for_report && target.requires_even_vgpr_tuples
+            ? std::max<uint16_t>(access_scratch_alignment, 2u)
+            : access_scratch_alignment;
     const auto choose_context_scratch = [&](std::optional<uint16_t> allocation_limit) {
       return choose_sc_access_scratch_vgpr(site, options, site_inst, owner_liveness,
                                            scratch_search_start, allocation_limit, scratch_vgprs,
