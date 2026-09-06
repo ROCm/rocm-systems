@@ -117,14 +117,16 @@ TEST(AmdSmiFabricState, PayloadFromSysfsBackedDeviceIsUsable)
 // The library writes these structs through dlopen using its own layout, so a
 // declaration that disagrees overflows the caller's object and shifts the
 // fields we read. amdsmi_wrap.h accepts the coherent 8-GPU layout used by some
-// pre-release ROCm 7.14 snapshots and the 16-GPU layout used by final ROCm 7.14
-// and ROCm 7.15, but rejects any other combination.
+// pre-release ROCm 7.14 snapshots, the 16-GPU layout used by final ROCm 7.14 and
+// ROCm 7.15, and the extended union amd_smi 27.x added, but rejects any other
+// combination.
 // ---------------------------------------------------------------------------
 
 TEST(AmdSmiFabricLayout, MatchesShippedLibraryAbi)
 {
-    EXPECT_TRUE(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu);
-    EXPECT_NE(amdSmiFabricLayoutIs8Gpu, amdSmiFabricLayoutIs16Gpu);
+    const int recognized = (amdSmiFabricLayoutIs8Gpu ? 1 : 0) + (amdSmiFabricLayoutIs16Gpu ? 1 : 0) +
+                           (amdSmiFabricLayoutIsExtendedUnion ? 1 : 0);
+    EXPECT_EQ(recognized, 1) << "exactly one layout must match the header in use";
 }
 
 TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
@@ -132,6 +134,16 @@ TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
     const size_t expectedAddrMode = amdSmiFabricLayoutIs8Gpu ? 204u : 236u;
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode), expectedAddrMode);
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), expectedAddrMode + sizeof(uint32_t));
+}
+
+// Every other case spells its extent as the constant it pins, so nothing else catches a moved boundary.
+TEST(AmdSmiFabricRuntimeLayout, WindowBoundariesHaveTheirShippedValues)
+{
+    EXPECT_EQ(kAmdSmiFabricV1PayloadBegin, 12u);
+    EXPECT_EQ(kAmdSmiFabricV1PayloadEnd, 256u);
+    EXPECT_EQ(kAmdSmiFabricInfo8GpuSize, 288u);
+    EXPECT_EQ(kAmdSmiFabricInfo16GpuSize, 320u);
+    EXPECT_GE(kAmdSmiFabricInfoBufferSize, kAmdSmiFabricInfo16GpuSize);
 }
 
 TEST(AmdSmiFabricRuntimeLayout, DetectsEightGpuWriter)
@@ -152,6 +164,80 @@ TEST(AmdSmiFabricRuntimeLayout, DetectsSixteenGpuWriter)
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
 }
 
+// Write extent, an optional extra dirty byte outside it, and the value the runtime leaves behind.
+struct FabricExtentCase
+{
+    size_t                     wrote;
+    size_t                     dirtyByte;
+    unsigned char              fill;
+    amdSmiFabricRuntimeLayout  expected;
+};
+
+TEST(AmdSmiFabricRuntimeLayout, ClassifiesWriteExtents)
+{
+    const FabricExtentCase cases[] = {
+        {kAmdSmiFabricV1PayloadEnd, 0, 0x00, amdSmiFabricRuntimeLayout::ExtendedUnion},
+        // A real payload is not all-zero, so the detector must key on the canary, not on zero.
+        {kAmdSmiFabricV1PayloadEnd, 0, 0xFF, amdSmiFabricRuntimeLayout::ExtendedUnion},
+        {kAmdSmiFabricInfo8GpuSize, 0, 0xFF, amdSmiFabricRuntimeLayout::EightGpu},
+        {kAmdSmiFabricInfo16GpuSize, 0, 0xFF, amdSmiFabricRuntimeLayout::SixteenGpu},
+        // 288 sits outside [256,288), so widening that window would reclassify this.
+        {kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize, 0x00, amdSmiFabricRuntimeLayout::ExtendedUnion},
+        // Trailing padding a compiler need not copy, in each layout.
+        {kAmdSmiFabricReserved16GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::SixteenGpu},
+        {kAmdSmiFabricReserved8GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::EightGpu},
+    };
+
+    for (const FabricExtentCase& c : cases) {
+        amdSmiFabricInfoBuffer buffer;
+        amdSmiPrepareFabricInfoBuffer(buffer);
+        memset(buffer.bytes, c.fill, c.wrote);
+        if (c.dirtyByte) {
+            buffer.bytes[c.dirtyByte] = c.fill;
+        }
+        EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), c.expected)
+            << "wrote " << c.wrote << ", dirty " << c.dirtyByte << ", fill " << (int)c.fill;
+    }
+}
+
+// ppod_id is a UUID and can legitimately contain the canary byte, so confirmation must never read
+// the v1 payload for content.
+TEST(AmdSmiFabricRuntimeLayout, CanaryValueInsideThePayloadIsStillAWrite)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricInfo16GpuSize);
+    buffer.bytes[kAmdSmiFabricV1PayloadBegin + 88] = kAmdSmiFabricBufferCanary;
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
+}
+
+// Reserved filled but the payload never touched matches no runtime; every arm requires both.
+TEST(AmdSmiFabricRuntimeLayout, ReservedWithoutPayloadIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes + kAmdSmiFabricV1PayloadEnd, 0,
+           kAmdSmiFabricReserved16GpuEnd - kAmdSmiFabricV1PayloadEnd);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// Touches the v1 payload without filling it, so no layout is confirmed. Identifying a layout by
+// elimination classified this as SixteenGpu and authorized the typed path.
+TEST(AmdSmiFabricRuntimeLayout, SparseWriteIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    buffer.bytes[kAmdSmiFabricV1PayloadBegin] = 0;
+    buffer.bytes[kAmdSmiFabricV1PayloadEnd] = 0;
+    memset(buffer.bytes + kAmdSmiFabricInfo8GpuSize, 0,
+           kAmdSmiFabricInfo16GpuSize - kAmdSmiFabricInfo8GpuSize);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// A write above the payload with the payload itself untouched matches no runtime.
 TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
 {
     amdSmiFabricInfoBuffer buffer;
@@ -159,6 +245,18 @@ TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
     buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// Literals, not the constant, so a change to kAmdSmiFabricV1PayloadBegin cannot move the test with it.
+TEST(AmdSmiFabricRuntimeLayout, PreparedBufferZeroesTheRequestHeader)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+
+    for (size_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(buffer.bytes[i], 0) << "request header byte " << i << " must be zeroed";
+    }
+    EXPECT_EQ(buffer.bytes[12], kAmdSmiFabricBufferCanary) << "the v1 payload must start as canary";
 }
 
 // ---------------------------------------------------------------------------
@@ -263,11 +361,16 @@ TEST(AmdSmiFabricLayoutCompat, ReadsPayloadFromFlatShape)
 
 // The rename did not move anything, which is why one set of ABI asserts covers
 // both headers. If a future layout change breaks this, the accessors are no
-// longer enough on their own.
+// longer enough on their own. The mocks carry a v1-only payload union, so on an
+// extended header only the buffer, not the mocks, tracks the real struct.
 TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
 {
     EXPECT_EQ(sizeof(MockNestedFabricInfo), sizeof(MockFlatFabricInfo));
-    EXPECT_EQ(sizeof(MockFlatFabricInfo), sizeof(amdsmi_fabric_info_t));
+    EXPECT_GE(sizeof(amdSmiFabricInfoBuffer), sizeof(amdsmi_fabric_info_t))
+        << "the probe buffer must be able to name the struct it is cast to";
+    if (!kAmdSmiFabricHeaderIsExtended) {
+        EXPECT_EQ(sizeof(MockFlatFabricInfo), sizeof(amdsmi_fabric_info_t));
+    }
 
     EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, version),
               offsetof(MockFlatFabricInfo, fabric_version));
