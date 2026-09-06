@@ -143,8 +143,10 @@ bool Kernel::postLoad() {
   workGroupInfo_.wavefrontPerSIMD_ =
       program()->rocDevice().info().maxWorkItemSizes_[0] / wavefront_size;
   workGroupInfo_.constMemSize_ = 0;
-  workGroupInfo_.maxDynamicSharedSizeBytes_ =
+  const int maxDynamicSharedSizeBytes =
       static_cast<int>(workGroupInfo_.availableLDSSize_ - workGroupInfo_.localMemSize_);
+  workGroupInfo_.maxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
+  workGroupInfo_.kernelMaxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
   if (workGroupInfo_.size_ == 0) {
     return false;
   }

@@ -602,6 +602,9 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.clusterSize_[0] = 1;
   workGroupInfo_.clusterSize_[1] = 1;
   workGroupInfo_.clusterSize_[2] = 1;
+  workGroupInfo_.runtimeClusterSize_[0] = 0;
+  workGroupInfo_.runtimeClusterSize_[1] = 0;
+  workGroupInfo_.runtimeClusterSize_[2] = 0;
   workGroupInfo_.localMemSize_ = 0;
   workGroupInfo_.preferredSizeMultiple_ = 0;
   workGroupInfo_.privateMemSize_ = 0;
@@ -627,7 +630,14 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.wavesPerSimdHint_ = 0;
   workGroupInfo_.constMemSize_ = 0;
   workGroupInfo_.maxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.kernelMaxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.kernelPreferredShmemCarveout_ = -1;
+  workGroupInfo_.nonPortableClusterSizeAllowed_ = false;
+  workGroupInfo_.clusterSchedulingPolicyPreference_ = 0;
   workGroupInfo_.hasClusterAttr_ = false;
+  workGroupInfo_.hasFuncMaxDynamicSharedSize_ = false;
+  workGroupInfo_.hasFuncPreferredShmemCarveout_ = false;
+  workGroupInfo_.groupMemCarveout_ = -1;
 }
 
 // ================================================================================================

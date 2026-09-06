@@ -94,11 +94,16 @@ class DynCO : public CodeObject {
   std::recursive_mutex dclock_;
 
  public:
-  DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
+  explicit DynCO(int device_id = ihipGetDevice())
+      : device_id_(device_id), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  // LoadsCodeObject and its data
-  hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
+  // LoadsCodeObject and optionally initializes global/managed-variable state.
+  // In case that we need to set attribute for a device, we need to load the
+  // code object for it first, but don't need to initialize
+  // global/managed-variable state.
+  hipError_t loadCodeObject(const char *fname, const void *image = nullptr,
+                            bool init_global_vars = true);
   hipModule_t getModule() const { return module_; };
 
   // Device the code object was loaded for at construction. Callers that key
