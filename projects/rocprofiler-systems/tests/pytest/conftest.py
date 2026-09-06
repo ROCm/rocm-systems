@@ -811,12 +811,9 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_events_usable:
+    if caps.papi_nic_events is not None:
         return None
-    return (
-        "Requires PAPI network events and perf_event_paranoid <= 2 "
-        "(or CAP_PERFMON or CAP_SYS_ADMIN) to be available"
-    )
+    return "Requires PAPI network events to be available"
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:

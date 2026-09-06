@@ -26,9 +26,15 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/papi/papi_common.hpp>
+#include <timemory/components/papi/papi_config.hpp>
+#include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -1454,23 +1460,42 @@ configure_settings(bool _init)
     const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
                                ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
 
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
-                    "CAP_SYS_ADMIN)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
-                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
+            });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                        "CAP_SYS_ADMIN)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                        "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else if(!papi_events.empty())
+        {
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
+        }
     }
     else
     {
