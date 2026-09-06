@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v3)
+### Archive Format (v6)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -245,7 +245,7 @@ hipamd/src/hrr/
                                     block layout, via _snapshot() polling
 
   playback/
-    hrr_reader.h/.cpp             — archive loader; record framing
+    hrr_reader.h/.cpp             — archive loader, v6 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -308,20 +308,20 @@ The generator classifies each API:
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 
-## Archive Format (v3)
+## Archive Format (v6)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 3
+HRR_VERSION = 6
 ```
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 3)
+                      events.bin HRR_VERSION = 6)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -924,24 +924,20 @@ There is no practical fix: capturing general CPU synchronisation would require
 instrumentation of the application binary, OS synchronisation primitives, or a
 language runtime — all of which are out of scope for a HIP API trace.
 
-### `__hipRegisterVar` / `__hipRegisterManagedVar` — Not Replayed
+### `__hipRegisterManagedVar` — Not Replayed
 
 These compiler-generated functions populate the runtime's internal host-symbol →
 device-symbol table used by `hipMemcpyToSymbol`, `hipMemcpyFromSymbol`,
 `hipGetSymbolAddress`, and `hipGetSymbolSize`.
 
-The capture shims record events for `__hipRegisterVar` and `__hipRegisterManagedVar`,
-but the symbol name is stored only as a raw `uint64_t` host pointer (a capture-time
-address, useless at replay) rather than the name string, and the playback shims are
-no-ops. The host-symbol → device-symbol table is therefore never rebuilt.
+`__hipRegisterVar` is handled — see "Symbol Registry" below: the name string is recorded
+and replay rebuilds the table through `hipModuleGetGlobal`, so the `__device__` global
+families replay. `__hipRegisterManagedVar` is not: a `__managed__` global is never
+registered in a way the sweep sees, so its symbol never reaches `symbol_map`.
 
-**Impact:** workloads that use `hipMemcpyToSymbol` / `hipMemcpyFromSymbol` will fail
-at replay because the symbol table is never populated. Kernel launches and all
-pointer-based memcpy APIs are unaffected.
-
-**Workaround:** none currently. A fix would require recording the variable name and
-host pointer, then at playback calling `hipModuleGetGlobal` on the loaded module to
-resolve the device address and rebuilding the symbol table entry.
+**Impact:** a workload whose `hipMemcpy*Symbol` subject is a `__managed__` rather than a
+`__device__` global fails loudly at replay, naming the symbol it could not resolve.
+Kernel launches and all pointer-based memcpy APIs are unaffected.
 
 ### `co_hash` Kernel → Code-Object Binding
 
@@ -1234,31 +1230,47 @@ Other HIP features with similar complications include device-side enqueue, coope
 groups with CPU-side barriers, and persistent kernels with CPU-side steering. These are
 not currently handled.
 
-### Explicit Graph Construction — Not Supported (fails loudly)
+### Explicit Graph Construction — Supported, With One Refusal
 
-Only the **stream-capture** graph chain is supported (`hipStreamBeginCapture` →
-`hipStreamEndCapture` → `hipGraphInstantiate` → `hipGraphLaunch`). Graphs built
-explicitly through the node API are not — and replay no longer silently produces an
-empty graph with skipped launches (finding H1). The failure is split into two levels:
+Both graph chains replay: **stream capture** (`hipStreamBeginCapture` →
+`hipStreamEndCapture` → `hipGraphInstantiate` → `hipGraphLaunch`) and **explicit
+node-API construction** (`hipGraphCreate` → `hipGraphAdd*Node` → `hipGraphInstantiate`).
+A node-API graph used to replay as an empty graph with its launches skipped (finding
+H1); it is now rebuilt node by node:
 
-- **Hard fail-loud at instantiate.** `hipGraphInstantiate` / `hipGraphInstantiateWithFlags`
-  (manual handlers) return `hipErrorNotSupported` — which the dispatcher treats as
-  fatal — when the graph handle is absent from `graph_map`. A miss can only happen for
-  a node-API-built graph, since the stream-capture chain always records its graph via
-  `hipStreamEndCapture`. This is the point that actually matters: a non-replayable
-  graph can never be launched as an empty graph.
-- **Attributable warning at construction (non-fatal).** `hipGraphCreate` /
-  `hipGraphClone` / every `hipGraphAdd*Node` / `hipGraphInstantiateWithParams` are
-  `ERROR_STUB_PLAYBACK_APIS`: they log a loud, per-API "explicit (node-API) graph
-  construction is NOT supported" message and return `hipSuccess`. They are deliberately
-  non-fatal so a program that merely *creates/clones* a graph (or exercises these APIs
-  for coverage) without instantiating it in an unsupported way still replays; if such a
-  graph is later instantiated, the instantiate gate above fires.
-- Node-parameter struct pointers are still stored as raw `uint64_t` without
-  dereferencing (full node-API replay remains future work).
+- `graph_node_map` in `PlaybackContext` maps each recorded `hipGraphNode_t` to the node
+  replay created, which is what lets dependency arrays, `*NodeGetParams` and the
+  `*NodeSetParams` / `*ExecNodeSetParams` mutation family refer to earlier nodes.
+- Every `hipGraphAdd*Node` construction API has a real handler. Node-parameter structs
+  are deep-copied at capture through `DEREF_FIELDS` (kernel node params reuse the
+  kernel-argument encoder), and at replay the pointers, streams, events and symbols
+  inside them are translated before the node is created.
+- The mutation spellings are real handlers rather than no-ops, so a graph whose
+  parameters change between launches replays with the parameters the recording used
+  instead of every launch repeating the first one.
 
-The supported stream-capture path is unaffected: it never emits `hipGraphCreate` /
-`hipGraphAdd*Node` events, and its graph is in `graph_map` so instantiate succeeds.
+The fail-loud gate at instantiate stays as the backstop. `hipGraphInstantiate` returns
+`hipErrorNotSupported` when the graph handle is absent from `graph_map`, or when the
+graph contains a node HRR cannot reproduce — a host-function node, since host callbacks
+are a declared scope exclusion. A graph missing work the recording had is refused rather
+than launched.
+
+### Symbol Registry — `__device__` Globals Only
+
+Replay loads code objects with `hipModuleLoadData` and so has no host shadow variables,
+while the `hipMemcpy*Symbol`, `hipGetSymbolAddress/Size` and graph symbol-node families
+all take a host shadow address as their subject. Capture bridges the gap by sweeping the
+registered `__device__` globals (`StatCO::ForEachGlobalVar`) and recording each one's
+*name* alongside the recorded host address; replay resolves the name through
+`hipModuleGetGlobal` and keeps the result in `symbol_map`. The graph symbol nodes are
+then spelled as 1D memcpy nodes against the resolved device address, which is
+semantically the same node without needing a host shadow to point at.
+
+The sweep runs from `hip_capture_init()`, which is itself called from `hip::init()`, so
+it must not call back into a public HIP entry point: doing so re-enters the
+initialisation once-guard and deadlocks. Resolution therefore happens inside
+`ForEachGlobalVar` while it already holds the code-object lock, falling back to device 0
+when no device is current yet.
 
 ### Wire-Format Size Limits
 
@@ -1268,8 +1280,10 @@ The event wire format (finding H5):
   was widened from `uint16_t` to `uint32_t` (the 32-byte header size is preserved by
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
-  normally instead of being dropped at 65535 bytes. `HRR_VERSION` was bumped to 4; the
-  writer's single-record buffer path now writes any oversized record straight through.
+  normally instead of being dropped at 65535 bytes. `HRR_VERSION` was bumped to 4 for this
+  and to 5 for the deep-copied argument payloads; the writer's single-record buffer path now
+  writes any oversized record straight through. The reader rejects any earlier version
+  outright, so a v4 archive is invalidated in one step rather than mis-read field by field.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
   is **dropped with an error-level log** and the whole archive is marked **incomplete**
@@ -1347,15 +1361,27 @@ resolver scans **all** loaded modules and binds (and caches) the first same-name
 function from any code object, with no identity check — potentially binding the wrong
 kernel.
 
-### Host Callbacks and Struct-Pointer Inputs — Not Captured
+### Struct-Pointer Inputs — Declared, Not Silent
 
-- `hipStreamAddCallback` / `hipLaunchHostFunc` record the callback pointer as 0; the
-  host-side work and any device-staging side effects it performs are never captured or
-  replayed. This is distinct from the app-thread CPU-sync limitation above.
-- By default the code generator stores an input struct-pointer parameter as a raw
-  `uint64_t` without serialising the pointed-to struct; only hand-written manual shims
-  copy struct bytes. A newly-captured, non-manual struct-input API therefore loses its
-  payload silently.
+The generator no longer drops a pointed-to struct by default. `DEREF_FIELDS` declares,
+per API and parameter, how much the pointer points at — a fixed struct, `count`
+elements of a fixed size, a NUL-terminated string, or an array whose elements are
+themselves device addresses — and the generator emits both the capture-side copy and
+the playback-side reconstruct-and-pass. The recorded capture-time address is carried for
+comparison only; the value handed back to the runtime is always a local of the pointee's
+own type.
+
+What is left is the honest residue: an API whose pointer argument has no `DEREF_FIELDS`
+entry still records only the address. That is now visible rather than silent — the
+manifest classifies it as payload loss and `derive_manifest.py` fails the build if the
+count drifts from its recorded baseline, so a newly-captured struct-input API cannot
+lose its payload unnoticed.
+
+### Recorded Failures Are Not Replay Failures
+
+A recorded call that *failed* is reproduced, not repaired: when the archived return is
+non-zero and replay reproduces the same error, that is the faithful outcome and the
+dispatcher reports it as such instead of as a handler failure.
 
 ## Relationship to Original HRR Code
 

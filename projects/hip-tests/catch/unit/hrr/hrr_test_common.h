@@ -399,7 +399,7 @@ inline std::string hrr_noop_marker(const std::string& api) {
 }
 
 inline std::string hrr_error_stub_marker(const std::string& api) {
-  return "[HRR] " + api + ": explicit (node-API) graph";
+  return "[HRR] " + api + ": not reconstructable at replay";
 }
 
 // ---------------------------------------------------------------------------

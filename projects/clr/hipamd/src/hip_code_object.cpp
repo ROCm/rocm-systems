@@ -695,4 +695,31 @@ void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
     cb(data);
   }
 }
+
+// ================================================================================================
+void StatCO::ForEachGlobalVar(void (*cb)(const void*, const char*, size_t,
+                                         const void*)) {
+  std::scoped_lock lock(sclock_);
+  // Resolved here rather than by the caller: this sweep runs from HRR's
+  // capture init, which is inside hip::init(), and re-entering the runtime
+  // through hipGetSymbolAddress from there deadlocks on the init once-flag.
+  // No device is current that early, and GetGlobalVar asserts rather than
+  // erroring on a negative device id, so the address is reported as
+  // unresolved instead.
+  // No device is current this early in init, and GetGlobalVar asserts rather
+  // than erroring on a negative id, so fall back to device 0 — which is the
+  // device a recording resolves its globals on anyway.
+  int device_id = ihipGetDevice();
+  if (device_id < 0) device_id = 0;
+  const bool resolvable = static_cast<size_t>(device_id) < g_devices.size();
+  for (const auto& [host_var, var] : vars_) {
+    if (var == nullptr) continue;
+    hipDeviceptr_t dev_ptr = nullptr;
+    size_t sym_size = 0;
+    if (resolvable &&
+        GetGlobalVar(host_var, device_id, &dev_ptr, &sym_size) != hipSuccess)
+      dev_ptr = nullptr;
+    cb(host_var, var->GetName().c_str(), var->GetSize(), dev_ptr);
+  }
+}
 }  // namespace hip

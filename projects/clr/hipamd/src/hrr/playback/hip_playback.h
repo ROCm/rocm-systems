@@ -7,6 +7,8 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <map>
+#include <set>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -81,12 +83,34 @@ struct PlaybackContext {
     std::unordered_map<uint64_t, hipArray_t>     array_map;
     std::unordered_map<uint64_t, hipMipmappedArray_t> mipmapped_map;
     std::unordered_map<uint64_t, hipGraph_t>     graph_map;
+    std::unordered_map<uint64_t, hipGraphNode_t> graph_node_map;
     std::unordered_map<uint64_t, hipGraphExec_t> graph_exec_map;
     std::unordered_map<uint64_t, hipSurfaceObject_t> surface_map;
     std::unordered_map<uint64_t, hipTextureObject_t> texture_map;
+    // Driver-API contexts. Without this map the family replayed asymmetrically
+    // — hipCtxCreate and hipCtxPopCurrent no-ops, hipCtxPushCurrent real — so
+    // replay pushed a capture-time hipCtx_t and the thread was left with no
+    // current device, which killed the process several events later.
+    std::unordered_map<uint64_t, hipCtx_t>       ctx_map;
+    // JIT linker states. hipLinkCreate used to throw its output away, so
+    // hipLinkComplete and hipLinkDestroy were handed the capturing process's
+    // pointer and failed no matter what the linker inputs were.
+    std::unordered_map<uint64_t, hipLinkState_t> link_state_map;
 
     // Device allocations: recorded base address -> {live ptr, size}
     std::unordered_map<uint64_t, AllocEntry>     alloc_map;
+
+    // __device__ globals, keyed by the recorded host shadow address the
+    // capturing process passed to hipGetSymbolAddress and the hipMemcpy*Symbol
+    // family. A replay has no host shadow of its own — the code object is
+    // loaded through hipModuleLoadData — so the name recorded beside the
+    // address is what resolves it.
+    struct SymbolEntry {
+        std::string name;
+        void*       live_ptr = nullptr;
+        size_t      size     = 0;
+    };
+    std::unordered_map<uint64_t, SymbolEntry>    symbol_map;
 
     // Code-object modules loaded by hash (not by recorded module handle)
     std::unordered_map<std::string, hipModule_t> co_modules;
@@ -205,6 +229,11 @@ struct PlaybackContext {
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
+    // APIs whose recorded call had already failed at capture and failed the
+    // same way here. Printed in the summary: without it a reader would misread
+    // a faithfully reproduced failure as a replay error. Guarded by map_mutex.
+    std::map<std::string, int> reproduced_errors;  // api -> recorded hipError_t
+
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
     //   vmm_va_map    : recorded reserved-VA base (u64) -> {live_va, size}
@@ -276,6 +305,58 @@ struct PlaybackContext {
         hipMemGenericAllocationHandle_t handle{};
     };
     std::unordered_map<void*, GuardAlloc> guard_allocs;
+
+    // Graphs this replay could not build faithfully: a node the recording
+    // added that no handler here can reconstruct. Before the node API was
+    // replayed at all, a graph's mere absence from graph_map was the signal
+    // hipGraphInstantiate refused on. Now that most construction calls do
+    // build something, absence no longer distinguishes "built by the node API"
+    // from "built correctly", so the ones that fell short say so explicitly
+    // and instantiate still refuses. Keyed by the recorded hipGraph_t.
+    std::set<uint64_t> incomplete_graphs;
+
+    void mark_graph_incomplete(uint64_t rec_graph, const char* api) {
+        if (!rec_graph) return;
+        bool first;
+        {
+            std::unique_lock lk(map_mutex);
+            first = incomplete_graphs.insert(rec_graph).second;
+        }
+        if (first)
+            fprintf(stderr,
+                    "[HRR] %s: this node was not reconstructed, so graph "
+                    "0x%llx is incomplete; instantiating it will be refused "
+                    "rather than replayed as a graph missing work.\n",
+                    api, static_cast<unsigned long long>(rec_graph));
+    }
+    bool graph_is_incomplete(uint64_t rec_graph) const {
+        std::shared_lock lk(map_mutex);
+        return incomplete_graphs.count(rec_graph) != 0;
+    }
+
+    // IPC handles, recorded 64 bytes -> the 64 bytes this replay's exporter
+    // produced. An importer's handle names an export in the process that made
+    // it, so replaying hipIpcOpenMemHandle with the recorded bytes opens
+    // nothing; it has to be matched to the handle the replayed exporter
+    // returned. Keyed by the recorded bytes because that is all the importing
+    // event carries. Guarded by map_mutex.
+    std::map<std::string, std::string> ipc_handle_map;
+
+    static std::string ipc_key(const void* bytes, size_t n) {
+        return std::string(static_cast<const char*>(bytes), n);
+    }
+    void record_ipc_handle(const std::string& recorded, const std::string& live) {
+        std::unique_lock lk(map_mutex);
+        ipc_handle_map[recorded] = live;
+    }
+    // Empty when the archive holds no export for this handle: the importer is
+    // then in another process, which is out of scope for a single-archive
+    // replay.
+    std::string translate_ipc_handle(const std::string& recorded) const {
+        std::shared_lock lk(map_mutex);
+        auto it = ipc_handle_map.find(recorded);
+        return it != ipc_handle_map.end() ? it->second : std::string();
+    }
 
     // ---- Pointer translation ----
     // Translates a recorded GPU address to a live pointer.
@@ -374,6 +455,12 @@ struct PlaybackContext {
         std::shared_lock lk(map_mutex);
         auto it = graph_map.find(rec); return it != graph_map.end() ? it->second : nullptr;
     }
+    hipGraphNode_t translate_graph_node(uint64_t rec) const {
+        if (rec == 0) return nullptr;
+        std::shared_lock lk(map_mutex);
+        auto it = graph_node_map.find(rec);
+        return it != graph_node_map.end() ? it->second : nullptr;
+    }
     hipGraphExec_t translate_graph_exec(uint64_t rec) const {
         if (rec == 0) return nullptr;
         std::shared_lock lk(map_mutex);
@@ -386,6 +473,17 @@ struct PlaybackContext {
     hipTextureObject_t translate_texture(uint64_t rec) const {
         std::shared_lock lk(map_mutex);
         auto it = texture_map.find(rec); return it != texture_map.end() ? it->second : 0;
+    }
+    hipCtx_t translate_ctx(uint64_t rec) const {
+        if (rec == 0) return nullptr;
+        std::shared_lock lk(map_mutex);
+        auto it = ctx_map.find(rec); return it != ctx_map.end() ? it->second : nullptr;
+    }
+    hipLinkState_t translate_link_state(uint64_t rec) const {
+        if (rec == 0) return nullptr;
+        std::shared_lock lk(map_mutex);
+        auto it = link_state_map.find(rec);
+        return it != link_state_map.end() ? it->second : nullptr;
     }
 
     // ---- Allocation registration (exclusive lock) ----
@@ -404,6 +502,38 @@ struct PlaybackContext {
         return alloc_map.find(rec) != alloc_map.end();
     }
 
+    // A graph node's host operand has to stay alive until the graph is
+    // launched, which is long after the call that built the node returned.
+    // Keyed by the recorded host address so the same recorded destination
+    // reuses one buffer instead of growing a new one per event.
+    std::unordered_map<uint64_t, std::vector<uint8_t>> host_landing_buffers;
+
+    void* host_landing_buffer(uint64_t rec, size_t sz) {
+        std::unique_lock lk(map_mutex);
+        auto& buf = host_landing_buffers[rec];
+        if (buf.size() < sz) buf.resize(sz);
+        return buf.data();
+    }
+
+    // ---- Symbol registration and lookup ----
+    void record_symbol(uint64_t rec_host_var, const std::string& name,
+                       void* live, size_t sz) {
+        std::unique_lock lk(map_mutex);
+        symbol_map[rec_host_var] = {name, live, sz};
+    }
+    // Device address of the global the capturing process knew by this host
+    // shadow address, or nullptr if the archive never registered it.
+    void* translate_symbol(uint64_t rec_host_var, size_t* sz_out = nullptr) const {
+        std::shared_lock lk(map_mutex);
+        auto it = symbol_map.find(rec_host_var);
+        if (it == symbol_map.end()) return nullptr;
+        if (sz_out) *sz_out = it->second.size;
+        return it->second.live_ptr;
+    }
+    // Resolve a symbol by name across every module the replay has loaded,
+    // whether it came from a fat binary or an explicit hipModuleLoad.
+    void* resolve_symbol_by_name(const char* name, size_t* sz_out) const;
+
     // ---- Handle registration (exclusive lock) ----
     void record_stream  (uint64_t rec, hipStream_t     live) { std::unique_lock lk(map_mutex); stream_map[rec]     = live; }
     void record_event   (uint64_t rec, hipEvent_t      live) { std::unique_lock lk(map_mutex); event_map[rec]      = live; }
@@ -413,9 +543,12 @@ struct PlaybackContext {
     void record_array   (uint64_t rec, hipArray_t      live) { std::unique_lock lk(map_mutex); array_map[rec]      = live; }
     void record_mipmapped(uint64_t rec, hipMipmappedArray_t live) { std::unique_lock lk(map_mutex); mipmapped_map[rec] = live; }
     void record_graph   (uint64_t rec, hipGraph_t      live) { std::unique_lock lk(map_mutex); graph_map[rec]      = live; }
+    void record_graph_node(uint64_t rec, hipGraphNode_t live){ std::unique_lock lk(map_mutex); graph_node_map[rec] = live; }
     void record_graph_exec(uint64_t rec, hipGraphExec_t live){ std::unique_lock lk(map_mutex); graph_exec_map[rec] = live; }
     void record_surface (uint64_t rec, hipSurfaceObject_t live) { std::unique_lock lk(map_mutex); surface_map[rec] = live; }
     void record_texture (uint64_t rec, hipTextureObject_t live) { std::unique_lock lk(map_mutex); texture_map[rec] = live; }
+    void record_ctx     (uint64_t rec, hipCtx_t        live) { std::unique_lock lk(map_mutex); ctx_map[rec]        = live; }
+    void record_link_state(uint64_t rec, hipLinkState_t live){ std::unique_lock lk(map_mutex); link_state_map[rec] = live; }
 
     // ---- Handle removal (exclusive lock) ----
     void remove_stream  (uint64_t rec) { std::unique_lock lk(map_mutex); stream_map.erase(rec); }
@@ -426,9 +559,12 @@ struct PlaybackContext {
     void remove_array   (uint64_t rec) { std::unique_lock lk(map_mutex); array_map.erase(rec); }
     void remove_mipmapped(uint64_t rec){ std::unique_lock lk(map_mutex); mipmapped_map.erase(rec); }
     void remove_graph   (uint64_t rec) { std::unique_lock lk(map_mutex); graph_map.erase(rec); }
+    void remove_graph_node(uint64_t rec){ std::unique_lock lk(map_mutex); graph_node_map.erase(rec); }
     void remove_graph_exec(uint64_t rec){ std::unique_lock lk(map_mutex); graph_exec_map.erase(rec); }
     void remove_surface (uint64_t rec) { std::unique_lock lk(map_mutex); surface_map.erase(rec); }
     void remove_texture (uint64_t rec) { std::unique_lock lk(map_mutex); texture_map.erase(rec); }
+    void remove_ctx     (uint64_t rec) { std::unique_lock lk(map_mutex); ctx_map.erase(rec); }
+    void remove_link_state(uint64_t rec){ std::unique_lock lk(map_mutex); link_state_map.erase(rec); }
 
     // ---- Blob/code-object loading ----
     // Load a blob from archive_dir/blobs/<2-char-prefix>/<hash>.blob
@@ -473,6 +609,42 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
 // and hipFree cannot release it, so every teardown path has to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// ---------------------------------------------------------------------------
+// hrr_note_recorded_error — replay reproduced a call that also failed at
+// capture, which is fidelity rather than failure.
+//
+// Most capture shims only record calls that succeeded, so a handler returning
+// an error normally means replay diverged. The exceptions are the hand-written
+// shims that record the call before the runtime rejects it (hipArrayCreate on a
+// part with no image support, say). Returning that same error to dispatch_event
+// would abort the replay over a call the recording shows failing identically.
+void hrr_note_recorded_error(PlaybackContext& ctx, const char* api,
+                             int recorded_ret);
+
+// ---------------------------------------------------------------------------
+// hrr_replayed_recorded_error — did this call fail exactly as the recording
+// says it failed?
+//
+// The generated handlers get this from the generator; the hand-written ones
+// call it. Both are needed because the hand-written capture shims are the ones
+// that record a call the runtime rejected, so their handlers are the ones most
+// likely to meet a recorded error.
+bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
+                                 int32_t recorded_ret, hipError_t replayed);
+
+// ---------------------------------------------------------------------------
+// hrr_live_ctx — a usable hipCtx_t for a recorded one.
+//
+// A recorded hipCtx_t names a context object in the capturing process and
+// there is no map from it to anything here. Passing it through would hand the
+// runtime a stale address; passing nullptr fails outright, because the
+// driver-API graph node calls reject a null context. Replay therefore
+// substitutes the context the calling thread is already on, which on AMD is
+// the primary context of the current device — the same device the archive was
+// recorded against. A recording that used a null context keeps one, so a call
+// that capture shows failing that way fails the same way here.
+hipCtx_t hrr_live_ctx(uint64_t recorded);
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers read this to wait for their submission turn at the
