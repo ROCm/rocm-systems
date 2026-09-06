@@ -27,10 +27,6 @@ else()
     set(MULTIPROC_LAUNCHER)
 endif()
 
-if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-    set(MULTIPROC_IS_DISABLED ON) # fails on mi300 SLES for some unknown reason
-endif()
-
 #########################################################################################
 #
 # generate rocpd database and the old-way outputs csv, otf2, perfetto to compare
@@ -62,24 +58,9 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
-
-# Can remove this test if MULTIPROC is re-enabled and rely on the multiproc databases for
-# packaging
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-rocpd-execute2
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out2 --output-format rocpd
-        --runtime-trace --kernel-rename --pmc SQ_WAVES --
-        $<TARGET_FILE:reproducible-dispatch-count> 500 2
-    DEPENDS reproducible-dispatch-count
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_SETUP rocprofv3-test-rocpd)
 
 #########################################################################################
 #
@@ -113,8 +94,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-otf2-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -150,8 +131,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-perfetto-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -206,8 +187,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-summary-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
