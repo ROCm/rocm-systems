@@ -6220,6 +6220,20 @@ class ConSanValidationTest(unittest.TestCase):
                     "inline-shadow": ("not_detected", "any"),
                 },
             },
+            "hipkittens-fp8fp32-4wave": {
+                "kernel": (
+                    "_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_"
+                    "fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEE"
+                    "NS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE"
+                ),
+                "pc": "0x0000000000000528",
+                "occurrence": "0",
+                "waves": "four waves",
+                "profiles": {
+                    "supercollider": ("not_detected", "any"),
+                    "inline-shadow": ("detected", "any"),
+                },
+            },
             "hipkittens-mxfp8-4wave": {
                 "kernel": (
                     "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens"

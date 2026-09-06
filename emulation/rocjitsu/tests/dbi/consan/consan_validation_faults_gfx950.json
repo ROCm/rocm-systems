@@ -69,6 +69,39 @@
         }
       ]
     },
+    "hipkittens-fp8fp32-4wave": {
+      "faults": [
+        {
+          "id": "barrier-drop-prologue-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first s_barrier at .text+0x528 is the unconditional prologue publication edge in the executed 256-thread FP8 kernel. All four waves cooperatively load the first two A and B tiles into LDS and wait for those stores before this edge; peer LDS reads begin immediately afterward. The exact 256-cubed validation command necessarily launches this sole optimized specialization. SuperCollider's deterministic emulator schedule may preserve the exact result without producing a conflict, so that engine prospectively retains this preselected site as a qualified miss."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3685fd6dd78a39a5|kernel=_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE|kind=barrier|pc=0x0000000000000528|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE"
+              }
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE"
+              }
+            }
+          }
+        }
+      ]
+    },
     "hipkittens-mxfp8-4wave": {
       "faults": [
         {
