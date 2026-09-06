@@ -55,33 +55,33 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 # ---------------------------------------------------------------------------
 EXPECTED = {
     "OFF": {
-        "total": 6123,
+        "total": 4084,
         "per_coll": {
-            "AllGather": 48,
-            "AllGatherV": 18,
-            "AllReduce": 3840,
-            "AlltoAllPivot": 6,
-            "Broadcast": 24,
-            "Reduce": 726,
-            "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            "AllGather": 32,
+            "AllGatherV": 12,
+            "AllReduce": 2560,
+            "AlltoAllPivot": 4,
+            "Broadcast": 16,
+            "Reduce": 484,
+            "ReduceScatter": 968,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            "SendRecv": 8,
         },
     },
     "ON": {
-        "total": 6135,
+        "total": 4092,
         "per_coll": {
-            "AllGather": 48,
-            "AllGatherV": 18,
-            "AllReduce": 3840,
-            "AlltoAllGda": 6,
-            "AlltoAllPivot": 6,
-            "AlltoAllvGda": 6,
-            "Broadcast": 24,
-            "Reduce": 726,
-            "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            "AllGather": 32,
+            "AllGatherV": 12,
+            "AllReduce": 2560,
+            "AlltoAllGda": 4,
+            "AlltoAllPivot": 4,
+            "AlltoAllvGda": 4,
+            "Broadcast": 16,
+            "Reduce": 484,
+            "ReduceScatter": 968,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            "SendRecv": 8,
         },
     },
 }
@@ -99,7 +99,8 @@ COMMON_DIMS = {
     },
     "acc": {"0", "1"},
     "pipeline": {"0", "1"},
-    "unroll": {"1", "2", "4", "8", "16", "32"},
+    # Unrolls emitted by a multi-arch build. --all_unrolls adds 8 and 16.
+    "unroll": {"1", "2", "4", "32"},
     "reg": {"0", "1", "2"},
 }
 DIMENSIONS = ("coll", "algo", "proto", "redop", "ty", "acc", "pipeline", "unroll", "reg")
@@ -122,11 +123,11 @@ _DEFINE_RE = re.compile(
 )
 
 
-def _run_generator(out_dir, rocshmem):
+def _run_generator(out_dir, rocshmem, all_unrolls="OFF"):
     """Run the main generator into out_dir for the given rocSHMEM setting.
 
     argv layout matches src/CMakeLists.txt:
-      gensrc, IFC, <unused>, local_gpu_only, rocshmem, ONLY_FUNCS
+      gensrc, IFC, <unused>, local_gpu_only, rocshmem, all_unrolls, ONLY_FUNCS
     local_gpu_only=OFF keeps the count deterministic and GPU-free (no rocminfo)
     and yields the full MULTI-ARCH superset of kernels (arch-guarded variants
     included); a BUILD_LOCAL_GPU_TARGET_ONLY=ON build legitimately emits fewer.
@@ -137,7 +138,7 @@ def _run_generator(out_dir, rocshmem):
         # a real breakage. (pytest.fail also survives `python -O`, unlike assert.)
         pytest.fail("generate.py not found next to source tree: %s" % GENERATE_PY)
     subprocess.run(
-        [sys.executable, str(GENERATE_PY), str(out_dir), "OFF", "OFF", "OFF", rocshmem, ""],
+        [sys.executable, str(GENERATE_PY), str(out_dir), "OFF", "OFF", "OFF", rocshmem, all_unrolls, ""],
         check=True,
         capture_output=True,
         text=True,
@@ -181,10 +182,11 @@ def _parse(out_dir):
     return records, len(files), manifest_count
 
 
-def _per_coll(records):
+def _count_by(records, dim):
+    """Tally records by one DIMENSIONS axis, e.g. "coll" or "unroll"."""
     counts = {}
     for r in records:
-        counts[r["coll"]] = counts.get(r["coll"], 0) + 1
+        counts[r[dim]] = counts.get(r[dim], 0) + 1
     return counts
 
 
@@ -260,7 +262,7 @@ def test_kernel_count_baselines(generated, rocshmem):
     report = diff_report(
         "rocshmem=%s" % rocshmem,
         exp["total"], len(data["records"]),
-        exp["per_coll"], _per_coll(data["records"]),
+        exp["per_coll"], _count_by(data["records"], "coll"),
         _expected_dims(exp["per_coll"]), _dims(data["records"]),
     )
     assert report is None, report
@@ -280,12 +282,42 @@ def test_parser_integrity(generated, rocshmem):
 
 
 @pytest.mark.main_generator
+@pytest.mark.parametrize("rocshmem", ["OFF", "ON"])
+def test_unroll_tables_have_equal_kernel_counts(generated, rocshmem):
+    # Host ids come from the first unroll and index every other unroll's table, so the
+    # unrolls must be generated in lockstep; a func_validate exception shows up as a skew.
+    counts = _count_by(generated[rocshmem]["records"], "unroll")
+    assert len(set(counts.values())) == 1, (
+        "unroll tables are not generated in lockstep (host ids would misindex): %s" % counts
+    )
+
+
+@pytest.mark.main_generator
+def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated):
+    # --all_unrolls must add exactly the skipped unrolls at the same per-unroll count.
+    # Asserted against the OFF baseline so no second hardcoded total is needed.
+    d = tmp_path_factory.mktemp("all_unrolls")
+    _run_generator(str(d), "OFF", all_unrolls="ON")
+    records, _, manifest_count = _parse(str(d))
+    assert manifest_count == len(records)
+
+    counts = _count_by(records, "unroll")
+    assert set(counts) == {"1", "2", "4", "8", "16", "32"}
+    assert len(set(counts.values())) == 1, counts
+
+    baseline = _count_by(generated["OFF"]["records"], "unroll")
+    assert set(counts.values()) == set(baseline.values()), (
+        "--all_unrolls changed the per-unroll kernel count: %s vs %s" % (counts, baseline)
+    )
+
+
+@pytest.mark.main_generator
 def test_rocshmem_on_is_off_plus_gda(generated):
     # Generator-backed (not just constant self-consistency): ON must equal OFF
     # plus exactly the two GDA collectives, with every shared collective's count
     # unchanged. Catches ON accidentally perturbing non-GDA kernels.
-    off = _per_coll(generated["OFF"]["records"])
-    on = _per_coll(generated["ON"]["records"])
+    off = _count_by(generated["OFF"]["records"], "coll")
+    on = _count_by(generated["ON"]["records"], "coll")
     assert set(on) - set(off) == {"AlltoAllGda", "AlltoAllvGda"}
     assert set(off) - set(on) == set()
     for coll, n in off.items():

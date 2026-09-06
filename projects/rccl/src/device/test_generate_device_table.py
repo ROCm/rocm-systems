@@ -36,24 +36,44 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 #
 # SendRecv is emitted as TWO latency-protocol kernel variants (reg_values_of):
 #   reg=0 -> legacy LL send/recv kernel, built unguarded on every arch (the default)
-#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950 + ENABLE_LL128
-#            and only for the base unrolls (the gfx1250-only unrolls 8/16/32 are
-#            excluded by func_validate). See tests_sendrecv_* below.
+#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950 + ENABLE_LL128. Emitted
+#            for every unroll regardless: a hole would shift that table's later indices.
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
-def _generate(tmpdir, ifc="OFF"):
+def _generate(tmpdir, ifc="OFF", all_unrolls="OFF"):
     """Run generate.py into tmpdir and return the device_table.h contents."""
-    # argv: gensrc, IFC, (unused), local_gpu_only, rocshmem, ONLY_FUNCS
+    # argv: gensrc, IFC, (unused), local_gpu_only, rocshmem, all_unrolls, ONLY_FUNCS
     # local_gpu_only=OFF avoids needing rocminfo/a local GPU.
     subprocess.run(
-        [sys.executable, GENERATE_PY, tmpdir, ifc, "OFF", "OFF", "OFF", ONLY_FUNCS],
+        [sys.executable, GENERATE_PY, tmpdir, ifc, "OFF", "OFF", "OFF", all_unrolls, ONLY_FUNCS],
         check=True,
         capture_output=True,
         text=True,
     )
     with open(os.path.join(tmpdir, "device_table.h")) as f:
         return f.read()
+
+
+def _unroll_tables(header):
+    """Map unroll -> list of table entries, guarded slots reduced to their symbol."""
+    tables = {}
+    for unroll, body in re.findall(
+        r"ncclDevFuncTable_(\d+)\[\] = \{(.*?)nullptr\};", header, re.S
+    ):
+        slots = {}
+        # Guarded slots emit symbol + "#else" nullptr at the same index; keep the symbol.
+        for m in re.finditer(r"/\*\s*(\d+)\*/ (\w+),", body):
+            slots.setdefault(int(m.group(1)), m.group(2))
+        tables[unroll] = [slots[i] for i in sorted(slots)]
+    return tables
+
+
+def _strip_unroll(sym):
+    # ncclDevFunc_<coll>_<algo>_<proto>_<redop>_<ty>_<acc>_<pipeline>_<unroll>[_<reg>]
+    parts = sym.split("_")
+    del parts[8]
+    return "_".join(parts)
 
 
 class DeviceTableGenerationTest(unittest.TestCase):
@@ -185,20 +205,46 @@ class DeviceTableGenerationTest(unittest.TestCase):
             "legacy LL SendRecv (reg=0) declaration should be unguarded",
         )
 
-    def test_sendrecv_ll128_excludes_gfx1250_only_unrolls(self):
-        # func_validate drops SendRecv reg=1 for the gfx1250-only unrolls
-        # (8/16/32) since LL128 send/recv targets gfx942/gfx950. Emitting them
-        # would reference symbols that are never compiled (undefined at link).
+    def test_sendrecv_ll128_covers_every_generated_unroll(self):
+        # Skipping reg=1 on the gfx1250 unrolls leaves a hole that shifts every later
+        # index in that table away from the host ids (derived from the first unroll).
         decls = self._sendrecv_decls()
-        bad = sorted(s for s in decls if re.search(r"_(?:8|16|32)_1$", s))
+        # A table is emitted per enum value; only non-empty ones were generated.
+        generated = {u for u, t in _unroll_tables(self.header).items() if t}
+        missing = sorted(
+            u
+            for u in generated
+            if not any(re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_%s_1" % u, s) for s in decls)
+        )
         self.assertEqual(
-            [], bad, "LL128 SendRecv (reg=1) must not be generated for unrolls 8/16/32: %s" % bad
+            [], missing, "LL128 SendRecv (reg=1) missing for generated unrolls: %s" % missing
         )
-        # The legacy LL kernel (reg=0) still covers those unrolls.
-        self.assertTrue(
-            any(re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_(?:8|16|32)", s) for s in decls),
-            "legacy LL SendRecv (reg=0) missing for unrolls 8/16/32",
-        )
+
+    def test_device_tables_are_index_aligned_across_unrolls(self):
+        # Host ids come from the first generated unroll but index every
+        # ncclDevFuncTable_*, so all tables must hold the same functions in order.
+        tables = {u: t for u, t in _unroll_tables(self.header).items() if t}
+        self.assertTrue(tables, "no non-empty unroll tables generated")
+        base_unroll, base = sorted(tables.items())[0]
+        base_shape = [_strip_unroll(s) for s in base]
+        for unroll, entries in sorted(tables.items()):
+            self.assertEqual(
+                base_shape,
+                [_strip_unroll(s) for s in entries],
+                "ncclDevFuncTable_%s is not index-aligned with ncclDevFuncTable_%s"
+                % (unroll, base_unroll),
+            )
+
+    def test_all_unrolls_opt_in_generates_every_unroll(self):
+        # BUILD_ALL_UNROLLS fills in the skipped unrolls and drops the gfx1250 restriction.
+        with tempfile.TemporaryDirectory(prefix="rccl_devtable_all_") as tmpdir:
+            header = _generate(tmpdir, all_unrolls="ON")
+        tables = _unroll_tables(header)
+        # Filter to non-empty: a table is emitted per enum value regardless.
+        self.assertEqual({"1", "2", "4", "8", "16", "32"}, {u for u, t in tables.items() if t})
+        for unroll, entries in tables.items():
+            self.assertTrue(entries, "ncclDevFuncTable_%s is empty under BUILD_ALL_UNROLLS" % unroll)
+        self.assertNotIn("#if defined(__gfx1250__)\n", header)
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.
