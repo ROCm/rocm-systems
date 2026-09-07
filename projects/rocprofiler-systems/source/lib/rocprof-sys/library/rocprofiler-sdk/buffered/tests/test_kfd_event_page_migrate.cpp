@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/kfd_events/kfd_event_page_migrate.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd_event_page_migrate.hpp"
 
 #include <gtest/gtest.h>
 
@@ -13,8 +13,8 @@ namespace rocprofsys::domains::buffered
 namespace
 {
 
-// Self-contained stand-in for SdkBackend: kfd_event_page_migrate<SdkBackend> and
-// on_kfd_event_page_migrate<SdkBackend> only ever touch these four members.
+// Self-contained stand-in for SdkBackend: kfd_event_page_migrate<SdkBackend, Externals>
+// and on_kfd_event_page_migrate<SdkBackend, Externals> only ever touch these members.
 struct mock_sdk
 {
     struct context_id_t
@@ -34,20 +34,23 @@ struct mock_sdk
 
     static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE = 23;
 
-    struct buffer_tracing_kfd_event_page_migrate_record_t
+    struct kfd_event_page_migrate_record
     {};
 };
 
+// Externals is unused by this domain today; any type satisfies the template parameter.
+struct externals
+{};
+
 using mock_dispatcher =
-    buffered_callback_dispatcher<mock_sdk,
-                                 mock_sdk::buffer_tracing_kfd_event_page_migrate_record_t,
-                                 on_kfd_event_page_migrate<mock_sdk>>;
+    buffered_callback_dispatcher<mock_sdk, mock_sdk::kfd_event_page_migrate_record,
+                                 on_kfd_event_page_migrate<mock_sdk, externals>>;
 
 }  // namespace
 
 TEST(kfd_event_page_migrate_test, descriptor_reports_correct_metadata)
 {
-    constexpr const auto& domain = kfd_event_page_migrate<mock_sdk>;
+    constexpr const auto& domain = k_kfd_event_page_migrate<mock_sdk, externals>;
 
     EXPECT_EQ(domain.meta.name, "kfd_event_page_migrate");
     EXPECT_EQ(domain.meta.id, mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE);
@@ -59,7 +62,7 @@ TEST(kfd_event_page_migrate_test, descriptor_reports_correct_metadata)
 
 TEST(kfd_event_page_migrate_test, descriptor_uses_default_buffer_properties)
 {
-    constexpr const auto& domain = kfd_event_page_migrate<mock_sdk>;
+    constexpr const auto& domain = k_kfd_event_page_migrate<mock_sdk, externals>;
 
     EXPECT_EQ(domain.buffer.buffer_size, k_default_buffer_properties.buffer_size);
     EXPECT_EQ(domain.buffer.buffer_watermark,
@@ -69,9 +72,9 @@ TEST(kfd_event_page_migrate_test, descriptor_uses_default_buffer_properties)
 TEST(kfd_event_page_migrate_test,
      on_kfd_event_page_migrate_handles_empty_record_batch_without_crashing)
 {
-    mock_sdk::buffer_tracing_kfd_event_page_migrate_record_t record{};
+    mock_sdk::kfd_event_page_migrate_record record{};
 
-    on_kfd_event_page_migrate<mock_sdk>(&record, nullptr);
+    on_kfd_event_page_migrate<mock_sdk, externals>(&record, nullptr);
 }
 
 }  // namespace rocprofsys::domains::buffered

@@ -141,6 +141,34 @@ using dispatch_counting_rec_cb   = void*;
 struct callback_tracing_record_t
 {};
 
+// record_header_t mirrors rocprofiler_record_header_t: buffered_callback_dispatcher
+// dereferences ->payload on every element of the header array it iterates.
+struct record_header_t
+{
+    std::uint32_t category = 0;
+    std::uint32_t kind     = 0;
+    void*         payload  = nullptr;
+};
+
+// The kfd_*_record stubs below each mirror one rocprofiler_buffer_tracing_kfd_*_record_t
+// type. backend<Sdk> only re-exports them as type aliases; no field is read here.
+struct kfd_page_fault_record
+{};
+struct kfd_page_migrate_record
+{};
+struct kfd_queue_record
+{};
+struct kfd_event_queue_record
+{};
+struct kfd_event_unmap_record
+{};
+struct kfd_event_dropped_record
+{};
+struct kfd_event_page_migrate_record
+{};
+struct kfd_event_page_fault_record
+{};
+
 // ─── Tracing-name table stub ────────────────────────────────────────────────
 //
 // Minimal stand-in for rocprofiler::sdk::utility::name_info. callback/buffer
@@ -365,6 +393,15 @@ struct mock_sdk
     using dispatch_counting_record_cb          = testing::dispatch_counting_rec_cb;
     using callback_name_info_t                 = testing::name_info<>;
     using buffer_name_info_t                   = testing::name_info<>;
+    using record_header_t                      = testing::record_header_t;
+    using kfd_page_fault_record                = testing::kfd_page_fault_record;
+    using kfd_page_migrate_record              = testing::kfd_page_migrate_record;
+    using kfd_queue_record                     = testing::kfd_queue_record;
+    using kfd_event_queue_record               = testing::kfd_event_queue_record;
+    using kfd_event_unmap_record               = testing::kfd_event_unmap_record;
+    using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
+    using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
+    using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
