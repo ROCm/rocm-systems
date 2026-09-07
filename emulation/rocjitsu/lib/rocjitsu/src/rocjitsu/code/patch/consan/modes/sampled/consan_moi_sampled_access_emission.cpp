@@ -410,12 +410,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   if (relocate_instruction) {
     const bool capture_high_bank_address =
         moi_access_requires_high_bank_address_capture(candidate, arch);
-    const bool select_guest_vgpr_bank = target->has_selectable_vgpr_bank &&
-                                        candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u &&
-                                        !capture_high_bank_address;
-    if (select_guest_vgpr_bank)
-      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          0u, static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), arch));
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     // Metadata consumes the low-bank captured address, while the guest still
@@ -433,9 +427,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     if (!append_moi_lds_wait(words, arch))
       return std::nullopt;
-    if (select_guest_vgpr_bank)
-      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   }
 
   const auto publication_state = moi_sampled_publication_state_sgprs(plan.exec_save_sgpr);
@@ -826,7 +817,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   }
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
-  const bool select_guest_vgpr_bank =
+  const bool has_banked_guest_operands =
       target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
@@ -835,18 +826,16 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     errors.emplace_back("ConSan MOI sampled probe has an invalid spill-backed operand plan");
     return std::nullopt;
   }
-  if (plan.spill_backed_operand_recovery && select_guest_vgpr_bank) {
+  if (plan.spill_backed_operand_recovery && has_banked_guest_operands) {
     errors.emplace_back(
         "ConSan MOI sampled spill-backed operand recovery cannot change the guest VGPR bank");
     return std::nullopt;
   }
-  // A high SRC0 bank is captured by the appended-body wrapper before it
-  // selects bank zero for instrumentation scratch. Other banked operands keep
-  // the older self-contained transition sequence.
-  if (select_guest_vgpr_bank && !capture_high_bank_address)
-    if (!sequence.emit(instrumentation::build_s_set_vgpr_msb_transition(
-            static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch)))
-      return std::nullopt;
+  // The appended-body wrapper owns the complete register-bank state machine:
+  // these words are emitted for its low instrumentation bank, with the guest
+  // range identified below so the wrapper can enter and leave the application
+  // bank exactly around that range. Keeping a second self-contained transition
+  // here would leave scalar-spill restoration in the application bank.
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
   std::optional<uint16_t> spilled_lds_byte_offset_vgpr;
   const bool reserve_two_address_replay_scratch =
@@ -975,10 +964,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     if (!sequence.emit(*range_words))
       return std::nullopt;
   }
-  if (select_guest_vgpr_bank && !capture_high_bank_address)
-    if (!sequence.emit(instrumentation::build_s_set_vgpr_msb_transition(
-            0u, static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), arch)))
-      return std::nullopt;
   return words;
 }
 

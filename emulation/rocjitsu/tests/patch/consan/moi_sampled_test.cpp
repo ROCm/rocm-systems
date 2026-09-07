@@ -656,10 +656,11 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
       continue;
     const std::vector<uint32_t> words =
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    // Four pairs cover the surrounding sampled trampoline, appended-body
-    // entry/exit, embedded guest, and appended spill restore.
-    EXPECT_EQ(std::ranges::count(words, select_low), 4u);
-    EXPECT_EQ(std::ranges::count(words, restore_guest), 4u);
+    // The common appended-body assembler exclusively owns the entry/exit and
+    // embedded-guest pairs. The Sampled emitter must not duplicate either
+    // state transition inside its mode-local words.
+    EXPECT_EQ(std::ranges::count(words, select_low), 2u);
+    EXPECT_EQ(std::ranges::count(words, restore_guest), 2u);
     ASSERT_TRUE(patch.relocated_guest_instruction_offset);
     ASSERT_GE(*patch.relocated_guest_instruction_offset,
               patch.trampoline_offset + sizeof(uint32_t));
@@ -672,6 +673,87 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
     ++checked;
   }
   EXPECT_EQ(checked, kAccessCount);
+}
+
+TEST(ConSanMoi, Gfx1250SampledScalarSpillRestoresInInstrumentationBank) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kGuestVgprMsbMode = 64u;
+  constexpr auto first_load =
+      cdna5::build_vds(cdna5::kDsLoadB128Vds, {.offset0 = 64u, .addr = 149u, .vdst = 8u});
+  constexpr auto second_load =
+      cdna5::build_vds(cdna5::kDsLoadB128Vds, {.offset0 = 96u, .addr = 149u, .vdst = 12u});
+  std::vector<uint32_t> text_words = {
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+  };
+  text_words.insert(text_words.end(), first_load.begin(), first_load.end());
+  const uint64_t second_anchor = text_words.size() * sizeof(uint32_t);
+  text_words.insert(text_words.end(), second_load.begin(), second_load.end());
+  text_words.push_back(*build_gfx1250_s_set_vgpr_msb(0x4000u, kArch));
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) == dead_router_sgprs.end())
+      text_words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, kArch));
+  }
+  text_words.resize(1200u, build_s_nop(0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(
+      text_words, "gfx1250_sampled_scalar_spill_bank_owner", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.test_force_vgpr_spill = true;
+  options.moi_runtime_sample_stride = 1u;
+  options.max_patches = 2u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().spill_backed);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
+           item.anchor_offset == second_anchor;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_GT(patch->spilled_vgpr_count, 0u);
+
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, kArch);
+  // Entry/exit, the embedded guest, and vector-spill restoration each own one
+  // pair. A mode-local duplicate would restore the guest bank before the
+  // scalar-spill reservoir is consumed and clobber a live high-bank VGPR.
+  EXPECT_EQ(std::ranges::count(cave, select_low), 3u);
+  EXPECT_EQ(std::ranges::count(cave, restore_guest), 3u);
+  for (size_t index = 1u; index < cave.size(); ++index) {
+    if (cave[index] == select_low || cave[index] == restore_guest)
+      EXPECT_NE(cave[index], cave[index - 1u]);
+  }
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  const size_t guest_word = static_cast<size_t>(
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t));
+  ASSERT_GT(guest_word, 0u);
+  ASSERT_LT(guest_word + second_load.size(), cave.size());
+  EXPECT_EQ(cave[guest_word - 1u], restore_guest);
+  EXPECT_TRUE(std::equal(second_load.begin(), second_load.end(), cave.begin() + guest_word));
+  EXPECT_EQ(cave[guest_word + second_load.size()], select_low);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledCapturesHighBankLdsAddressBeforeSelectingScratchBank) {
