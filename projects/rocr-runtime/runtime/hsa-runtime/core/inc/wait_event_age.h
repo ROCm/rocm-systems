@@ -55,7 +55,7 @@ namespace core {
 // the buffer must reserve sizeof(uint64_t) per unique signal. Centralising the
 // size here keeps the allocation and the memset from disagreeing.
 inline constexpr std::size_t WaitEventAgeBytes(uint32_t unique_evts) {
-  return static_cast<std::size_t>(unique_evts) * sizeof(uint32_t);
+  return static_cast<std::size_t>(unique_evts) * sizeof(uint64_t);
 }
 
 }  // namespace core
