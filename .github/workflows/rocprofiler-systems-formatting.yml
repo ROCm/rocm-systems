@@ -179,10 +179,7 @@ jobs:
       run: |
         set -eu
 
-        # Headers retired by the timemory-removal PR series. Once a header is
-        # gone from the tree it must not come back: add a line here in the same
-        # PR that removes the last include of it.
-        #
+        # Check for headers that should not be included directly.
         # Format, one entry per line:  <header path>|<what to use instead>
         BANNED=$(cat <<'EOF'
         timemory/utility/filepath.hpp|use "common/path.hpp" (rocprofsys::path::)
