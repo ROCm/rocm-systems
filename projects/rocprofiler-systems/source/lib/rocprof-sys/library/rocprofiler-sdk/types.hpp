@@ -103,4 +103,30 @@ struct domain_configuration
     std::vector<operation_id_t> operations;
 };
 
+template <typename SdkBackend, typename RecordT, void (*Callback)(RecordT*, void*)>
+struct buffered_callback_dispatcher
+{
+    // NOLINTNEXTLINE (readability-function-size)
+    static void callback(SdkBackend::context_id_t /*context*/,
+                         SdkBackend::buffer_id_t /*buffer_id*/,
+                         SdkBackend::record_header_t** headers, std::size_t num_headers,
+                         void* data, std::uint64_t /*drop_count*/)
+    {
+        if(headers == nullptr)
+        {
+            return;
+        }
+
+        for(std::size_t i = 0; i < num_headers; i++)
+        {
+            if(headers[i] == nullptr)
+            {
+                continue;
+            }
+
+            Callback(static_cast<RecordT*>(headers[i]->payload), data);
+        }
+    }
+};
+
 }  // namespace rocprofsys::domains
