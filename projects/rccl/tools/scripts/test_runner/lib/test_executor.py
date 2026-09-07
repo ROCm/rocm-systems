@@ -73,6 +73,15 @@ def configure_coverage_build(install_flags, cmake_options, coverage_report):
         while flag in install_flags:
             install_flags.remove(flag)
 
+    # Drop any pre-existing (e.g. cached-config) coverage -D options so the
+    # authoritative values appended below are the only ones present, rather than
+    # leaning on CMake's last-wins to override a contradictory earlier token.
+    cmake_options = " ".join(
+        tok for tok in cmake_options.split()
+        if not tok.startswith("-DENABLE_CODE_COVERAGE=")
+        and not tok.startswith("-DENABLE_DEVICE_COVERAGE=")
+    )
+
     def append_cmake_option(option):
         nonlocal cmake_options
         cmake_options = f"{cmake_options} {option}".strip()
@@ -345,6 +354,12 @@ class TestExecutor:
 
         output_dir = getattr(self.args, "output", None)
         if output_dir:
+            # --output takes the workspace path verbatim, so --report-suffix (only
+            # consumed by the timestamped-name branch below) would be silently
+            # dropped. Warn rather than ignore it without a trace.
+            if getattr(self.args, "report_suffix", ""):
+                print("NOTE: --report-suffix is ignored when --output is given "
+                      "(the workspace directory is taken verbatim from --output)")
             self.workspace_dir = os.path.abspath(
                 os.path.expanduser(os.path.expandvars(output_dir))
             )
@@ -370,10 +385,16 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")
         else:
-            # Use default build directory matching install.sh convention
+            # Use default build directory matching install.sh convention.
+            # --coverage-report forces a Debug build (configure_coverage_build
+            # appends --debug), so mirror that here or the runner would look for
+            # librccl.so / device-*.elf under build/release while install.sh
+            # built them into build/debug.
             self.using_custom_lib = False
             install_flags = self.build_config.get("install_flags", [])
-            if "--debug" in install_flags or "--debug-fast" in install_flags:
+            coverage_forces_debug = getattr(self.args, "coverage_report", False)
+            if ("--debug" in install_flags or "--debug-fast" in install_flags
+                    or coverage_forces_debug):
                 build_type = "debug"
             else:
                 build_type = "release"

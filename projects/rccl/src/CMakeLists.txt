@@ -1108,20 +1108,23 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
+  # Host-only and host+device coverage instrument with the same two flags and
+  # differ only in whether the instrumentation is restricted to host code.
+  # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
+  # device compilation; host-only keeps -Xarch_host so device code is untouched.
   if(ENABLE_DEVICE_COVERAGE)
     message(STATUS "Device-side coverage is enabled (host + device instrumented).")
-    # ROCm 7.15+ forwards these flags to device compilation. Omitting
-    # -Xarch_host instruments both host and device code.
-    target_compile_options(rccl PRIVATE
-      -fvisibility=default
+    set(_coverage_instr_flags
       -fprofile-instr-generate
       -fcoverage-mapping)
   else()
-    target_compile_options(rccl PRIVATE
-      -fvisibility=default
+    set(_coverage_instr_flags
       "SHELL:-Xarch_host -fprofile-instr-generate"
       "SHELL:-Xarch_host -fcoverage-mapping")
   endif()
+  target_compile_options(rccl PRIVATE
+    -fvisibility=default
+    ${_coverage_instr_flags})
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate

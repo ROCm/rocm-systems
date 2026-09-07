@@ -211,6 +211,15 @@ if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]];
     exit 1
 fi
 
+# Coverage requires the Debug-only symbol visibility contract used by the tests.
+# Validate up front (before any build/release tree is removed below) so a bad
+# invocation like `./install.sh -c` without --debug fails fast instead of first
+# wiping the existing build tree.
+if [[ "${enable_code_coverage}" == true && "${build_release}" == true ]]; then
+    echo "ERROR: code coverage requires --debug. Please re-run with --debug."
+    exit 1
+fi
+
 # /etc/*-release files describe the system
 if [[ -e "/etc/os-release" ]]; then
     source /etc/os-release
@@ -359,12 +368,6 @@ fi
 # Address sanitizer
 if [[ "${build_address_sanitizer}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_ADDRESS_SANITIZER=ON"
-fi
-
-# Coverage requires the Debug-only symbol visibility contract used by the tests.
-if [[ "${enable_code_coverage}" == true && "${build_release}" == true ]]; then
-    echo "ERROR: code coverage requires --debug. Please re-run with --debug."
-    exit 1
 fi
 
 # Enable code coverage

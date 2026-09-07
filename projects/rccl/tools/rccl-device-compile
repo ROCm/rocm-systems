@@ -36,6 +36,14 @@ import sys
 import tempfile
 
 
+# amdclang++ emits '.no_dead_strip .L<local>' for __llvm_coverage_mapping /
+# __llvm_prf_nm under -fcoverage-mapping, but the AMDGPU ELF assembler rejects
+# them with "non-local symbol required". The directive is advisory (the data
+# sections already carry SHF_ALLOC/SHF_GNU_RETAIN where needed), so both the
+# per-kernel extractor and the dispatcher pass drop it via this shared pattern.
+_LOCAL_NO_DEAD_STRIP_RE = re.compile(r'\s*\.no_dead_strip\s+\.L')
+
+
 # ---------------------------------------------------------------------------
 # Assembly extraction (from extract_device_function.py)
 # ---------------------------------------------------------------------------
@@ -157,11 +165,10 @@ def extract_device_function(asm_lines):
         if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
             continue
         # Drop .no_dead_strip directives that reference a local-only symbol
-        # (.L*). amdclang++ emits these for __llvm_coverage_mapping under
-        # -fcoverage-mapping, but the AMDGPU ELF assembler rejects them with
-        # "non-local symbol required". The directive is advisory; the data
-        # section already carries SHF_ALLOC / SHF_GNU_RETAIN where needed.
-        if re.match(r'\s*\.no_dead_strip\s+\.L', stripped):
+        # (.L*); see _LOCAL_NO_DEAD_STRIP_RE for why the AMDGPU assembler needs
+        # this. The pattern is anchored with \s* so it matches the raw or the
+        # stripped line identically.
+        if _LOCAL_NO_DEAD_STRIP_RE.match(stripped):
             continue
         if not globl_inserted and mangled in line and '.type' in line and '@function' in line:
             out_lines.append(f'\t.globl\t{mangled}\n')
@@ -392,18 +399,8 @@ def _normalize_file_directives(lines):
 def _drop_local_no_dead_strip(lines):
     """Strip '.no_dead_strip .L<local>' directives the AMDGPU assembler rejects.
 
-    Mirrors the per-kernel extractor: amdclang++ emits these for
-    __llvm_coverage_mapping / __llvm_prf_nm under -fcoverage-mapping, but the
-    AMDGPU ELF assembler bails with 'non-local symbol required'. The directive
-    is advisory; coverage data sections already carry SHF_ALLOC/SHF_GNU_RETAIN
-    where needed."""
-    out = []
-    pat = re.compile(r'\s*\.no_dead_strip\s+\.L')
-    for ln in lines:
-        if pat.match(ln):
-            continue
-        out.append(ln)
-    return out
+    Mirrors the per-kernel extractor (both share _LOCAL_NO_DEAD_STRIP_RE)."""
+    return [ln for ln in lines if not _LOCAL_NO_DEAD_STRIP_RE.match(ln)]
 
 
 def patch_dispatcher(asm_lines, max_res):
@@ -569,6 +566,30 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
+def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
+    """Assemble the ld.lld argv for the per-arch device.elf link.
+
+    When a device profile-runtime archive is given (ENABLE_DEVICE_COVERAGE), it
+    is appended together with --plugin-opt=mcpu=<arch> so lld's LTO codegen of
+    the bitcode archive targets amdgcn-amd-amdhsa for this arch instead of the
+    host triple (otherwise lld errors out with "incompatible mach").
+
+    CMake EXISTS-checks the archive before passing --profile-rt
+    (cmake/DeviceLinker.cmake), so a missing archive here means the driver was
+    hand-invoked; fail loudly instead of falling through to a link that leaves
+    __llvm_profile_runtime / __start___llvm_prf_* unresolved as an opaque lld
+    dump.
+    """
+    link_cmd = [lld, '-shared', '-o', output, f'@{rsp_path}']
+    if profile_rt:
+        if not os.path.exists(profile_rt):
+            raise SystemExit(
+                f"ERROR: --profile-rt={profile_rt} not found; cannot resolve "
+                f"the device profile runtime for {arch}")
+        link_cmd.extend([f'--plugin-opt=mcpu={arch}', profile_rt])
+    return link_cmd
+
+
 def do_link(args, forwarded_flags):
     clang, lld = discover_tools(args.clang)
     arch = args.arch
@@ -618,16 +639,20 @@ def do_link(args, forwarded_flags):
             cleanup.insert(-1, rocshmem_obj)  # remove before rmdir
 
     try:
-        # Step 2: Compile dispatcher to assembly
-        # Use -gline-tables-only (not -g) so source-line info is present for
-        # llvm-cov mapping without the full-DWARF blow-up that would otherwise
-        # explode every per-arch dispatcher TU under -fcoverage-mapping.
+        # Step 2: Compile dispatcher to assembly.
+        # The debug-info level is inherited from DL_OPT_FLAGS in forwarded_flags
+        # (-g0 under ENABLE_DEVICE_COVERAGE, -g for a Debug build, none for
+        # release). We deliberately do NOT force -gline-tables-only here: LLVM
+        # source-based coverage lives in __llvm_covfun/__llvm_covmap (not DWARF),
+        # and the coverage build intentionally drops DWARF (-g0) to keep the
+        # per-arch device.elf under the ~2 GB unbundling limit
+        # (see cmake/DeviceLinker.cmake:121-133).
         disp_compile_cmd = [
             clang,
             '-x', 'hip',
             '--offload-device-only',
             f'--offload-arch={arch}',
-            '-gline-tables-only', '-w',
+            '-w',
         ] + forwarded_flags + [
             '-S', '-o', disp_asm, dispatcher,
         ]
@@ -680,31 +705,12 @@ def do_link(args, forwarded_flags):
             if rocshmem_obj:
                 f.write(rocshmem_obj + '\n')
 
-        link_cmd = [
-            lld, '-shared',
-            '-o', output,
-            f'@{rsp_path}',
-        ]
-        # When ENABLE_DEVICE_COVERAGE=ON, CMake passes --profile-rt=<archive>
-        # so lld can resolve __llvm_profile_runtime / __start___llvm_prf_*
-        # symbols from the per-arch libclang_rt.profile.a. lld pulls in only
-        # the members referenced by the instrumented TUs; host-only members
-        # of the archive (fopen, calloc, atexit, ...) stay unreferenced.
-        #
-        # The profile-rt archive ships as LLVM *bitcode* (not native amdgcn
-        # objects), so lld runs LTO codegen on pulled-in members. Without
-        # an explicit --plugin-opt=mcpu, that codegen defaults to the host
-        # triple and lld errors out with "incompatible mach". Pass mcpu so
-        # the LTO backend targets amdgcn-amd-amdhsa for this arch.
-        if profile_rt:
-            if not os.path.exists(profile_rt):
-                print(f"WARNING: --profile-rt={profile_rt} not found, skipping",
-                      file=sys.stderr)
-            else:
-                link_cmd.extend([
-                    f'--plugin-opt=mcpu={arch}',
-                    profile_rt,
-                ])
+        # When ENABLE_DEVICE_COVERAGE=ON, CMake passes --profile-rt=<archive> so
+        # lld can resolve __llvm_profile_runtime / __start___llvm_prf_* symbols
+        # from the per-arch libclang_rt.profile.a (see build_link_cmd for the
+        # --plugin-opt=mcpu rationale). lld pulls in only the members referenced
+        # by the instrumented TUs; host-only members stay unreferenced.
+        link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt)
         run(link_cmd, f"link device.elf for {arch}")
 
         if not keep_temps:

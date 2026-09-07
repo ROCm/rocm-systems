@@ -618,8 +618,10 @@ python test_runner.py --config adhoc_test_config.json --coverage-report --verbos
 ### Generate Coverage from Existing Build
 
 ```bash
-# Skip build, use existing profraw files
-python test_runner.py --config adhoc_test_config.json --no-build --skip-tests --coverage-report
+# Skip build/run, reuse an existing workspace's profraw files. --output must
+# point at the previous run's workspace or there are no profraws to report on.
+python test_runner.py --config adhoc_test_config.json --no-build --skip-tests \
+    --coverage-report --output /path/to/previous/workspace
 ```
 
 ### Custom Output Directory
@@ -1513,4 +1515,17 @@ When the same configuration can be specified in multiple places, the priority is
 5. **Built-in defaults** (lowest priority)
 
 **Example**: If `ROCM_PATH` is set as an environment variable, it overrides the `rocm_path` value in the JSON configuration file.
+
+## Unit Tests
+
+The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, and the `rccl-device-compile` link driver. They use only the Python standard library (`unittest`), so no extra dependencies are required.
+
+Run them from the `test_runner` directory. This `unittest discover` invocation is the canonical, supported entry point:
+
+```bash
+cd projects/rccl/tools/scripts/test_runner
+python3 -m unittest discover -s tests -t . -v
+```
+
+`pytest` also discovers them via `pytest.ini` (`pytest tests/`) if you prefer, but the `unittest discover` command above is the one contributors and CI should use so the two entry points never diverge.
 

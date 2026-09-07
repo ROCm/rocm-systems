@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,18 +9,20 @@ from pathlib import Path
 RCCL_ROOT = Path(__file__).resolve().parents[4]
 DEVICE_COVERAGE_MODULE = RCCL_ROOT / "cmake" / "DeviceCoverage.cmake"
 
+# The amdgcn profile-runtime candidates probed by DeviceCoverage.cmake, in the
+# same priority order as RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS.
+PRIMARY_RUNTIME_RELPATH = "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+FALLBACK_RUNTIME_RELPATH = "lib/linux/libclang_rt.profile-amdgcn.a"
 
+
+@unittest.skipUnless(shutil.which("cmake"), "cmake not available on PATH")
 class DeviceCoverageCMakeTest(unittest.TestCase):
-    def run_probe(self, create_runtime, reject_coverage=False):
+    def run_probe(self, create_runtime, reject_coverage=False,
+                  runtime_relpath=PRIMARY_RUNTIME_RELPATH):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             resource_dir = root / "resource"
-            runtime = (
-                resource_dir
-                / "lib"
-                / "amdgcn-amd-amdhsa"
-                / "libclang_rt.profile.a"
-            )
+            runtime = resource_dir / runtime_relpath
             runtime.parent.mkdir(parents=True)
             if create_runtime:
                 runtime.touch()
@@ -60,6 +63,16 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
 
     def test_probe_finds_selected_compiler_profile_runtime(self):
         runtime, result = self.run_probe(create_runtime=True)
+
+        self.assertEqual(result, f"{runtime}\n")
+
+    def test_probe_finds_linux_fallback_profile_runtime(self):
+        # Only the second candidate (lib/linux/...-amdgcn.a) exists, exercising
+        # the second loop iteration in rccl_find_device_profile_runtime.
+        runtime, result = self.run_probe(
+            create_runtime=True,
+            runtime_relpath=FALLBACK_RUNTIME_RELPATH,
+        )
 
         self.assertEqual(result, f"{runtime}\n")
 
