@@ -363,6 +363,18 @@ def test_list_torch_operators(
     assert df["Counter_Value"].notnull().all()
     assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
 
+    assert "Args" in df.columns, "Args column missing from consolidated.csv"
+    args = df["Args"].astype(str)
+    assert args.str.contains(r"self=float32\[5x20\]", regex=True).any(), (
+        "missing self=float32[5x20] in Args"
+    )
+    assert args.str.contains(r"mat1=float32\[5x10\]", regex=True).any(), (
+        "missing mat1=float32[5x10] in Args"
+    )
+    assert args.str.contains(r"mat2=float32\[10x20\]", regex=True).any(), (
+        "missing mat2=float32[10x20] in Args"
+    )
+
 
 @pytest.mark.torch_trace
 def test_torch_operator_filters(
