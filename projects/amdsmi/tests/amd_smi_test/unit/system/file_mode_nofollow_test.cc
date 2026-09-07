@@ -32,7 +32,7 @@ class FileModeNoFollowTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    for (const char* n : {"f", "decoy", "link", "nope"}) {
+    for (const char* n : {"f", "decoy", "link", "nope", "fifo"}) {
       ::unlink(path(n).c_str());
     }
     ::rmdir(dir_);
@@ -88,6 +88,14 @@ TEST_F(FileModeNoFollowTest, RefusesSymlinkAndLeavesTargetUnchanged) {
 
 TEST_F(FileModeNoFollowTest, NonexistentPathFails) {
   EXPECT_EQ(SetFileModeNoFollow(path("nope").c_str(), 0600), -1);
+}
+
+// The helper's contract is "existing regular file"; a non-regular path (here a
+// FIFO) must be refused rather than fchmod'd, and must not block the open.
+TEST_F(FileModeNoFollowTest, RefusesNonRegularFile) {
+  const std::string fifo = path("fifo");
+  ASSERT_EQ(::mkfifo(fifo.c_str(), 0644), 0) << std::strerror(errno);
+  EXPECT_EQ(SetFileModeNoFollow(fifo.c_str(), 0600), -1);
 }
 
 }  // namespace
