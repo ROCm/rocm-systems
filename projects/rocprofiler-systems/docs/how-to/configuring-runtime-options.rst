@@ -321,6 +321,13 @@ The equivalent command-line options are:
 SPM collection is mutually exclusive with the existing ROCm GPU counter paths in
 this beta. Do not combine ``ROCPROFSYS_ROCM_SPM_EVENTS`` with either
 ``ROCPROFSYS_ROCM_EVENTS`` or ``ROCPROFSYS_GPU_PERF_COUNTERS`` in the same run.
+In an SPM-enabled build, combining SPM with ``ROCPROFSYS_GPU_PERF_COUNTERS`` is
+rejected before either service starts. Combining SPM with ``ROCPROFSYS_ROCM_EVENTS``
+terminates the process only after SPM is configured and ROCprofiler-SDK reports the
+shared-context conflict. These fatal errors occur during tool initialization rather
+than producing a partial trace. When SPM support is not compiled in, an SPM request
+remains unavailable and does not prevent standalone
+``ROCPROFSYS_GPU_PERF_COUNTERS`` collection.
 
 In this beta, SPM Perfetto output is single-process. SPM counter-name metadata is
 kept in memory for the collecting process and is not yet written to the

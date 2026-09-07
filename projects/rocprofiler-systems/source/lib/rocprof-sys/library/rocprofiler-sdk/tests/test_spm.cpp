@@ -40,7 +40,6 @@ ensure_spm_settings_registered()
         }
     };
 
-    register_if_missing(rocprofsys::env_vars::ROCM_EVENTS, std::string{});
     register_if_missing(rocprofsys::env_vars::ROCM_SPM_EVENTS, std::string{});
     register_if_missing(rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL,
                         std::uint64_t{ 0 });
@@ -58,8 +57,6 @@ protected:
             std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS });
         m_previous_sample_interval = rocprofsys::config::get_setting_value<std::uint64_t>(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL });
-        m_previous_dispatch_events = rocprofsys::config::get_setting_value<std::string>(
-            std::string{ rocprofsys::env_vars::ROCM_EVENTS });
     }
 
     void TearDown() override
@@ -70,14 +67,10 @@ protected:
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
             m_previous_sample_interval.value_or(std::uint64_t{ 0 }));
-        rocprofsys::config::set_setting_value(
-            std::string{ rocprofsys::env_vars::ROCM_EVENTS },
-            m_previous_dispatch_events.value_or(std::string{}));
     }
 
     std::optional<std::string>   m_previous_events          = std::nullopt;
     std::optional<std::uint64_t> m_previous_sample_interval = std::nullopt;
-    std::optional<std::string>   m_previous_dispatch_events = std::nullopt;
 };
 
 configuration
@@ -193,34 +186,19 @@ TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 
     EXPECT_EQ(events, std::vector<std::string>{ "SQ_WAVES" });
     EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(), 0);
-    EXPECT_FALSE(is_config_valid(
-        configuration{ .counter_events = events, .sample_interval = 0 }, {}, {}));
+    EXPECT_FALSE(
+        is_config_valid(configuration{ .counter_events = events, .sample_interval = 0 }));
 }
 
 TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 {
-    EXPECT_TRUE(is_config_valid(configuration{}, {}, {}));
+    EXPECT_TRUE(is_config_valid(configuration{}));
 }
 
 TEST(spm_config_validation, accepts_sample_interval_without_events)
 {
-    EXPECT_TRUE(is_config_valid(
-        configuration{ .counter_events = {}, .sample_interval = k_valid_sample_interval },
-        {}, {}));
-}
-
-TEST(spm_config_validation, defers_rocm_dispatch_counter_conflict_to_sdk)
-{
-    const auto requested_config = make_valid_requested_spm_config();
-
-    EXPECT_TRUE(is_config_valid(requested_config, { "SQ_WAVES" }, {}));
-}
-
-TEST(spm_config_validation, rejects_gpu_perf_counter_conflict)
-{
-    const auto requested_config = make_valid_requested_spm_config();
-
-    EXPECT_FALSE(is_config_valid(requested_config, {}, "SQ_WAVES"));
+    EXPECT_TRUE(is_config_valid(configuration{
+        .counter_events = {}, .sample_interval = k_valid_sample_interval }));
 }
 
 TEST(spm_config_validation, rejects_zero_sample_interval)
@@ -228,14 +206,14 @@ TEST(spm_config_validation, rejects_zero_sample_interval)
     auto requested_config            = make_valid_requested_spm_config();
     requested_config.sample_interval = 0;
 
-    EXPECT_FALSE(is_config_valid(requested_config, {}, {}));
+    EXPECT_FALSE(is_config_valid(requested_config));
 }
 
 TEST(spm_config_validation, accepts_valid_requested_spm_configuration)
 {
     const auto requested_config = make_valid_requested_spm_config();
 
-    EXPECT_TRUE(is_config_valid(requested_config, {}, {}));
+    EXPECT_TRUE(is_config_valid(requested_config));
 }
 
 #if ROCPROFSYS_USE_SPM
@@ -256,23 +234,21 @@ TEST(spm_runtime_configuration, classifies_only_context_conflict_as_fatal)
 
 TEST(spm_runtime_configuration, accepts_when_spm_is_not_requested)
 {
-    EXPECT_TRUE(configure_runtime(nullptr, configuration{}, {}, {}));
+    EXPECT_TRUE(configure_runtime(nullptr, configuration{}));
 }
 
 TEST(spm_runtime_configuration, accepts_sample_interval_without_events)
 {
     EXPECT_TRUE(configure_runtime(
-        nullptr,
-        configuration{ .counter_events = {}, .sample_interval = k_valid_sample_interval },
-        {}, {}));
+        nullptr, configuration{ .counter_events  = {},
+                                .sample_interval = k_valid_sample_interval }));
 }
 
-// The SDK runtime is disabled in this test target, so a valid request without client
-// data exercises the non-fatal fallback after Systems validation.
-TEST(spm_runtime_configuration, defers_rocm_dispatch_counter_conflict_to_sdk)
+// The unit-test target disables the SDK runtime, so a valid request without client
+// data exercises the non-fatal unavailable-service fallback.
+TEST(spm_runtime_configuration, valid_request_without_client_data_is_non_fatal)
 {
-    EXPECT_TRUE(configure_runtime(nullptr, make_valid_requested_spm_config(),
-                                  { "SQ_WAVES" }, {}));
+    EXPECT_TRUE(configure_runtime(nullptr, make_valid_requested_spm_config()));
 }
 
 TEST(spm_runtime_configuration, rejects_zero_sample_interval)
@@ -280,13 +256,5 @@ TEST(spm_runtime_configuration, rejects_zero_sample_interval)
     auto requested_config            = make_valid_requested_spm_config();
     requested_config.sample_interval = 0;
 
-    EXPECT_FALSE(configure_runtime(nullptr, requested_config, {}, {}));
-}
-
-TEST(spm_runtime_configuration, rejects_zero_interval_with_dispatch_counters)
-{
-    auto requested_config            = make_valid_requested_spm_config();
-    requested_config.sample_interval = 0;
-
-    EXPECT_FALSE(configure_runtime(nullptr, requested_config, { "SQ_WAVES" }, {}));
+    EXPECT_FALSE(configure_runtime(nullptr, requested_config));
 }

@@ -31,6 +31,7 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
+#include "library/rocprofiler-sdk/service_compatibility.hpp"
 #include "library/rocprofiler-sdk/spm.hpp"
 #include "library/rocprofiler-sdk/spm_internal.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
@@ -73,11 +74,13 @@
 #include <nlohmann/json.hpp>
 
 #include "logger/debug.hpp"
+#include "logger/logger.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -2355,22 +2358,39 @@ is_valid(rocprofiler_context_id_t ctx)
     return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
 }
 
-#if ROCPROFSYS_USE_SPM
-bool
-handle_counter_context_conflict(rocprofiler_status_t status, const char* service,
-                                client_data* data)
+// ROCprofiler-SDK currently ignores nonzero tool-initializer returns
+// (ROCm/rocm-systems#11189). _Exit deliberately avoids running cleanup for a
+// partially initialized SDK; remove this workaround when the SDK propagates failure.
+[[noreturn]] void
+terminate_process_after_tool_initialization_failure()
+{
+    ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
+    try
+    {
+        ::rocprofsys::logger_t::instance().flush();
+    } catch(...)  // NOLINT(bugprone-empty-catch)
+    {
+        // A logging failure must not prevent the required process exit.
+    }
+    ::std::_Exit(EXIT_FAILURE);
+}
+
+#if(ROCPROFSYS_USE_SPM)
+void
+terminate_on_counter_context_conflict(rocprofiler_status_t status, const char* service,
+                                      client_data* data)
 {
     if(spm::detail::classify_runtime_configuration_status(status) !=
        spm::detail::RuntimeConfigurationResult::FatalError)
     {
-        return false;
+        return;
     }
 
     LOG_ERROR("Failed to configure {} on shared counter_ctx: {} ({}). SPM and "
               "ROCPROFSYS_ROCM_EVENTS cannot be enabled together",
               service, static_cast<int>(status), rocprofiler_get_status_string(status));
     spm::finalize_runtime(data);
-    return true;
+    terminate_process_after_tool_initialization_failure();
 }
 #endif
 
@@ -2509,10 +2529,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     sdk_backend_t::check_version_compatibility();
 
-    auto _callback_domains = tracing_config_t::get_callback_domains();
-    auto _buffered_domain  = tracing_config_t::get_buffered_domains();
-    auto _counter_events   = config::get_rocm_counter_events();
-    auto _version          = tracing_config_t::get_version();
+    auto       _callback_domains    = tracing_config_t::get_callback_domains();
+    auto       _buffered_domain     = tracing_config_t::get_buffered_domains();
+    auto       _counter_events      = config::get_rocm_counter_events();
+    const auto requested_spm_config = spm::configuration{
+        .counter_events  = spm::get_events(),
+        .sample_interval = spm::get_sample_interval(),
+    };
+#if(ROCPROFSYS_USE_SPM || ROCPROFILER_VERSION >= 600)
+    const auto gpu_perf_counter_events = get_gpu_perf_counters();
+#endif
+    auto _version = tracing_config_t::get_version();
     if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2524,9 +2551,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
 
-    if(!rocprofiler_sdk::spm::configure_runtime(_data))
+#if(ROCPROFSYS_USE_SPM)
+    // A build without SPM cannot activate both services, so its unavailable-SPM
+    // fallback must not reject an otherwise valid GPU device-counting request.
+    const auto spm_requested = requested_spm_config.requested();
+    if(service_compatibility::has_spm_gpu_perf_counter_conflict(spm_requested,
+                                                                gpu_perf_counter_events))
     {
-        return -1;
+        LOG_ERROR("Invalid SPM configuration: SPM counter collection is "
+                  "mutually exclusive with ROCPROFSYS_GPU_PERF_COUNTERS");
+        terminate_process_after_tool_initialization_failure();
+    }
+#endif
+
+    if(!rocprofiler_sdk::spm::configure_runtime(_data, requested_spm_config))
+    {
+        terminate_process_after_tool_initialization_failure();
     }
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
@@ -2775,11 +2815,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
         // --- Dispatch-mode kernel counters ---
         const auto context_status = _data->ensure_counter_context();
-#if ROCPROFSYS_USE_SPM
-        if(handle_counter_context_conflict(context_status,
-                                           "ROCPROFSYS_ROCM_EVENTS context", _data))
+#if(ROCPROFSYS_USE_SPM)
+        if(spm_requested)
         {
-            return -1;
+            terminate_on_counter_context_conflict(
+                context_status, "ROCPROFSYS_ROCM_EVENTS context", _data);
         }
 #endif
         ROCPROFILER_CALL(context_status);
@@ -2792,11 +2832,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             const auto tracing_status = rocprofiler_configure_callback_tracing_service(
                 _data->counter_ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                 operations.data(), operations.size(), tool_tracing_callback, _data);
-#if ROCPROFSYS_USE_SPM
-            if(handle_counter_context_conflict(tracing_status,
-                                               "ROCPROFSYS_ROCM_EVENTS tracing", _data))
+#if(ROCPROFSYS_USE_SPM)
+            if(spm_requested)
             {
-                return -1;
+                terminate_on_counter_context_conflict(
+                    tracing_status, "ROCPROFSYS_ROCM_EVENTS tracing", _data);
             }
 #endif
             ROCPROFILER_CALL(tracing_status);
@@ -2805,11 +2845,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 rocprofiler_configure_callback_dispatch_counting_service(
                     _data->counter_ctx, dispatch_counting_service_callback, _data,
                     counter_record_callback, _data);
-#if ROCPROFSYS_USE_SPM
-            if(handle_counter_context_conflict(
-                   counting_status, "ROCPROFSYS_ROCM_EVENTS dispatch counting", _data))
+#if(ROCPROFSYS_USE_SPM)
+            if(spm_requested)
             {
-                return -1;
+                terminate_on_counter_context_conflict(
+                    counting_status, "ROCPROFSYS_ROCM_EVENTS dispatch counting", _data);
             }
 #endif
             ROCPROFILER_CALL(counting_status);
@@ -2817,8 +2857,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
 #if ROCPROFILER_VERSION >= 600
-    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
-    if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
+    if(!gpu_perf_counter_events.empty() && !_data->gpu_agents.empty())
     {
         pmc::register_gpu_perf_counter_source(
             get_agent_manager_instance().get_agents_by_type(agent_type::GPU));

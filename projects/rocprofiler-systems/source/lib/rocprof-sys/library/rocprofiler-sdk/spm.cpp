@@ -14,7 +14,6 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <iterator>
@@ -105,13 +104,10 @@ detail::classify_runtime_configuration_status(rocprofiler_status_t status) noexc
 #endif
 
 bool
-is_config_valid(const configuration& requested_config,
-                const std::vector<std::string>& /*dispatch_counter_events*/,
-                const std::string& gpu_perf_counter_events)
+is_config_valid(const configuration& requested_config)
 {
     // Backstop for direct library load paths. Tool initialization must reject
-    // SPM requests when the required interval or mutual-exclusion constraints
-    // are not satisfied.
+    // SPM requests when the required interval is not provided.
     if(!requested_config.requested())
     {
         if(requested_config.sample_interval > 0)
@@ -122,17 +118,6 @@ is_config_valid(const configuration& requested_config,
                         "to request SPM collection.");
         }
         return true;
-    }
-
-    // ROCPROFSYS_GPU_PERF_COUNTERS is kept as a raw setting string here. Treat
-    // any non-whitespace value as a requested device-counting collection.
-    if(std::ranges::any_of(gpu_perf_counter_events, [](unsigned char character) {
-           return std::isspace(character) == 0;
-       }))
-    {
-        LOG_ERROR("Invalid SPM configuration: SPM counter collection is mutually "
-                  "exclusive with ROCPROFSYS_GPU_PERF_COUNTERS");
-        return false;
     }
 
     if(requested_config.sample_interval == 0)
@@ -1219,35 +1204,15 @@ configure_validated_runtime(client_data* data, const configuration& requested_co
 }  // namespace
 
 bool
-configure_runtime(client_data* data, const configuration& requested_config,
-                  const std::vector<std::string>& dispatch_counter_events,
-                  const std::string&              gpu_perf_counter_events)
+configure_runtime(client_data* data, const configuration& requested_config)
 {
-    if(!is_config_valid(requested_config, dispatch_counter_events,
-                        gpu_perf_counter_events))
+    if(!is_config_valid(requested_config))
     {
         return false;
     }
-    return configure_validated_runtime(data, requested_config);
-}
-
-bool
-configure_runtime(client_data* data)
-{
-    const auto requested_config = configuration{
-        .counter_events  = get_events(),
-        .sample_interval = get_sample_interval(),
-    };
-    const auto dispatch_counter_events = config::get_rocm_counter_events();
-    const auto gpu_perf_counter_events = config::get_gpu_perf_counters();
-
-    if(!is_config_valid(requested_config, dispatch_counter_events,
-                        gpu_perf_counter_events))
-    {
-        return false;
-    }
-
-    if(requested_config.requested() && config::get_use_rocpd())
+    // A null data pointer is the no-runtime unit-test seam; do not consult global
+    // output settings when no runtime setup can occur.
+    if(data != nullptr && requested_config.requested() && config::get_use_rocpd())
     {
         LOG_WARNING("SPM samples are not written to the RocPD database in this "
                     "release; use Perfetto output for SPM results");

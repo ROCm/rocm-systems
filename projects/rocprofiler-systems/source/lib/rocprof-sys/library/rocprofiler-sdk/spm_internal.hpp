@@ -39,23 +39,17 @@ get_sample_interval();
 /// Validate SPM collection configuration constraints.
 ///
 /// Returns true when SPM is not requested because there is no SPM configuration to
-/// reject. If SPM is requested, validates the required sample interval settings and
-/// mutual exclusion with ROCPROFSYS_GPU_PERF_COUNTERS. Compatibility with
-/// ROCPROFSYS_ROCM_EVENTS is determined by rocprofiler-sdk on the shared context.
+/// reject. If SPM is requested, validates the required sample interval settings.
 [[nodiscard]] bool
-is_config_valid(const configuration&            requested_config,
-                const std::vector<std::string>& dispatch_counter_events,
-                const std::string&              gpu_perf_counter_events);
+is_config_valid(const configuration& requested_config);
 
-/// Inject configuration inputs for validation-focused unit tests.
+/// Validate the supplied SPM configuration and configure the SDK SPM runtime service.
 ///
 /// Returns false for invalid user configuration or an SDK context conflict. Other
 /// SDK/hardware/runtime SPM setup failures warn and allow tool initialization to
 /// continue without SPM.
 [[nodiscard]] bool
-configure_runtime(client_data* data, const configuration& requested_config,
-                  const std::vector<std::string>& dispatch_counter_events,
-                  const std::string&              gpu_perf_counter_events);
+configure_runtime(client_data* data, const configuration& requested_config);
 
 namespace detail
 {
