@@ -12,6 +12,8 @@
 #include "utility.hpp"
 
 #include <chrono>
+#include <fstream>
+#include <ios>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
