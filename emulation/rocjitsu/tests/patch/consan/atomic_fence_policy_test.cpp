@@ -204,7 +204,8 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
                                         std::vector<ConSanOrdinaryMemorySite> ordinary_sites = {},
                                         std::vector<ConSanMoiFenceCandidate> fences = {},
                                         const AtomicPolicyTarget &target = {},
-                                        std::vector<uint64_t> unowned_offsets = {}) {
+                                        std::vector<uint64_t> unowned_offsets = {},
+                                        std::vector<ConSanProgramSite> access_sites = {}) {
   ProgramInventoryBuilder builder(atomic_policy_bytes());
   builder.set_code_object_facts(true, 0, target.arch, target.target);
   ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
@@ -222,6 +223,10 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     event_kernel.descriptor_file_offset = 384u + 64u * builder.kernels().size();
     event_kernel.entry_text_offset = 0;
     builder.add_kernel(std::move(event_kernel));
+  }
+  for (ConSanProgramSite &site : access_sites) {
+    site.container = builder.kernels().back().id;
+    builder.add_access_site(std::move(site));
   }
   for (ConSanAtomicSite &site : atomic_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
@@ -241,6 +246,7 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
         site.cache_operation == ConSanCacheOperation::Acquire ? "global_inv" : "global_wb";
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   }
+  builder.publish_decoded_accesses(atomic_policy_bytes());
   const std::span<const ConSanProgramSite> program_sites = builder.view().program_sites();
   for (ConSanSyncEvent &event : events) {
     if (event.source_site.valid())
@@ -285,6 +291,21 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
   return builder.view();
 }
 
+ConSanProgramSite make_lds_access(ConSanLdsAccessKind kind, uint64_t offset = 96) {
+  ConSanProgramSite site;
+  site.origin = ConSanAccessOrigin::NativeLds;
+  site.kind = kind;
+  site.physical_id.original_text_offset = offset;
+  site.decoded_site().text_offset = offset;
+  site.decoded_site().file_offset = offset;
+  site.decoded_site().size = 8;
+  site.decoded_width_bits = 32;
+  site.operands.address_vgpr = 3;
+  site.operands.data_vgpr = 4;
+  site.decoded_site().mnemonic = kind == ConSanLdsAccessKind::Read ? "ds_load_b32" : "ds_store_b32";
+  return site;
+}
+
 ProgramInventory one_atomic_inventory(
     const AtomicPolicyTarget &target = {},
     ConSanSyncRmwOutcome outcome = ConSanSyncRmwOutcome::ReturnsOldValue,
@@ -310,10 +331,17 @@ ordinary_fence_inventory(ConSanFenceAssociation association = ConSanFenceAssocia
 }
 
 ConSanAtomicFencePolicyRequest atomic_request(ConSanCapabilityEngine engine) {
+  static constexpr std::array kSampledWindows = {
+      ConSanSampledAccessWindowAvailability{
+          .owner = ConSanProgramContainerId{},
+          .read = true,
+          .write = true,
+      },
+  };
   return {
       .engine = engine,
       .tracking_enabled = true,
-      .sampled_access_window_available = true,
+      .sampled_access_windows = kSampledWindows,
       .container_filter = {},
       .kernel_name_allowlist = {},
   };
@@ -409,7 +437,7 @@ TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents)
            [](auto &request) { request.container_filter = "different"; },
            ConSanAtomicPolicyReason::ContainerFilterExcluded},
           {"sampled-window", ConSanCapabilityEngine::Sampled,
-           [](auto &request) { request.sampled_access_window_available = false; },
+           [](auto &request) { request.sampled_access_windows = {}; },
            ConSanAtomicPolicyReason::MissingSampledAccessWindow},
       };
   for (const auto &[name, engine, mutate, expected] : cases) {
@@ -425,6 +453,85 @@ TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents)
     EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, expected);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
+}
+
+TEST(ConSanAtomicFencePolicy, SampledExcludesReleaseWithoutOwnerLocalWriteWindow) {
+  static constexpr std::array kReadOnlyWindows = {
+      ConSanSampledAccessWindowAvailability{
+          .owner = ConSanProgramContainerId{},
+          .read = true,
+          .write = false,
+      },
+  };
+  ConSanAtomicFencePolicyRequest request = atomic_request(ConSanCapabilityEngine::Sampled);
+  request.sampled_access_windows = kReadOnlyWindows;
+
+  const ConSanAtomicFencePolicyResult policy =
+      plan_consan_atomic_fence_observation(ordinary_fence_inventory(), request);
+
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
+            ConSanAtomicPolicyReason::MissingSampledAccessWindow);
+  ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
+  EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(policy.plan.fence_site_decisions.front().reason,
+            ConSanFencePolicyReason::CommunicationNotApplicable);
+  EXPECT_TRUE(policy.plan.probe_intents.empty());
+}
+
+TEST(ConSanAtomicFencePolicy, AssembledSampledPolicyDerivesDirectionalOwnerLocalWindows) {
+  const auto assemble = [](ConSanLdsAccessKind access_kind) {
+    std::vector events{make_ordinary_store_event(), make_fence_event()};
+    std::vector sequences{make_atomic_sequence(events.front())};
+    std::vector fences{make_fence_candidate(events[0], events[1], sequences[0])};
+    ProgramInventoryBuilder builder(build_atomic_inventory(
+        std::move(events), std::move(sequences), {}, {make_global_store_site({})},
+        std::move(fences), {}, {}, {make_lds_access(access_kind)}));
+    for (ConSanProgramSite &site : builder.program_sites()) {
+      site.execution_owners.clear();
+      site.execution_owners.push_back({.kernel = builder.kernels().front().id});
+    }
+    return assemble_consan_observation_product(
+        builder.view(), {.engine = ConSanCapabilityEngine::Sampled,
+                         .native_lds_enabled = true,
+                         .group_flat_enabled = true,
+                         .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
+                         .barrier_tracking_enabled = true,
+                         .include_atomic_fence_policy = true,
+                         .atomic_fence_tracking_enabled = true,
+                         .container_filter = {},
+                         .kernel_name_allowlist = {},
+                         .reserved_for_synchronization = {}});
+  };
+
+  const ConSanObservationProduct read_only = assemble(ConSanLdsAccessKind::Read);
+  ASSERT_TRUE(read_only.valid());
+  ASSERT_EQ(read_only.plan().site_decisions.size(), 1u);
+  EXPECT_EQ(read_only.plan().site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  ASSERT_EQ(read_only.plan().atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(read_only.plan().atomic_site_decisions.front().kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(read_only.plan().atomic_site_decisions.front().reason,
+            ConSanAtomicPolicyReason::MissingSampledAccessWindow);
+  ASSERT_EQ(read_only.plan().fence_site_decisions.size(), 1u);
+  EXPECT_EQ(read_only.plan().fence_site_decisions.front().kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(read_only.plan().fence_site_decisions.front().reason,
+            ConSanFencePolicyReason::CommunicationNotApplicable);
+  EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ConSanProbeIntentKind::SampledAccess,
+                               &ConSanProbeIntent::kind),
+            1u);
+  EXPECT_EQ(read_only.plan().probe_intents.size(), 1u);
+
+  const ConSanObservationProduct write = assemble(ConSanLdsAccessKind::Write);
+  ASSERT_TRUE(write.valid());
+  ASSERT_EQ(write.plan().atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(write.plan().atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  ASSERT_EQ(write.plan().fence_site_decisions.size(), 1u);
+  EXPECT_EQ(write.plan().fence_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(write.plan().probe_intents.size(), 3u);
 }
 
 TEST(ConSanAtomicFencePolicy, GlobalAtomicContractTransportsAcrossEverySupportedArchitecture) {

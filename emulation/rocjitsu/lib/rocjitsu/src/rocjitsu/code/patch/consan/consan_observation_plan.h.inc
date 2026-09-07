@@ -282,6 +282,8 @@ enum class ConSanFencePolicyReason : uint8_t {
   MissingExecutionOwner,
   /// Shared analysis rejected the addressed communication association.
   AssociationUnavailable,
+  /// Sampled excluded the associated communication as causally irrelevant.
+  CommunicationNotApplicable,
   /// The associated communication identity no longer names a unique event.
   MissingCommunicationEvent,
   /// The target/engine capability contract excludes the addressed fence.
@@ -301,6 +303,7 @@ inline constexpr auto kConSanFencePolicyReasons = [] {
       consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
       consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
       consan_enum(E::AssociationUnavailable, "association-unavailable"),
+      consan_enum(E::CommunicationNotApplicable, "communication-not-applicable"),
       consan_enum(E::MissingCommunicationEvent, "missing-communication-event"),
       consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
       consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
@@ -662,17 +665,29 @@ struct ConSanBarrierPolicyResult {
 /// Immutable request parameters consumed by pure atomic/fence policy.
 ///
 /// `tracking_enabled` selects the atomic-ordering feature as a whole.
-/// `sampled_access_window_available` is a semantic dependency of Sampled: its
-/// ordering metadata has no consumer unless access policy admitted at least one
-/// selected LDS window. Other engines ignore that field. The request contains
-/// no report address, register assignment, capacity, or mutable result state.
+/// `sampled_access_windows` is a semantic dependency of Sampled: an acquire
+/// needs an owner-local read window and a release needs an owner-local write
+/// window to consume ordering metadata. Other engines ignore that field. The
+/// request contains no report address, register assignment, capacity, or
+/// mutable result state.
+struct ConSanSampledAccessWindowAvailability {
+  /// Kernel that can execute the admitted access window.
+  ConSanProgramContainerId owner;
+  /// At least one selected read window exists for this owner.
+  bool read = false;
+  /// At least one selected write window exists for this owner.
+  bool write = false;
+
+  bool operator==(const ConSanSampledAccessWindowAvailability &) const = default;
+};
+
 struct ConSanAtomicFencePolicyRequest {
   /// Engine whose ordered-communication contract should be evaluated.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Whether atomic and associated-fence tracking belongs to this request.
   bool tracking_enabled = false;
-  /// Whether Sampled has an access window able to consume ordering metadata.
-  bool sampled_access_window_available = true;
+  /// Directional, owner-local Sampled windows able to consume ordering metadata.
+  std::span<const ConSanSampledAccessWindowAvailability> sampled_access_windows;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
   /// Production exact kernel-entry allowlist.

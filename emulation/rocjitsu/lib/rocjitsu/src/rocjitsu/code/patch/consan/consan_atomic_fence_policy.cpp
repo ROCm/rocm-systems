@@ -49,6 +49,30 @@ namespace {
          });
 }
 
+[[nodiscard]] bool sampled_access_window_available(std::span<const ConSanExecutionOwner> owners,
+                                                   ConSanSyncMemoryRole role,
+                                                   const ConSanAtomicFencePolicyRequest &request) {
+  return std::ranges::any_of(owners, [&](const ConSanExecutionOwner &owner) {
+    const auto availability = std::ranges::find(request.sampled_access_windows, owner.kernel,
+                                                &ConSanSampledAccessWindowAvailability::owner);
+    if (availability == request.sampled_access_windows.end())
+      return false;
+    switch (role) {
+    case ConSanSyncMemoryRole::Release:
+      return availability->write;
+    case ConSanSyncMemoryRole::Acquire:
+      return availability->read;
+    case ConSanSyncMemoryRole::AcquireRelease:
+      return availability->read || availability->write;
+    case ConSanSyncMemoryRole::Unknown:
+    case ConSanSyncMemoryRole::None:
+    case ConSanSyncMemoryRole::SequentiallyConsistent:
+      return false;
+    }
+    return false;
+  });
+}
+
 [[nodiscard]] SemanticSiteId event_semantic_id(const ProgramInventory &inventory,
                                                const ConSanSyncEvent &event) {
   if (event.semantic_id.valid())
@@ -336,8 +360,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
     } else if (synchronization.execution_owners(event).empty()) {
       reason = ConSanAtomicPolicyReason::MissingExecutionOwner;
-    } else if (request.engine == ConSanCapabilityEngine::Sampled &&
-               !request.sampled_access_window_available) {
+    } else if (request.engine == ConSanCapabilityEngine::Sampled && sequence != nullptr &&
+               !sampled_access_window_available(synchronization.execution_owners(event),
+                                                sequence->memory_role, request)) {
       reason = ConSanAtomicPolicyReason::MissingSampledAccessWindow;
     } else if (!form || (capability != ConSanCapabilityDisposition::Supported &&
                          capability != ConSanCapabilityDisposition::AssociatedOnly)) {
@@ -463,43 +488,49 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       const ConSanSyncEvent *communication =
           fence.communication_event ? synchronization.find_event(*fence.communication_event)
                                     : nullptr;
-      const auto atomic_decision =
+      const auto communication_decision =
           communication == nullptr
               ? result.plan.atomic_site_decisions.end()
-              : std::ranges::find_if(
-                    result.plan.atomic_site_decisions,
-                    [&](const ConSanAtomicSiteDecision &candidate) {
-                      return candidate.semantic_site.physical ==
-                                 event_semantic_id(inventory, *communication).physical &&
-                             candidate.kind == ConSanSiteDecisionKind::Admitted && association &&
-                             find_intent(result.plan, candidate.semantic_site, *association,
-                                         ConSanProbeIntentKind::AtomicAddressCapture);
-                    });
+              : std::ranges::find_if(result.plan.atomic_site_decisions,
+                                     [&](const ConSanAtomicSiteDecision &candidate) {
+                                       return candidate.semantic_site.physical ==
+                                              event_semantic_id(inventory, *communication).physical;
+                                     });
+      const bool communication_admitted =
+          communication_decision != result.plan.atomic_site_decisions.end() &&
+          communication_decision->kind == ConSanSiteDecisionKind::Admitted && association &&
+          find_intent(result.plan, communication_decision->semantic_site, *association,
+                      ConSanProbeIntentKind::AtomicAddressCapture);
       if (fence_event != nullptr && communication != nullptr &&
           (synchronization.execution_owners(*fence_event).empty() ||
            synchronization.execution_owners(*communication).empty())) {
         decision.reason = ConSanFencePolicyReason::MissingExecutionOwner;
+      } else if (communication_decision != result.plan.atomic_site_decisions.end() &&
+                 communication_decision->kind == ConSanSiteDecisionKind::NotApplicable &&
+                 communication_decision->reason ==
+                     ConSanAtomicPolicyReason::MissingSampledAccessWindow) {
+        decision.reason = ConSanFencePolicyReason::CommunicationNotApplicable;
       } else if (fence_event == nullptr || communication == nullptr || !association ||
-                 atomic_decision == result.plan.atomic_site_decisions.end()) {
+                 !communication_admitted) {
         decision.kind = ConSanSiteDecisionKind::Unsupported;
         decision.reason = ConSanFencePolicyReason::MissingCommunicationEvent;
       } else {
         decision.kind = ConSanSiteDecisionKind::Admitted;
         decision.reason = ConSanFencePolicyReason::None;
         const ConSanProbeIntentId capture =
-            *find_intent(result.plan, atomic_decision->semantic_site, *association,
+            *find_intent(result.plan, communication_decision->semantic_site, *association,
                          ConSanProbeIntentKind::AtomicAddressCapture);
         if (vocabulary->fence != ConSanProbeIntentKind::Count) {
           add_covered_site(result.plan, capture, fence_id);
           add_intent(result.plan, fence_event->source_site, fence_id.physical,
-                     {atomic_decision->semantic_site, fence_id}, vocabulary->fence,
+                     {communication_decision->semantic_site, fence_id}, vocabulary->fence,
                      ConSanProbePosition::After, *association,
                      ConSanDynamicResultRequirement::None);
         } else {
           std::vector<ConSanProbeIntentId> associated_intents;
           for (const ConSanProbeIntent &intent : result.plan.probe_intents) {
             if (intent.synchronization_association == association &&
-                intent_covers(intent, atomic_decision->semantic_site)) {
+                intent_covers(intent, communication_decision->semantic_site)) {
               associated_intents.push_back(intent.id);
             }
           }
