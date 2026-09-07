@@ -2657,6 +2657,16 @@ class ConSanValidationTest(unittest.TestCase):
             900,
         )
         self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-explicit"]["run_timeout_seconds"],
+            960,
+        )
+        self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-explicit"][
+                "tensile_inner_timeout_seconds"
+            ],
+            900,
+        )
+        self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             (
                 "hip-moi-build-gfx1250-tests/tests/"

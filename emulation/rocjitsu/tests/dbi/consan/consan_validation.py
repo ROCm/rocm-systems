@@ -1971,6 +1971,10 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "tensile_inner_timeout_seconds": 900,
             "run_timeout_seconds": 960,
         },
+        "tensile-sk-mxf4gemm-explicit": {
+            "tensile_inner_timeout_seconds": 900,
+            "run_timeout_seconds": 960,
+        },
         # The unchanged full 151,936-logit Qwen baseline takes about 65
         # seconds through RocJitsu. Complete Sampled instrumentation has been
         # observed to finish in about 129 seconds but can exceed 180 seconds
