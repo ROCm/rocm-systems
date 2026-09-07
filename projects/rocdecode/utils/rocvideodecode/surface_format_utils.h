@@ -24,11 +24,12 @@ THE SOFTWARE.
 
 #include <stdint.h>
 
-// Host-only mirror of the chroma-format -> surface-format mapping in
-// RocVideoDecoder::HandleVideoSequence() / ReconfigureDecoder()
-// (projects/rocdecode/utils/rocvideodecode/roc_video_dec.cpp). It exists so the
-// selection logic can be unit-tested without the HIP toolchain or a GPU. The
-// enum values below are kept in sync with api/rocdecode/rocdecode.h.
+// The production build pulls the chroma/surface enums (and HIP) from rocdecode.h.
+// Unit tests define ROCDECODE_SURFACE_FORMAT_UTILS_STANDALONE to compile this
+// header host-only, using the fallback enum definitions below (kept in sync with
+// api/rocdecode/rocdecode.h) so the *same* SelectSurfaceFormat used in production
+// can be exercised without the HIP toolchain or a GPU.
+#ifdef ROCDECODE_SURFACE_FORMAT_UTILS_STANDALONE
 typedef enum rocDecVideoChromaFormat_enum {
     rocDecVideoChromaFormat_Monochrome = 0,
     rocDecVideoChromaFormat_420,
@@ -47,11 +48,13 @@ typedef enum rocDecVideoSurfaceFormat_enum {
     rocDecVideoSurfaceFormat_YUV422_16Bit = 7,
     rocDecVideoSurfaceFormat_Native = 8
 } rocDecVideoSurfaceFormat;
+#else
+#include "rocdecode/rocdecode.h"
+#endif
 
-// Returns the output surface format for a chroma format + bit depth, mirroring
-// the shipped selection chain. Monochrome selects the same format as 4:2:0
-// (NV12/P016). Unrecognized chroma formats return rocDecVideoSurfaceFormat_Native
-// (the "decoder chooses" sentinel).
+// Select the output surface format for a chroma format + bit depth. Monochrome
+// selects the same format as 4:2:0 (NV12/P016). Unrecognized chroma formats
+// return rocDecVideoSurfaceFormat_Native (the "decoder chooses" sentinel).
 inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chroma_format, uint8_t bitdepth_minus_8) {
     switch (chroma_format) {
     case rocDecVideoChromaFormat_420:
@@ -65,6 +68,6 @@ inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chro
         return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV422_16Bit
                                 : rocDecVideoSurfaceFormat_YUV422;
     default:
-        return rocDecVideoSurfaceFormat_Native;  // unrecognized (and, pre-fix, Monochrome)
+        return rocDecVideoSurfaceFormat_Native;  // unrecognized chroma format
     }
 }
