@@ -261,7 +261,7 @@ bool Event::awaitCompletion() {
 }
 
 // ================================================================================================
-bool Event::notifyCmdQueue(bool cpu_wait) {
+bool Event::notifyCmdQueue(bool cpu_wait, bool cross_queue) {
   HostQueue* queue = command().queue();
   if (AMD_DIRECT_DISPATCH) {
     ScopedLock l(notify_lock_);
@@ -276,6 +276,9 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
         notified_.clear();
         return false;
       }
+      // This marker exists because a command on another queue named this event, so its
+      // completion is a cross queue dependency by construction.
+      command->setCrossStreamProducer(cross_queue);
       command->enqueue();
       // Save notification, associated with the current event
       notify_event_ = command;
@@ -380,7 +383,7 @@ void Command::enqueue() {
           return;
         }
       } else {
-        event->notifyCmdQueue(!kCpuWait);
+        event->notifyCmdQueue(!kCpuWait, event->command().queue() != queue_);
       }
     }
 

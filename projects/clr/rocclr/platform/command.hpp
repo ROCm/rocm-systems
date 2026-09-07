@@ -204,7 +204,7 @@ class Event : public RuntimeObject {
 
   /*! \brief Notifies current command queue about execution status
    */
-  bool notifyCmdQueue(bool cpu_wait = false);
+  bool notifyCmdQueue(bool cpu_wait = false, bool cross_queue = false);
 
   //! RTTI internal implementation
   virtual ObjectType objectType() const { return ObjectTypeEvent; }
