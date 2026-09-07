@@ -5,10 +5,12 @@
  */
 
 #include <algorithm>
+#include <cmath>
 
 #include <hip_test_common.hh>
 
 #include <hip/hip_fp4.h>
+#include <hip/hip_fp16.h>
 
 template <typename Lambda, typename... Type>
 static __global__ void lambda_kernel_launch(Lambda l, Type... args) {
@@ -413,4 +415,44 @@ HIP_TEST_CASE(Unit_ocp_fp4_from_double_full_range_device) {
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - E2M1 signed zeros must decode to the matching fp16 signed zero. Encoding
+ * 0x8 is negative zero and must give fp16 0x8000, not a normal value.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp4_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp4_to_halfraw_signed_zero_host) {
+  SECTION("scalar") {
+    const __half_raw pos =
+        __hip_cvt_fp4_to_halfraw(static_cast<__hip_fp4_storage_t>(0x0), __HIP_E2M1);
+    const __half_raw neg =
+        __hip_cvt_fp4_to_halfraw(static_cast<__hip_fp4_storage_t>(0x8), __HIP_E2M1);
+
+    INFO("E2M1 0x0 -> fp16 bits 0x" << std::hex << pos.x);
+    REQUIRE(pos.x == 0x0000);
+    REQUIRE(__half2float(pos) == 0.0f);
+    REQUIRE(!std::signbit(__half2float(pos)));
+
+    INFO("E2M1 0x8 -> fp16 bits 0x" << std::hex << neg.x);
+    REQUIRE(neg.x == 0x8000);
+    REQUIRE(__half2float(neg) == 0.0f);
+    REQUIRE(std::signbit(__half2float(neg)));
+  }
+
+  SECTION("packed pair") {
+    // Low nibble 0x8 is -0.0, high nibble 0x0 is +0.0.
+    const __half2_raw pair =
+        __hip_cvt_fp4x2_to_halfraw2(static_cast<__hip_fp4x2_storage_t>(0x08), __HIP_E2M1);
+    INFO("E2M1 pair 0x08 -> fp16 bits 0x" << std::hex << pair.x.x << ", 0x" << pair.y.x);
+    REQUIRE(pair.x.x == 0x8000);
+    REQUIRE(pair.y.x == 0x0000);
+  }
 }
