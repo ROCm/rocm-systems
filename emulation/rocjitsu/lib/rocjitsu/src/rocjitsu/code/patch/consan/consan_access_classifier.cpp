@@ -260,14 +260,16 @@ native_data_register_count(const ConSanProgramSite &access,
     const uint32_t per_range = two_address->element_width_bits / 32u;
     if (!access.operands.data_vgpr || !access.operands.second_data_vgpr)
       return Reason::MissingDataOperand;
-    return static_cast<uint32_t>(*access.operands.data_vgpr) + per_range <= 256u &&
-                   static_cast<uint32_t>(*access.operands.second_data_vgpr) + per_range <= 256u
+    const uint32_t limit = target.has_selectable_vgpr_bank ? 1024u : 256u;
+    return static_cast<uint32_t>(*access.operands.data_vgpr) + per_range <= limit &&
+                   static_cast<uint32_t>(*access.operands.second_data_vgpr) + per_range <= limit
                ? Reason::None
                : Reason::OperandRegisterRange;
   }
   if (!access.operands.data_vgpr)
     return Reason::MissingDataOperand;
-  return static_cast<uint32_t>(*access.operands.data_vgpr) + data_register_count <= 256u
+  const uint32_t limit = target.has_selectable_vgpr_bank ? 1024u : 256u;
+  return static_cast<uint32_t>(*access.operands.data_vgpr) + data_register_count <= limit
              ? Reason::None
              : Reason::OperandRegisterRange;
 }

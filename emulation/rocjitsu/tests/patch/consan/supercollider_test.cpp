@@ -3441,6 +3441,39 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250StoreAcrossVgprBankBoundary) {
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB128Vds, {.addr = 2, .data0 = 254});
+  // Select physical bank one for the Src1-role store tuple. Its four dwords
+  // consequently span physical v510:v513 and cross into bank two.
+  constexpr uint32_t kSelectGuestSourceBank = 0xBF860004u;
+  std::vector<uint32_t> text_words = {kSelectGuestSourceBank, store[0], store[1]};
+  text_words.resize(56u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_vds_cross_bank_store");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 4;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  const auto patch =
+      std::ranges::find(result.patches, ConSanPatchKind::LdsStoreCheckTrap, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  const std::vector<uint32_t> body = emitted_patch_words(result, *patch);
+  // Two comparisons consume v510:v511 from bank one, and two consume
+  // v512:v513 from bank two. Each comparison returns to bank zero.
+  EXPECT_EQ(std::ranges::count(body, 0xBF860001u), 2u);
+  EXPECT_EQ(std::ranges::count(body, 0xBF860100u), 2u);
+  EXPECT_EQ(std::ranges::count(body, 0xBF860002u), 2u);
+  EXPECT_EQ(std::ranges::count(body, 0xBF860200u), 2u);
+  EXPECT_NE(std::ranges::find(body, 0xBF860400u), body.end());
+  EXPECT_NE(std::ranges::find(body, kSelectGuestSourceBank), body.end());
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
   constexpr auto store = cdna4::build_ds(cdna4::kDsWriteB96Ds, {.addr = 10, .data0 = 2});
   std::vector<uint32_t> text_words = {store[0], store[1]};

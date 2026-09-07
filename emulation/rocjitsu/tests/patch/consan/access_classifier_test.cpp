@@ -316,5 +316,19 @@ TEST(ConSanAccessClassifier, ComparisonOperandDetailsAreClassifierOwned) {
   }
 }
 
+TEST(ConSanAccessClassifier, Cdna5ComparisonAllowsWideStoreAcrossVgprBankBoundary) {
+  ConSanProgramSite input = native_access_site("ds_store_b128", ConSanLdsAccessKind::Write, 128u);
+  input.operands.data_vgpr = 254u;
+
+  const ConSanProgramSite cdna5 =
+      complete_site(input, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(cdna5.lowering.compare_observed_value.available());
+
+  const ConSanProgramSite rdna4 =
+      complete_site(std::move(input), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_EQ(rdna4.lowering.compare_observed_value.reason,
+            ConSanAccessClassifierReason::OperandRegisterRange);
+}
+
 } // namespace
 } // namespace rocjitsu
