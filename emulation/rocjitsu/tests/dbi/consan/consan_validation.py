@@ -2074,6 +2074,25 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
+        # The six exact MXF8 problems share one generated six-solution object.
+        # Give each size an independent numerical oracle, coverage gate, and
+        # teardown verdict instead of allowing the monolithic client to consume
+        # the complete legacy timeout before its final oracle is visible.
+        "tensile-sk-mxf8gemm-tdm": {
+            "tensile_inner_timeout_seconds": 120,
+            "run_timeout_seconds": 180,
+            "tensile_exact_problem_size_shards": (
+                ((127, 127, 1, 1024),),
+                ((128, 128, 1, 1024),),
+                ((129, 129, 1, 1024),),
+                ((127, 127, 1, 1056),),
+                ((128, 128, 1, 1056),),
+                ((129, 129, 1, 1056),),
+            ),
+            "tensile_expected_numeric_rows_per_shard": (6, 6, 6, 6, 6, 6),
+            "tensile_shard_parallelism": 4,
+            "tensile_fault_shard_index": 0,
+        },
         # Preserve all six exact problems and all 16 generated solutions per
         # problem, but give each exact size an independent numeric oracle,
         # teardown verdict, and coverage gate. Four RocJITsu-backed shards fit
