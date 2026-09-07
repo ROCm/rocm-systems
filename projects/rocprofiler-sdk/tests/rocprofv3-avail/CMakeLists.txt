@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
             --spm
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"

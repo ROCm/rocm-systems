@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"

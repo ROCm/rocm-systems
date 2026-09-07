@@ -30,6 +30,8 @@
 // `region_record_count` slots (a power of two). Multiple queues can multiplex
 // into one region; records carry their own (doorbell_off, dispatch_id).
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -137,7 +139,7 @@ struct copied_record
 struct ring_cursors
 {
     uint64_t rptr[kMaxRegions] = {};     // consumer read pos per region
-    bool     rptr_init         = false;  // sync rptr to wptr on first drain
+    bool     rptr_init         = false;  // zero rptr[] on first drain (both local and shared)
 
     // Overrun telemetry. Exclusive-end contract: the producer has LAPPED us only
     // once `w - rptr` EXCEEDS region_slots (== region_slots is merely exactly full).
@@ -197,7 +199,38 @@ struct pair_state
     uint64_t eops_seen          = 0;
     uint64_t starts_overwritten = 0;  // a second START arrived on a retained key
     uint64_t ambiguous_pairs    = 0;  // EOPs dropped because their raw key was ambiguous
+    uint64_t equal_tick_drops   = 0;  // EOP tick == retained START tick (fail-closed)
+    uint64_t stale_eop_drops    = 0;  // EOP tick < retained START tick (belongs earlier)
     uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
+    uint64_t starts_cap_evicted = 0;  // retained STARTs dropped by the hard size cap
+
+    // Hard bound on pending_starts, mirroring D9's per-GPU hub cap (this map is
+    // per-GPU too, and a START is of the same order in size). evict_stale is only
+    // an AGE backstop -- at the 30-min default a sustained EOP loss exhausts memory
+    // long before it fires -- and D9's cap does not cover this map, because
+    // firmware emits records for signal-fallback dispatches the hub never saw.
+    // Overridden from ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS by the
+    // reader; the default stands for a unit test that never sets it.
+    size_t max_pending_starts = 2'000'000;
+
+    // Drop the single oldest retained START, counting its outstanding STARTs as
+    // lost (each is a dispatch that will now complete start-unknown -- coverage
+    // loss, not a wrong record). RESIDUAL, accepted: this is an O(live) scan, paid
+    // on every insert while the map sits AT the cap. Reaching the cap already means
+    // EOPs are being lost at a rate no sane workload produces, and the alternative
+    // there is memory exhaustion; a cheap victim lookup would need a second index
+    // ordered by seen_at_ns, the same secondary-index work D9 deferred.
+    void evict_oldest_start()
+    {
+        auto _oldest = pending_starts.end();
+        for(auto it = pending_starts.begin(); it != pending_starts.end(); ++it)
+            if(_oldest == pending_starts.end() ||
+               it->second.seen_at_ns < _oldest->second.seen_at_ns)
+                _oldest = it;
+        if(_oldest == pending_starts.end()) return;
+        starts_cap_evicted += _oldest->second.outstanding;
+        pending_starts.erase(_oldest);
+    }
 
     // Stream-driven eviction watermark: the copy timestamp of the last batch that
     // triggered an evict for this GPU. Compared against batch.now_ns,
@@ -213,8 +246,11 @@ struct pair_state
         {
             if(now_ns > it->second.seen_at_ns && now_ns - it->second.seen_at_ns > max_age_ns)
             {
+                // A single key can hold more than one outstanding START (a recycled
+                // doorbell latched it ambiguous); each is a stranded START, so the
+                // telemetry counts outstanding, not one per key.
+                removed += it->second.outstanding;
                 it = pending_starts.erase(it);
-                ++removed;
             }
             else
             {
@@ -243,7 +279,10 @@ copy_pipes(const uint8_t*           records_base,
            // NOLINTNEXTLINE(readability-non-const-parameter)
            volatile uint64_t* rptr_arr,
            ring_cursors&      cursors,
-           OutT&              out)
+           OutT&              out,
+           // Reserved per region before the first memcpy so a record is counted
+           // from the instant it leaves the ring into `out`. nullptr in tests.
+           std::atomic<uint64_t>* inflight = nullptr)
 {
     if(num_regions == 0 || num_regions > kMaxRegions) return 0;
 
@@ -267,10 +306,18 @@ copy_pipes(const uint8_t*           records_base,
         uint64_t       scan = cursors.rptr[p];
         if(w < scan)
         {
-            // wptr moved backwards: the stream was reset underneath us. Readiness
-            // uses wptr != rptr, so leaving rptr ahead would report ready forever
-            // while the w > scan drain below never runs. Snap rptr back to wptr in
-            // both the local cursor and the shared rptr[] so the predicates agree.
+            // wptr < rptr. Per the driver contract (kfd_dlog_stream.c): wptr is
+            // monotonic within a stream's lifetime -- it is zeroed only once at
+            // setup, before firmware arms, and a GPU reset sets the fatal latch
+            // (EPOLLERR) WITHOUT regressing wptr. So a live stream cannot legitimately
+            // move wptr backwards; observing it here means a torn/corrupt read of the
+            // volatile mapping (F5/F12), not a reset generation. The safe response is
+            // to drop this region's un-drained span rather than trust a rewound
+            // window that could mis-publish stale slots as fresh: snap rptr up to the
+            // observed wptr (in both the local cursor and the shared rptr[] so
+            // wptr!=rptr readiness agrees) and skip it. No new-generation drain is
+            // attempted because that mid-stream reset-with-wptr-rewind state cannot
+            // occur under the driver contract.
             ++cursors.wptr_regressions;
             cursors.rptr[p] = w;
             __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
@@ -283,6 +330,12 @@ copy_pipes(const uint8_t*           records_base,
         // (NOT w - slots + 1, which skipped one valid record).
         cursors.note_overrun(w - scan, region_slots);
         if(w - scan > region_slots) scan = w - region_slots;
+
+        // Reserve BEFORE the first memcpy: from that instant these records live in
+        // `out` and will be processed while the pipe still reads empty. `w - scan`
+        // is exact here (post-clamp) and is exactly what the batch's publish
+        // fetch_sub removes. Release pairs with the GC gate's acquire load.
+        if(inflight != nullptr) inflight->fetch_add(w - scan, std::memory_order_release);
 
         // Every copied record starts loss_free = true; the region-wide
         // verdict is gone. The untrusted back-patch below is per-record.
@@ -303,6 +356,16 @@ copy_pipes(const uint8_t*           records_base,
         // aliases is untrusted. w is exclusive, so index w2 aliases w2 - slots
         // (power-of-two mask); the boundary the drain sits on when it just keeps up
         // is exactly the one an acquire load of w2 cannot certify -- hence `<=`.
+        //
+        // Acquire fence pairing the plain payload memcpy above with the w2 acquire
+        // load below: the memcpy reads are non-atomic, and an acquire load only
+        // orders operations that follow it, not ones that precede it. Without this
+        // fence a weak-memory CPU (aarch64) could satisfy a payload read AFTER
+        // observing w2, so the untrusted back-patch would test a stale w2 against a
+        // read that actually raced the producer's overwrite. The fence keeps every
+        // memcpy read sequenced before the w2 observation, so the `idx <=
+        // untrusted_upto` test certifies exactly the slots that were read clean.
+        std::atomic_thread_fence(std::memory_order_acquire);
         const uint64_t w2 = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
         if(w2 >= region_slots)
         {
@@ -337,90 +400,134 @@ pair_records(const copied_record* records,
              OnRecord&&           on_record)
 {
     uint64_t seen = 0;
-    // Two passes over the batch: bind every START first, then match every EOP. A
-    // batch is one drain sweep of all regions in index order, and the HWS can
-    // remap a queue onto a lower-numbered MEC pipe between its START and its EOP,
-    // which puts the EOP in an earlier region than the START -- so in copy order
-    // the EOP can precede its own START within this one batch. Firmware always
-    // writes START before EOP and the sweep reads region k before region k+1, so
-    // a copied EOP's START is either in an earlier batch (already consumed) or
-    // later in THIS batch; binding all of this batch's STARTs before any EOP is
-    // therefore exact, not a heuristic, and removes the spurious start-unknown
-    // that the old single pass produced for a same-batch region reorder.
-    for(int pass = 0; pass < 2; ++pass)
-        for(size_t i = 0; i < count; ++i)
+
+    // Pair in TICK order, not batch/region position. Each record carries its own
+    // per-agent GPU-clock tick (the stream is per-GPU, so all ticks in a batch are
+    // comparable), so tick order == temporal order regardless of which region an
+    // HWS remap copied a record from. Only THIS batch's records are ordered; the
+    // retained cross-batch pending_starts map is the state the pass runs against
+    // and is never re-fed into the work list (re-appending it would push a second
+    // START transition on every retained key and latch ambiguous spuriously).
+    struct work_item
+    {
+        uint64_t tick;         // start_ticks for a START, end_ticks for an EOP
+        uint32_t kind;         // 0 = EOP, 1 = START: equal ticks run all EOPs first
+        uint32_t arrival_seq;  // region-ordered merge index; ordering only, never a pairing input
+        size_t   idx;          // record index in `records`
+    };
+    std::vector<work_item> work;
+    work.reserve(count);
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto& rec = records[i].rec;
+        if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
+        // a torn record's doorbell_off/dispatch_id are as suspect as its tick, so
+        // it must never bind a START or claim an EOP. A torn START is thus never
+        // retained; its later intact EOP arrives start-unknown.
+        if(!records[i].loss_free) continue;
+        if(rec.record_type != kRecStart && rec.record_type != kRecEop) continue;
+
+        const uint64_t ts =
+            static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
+        work.push_back(work_item{
+            ts, rec.record_type == kRecStart ? 1u : 0u, static_cast<uint32_t>(work.size()), i});
+    }
+
+    // EOP-before-START at equal ticks (the `kind` term) is what makes ties
+    // order-independent AND keeps ordinary doorbell reuse intact: {E_A(t),S_B(t)}
+    // pairs E_A with the outstanding S_A, then installs S_B cleanly. arrival_seq
+    // only completes the strict weak ordering; it never decides a pairing.
+    std::sort(work.begin(), work.end(), [](const work_item& a, const work_item& b) {
+        if(a.tick != b.tick) return a.tick < b.tick;
+        if(a.kind != b.kind) return a.kind < b.kind;
+        return a.arrival_seq < b.arrival_seq;
+    });
+
+    for(const auto& w : work)
+    {
+        const auto&    rec = records[w.idx].rec;
+        const uint64_t ts  = w.tick;
+        const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
+                             static_cast<uint64_t>(rec.dispatch_id);
+
+        if(rec.record_type == kRecStart)
         {
-            const auto& rec = records[i].rec;
-            if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
-            // a torn record's doorbell_off/dispatch_id are as suspect as
-            // its tick, so it must never bind a START or claim an EOP. A torn START
-            // is thus never retained; its later intact EOP arrives start-unknown.
-            if(!records[i].loss_free) continue;
-            if(pass == 0 && rec.record_type != kRecStart) continue;
-            if(pass == 1 && rec.record_type == kRecStart) continue;
-
-            const uint64_t ts =
-                static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
-            const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
-                                 static_cast<uint64_t>(rec.dispatch_id);
-
-            if(rec.record_type == kRecStart)
+            ++state.starts_seen;
+            // Hard size cap. Only an insert that GROWS the map can breach it, so a
+            // recurring key is exempt -- evicting there could pick the very key
+            // about to be touched and silently reset its `ambiguous` latch. The
+            // size test short-circuits, so the normal path pays no extra lookup.
+            if(state.pending_starts.size() >= state.max_pending_starts &&
+               state.pending_starts.find(key) == state.pending_starts.end())
+                state.evict_oldest_start();
+            // dispatch_id is only low-32, so a raw key can recur. A second
+            // outstanding START on one key makes it AMBIGUOUS: keep the first
+            // START's ticks and age unchanged (so an unpairable key still ages out
+            // -- refreshing seen_at_ns would make it permanent) and count another
+            // outstanding. try_emplace, not [], so the first START's fields survive.
+            auto [it, ins] = state.pending_starts.try_emplace(
+                key, pair_state::pending_start{ts, now_ns, 1, false});
+            if(!ins)
             {
-                ++state.starts_seen;
-                // dispatch_id is only low-32, so a raw key can recur. A second
-                // outstanding START on one key makes it AMBIGUOUS: keep the first
-                // START's ticks and age unchanged (so an unpairable key still
-                // ages out -- refreshing seen_at_ns would make it permanent) and
-                // count another outstanding. try_emplace, not [], so the first
-                // START's fields survive the duplicate.
-                auto [it, ins] = state.pending_starts.try_emplace(
-                    key, pair_state::pending_start{ts, now_ns, 1, false});
-                if(!ins)
-                {
-                    ++state.starts_overwritten;
-                    it->second.ambiguous = true;
-                    ++it->second.outstanding;
-                }
-                continue;
+                ++state.starts_overwritten;
+                it->second.ambiguous = true;
+                ++it->second.outstanding;
             }
-            if(rec.record_type != kRecEop) continue;
-            ++state.eops_seen;
-
-            auto it = state.pending_starts.find(key);
-            if(it == state.pending_starts.end())
-            {
-                // The START was lost (shape ii): the EOP still proves the kernel
-                // finished, it just carries no interval.
-                ++state.unmatched_eops;
-                auto out         = drained_record{};
-                out.doorbell_off = rec.doorbell_off;
-                out.dispatch_id  = rec.dispatch_id;
-                out.end_ticks    = ts;
-                out.start_known  = false;
-                on_record(out);
-            }
-            else if(it->second.ambiguous)
-            {
-                // Cannot say which dispatch this EOP belongs to. Drop it HERE --
-                // forwarding it start-unknown would let the hub complete the
-                // wrong dispatch (the same-window low-32-wrap shape). The key
-                // stays unpairable until every outstanding START is consumed.
-                ++state.ambiguous_pairs;
-                if(--it->second.outstanding == 0) state.pending_starts.erase(it);
-            }
-            else
-            {
-                auto out         = drained_record{};
-                out.doorbell_off = rec.doorbell_off;
-                out.dispatch_id  = rec.dispatch_id;
-                out.end_ticks    = ts;
-                out.start_ticks  = it->second.start_ticks;
-                out.start_known  = true;
-                state.pending_starts.erase(it);
-                ++seen;
-                on_record(out);
-            }
+            continue;
         }
+
+        ++state.eops_seen;
+        auto it = state.pending_starts.find(key);
+        if(it == state.pending_starts.end())
+        {
+            // (1) no entry -- the START was lost: the EOP still proves the kernel
+            // finished, it just carries no interval.
+            ++state.unmatched_eops;
+            auto out         = drained_record{};
+            out.doorbell_off = rec.doorbell_off;
+            out.dispatch_id  = rec.dispatch_id;
+            out.end_ticks    = ts;
+            out.start_known  = false;
+            on_record(out);
+        }
+        else if(it->second.ambiguous)
+        {
+            // (2) ambiguous -- cannot say which dispatch this EOP belongs to.
+            // Drop HERE: forwarding it start-unknown would let the hub complete the
+            // wrong dispatch. The key stays unpairable until every outstanding
+            // START is consumed.
+            ++state.ambiguous_pairs;
+            if(--it->second.outstanding == 0) state.pending_starts.erase(it);
+        }
+        else if(ts == it->second.start_ticks)
+        {
+            // (3) equal tick -- no HW contract that start_ticks < end_ticks for a
+            // real pair, so fail closed: drop rather than form a zero/ambiguous pair.
+            ++state.equal_tick_drops;
+            if(--it->second.outstanding == 0) state.pending_starts.erase(it);
+        }
+        else if(ts < it->second.start_ticks)
+        {
+            // (4) stale EOP -- it predates the outstanding START, so it belongs to
+            // an earlier dispatch whose START was lost. Drop the EOP and leave the
+            // retained START untouched; consuming it would strand the EOP that
+            // really belongs to it.
+            ++state.stale_eop_drops;
+        }
+        else
+        {
+            // (5) outstanding==1, !ambiguous, t > start_ticks -- pair and erase.
+            auto out         = drained_record{};
+            out.doorbell_off = rec.doorbell_off;
+            out.dispatch_id  = rec.dispatch_id;
+            out.end_ticks    = ts;
+            out.start_ticks  = it->second.start_ticks;
+            out.start_known  = true;
+            state.pending_starts.erase(it);
+            ++seen;
+            on_record(out);
+        }
+    }
     return seen;
 }
 }  // namespace kfd
