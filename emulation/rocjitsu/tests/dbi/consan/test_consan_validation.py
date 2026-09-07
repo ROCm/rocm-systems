@@ -2647,6 +2647,16 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workloads["d128-block"]["run_timeout_seconds"], 150)
         self.assertEqual(workloads["d128-pressure"]["run_timeout_seconds"], 300)
         self.assertEqual(
+            workloads["tensile-sk-mxf8gemm-explicit"]["run_timeout_seconds"],
+            960,
+        )
+        self.assertEqual(
+            workloads["tensile-sk-mxf8gemm-explicit"][
+                "tensile_inner_timeout_seconds"
+            ],
+            900,
+        )
+        self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             (
                 "hip-moi-build-gfx1250-tests/tests/"
@@ -5292,7 +5302,7 @@ class ConSanValidationTest(unittest.TestCase):
             str(Path("/workspace") / workload.corpus / workload.relative_path),
         )
         self.assertNotIn("--streamk-fixed-grid", command)
-        self.assertNotIn("--timeout-seconds", command)
+        self.assertEqual(command[command.index("--timeout-seconds") + 1], "900")
         self.assertNotIn("--expect-numeric-rows", command)
         self.assertEqual(
             command[command.index("--output-dir") + 1],

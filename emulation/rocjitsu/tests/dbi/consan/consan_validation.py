@@ -1962,6 +1962,15 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
     },
     "gfx1250": {
+        # Complete Record/Replay instrumentation of the two exact MXF8
+        # Stream-K problems exceeds the generic 55-second Tensile subprocess
+        # budget while still making forward progress. A 300-second trial
+        # completed the first exact oracle and entered the second. Keep the
+        # unchanged serialized pair under an explicit bounded margin.
+        "tensile-sk-mxf8gemm-explicit": {
+            "tensile_inner_timeout_seconds": 900,
+            "run_timeout_seconds": 960,
+        },
         # The unchanged full 151,936-logit Qwen baseline takes about 65
         # seconds through RocJitsu. Complete Sampled instrumentation has been
         # observed to finish in about 129 seconds but can exceed 180 seconds
