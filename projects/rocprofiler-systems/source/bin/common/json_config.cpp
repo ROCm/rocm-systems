@@ -233,8 +233,10 @@ resolve_schema_config(const nlohmann::json& config)
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
             }
             if(gpu.contains("unified_memory_profiling"))
+            {
                 resolve_enabled(result, gpu["unified_memory_profiling"], "enabled",
                                 env_vars::USE_UNIFIED_MEMORY_PROFILING);
+            }
         }
 
         // ROCm domain (API tracing)
@@ -760,8 +762,10 @@ export_domain_gpu(nlohmann::json&                           config,
 
     if(auto v = lookup(env_map, env_vars::USE_PROCESS_SAMPLING))
         gpu["process_sampling"]["enabled"] = is_truthy(*v);
-    if(auto v = lookup(env_map, env_vars::USE_UNIFIED_MEMORY_PROFILING))
-        gpu["unified_memory_profiling"]["enabled"] = is_truthy(*v);
+    if(auto use_unified_memory = lookup(env_map, env_vars::USE_UNIFIED_MEMORY_PROFILING))
+    {
+        gpu["unified_memory_profiling"]["enabled"] = is_truthy(*use_unified_memory);
+    }
 
     auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);
     if(!use_amd_smi) return;

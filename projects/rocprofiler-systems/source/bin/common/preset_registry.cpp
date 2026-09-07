@@ -17,6 +17,7 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <string_view>
 
 namespace rocprofsys
 {
@@ -125,7 +126,7 @@ preset_registry::translate_legacy_flag(std::string_view arg) const
         return {};
 
     const auto preset_it =
-        std::find_if(m_presets.begin(), m_presets.end(), [arg](const auto& preset_entry) {
+        std::ranges::find_if(m_presets, [arg](const auto& preset_entry) {
             return preset_entry.second.cli_flag == arg;
         });
     if(preset_it == m_presets.end())
