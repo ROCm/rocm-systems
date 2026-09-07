@@ -207,11 +207,13 @@ A missing trace decoder is ruled out as the cause. CI builds the decoder
 [`samples/kernel_replay/CMakeLists.txt`](../samples/kernel_replay/CMakeLists.txt) disables ATT tests
 outright when it is absent. The test ran, so the decoder was found and its path was supplied.
 
-The evidence points to hardware resource contention in a highly parallel batch rather than a defect
-in replay: the identical binary and the identical test passed in the build-tree suite of the same
-job, on all three other operating systems, and twice on the parent build. It is worth watching for
-recurrence, and the durable fix is to serialise thread trace against full-device counter
-enumeration in the installed-samples suite. Not a functional blocker.
+At merge time the evidence pointed to hardware resource contention in a highly parallel batch, since
+the identical test passed in the build-tree suite of the same job, on all three other operating
+systems, and twice on the parent build.
+
+> **Superseded — read section 8.** Post-merge nightlies on `develop` show this is not an isolated
+> contention artefact. Kernel replay samples abort on most nights, the failing test rotates, and one
+> of them carries a fault signature that contention does not explain. Section 8 has the detail.
 
 Log: [ubuntu-22.04, build 8917](https://github.com/ROCm/rocm-systems/actions/runs/33594406094/job/100166342386).
 
@@ -301,3 +303,85 @@ workloads; graph-capturing frameworks (PyTorch, vLLM) to confirm the decline pat
 harmless; long-running replay with an indefinite pass loop to confirm the termination contract;
 and host-memory-pressure conditions to confirm snapshot failure degrades to a single run instead of
 aborting.
+
+## 8. Post-merge status on `develop` (updated 2026-09-07)
+
+**This section revises the assessment in section 5.1. Kernel replay is failing on `develop`
+nightlies and should be treated as an open defect, not as validated.**
+
+### What the nightlies show
+
+The `Core • mi325 • ubuntu-22.04` job on `develop` fails on most nights since the merge, and on
+several of them **kernel replay is the sole cause**. The failing test rotates from night to night.
+
+| Nightly | Run | Kernel replay failures in the Core job |
+| --- | --- | --- |
+| 2026-09-02 (pre-merge baseline) | [8918](https://github.com/ROCm/rocm-systems/actions/runs/33602140757) | none — feature not yet on `develop` |
+| 2026-09-03 | [8981](https://github.com/ROCm/rocm-systems/actions/runs/33726564314) | `rocprofv3-test-kernel-replay-perf-validate`, `snap_bandwidth_meets_floor_with_128mb_ballast` |
+| 2026-09-04 | [9033](https://github.com/ROCm/rocm-systems/actions/runs/33847286910) | none (two unrelated failures) |
+| 2026-09-05 | [9035](https://github.com/ROCm/rocm-systems/actions/runs/33951634906) | `kernel-replay-att`, `kernel-replay-opt-out` |
+| 2026-09-06 | [9038](https://github.com/ROCm/rocm-systems/actions/runs/34018259288) | `kernel-replay-basic`, `kernel-replay-att` |
+
+On the 2026-09-06 nightly these two kernel replay samples were the **only** failing tests in the
+job — 92% passed, 2 failed out of 25. The rotation across `basic`, `opt-out`, `att`,
+`perf-validate` and the snapshot bandwidth floor means this is not attributable to any single
+service.
+
+### The fault signature that changes the assessment
+
+`kernel-replay-basic` aborted with:
+
+```text
+Memory access fault by GPU node-5 on address 0x74ac31820000.
+Reason: Write access to a read-only page.
+```
+
+This matters for three reasons. `kernel-replay-basic` uses no ATT, no counters, no SPM and no PC
+sampling, so the resource-contention explanation offered in section 5.1 does not apply to it. The
+reason string is specific rather than the generic `Reason: Unknown` seen on the merge-time failure.
+And a write to a read-only page is what a **restore into non-writable memory** looks like.
+
+**Root-cause lead (hypothesis, not yet reproduced).** The snapshot enumerates module-scope
+variables by collecting every `HSA_SYMBOL_KIND_VARIABLE` symbol in each loaded executable —
+explicitly including `__constant__` globals, per the comment on `module_variable_t` in
+[`memory_snapshot.cpp`](../source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp). There is
+no writability or permission check anywhere in that file: executables are excluded from the
+allocation inventory, but a variable's page protection is never consulted. `__constant__` data can
+be placed in read-only memory, and restoring such a variable between passes writes to it. That
+would produce exactly this fault, and would be intermittent, because it depends on which variables
+a given build places where.
+
+The `kernel-replay-att` abort on the same night has a different and also specific signature,
+`[aqlprofile] _internal_aqlprofile_att_iterate_data(): SQTT memory error received, SE(0)`, so it
+may be a separate issue rather than the same one.
+
+Both runs also log `Attempt to enable hip visibility for agent-2 which is not visible to HSA
+(ROCR)`, and the faults name GPU `node-4` and `node-5` on different nights. Multi-GPU is gap 2 in
+section 7 — untested at any level — so an agent-visibility interaction is worth ruling in or out
+early.
+
+### What is *not* implicated
+
+Two things that look alarming on `develop` are pre-existing and unrelated to kernel replay:
+
+- **All four sanitizer jobs fail** (ASan, UBSan, TSan, LSan). They also failed on run
+  [8918](https://github.com/ROCm/rocm-systems/actions/runs/33602140757), whose head commit
+  `1b648038a0` predates the kernel replay merge. Under ASan, 546 of 1475 tests fail across the whole
+  suite, most of them unrelated to replay. Note that sanitizer jobs are **skipped on pull
+  requests** and only run on `develop`, so kernel replay was never sanitizer-tested pre-merge; that
+  coverage cannot be assessed until the systemic sanitizer failure is fixed.
+- **`Core • mi325 • ubuntu-22.04` was already failing** before the merge (runs 8883 and 8916).
+
+The feature remains on `develop` — no revert, and no commit has touched kernel replay since it
+landed.
+
+### Recommended actions
+
+1. Treat the `kernel-replay-basic` read-only-page fault as the priority. Check whether the module
+   variable restore path writes to `__constant__` or otherwise non-writable allocations, and if so,
+   filter them out of the snapshot inventory the way executables already are.
+2. Reproduce outside CI on a multi-GPU MI325 node, since the fault names different GPU nodes on
+   different nights and multi-GPU is untested.
+3. Investigate the ATT `SQTT memory error` separately; do not assume it shares a root cause.
+4. Keep the merge-time contention theory in section 5.1 open only for the ATT case. It does not
+   explain `kernel-replay-basic`.
