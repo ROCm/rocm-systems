@@ -5,25 +5,117 @@
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm_internal.hpp"
+#include "rocprof-sys/library/rocprofiler-sdk/spm_record_batch.hpp"
+#include "rocprof-sys/library/rocprofiler-sdk/spm_sample.hpp"
 
 #include <gtest/gtest.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <optional>
 #include <set>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace
 {
 constexpr auto k_valid_sample_interval = std::uint64_t{ 8192 };
+constexpr auto k_counter_id_offset     = std::uint64_t{ 100 };
+constexpr auto k_failed_counter_id     = std::uint64_t{ 9 };
+constexpr auto k_failed_record_count   = std::size_t{ 2 };
+constexpr auto k_transient_counter_id  = std::uint64_t{ 7 };
+constexpr auto k_test_serialized_limit = std::uint32_t{ 2 };
 
 using rocprofsys::rocprofiler_sdk::spm::configuration;
 using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
+using rocprofsys::rocprofiler_sdk::spm::counter_info;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
 namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
+
+struct fake_spm_record
+{
+    std::uint64_t id        = 0;
+    std::uint64_t timestamp = 0;
+    double        value     = 0.0;
+};
+
+class scripted_counter_decoder
+{
+public:
+    explicit scripted_counter_decoder(
+        std::unordered_map<std::uint64_t, std::size_t> failures = {})
+    : m_failures{ std::move(failures) }
+    {}
+
+    [[nodiscard]] std::optional<counter_info> operator()(std::uint64_t instance_id)
+    {
+        ++m_calls[instance_id];
+        if(auto itr = m_failures.find(instance_id);
+           itr != m_failures.end() && itr->second > 0)
+        {
+            --itr->second;
+            return std::nullopt;
+        }
+        return counter_info{ .counter_id          = instance_id + k_counter_id_offset,
+                             .counter_instance_id = instance_id };
+    }
+
+    [[nodiscard]] std::size_t call_count(std::uint64_t instance_id) const
+    {
+        if(const auto itr = m_calls.find(instance_id); itr != m_calls.end())
+        {
+            return itr->second;
+        }
+        return 0;
+    }
+
+private:
+    std::unordered_map<std::uint64_t, std::size_t> m_failures;
+    std::unordered_map<std::uint64_t, std::size_t> m_calls;
+};
+
+template <std::uint32_t MaxSerializedCount = std::numeric_limits<std::uint32_t>::max(),
+          typename DecoderT>
+[[nodiscard]]
+spm_detail::decoded_record_batch
+build_test_batch(const std::vector<std::optional<fake_spm_record>>& records,
+                 DecoderT                                           decoder)
+{
+    auto record_ptrs = std::vector<const fake_spm_record*>{};
+    record_ptrs.reserve(records.size());
+    std::ranges::transform(
+        records, std::back_inserter(record_ptrs),
+        [](const auto& record) { return record ? &*record : nullptr; });
+
+    return spm_detail::build_record_batch<MaxSerializedCount>(
+        std::span<const fake_spm_record* const>{ record_ptrs.data(), record_ptrs.size() },
+        std::move(decoder));
+}
+
+// Numeric literals below are intentionally compact, table-shaped SPM test data.
+// NOLINTBEGIN(readability-magic-numbers)
+[[nodiscard]] std::vector<std::optional<fake_spm_record>>
+make_dense_test_records()
+{
+    return {
+        fake_spm_record{ .id = 2, .timestamp = 20, .value = 2.0 },
+        fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+        fake_spm_record{ .id = 1, .timestamp = 20, .value = 3.0 },
+        fake_spm_record{ .id = 2, .timestamp = 10, .value = 4.0 },
+    };
+}
+// NOLINTEND(readability-magic-numbers)
 
 void
 ensure_spm_settings_registered()
@@ -173,6 +265,265 @@ TEST(spm_configuration_parsing, requested_counter_names_deduplicates_parsed_name
     const auto names = spm_detail::requested_counter_names(parsed);
     EXPECT_EQ(names, (std::unordered_set<std::string>{ "SQ_WAVES", "TD_TD_BUSY" }));
 }
+
+// Numeric literals below are intentionally compact, table-shaped SPM test data.
+// NOLINTBEGIN(readability-magic-numbers)
+TEST(spm_build_record_batch, decodes_each_dense_counter_once)
+{
+    auto       decoder = scripted_counter_decoder{};
+    const auto batch   = build_test_batch(make_dense_test_records(), std::ref(decoder));
+
+    ASSERT_EQ(batch.counters.size(), 2);
+    EXPECT_EQ(decoder.call_count(1), 1);
+    EXPECT_EQ(decoder.call_count(2), 1);
+    EXPECT_EQ(batch.counters.at(0).counter_id, 2 + k_counter_id_offset);
+    EXPECT_EQ(batch.counters.at(0).counter_instance_id, 2);
+    EXPECT_EQ(batch.counters.at(1).counter_id, 1 + k_counter_id_offset);
+    EXPECT_EQ(batch.counters.at(1).counter_instance_id, 1);
+}
+
+TEST(spm_build_record_batch, preserves_dense_sample_and_value_order)
+{
+    const auto batch =
+        build_test_batch(make_dense_test_records(), scripted_counter_decoder{});
+
+    ASSERT_EQ(batch.samples.size(), 2);
+    EXPECT_EQ(batch.samples.at(0).timestamp, 20);
+    ASSERT_EQ(batch.samples.at(0).values.size(), 2);
+    EXPECT_EQ(batch.samples.at(0).values.at(0).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.at(0).values.at(0).value, 2.0);
+    EXPECT_EQ(batch.samples.at(0).values.at(1).counter_info_index, 1);
+    EXPECT_DOUBLE_EQ(batch.samples.at(0).values.at(1).value, 3.0);
+
+    EXPECT_EQ(batch.samples.at(1).timestamp, 10);
+    ASSERT_EQ(batch.samples.at(1).values.size(), 2);
+    EXPECT_EQ(batch.samples.at(1).values.at(0).counter_info_index, 1);
+    EXPECT_DOUBLE_EQ(batch.samples.at(1).values.at(0).value, 1.0);
+    EXPECT_EQ(batch.samples.at(1).values.at(1).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.at(1).values.at(1).value, 4.0);
+}
+
+// GTest assertion macros inflate the measured complexity of this table-shaped check.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST(spm_build_record_batch, groups_sparse_records_without_changing_order)
+{
+    const auto batch = build_test_batch(
+        {
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = 2, .timestamp = 20, .value = 2.0 },
+            fake_spm_record{ .id = 1, .timestamp = 30, .value = 3.0 },
+            fake_spm_record{ .id = 2, .timestamp = 40, .value = 4.0 },
+        },
+        scripted_counter_decoder{});
+
+    ASSERT_EQ(batch.counters.size(), 2);
+    ASSERT_EQ(batch.samples.size(), 4);
+    EXPECT_EQ(batch.samples.at(0).timestamp, 10);
+    EXPECT_EQ(batch.samples.at(1).timestamp, 20);
+    EXPECT_EQ(batch.samples.at(2).timestamp, 30);
+    EXPECT_EQ(batch.samples.at(3).timestamp, 40);
+    const auto expected_counter_indices = std::array<std::uint32_t, 4>{ 0, 1, 0, 1 };
+    const auto expected_values          = std::array<double, 4>{ 1.0, 2.0, 3.0, 4.0 };
+    for(std::size_t index = 0; index < batch.samples.size(); ++index)
+    {
+        const auto& values = batch.samples.at(index).values;
+        ASSERT_EQ(values.size(), 1);
+        EXPECT_EQ(values.front().counter_info_index, expected_counter_indices.at(index));
+        EXPECT_DOUBLE_EQ(values.front().value, expected_values.at(index));
+    }
+}
+
+TEST(spm_build_record_batch, returns_empty_for_empty_input)
+{
+    const auto batch = build_test_batch({}, scripted_counter_decoder{});
+    EXPECT_TRUE(batch.counters.empty());
+    EXPECT_TRUE(batch.samples.empty());
+}
+
+TEST(spm_build_record_batch, returns_empty_for_all_null_input)
+{
+    const auto batch =
+        build_test_batch({ std::nullopt, std::nullopt }, scripted_counter_decoder{});
+    EXPECT_TRUE(batch.counters.empty());
+    EXPECT_TRUE(batch.samples.empty());
+}
+
+TEST(spm_build_record_batch, skips_interspersed_null_records)
+{
+    const auto batch = build_test_batch(
+        {
+            std::nullopt,
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+            std::nullopt,
+            fake_spm_record{ .id = 2, .timestamp = 10, .value = 2.0 },
+        },
+        scripted_counter_decoder{});
+
+    ASSERT_EQ(batch.counters.size(), 2);
+    ASSERT_EQ(batch.samples.size(), 1);
+    ASSERT_EQ(batch.samples.front().values.size(), 2);
+    EXPECT_EQ(batch.samples.front().values.at(0).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.front().values.at(0).value, 1.0);
+    EXPECT_EQ(batch.samples.front().values.at(1).counter_info_index, 1);
+    EXPECT_DOUBLE_EQ(batch.samples.front().values.at(1).value, 2.0);
+}
+
+TEST(spm_build_record_batch, skips_records_when_counter_decode_fails)
+{
+    auto decoder =
+        scripted_counter_decoder{ { { k_failed_counter_id, k_failed_record_count } } };
+    const auto batch = build_test_batch(
+        {
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = k_failed_counter_id, .timestamp = 20, .value = 9.0 },
+            fake_spm_record{ .id = k_failed_counter_id, .timestamp = 25, .value = 10.0 },
+            fake_spm_record{ .id = 2, .timestamp = 30, .value = 2.0 },
+        },
+        std::ref(decoder));
+
+    EXPECT_EQ(decoder.call_count(k_failed_counter_id), k_failed_record_count);
+    ASSERT_EQ(batch.counters.size(), 2);
+    EXPECT_EQ(batch.counters.at(0).counter_instance_id, 1);
+    EXPECT_EQ(batch.counters.at(1).counter_instance_id, 2);
+    ASSERT_EQ(batch.samples.size(), 2);
+    EXPECT_EQ(batch.samples.at(0).timestamp, 10);
+    ASSERT_EQ(batch.samples.at(0).values.size(), 1);
+    EXPECT_EQ(batch.samples.at(0).values.front().counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.at(0).values.front().value, 1.0);
+    EXPECT_EQ(batch.samples.at(1).timestamp, 30);
+    ASSERT_EQ(batch.samples.at(1).values.size(), 1);
+    EXPECT_EQ(batch.samples.at(1).values.front().counter_info_index, 1);
+    EXPECT_DOUBLE_EQ(batch.samples.at(1).values.front().value, 2.0);
+}
+
+TEST(spm_build_record_batch, retries_transient_decode_without_reordering)
+{
+    auto       decoder = scripted_counter_decoder{ { { k_transient_counter_id, 1 } } };
+    const auto batch   = build_test_batch(
+        {
+            fake_spm_record{
+                  .id = k_transient_counter_id, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = 1, .timestamp = 20, .value = 2.0 },
+            fake_spm_record{
+                  .id = k_transient_counter_id, .timestamp = 30, .value = 3.0 },
+        },
+        std::ref(decoder));
+
+    EXPECT_EQ(decoder.call_count(k_transient_counter_id), 2);
+    ASSERT_EQ(batch.counters.size(), 2);
+    EXPECT_EQ(batch.counters.at(0).counter_instance_id, 1);
+    EXPECT_EQ(batch.counters.at(1).counter_instance_id, k_transient_counter_id);
+
+    ASSERT_EQ(batch.samples.size(), 2);
+    EXPECT_EQ(batch.samples.at(0).timestamp, 20);
+    ASSERT_EQ(batch.samples.at(0).values.size(), 1);
+    EXPECT_EQ(batch.samples.at(0).values.at(0).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.at(0).values.at(0).value, 2.0);
+    EXPECT_EQ(batch.samples.at(1).timestamp, 30);
+    ASSERT_EQ(batch.samples.at(1).values.size(), 1);
+    EXPECT_EQ(batch.samples.at(1).values.at(0).counter_info_index, 1);
+    EXPECT_DOUBLE_EQ(batch.samples.at(1).values.at(0).value, 3.0);
+}
+
+TEST(spm_build_record_batch, returns_empty_when_all_counter_decodes_fail)
+{
+    auto decoder =
+        scripted_counter_decoder{ { { k_failed_counter_id, k_failed_record_count } } };
+    const auto batch = build_test_batch(
+        {
+            fake_spm_record{ .id = k_failed_counter_id, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = k_failed_counter_id, .timestamp = 20, .value = 2.0 },
+        },
+        std::ref(decoder));
+
+    EXPECT_EQ(decoder.call_count(k_failed_counter_id), k_failed_record_count);
+    EXPECT_TRUE(batch.counters.empty());
+    EXPECT_TRUE(batch.samples.empty());
+}
+
+TEST(spm_build_record_batch, preserves_duplicate_timestamp_counter_values)
+{
+    const auto batch = build_test_batch(
+        {
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 2.0 },
+        },
+        scripted_counter_decoder{});
+
+    ASSERT_EQ(batch.counters.size(), 1);
+    ASSERT_EQ(batch.samples.size(), 1);
+    ASSERT_EQ(batch.samples.front().values.size(), 2);
+    EXPECT_EQ(batch.samples.front().values.at(0).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.front().values.at(0).value, 1.0);
+    EXPECT_EQ(batch.samples.front().values.at(1).counter_info_index, 0);
+    EXPECT_DOUBLE_EQ(batch.samples.front().values.at(1).value, 2.0);
+}
+
+TEST(spm_build_record_batch, propagates_decoder_exception)
+{
+    const auto throwing_decoder =
+        []([[maybe_unused]] std::uint64_t instance_id) -> std::optional<counter_info> {
+        throw std::runtime_error{ "expected decoder failure" };
+    };
+
+    EXPECT_THROW(static_cast<void>(build_test_batch(
+                     { fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 } },
+                     throwing_decoder)),
+                 std::runtime_error);
+}
+
+TEST(spm_build_record_batch, rejects_counter_count_above_serialized_limit)
+{
+    EXPECT_THROW(static_cast<void>(build_test_batch<k_test_serialized_limit>(
+                     {
+                         fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+                         fake_spm_record{ .id = 2, .timestamp = 10, .value = 2.0 },
+                         fake_spm_record{ .id = 3, .timestamp = 20, .value = 3.0 },
+                     },
+                     scripted_counter_decoder{})),
+                 std::length_error);
+}
+
+TEST(spm_build_record_batch, rejects_sample_count_above_serialized_limit)
+{
+    EXPECT_THROW(static_cast<void>(build_test_batch<k_test_serialized_limit>(
+                     {
+                         fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+                         fake_spm_record{ .id = 1, .timestamp = 20, .value = 2.0 },
+                         fake_spm_record{ .id = 1, .timestamp = 30, .value = 3.0 },
+                     },
+                     scripted_counter_decoder{})),
+                 std::length_error);
+}
+
+TEST(spm_build_record_batch, rejects_value_count_above_serialized_limit)
+{
+    EXPECT_THROW(static_cast<void>(build_test_batch<k_test_serialized_limit>(
+                     {
+                         fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+                         fake_spm_record{ .id = 1, .timestamp = 10, .value = 2.0 },
+                         fake_spm_record{ .id = 1, .timestamp = 10, .value = 3.0 },
+                     },
+                     scripted_counter_decoder{})),
+                 std::length_error);
+}
+
+TEST(spm_build_record_batch, accepts_counts_at_serialized_limit)
+{
+    const auto batch = build_test_batch<k_test_serialized_limit>(
+        {
+            fake_spm_record{ .id = 1, .timestamp = 10, .value = 1.0 },
+            fake_spm_record{ .id = 2, .timestamp = 10, .value = 2.0 },
+            fake_spm_record{ .id = 1, .timestamp = 20, .value = 3.0 },
+        },
+        scripted_counter_decoder{});
+
+    ASSERT_EQ(batch.counters.size(), k_test_serialized_limit);
+    ASSERT_EQ(batch.samples.size(), k_test_serialized_limit);
+    EXPECT_EQ(batch.samples.at(0).values.size(), k_test_serialized_limit);
+    EXPECT_EQ(batch.samples.at(1).values.size(), 1);
+}
+// NOLINTEND(readability-magic-numbers)
 
 TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 {

@@ -44,6 +44,7 @@
 #    include "core/trace_cache/metadata_registry.hpp"
 #    include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #    include "library/rocprofiler-sdk/fwd.hpp"
+#    include "library/rocprofiler-sdk/spm_record_batch.hpp"
 #    include "library/rocprofiler-sdk/spm_sample.hpp"
 
 #    include <rocprofiler-sdk/context.h>
@@ -59,7 +60,6 @@
 #    include <exception>
 #    include <numeric>
 #    include <span>
-#    include <unordered_map>
 #endif
 
 namespace rocprofsys::rocprofiler_sdk::spm
@@ -266,8 +266,6 @@ using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configu
 using spm_counter_id_vec_t       = std::vector<rocprofiler_counter_id_t>;
 using resolved_counter_vec_t     = std::vector<resolved_counter>;
 using requested_counter_vec_t    = detail::requested_counter_vec_t;
-using counter_info_index_map_t   = std::unordered_map<std::uint64_t, std::uint32_t>;
-using sample_index_map_t         = std::unordered_map<std::uint64_t, size_t>;
 using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
         ::rocprofsys::rocprofiler_sdk::wrapper>;
 
@@ -843,45 +841,6 @@ make_counter_info(rocprofiler_counter_instance_id_t instance_id)
     };
 }
 
-std::optional<std::uint32_t>
-get_counter_info_index(const rocprofiler_spm_counter_record_t& record,
-                       std::vector<counter_info>&              counters,
-                       counter_info_index_map_t&               counter_info_indices)
-{
-    auto [counter_itr, inserted] = counter_info_indices.try_emplace(
-        record.id, static_cast<std::uint32_t>(counters.size()));
-    if(!inserted)
-    {
-        return counter_itr->second;
-    }
-
-    auto info = make_counter_info(record.id);
-    if(!info)
-    {
-        counter_info_indices.erase(counter_itr);
-        return std::nullopt;
-    }
-
-    counters.emplace_back(*info);
-    return counter_itr->second;
-}
-
-size_t
-get_sample_index(const rocprofiler_spm_counter_record_t& record,
-                 std::vector<timestamp_sample>&          samples,
-                 sample_index_map_t& sample_indices, size_t counter_count)
-{
-    auto [sample_itr, inserted] =
-        sample_indices.try_emplace(record.timestamp, samples.size());
-    if(inserted)
-    {
-        auto sample = timestamp_sample{ .timestamp = record.timestamp };
-        sample.values.reserve(counter_count);
-        samples.emplace_back(std::move(sample));
-    }
-    return sample_itr->second;
-}
-
 // This helper is the exception boundary for the lock-backed dispatch lookup.
 // NOLINTBEGIN(readability-function-size)
 void
@@ -945,55 +904,10 @@ store_spm_records(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                   const rocprofiler_spm_counter_record_t** records, size_t record_count,
                   bool data_loss)
 {
-    auto       counters             = std::vector<counter_info>{};
-    auto       samples              = std::vector<timestamp_sample>{};
-    auto       counter_info_indices = counter_info_index_map_t{};
-    auto       sample_indices       = sample_index_map_t{};
-    const auto record_span =
-        std::span<const rocprofiler_spm_counter_record_t*>{ records, record_count };
-    for(const auto* record : record_span)
-    {
-        if(record == nullptr)
-        {
-            continue;
-        }
-        const auto counter_info_index =
-            get_counter_info_index(*record, counters, counter_info_indices);
-        if(!counter_info_index)
-        {
-            continue;
-        }
-    }
-
-    if(counters.empty())
-    {
-        return;
-    }
-
-    const auto counter_count = counters.size();
-    const auto sample_capacity =
-        (record_count / counter_count) + ((record_count % counter_count) != 0 ? 1 : 0);
-    samples.reserve(sample_capacity);
-    sample_indices.reserve(sample_capacity);
-
-    for(const auto* record : record_span)
-    {
-        if(record == nullptr)
-        {
-            continue;
-        }
-        const auto counter_itr = counter_info_indices.find(record->id);
-        if(counter_itr == counter_info_indices.end())
-        {
-            continue;
-        }
-
-        const auto sample_index =
-            get_sample_index(*record, samples, sample_indices, counter_count);
-        samples[sample_index].values.emplace_back(counter_value{
-            .counter_info_index = counter_itr->second, .value = record->value });
-    }
-    if(samples.empty())
+    auto batch = detail::build_record_batch(
+        std::span<const rocprofiler_spm_counter_record_t* const>{ records, record_count },
+        make_counter_info);
+    if(batch.samples.empty())
     {
         return;
     }
@@ -1009,8 +923,8 @@ store_spm_records(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
         // TODO: wire HIP stream correlation for SPM dispatch callbacks.
         .stream_handle = 0,
         .data_loss     = data_loss,
-        .counters      = std::move(counters),
-        .samples       = std::move(samples),
+        .counters      = std::move(batch.counters),
+        .samples       = std::move(batch.samples),
     });
 }
 

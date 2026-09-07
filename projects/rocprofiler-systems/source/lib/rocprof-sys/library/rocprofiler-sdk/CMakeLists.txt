@@ -26,6 +26,7 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/service_compatibility.hpp
     ${CMAKE_CURRENT_LIST_DIR}/spm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/spm_internal.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_record_batch.hpp
     ${CMAKE_CURRENT_LIST_DIR}/spm_sample.hpp
 )
 
