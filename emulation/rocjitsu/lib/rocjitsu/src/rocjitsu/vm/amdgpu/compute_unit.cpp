@@ -60,6 +60,16 @@ constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
 
+std::string_view instruction_execution_error_name(InstructionExecutionError error) {
+  switch (error) {
+  case InstructionExecutionError::None:
+    return "none";
+  case InstructionExecutionError::UnsupportedOperandValue:
+    return "unsupported operand value";
+  }
+  return "unknown instruction execution error";
+}
+
 uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
                             uint32_t allocation_blocks = 0) {
   return 1u | ((member_count & 0x7fu) << 4) | ((signal_count & 0x7fu) << 16) |
@@ -883,6 +893,19 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   const bool was_in_trap_handler = active->in_trap_handler();
 
   execute_instruction(inst, *active);
+
+  if (active->instruction_execution_failed()) {
+    const InstructionExecutionError error = active->instruction_execution_error();
+    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
+                                            this->name(), active->wf_id(), inst->mnemonic(),
+                                            active->pc, instruction_execution_error_name(error));
+    util::Logger::warn(failure);
+    if (auto *sim_engine = this->engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    active->halt();
+    delete inst;
+    return;
+  }
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,

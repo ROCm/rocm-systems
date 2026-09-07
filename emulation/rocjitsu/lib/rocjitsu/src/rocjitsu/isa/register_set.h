@@ -95,6 +95,14 @@ public:
   /// @brief Return true if every lane covered by `ref` is present.
   [[nodiscard]] bool contains(RegisterRef ref) const;
 
+  /// @brief Return true if any lane covered by `ref` is present.
+  ///
+  /// @details The any-of counterpart to contains(). Register allocation asks
+  /// this to reject a candidate tuple: a run is usable only when none of its
+  /// lanes is in the unavailable set. Classes RegisterSet does not track answer
+  /// false, matching contains().
+  [[nodiscard]] bool intersects(RegisterRef ref) const;
+
   /// @brief Return true when no register class contains any live bits.
   [[nodiscard]] bool none() const;
 

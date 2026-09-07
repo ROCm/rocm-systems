@@ -24,7 +24,7 @@
 #include <math.h>
 #include <limits.h>
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "KFDRASTest.hpp"
 #include "PM4Queue.hpp"
 
