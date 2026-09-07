@@ -64,23 +64,33 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
+
 /* DMA-BUF support */
 ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
+  struct ncclIbMrHandle* mhandleWrapper = NULL;
+  int registered = 0;
+  *mhandle = NULL;
+  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
     NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i),
                   ret, fail);
+    registered++;
   }
   *mhandle = (void*)mhandleWrapper;
 exit:
   return ret;
 fail:
+  for (int i = 0; i < registered; i++) {
+    struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
+    (void)ncclIbDeregMrInternal(devComm, mhandleWrapper->mrs[i]);
+  }
   free(mhandleWrapper);
   goto exit;
 }

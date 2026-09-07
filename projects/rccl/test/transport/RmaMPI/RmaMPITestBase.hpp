@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RMA_MPI_TEST_BASE_HPP
+#define RMA_MPI_TEST_BASE_HPP
 
 #ifdef MPI_TESTS_ENABLED
 #ifdef RCCL_HAS_RMA_IB_PROXY
@@ -163,7 +164,8 @@ protected:
 
     bool SetUpFixture(int minProcesses = kMinProcessesForMPI,
                       int maxProcesses = kNoProcessLimit,
-                      int minNodes = 1)
+                      int minNodes = 1,
+                      int maxNodes = kNoNodeLimit)
     {
         // SetUp() already recorded the skip + warning when NCCL_NET wasn't
         // ib / ib-cast. Short-circuit so the per-test body doesn't proceed to
@@ -172,7 +174,7 @@ protected:
 
         if(!validateTestPrerequisites(minProcesses, maxProcesses,
                                       kNoPowerOfTwoRequired,
-                                      minNodes, kNoNodeLimit))
+                                      minNodes, maxNodes))
         {
             return false;
         }
@@ -515,3 +517,5 @@ protected:
 
 #endif // RCCL_HAS_RMA_IB_PROXY
 #endif // MPI_TESTS_ENABLED
+
+#endif // RMA_MPI_TEST_BASE_HPP
