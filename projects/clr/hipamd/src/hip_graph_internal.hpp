@@ -778,7 +778,8 @@ class Graph {
   hipError_t RunNodes(
       int32_t base_stream = 0,                             //!< The base stream to run the graph on
       const std::vector<hip::Stream*>* streams = nullptr,  //!< Streams to run the graph
-      const amd::Command::EventWaitList* parent_waitlist = nullptr  //!< Parent Graph waitlist
+      const amd::Command::EventWaitList* parent_waitlist = nullptr,  //!< Parent Graph waitlist
+      bool waited_cross_stream = false  //!< Something on another stream waits on the last command
   );
 
   //! Schedules nodes into batches for optimized execution
