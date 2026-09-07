@@ -28,6 +28,7 @@
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
@@ -86,6 +87,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "library/rocprofiler-sdk/domain_service.hpp"
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -98,6 +101,14 @@ namespace
 using rocprofiler_sdk::default_externals;
 using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
+
+using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
+
+struct external_dependencies
+{};
+
+std::shared_ptr<domain_service<production_backend, external_dependencies>>
+    g_domain_service;
 
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
@@ -2099,50 +2110,55 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
-#if(ROCPROFILER_VERSION >= 10202)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
-                        header->payload);
-                tool_kfd_page_fault_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
-                        header->payload);
-                tool_kfd_page_migrate_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
-                        header->payload);
-                tool_kfd_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
-                        header->payload);
-                tool_kfd_event_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
-                    header->payload);
-                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
-                    header->payload);
-                tool_kfd_event_dropped_events_callback(tool_data, record);
-            }
-#endif
+            // #if (ROCPROFILER_VERSION >= 10202)
+            //             else if(header->kind ==
+            //             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+            //             {
+            //                 auto* record =
+            //                     static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
+            //                         header->payload);
+            //                 tool_kfd_page_fault_callback(tool_data, record);
+            //             }
+            //             else if(header->kind ==
+            //             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+            //             {
+            //                 auto* record =
+            //                     static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
+            //                         header->payload);
+            //                 tool_kfd_page_migrate_callback(tool_data, record);
+            //             }
+            //             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+            //             {
+            //                 auto* record =
+            //                     static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
+            //                         header->payload);
+            //                 tool_kfd_queue_callback(tool_data, record);
+            //             }
+            //             else if(header->kind ==
+            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
+            //             {
+            //                 auto* record =
+            //                     static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
+            //                         header->payload);
+            //                 tool_kfd_event_queue_callback(tool_data, record);
+            //             }
+            //             else if(header->kind ==
+            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+            //             {
+            //                 auto* record = static_cast<
+            //                     rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
+            //                     header->payload);
+            //                 tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
+            //             }
+            //             else if(header->kind ==
+            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+            //             {
+            //                 auto* record = static_cast<
+            //                     rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
+            //                     header->payload);
+            //                 tool_kfd_event_dropped_events_callback(tool_data, record);
+            //             }
+            // #endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {
@@ -2645,95 +2661,129 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
 
 #if(ROCPROFILER_VERSION >= 10202)
-    // Initialize KFD event metadata
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    std::vector<domain_selection> domain_selection_list;
+
+    // // Initialize KFD event metadata
+    // if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
+    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
+    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
+    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
+    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0
+    //    || _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) >
+    //    0)
+    // {
+    //     rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+    // }
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
-        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+        domain_selection selection;
+        selection.name = "kfd_page_fault";
+        domain_selection_list.push_back(selection);
+
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_page_fault_buffer));
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
+        //     _data->kfd_page_fault_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_fault_buffer));
+        domain_selection selection;
+        selection.name = "kfd_page_migrate";
+        domain_selection_list.push_back(selection);
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
-            _data->kfd_page_fault_buffer));
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_page_migrate_buffer));
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr,
+        //     0, _data->kfd_page_migrate_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_migrate_buffer));
+        domain_selection selection;
+        selection.name = "kfd_queue";
+        domain_selection_list.push_back(selection);
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
-            _data->kfd_page_migrate_buffer));
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_queue_buffer));
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
+        //     _data->kfd_queue_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_queue_buffer));
+        domain_selection selection;
+        selection.name       = "kfd_event_queue";
+        selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
-            _data->kfd_queue_buffer));
+        domain_selection_list.push_back(selection);
+
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_event_queue_buffer));
+
+        // // The only KFD_EVENT_QUEUE operation we want to process is
+        // RESTORE_RESCHEDULED.
+        // // All others are captured within paired KFD_QUEUE operations
+        // auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
+        //     ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
+        // };
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+        //     kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
+        //     _data->kfd_event_queue_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_queue_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_unmap_from_gpu";
 
-        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
-        // All others are captured within paired KFD_QUEUE operations
-        auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
-        };
+        domain_selection_list.push_back(selection);
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-            kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
-            _data->kfd_event_queue_buffer));
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_event_unmap_buffer));
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+        //     nullptr, 0, _data->kfd_event_unmap_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_unmap_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_dropped_events";
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-            nullptr, 0, _data->kfd_event_unmap_buffer));
+        domain_selection_list.push_back(selection);
+
+        // ROCPROFILER_CALL(rocprofiler_create_buffer(
+        //     _data->primary_ctx, buffer_size, watermark,
+        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+        //     &_data->kfd_event_dropped_buffer));
+
+        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+        //     nullptr, 0, _data->kfd_event_dropped_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_dropped_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-            nullptr, 0, _data->kfd_event_dropped_buffer));
-    }
+    g_domain_service->configure(domain_selection_list);
 #endif
 
     if(!_counter_events.empty())
