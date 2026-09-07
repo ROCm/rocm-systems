@@ -6,19 +6,29 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
+### Added
+
+- Added the `--preset=trace-unified-memory` profile for unified-memory reports and
+  Perfetto page-fault and migration-throughput tracks. The preset requires
+  `HSA_XNACK=1` in the target application's environment.
+
 ### Changed
 
 - **rocpd is now the default output format.** When no output format is specified,
-profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
-output must now be explicitly enabled via `--output-format proto`. Requires
-ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+profiling data is emitted as a rocpd SQLite database
+(`rocpd-<pid>-<session>.db` by default, or `rocpd.db` with
+`ROCPROFSYS_USE_PID=NO`). Perfetto (`.proto`) output must now be explicitly enabled
+via `--output-format proto`. Requires ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
 - `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
 replaces Perfetto as the primary trace output.
-- All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
-  `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
-  `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
-  library default. The `--profile-only` and `--profile-mpi` presets explicitly disable
-  rocpd output to preserve their lightweight, flat-profile-only character.
+- All built-in presets that perform tracing (`--preset=balanced`,
+  `--preset=detailed`, `--preset=sys-trace`, `--preset=runtime-trace`,
+  `--preset=trace-gpu`, `--preset=trace-hpc`, `--preset=trace-hw-counters`,
+  `--preset=trace-openmp`, `--preset=trace-unified-memory`,
+  `--preset=workload-trace`) now produce a rocpd database by default, because
+  rocpd is the new library default. The `--preset=profile-only` and
+  `--preset=profile-mpi` presets explicitly disable rocpd output to preserve
+  their lightweight, flat-profile-only character.
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
 - The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
@@ -28,6 +38,12 @@ replaces Perfetto as the primary trace output.
 
 ### Resolved issues
 
+- Fixed preset JSON import and export so unified-memory profiling can be enabled
+  independently of AMD SMI GPU metrics.
+- Fixed the `--cpu` override note to derive CPU-sampling state from resolved preset
+  settings instead of a hard-coded name list. The note no longer appears for
+  `trace-openmp`, now appears for `profile-only` and `trace-hw-counters`, and also
+  supports custom preset files.
 - Fixed `rocprof-sys-python` ignoring the `-c`/`--config` flag. The configuration
   file is now applied to `ROCPROFSYS_CONFIG_FILE` before the profiler bindings are
   loaded, so its settings take effect. A configuration file already named by

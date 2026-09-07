@@ -1,0 +1,24 @@
+{
+    "domains": {
+        "gpu": {
+            "unified_memory_profiling": {
+                "enabled": true
+            }
+        }
+    },
+    "metadata": {
+        "category": "gpu",
+        "description": "Unified memory profiling: KFD page-fault and page-migration reports with a Perfetto timeline",
+        "name": "trace-unified-memory",
+        "use_case": "HIP managed-memory workloads on an XNACK-capable GPU. Requires HSA_XNACK=1 and ROCm 7.13 or later."
+    },
+    "profiling": {
+        "enabled": false
+    },
+    "sampling": {
+        "enabled": false
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

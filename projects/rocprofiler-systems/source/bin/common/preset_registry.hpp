@@ -73,6 +73,15 @@ public:
         const std::string& name_or_path);
 
     /**
+     * Check whether an already-loaded preset disables CPU sampling.
+     * @param preset_name Preset registry key, including a custom preset file path.
+     * @return True when resolved settings disable sampling or select no CPUs. A
+     *         missing or not-yet-loaded preset safely returns false, because
+     *         validation normally runs after preset application.
+     */
+    [[nodiscard]] bool disables_cpu_sampling(std::string_view preset_name) const;
+
+    /**
      * Print a list of all available presets grouped by category.
      */
     void list(std::string_view tool_name, std::ostream& os = std::cout);

@@ -9,6 +9,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +23,9 @@ namespace rocprofsys
 
 namespace
 {
+constexpr std::string_view k_disabled_setting_value = "false";
+constexpr std::string_view k_no_sampling_cpus       = "none";
+
 std::string
 find_preset_directory()
 {
@@ -120,12 +124,18 @@ preset_registry::translate_legacy_flag(std::string_view arg) const
        arg.find('=') != std::string_view::npos)
         return {};
 
-    auto name = std::string{ arg.substr(2) };
-    if(m_presets.count(name) == 0) return {};
+    const auto preset_it =
+        std::find_if(m_presets.begin(), m_presets.end(), [arg](const auto& preset_entry) {
+            return preset_entry.second.cli_flag == arg;
+        });
+    if(preset_it == m_presets.end())
+    {
+        return {};
+    }
 
     std::cerr << "[rocprof-sys] WARNING: '" << arg
-              << "' is deprecated. Use '--preset=" << name << "' instead.\n";
-    return "--preset=" + name;
+              << "' is deprecated. Use '--preset=" << preset_it->first << "' instead.\n";
+    return "--preset=" + preset_it->first;
 }
 
 std::optional<preset_registry::preset_info>
@@ -220,6 +230,27 @@ preset_registry::get_settings(const std::string& name_or_path)
     auto info = find(name_or_path);
     if(!info) return std::nullopt;
     return info->settings;
+}
+
+bool
+preset_registry::disables_cpu_sampling(std::string_view preset_name) const
+{
+    const auto preset_it = m_presets.find(std::string{ preset_name });
+    if(preset_it == m_presets.end())
+    {
+        return false;
+    }
+
+    const auto& settings         = preset_it->second.settings;
+    const auto  sampling_enabled = settings.find(std::string{ env_vars::USE_SAMPLING });
+    if(sampling_enabled != settings.end() &&
+       sampling_enabled->second == k_disabled_setting_value)
+    {
+        return true;
+    }
+
+    const auto sampling_cpus = settings.find(std::string{ env_vars::SAMPLING_CPUS });
+    return sampling_cpus != settings.end() && sampling_cpus->second == k_no_sampling_cpus;
 }
 
 void
@@ -441,7 +472,8 @@ preset_registry::describe(std::string_view preset_name)
             auto freq = sampling["frequency_hz"].value("value", 0);
             if(freq > 0) entry += " @ " + std::to_string(freq) + " Hz";
         }
-        if(sampling.contains("cpus") && sampling["cpus"].value("value", "") == "none")
+        if(sampling.contains("cpus") &&
+           sampling["cpus"].value("value", "") == k_no_sampling_cpus)
         {
             entry = "CPU Sampling:    Disabled (none)";
         }

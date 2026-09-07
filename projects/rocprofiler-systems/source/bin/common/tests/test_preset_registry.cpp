@@ -93,6 +93,11 @@ constexpr auto gpu_preset_json = R"({
 
 constexpr auto invalid_json = R"({ this is not valid json })";
 
+constexpr auto k_sampling_disabled_json = R"({
+    "metadata": {"name": "sampling-disabled"},
+    "sampling": {"enabled": false}
+})";
+
 }  // namespace
 
 class preset_registry_test : public ::testing::Test
@@ -209,6 +214,40 @@ TEST_F(preset_registry_test, get_settings_returns_consistent_results)
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(second.has_value());
     EXPECT_EQ(*first, *second);
+}
+
+TEST_F(preset_registry_test, cpu_sampling_query_handles_loaded_and_missing_presets)
+{
+    temp_dir dir;
+    auto filepath = dir.write_file("sampling-disabled.json", k_sampling_disabled_json);
+
+    preset_registry registry;
+    ASSERT_TRUE(registry.get_settings(filepath).has_value());
+
+    EXPECT_TRUE(registry.disables_cpu_sampling(filepath));
+    EXPECT_FALSE(registry.disables_cpu_sampling("missing-preset"));
+}
+
+TEST_F(preset_registry_test, cpu_sampling_query_reads_embedded_presets_without_load)
+{
+    const preset_registry registry{};
+
+    EXPECT_TRUE(registry.disables_cpu_sampling("profile-only"));
+    EXPECT_TRUE(registry.disables_cpu_sampling("trace-gpu"));
+    EXPECT_TRUE(registry.disables_cpu_sampling("trace-hpc"));
+    EXPECT_TRUE(registry.disables_cpu_sampling("trace-hw-counters"));
+    EXPECT_TRUE(registry.disables_cpu_sampling("trace-unified-memory"));
+    EXPECT_TRUE(registry.disables_cpu_sampling("workload-trace"));
+    EXPECT_FALSE(registry.disables_cpu_sampling("balanced"));
+    EXPECT_FALSE(registry.disables_cpu_sampling("trace-openmp"));
+}
+
+TEST_F(preset_registry_test, legacy_translation_requires_declared_cli_flag)
+{
+    const preset_registry registry{};
+
+    EXPECT_EQ(registry.translate_legacy_flag("--balanced"), "--preset=balanced");
+    EXPECT_TRUE(registry.translate_legacy_flag("--trace-unified-memory").empty());
 }
 
 TEST_F(preset_registry_test, is_section_enabled_checks)

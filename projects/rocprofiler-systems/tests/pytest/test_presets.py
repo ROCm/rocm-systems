@@ -9,8 +9,13 @@ case is exercised against both front-ends.
 """
 
 from __future__ import annotations
+
 import json
+from pathlib import Path
+from typing import NamedTuple, Optional
+
 import pytest
+
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.presets]
@@ -35,10 +40,16 @@ PRESETS = [
     "sys-trace",
     "runtime-trace",
     "trace-gpu",
+    "trace-unified-memory",
     "trace-openmp",
     "profile-mpi",
     "trace-hw-counters",
 ]
+
+# trace-unified-memory is modern-only: without metadata.cli_flag, it has no
+# deprecated --<name> alias.
+MODERN_PRESETS = {"trace-unified-memory"}
+LEGACY_PRESETS = [preset for preset in PRESETS if preset not in MODERN_PRESETS]
 
 # workload-trace requires rocPD and a valid GPU — tested separately
 ROCPD_PRESETS = ["workload-trace"]
@@ -57,12 +68,18 @@ TARGETS = [
 ]
 
 
+class _BaselineOverrides(NamedTuple):
+    env: Optional[dict[str, str]] = None
+    fail_regex: Optional[list[str]] = None
+
+
 def _assert_baseline_output(
     test: RocprofsysTest,
     *,
     target: str,
     run_args: list[str],
     pass_regex: list[str],
+    overrides: _BaselineOverrides = _BaselineOverrides(),
 ) -> None:
     """Launch ``target`` in baseline mode and assert its output matches ``pass_regex``.
 
@@ -72,10 +89,15 @@ def _assert_baseline_output(
     result = test.run_test(
         "baseline",
         target=target,
+        env=overrides.env,
         run_args=run_args,
         fail_on_not_found=True,
     )
-    test.assert_regex(result, pass_regex=pass_regex)
+    test.assert_regex(
+        result,
+        pass_regex=pass_regex,
+        fail_regex=overrides.fail_regex,
+    )
 
 
 # ============================================================================
@@ -130,6 +152,30 @@ class TestPresets(RocprofsysTest):
             pass_regex=["ROCPROFSYS_FLAT_PROFILE=true"],
         )
 
+    def test_trace_unified_memory_settings(self, target: str) -> None:
+        """Keep GPU settings while enabling unified-memory tracing."""
+        _assert_baseline_output(
+            self,
+            target=target,
+            overrides=_BaselineOverrides(
+                env={
+                    "ROCPROFSYS_LOG_LEVEL": "debug",
+                    "ROCPROFSYS_USE_AMD_SMI": "OFF",
+                    "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+                }
+            ),
+            run_args=["--preset=trace-unified-memory", "--", "ls"],
+            pass_regex=[
+                r"Preset:\s+trace-unified-memory",
+                "ROCPROFSYS_TRACE=true",
+                "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=true",
+                "ROCPROFSYS_PROFILE=false",
+                "ROCPROFSYS_USE_SAMPLING=false",
+                "ROCPROFSYS_USE_AMD_SMI=OFF",
+                "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF",
+            ],
+        )
+
 
 # ============================================================================
 # Legacy preset flag translation --preset=<name>
@@ -145,9 +191,12 @@ class TestLegacyPresetFlags(RocprofsysTest):
     Running --balanced is the same as running --preset=balanced. The tool
     accepts the old flag, prints a deprecation warning telling you to switch
     to --preset=<name>, and then applies that preset anyway.
+
+    Only presets that declare metadata.cli_flag get a legacy alias, so
+    modern-only presets are excluded here.
     """
 
-    @pytest.mark.parametrize("preset", PRESETS)
+    @pytest.mark.parametrize("preset", LEGACY_PRESETS)
     def test_flag_translates_to_preset(self, target, preset):
         _assert_baseline_output(
             self,
@@ -239,14 +288,86 @@ class TestDomainFlagOverrideNotes(RocprofsysTest):
     flags are combined. These are guidance hints printed to stderr, not errors —
     the workload still runs."""
 
-    def test_cpu_with_no_sampling_preset(self, target):
-        """--cpu with a preset that disables CPU sampling warns it will be overridden."""
+    @pytest.mark.parametrize(
+        "preset",
+        [
+            "profile-only",
+            "trace-gpu",
+            "trace-hpc",
+            "trace-hw-counters",
+            "trace-unified-memory",
+        ],
+    )
+    def test_cpu_with_no_sampling_preset(
+        self,
+        target: str,
+        preset: str,
+    ) -> None:
+        """Read the override note from resolved preset settings."""
         _assert_baseline_output(
             self,
             target=target,
-            run_args=["--preset=trace-hpc", "--cpu=100", "-v", "1", "--", "ls"],
+            run_args=[
+                f"--preset={preset}",
+                "--cpu=100",
+                "-v",
+                "1",
+                "--",
+                "ls",
+            ],
             pass_regex=[
-                r"--cpu flag used with 'trace-hpc' preset which disables CPU sampling",
+                rf"--cpu flag used with '{preset}' preset which "
+                r"disables CPU sampling",
+                r"will override the preset's sampling settings",
+            ],
+        )
+
+    def test_cpu_with_trace_openmp_does_not_warn(self, target: str) -> None:
+        """Do not warn when a preset leaves CPU sampling unspecified."""
+        _assert_baseline_output(
+            self,
+            target=target,
+            run_args=[
+                "--preset=trace-openmp",
+                "--cpu=100",
+                "-v",
+                "1",
+                "--",
+                "ls",
+            ],
+            pass_regex=[r"Preset:\s+trace-openmp"],
+            overrides=_BaselineOverrides(
+                fail_regex=[r"preset which disables CPU sampling"]
+            ),
+        )
+
+    def test_cpu_with_custom_disabled_sampling_preset(
+        self, target: str, tmp_path: Path
+    ) -> None:
+        """Apply resolved sampling guidance to a custom preset file."""
+        preset_file = tmp_path / "sampling-disabled.json"
+        preset_file.write_text(
+            json.dumps(
+                {
+                    "metadata": {"name": "sampling-disabled"},
+                    "sampling": {"enabled": False},
+                }
+            )
+        )
+        _assert_baseline_output(
+            self,
+            target=target,
+            run_args=[
+                f"--preset={preset_file}",
+                "--cpu=100",
+                "-v",
+                "1",
+                "--",
+                "ls",
+            ],
+            pass_regex=[
+                r"--cpu flag used with '.*sampling-disabled\.json' "
+                r"preset which disables CPU sampling",
                 r"will override the preset's sampling settings",
             ],
         )
