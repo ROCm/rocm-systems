@@ -2118,7 +2118,9 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  */
 void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
   // A separate packet, so it sits behind the command it denotes.
-  if (publishOrderingEdge && command_->isCrossStreamProducer()) {
+  // Not when clearHwEvent is set: the block below releases the HwEvent, and that is the only
+  // route a consumer has to the edge, so one published here could never be named.
+  if (publishOrderingEdge && !clearHwEvent && command_->isCrossStreamProducer()) {
     PublishOrderingEdge();
   }
 
