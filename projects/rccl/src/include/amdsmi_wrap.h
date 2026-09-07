@@ -658,7 +658,7 @@ inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFab
     return amdSmiFabricRuntimeLayout::ExtendedUnion;
   }
   if (wroteV1 && wrote8GpuTail &&
-      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd)) {
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
     return amdSmiFabricRuntimeLayout::EightGpu;
   }
   if (wroteV1 && wrote8GpuTail && wrote16GpuTail && nothingBeyond16Gpu) {

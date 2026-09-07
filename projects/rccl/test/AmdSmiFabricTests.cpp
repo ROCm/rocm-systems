@@ -188,6 +188,8 @@ TEST(AmdSmiFabricRuntimeLayout, ClassifiesWriteExtents)
         // Trailing padding a compiler need not copy, in each layout.
         {kAmdSmiFabricReserved16GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::SixteenGpu},
         {kAmdSmiFabricReserved8GpuEnd, 0, 0x00, amdSmiFabricRuntimeLayout::EightGpu},
+        // A byte in the 16-GPU trailing padding rules out the 8-GPU layout.
+        {kAmdSmiFabricReserved8GpuEnd, 319, 0x00, amdSmiFabricRuntimeLayout::Unknown},
     };
 
     for (const FabricExtentCase& c : cases) {
@@ -248,7 +250,12 @@ TEST(AmdSmiFabricRuntimeLayout, ReservedWithoutPayloadIsUnknown)
     amdSmiPrepareFabricInfoBuffer(buffer);
     memset(buffer.bytes + kAmdSmiFabricV1PayloadEnd, 0,
            kAmdSmiFabricReserved16GpuEnd - kAmdSmiFabricV1PayloadEnd);
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 
+    // The 8-GPU mirror: only that layout's reserved tail written, payload still untouched.
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes + kAmdSmiFabricV1PayloadEnd, 0,
+           kAmdSmiFabricReserved8GpuEnd - kAmdSmiFabricV1PayloadEnd);
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
 
