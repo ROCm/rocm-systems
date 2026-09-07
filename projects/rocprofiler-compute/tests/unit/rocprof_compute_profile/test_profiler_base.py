@@ -14,7 +14,9 @@ from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
+    _capture_args_flags,
     _partition_warning_messages,
+    _prepare_ml_api_trace_injection,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
@@ -920,6 +922,69 @@ def test_sanitize_pc_sampling_method_unsupported(interval, monkeypatch):
 
     with pytest.raises(SystemExit):
         instance.sanitize()
+
+
+# ---------------------------------------------------------------------------
+# --ml-trace-with-params: launcher wiring + warn-and-ignore gating
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "level, expected",
+    [
+        ("off", ["--capture-args", "0", "--capture-arg-values", "0"]),
+        ("shapes", ["--capture-args", "1", "--capture-arg-values", "0"]),
+        ("values", ["--capture-args", "1", "--capture-arg-values", "1"]),
+    ],
+)
+def test_capture_args_flags_mapping(level, expected):
+    """Each capture level maps to the launcher's --capture-args /
+    --capture-arg-values flags."""
+    assert _capture_args_flags(level) == expected
+
+
+def test_injection_threads_capture_flags_into_launcher(tmp_path):
+    """The inject_roctx launcher carries the resolved capture flags."""
+    script = tmp_path / "workload.py"
+    script.write_text("print('ok')\n")
+    remaining = ["python3", str(script)]
+
+    _prepare_ml_api_trace_injection(
+        remaining,
+        Path("/usr/bin/python3"),
+        True,
+        1,
+        None,
+        {"torch"},
+        "values",
+    )
+
+    joined = " ".join(remaining)
+    assert "launch.py" in joined
+    assert "--frameworks torch" in joined
+    assert "--capture-args 1 --capture-arg-values 1" in joined
+
+
+def test_ml_trace_with_params_without_tracing_flag_warns(tmp_path, monkeypatch):
+    """--ml-trace-with-params without a tracing flag warns and is ignored."""
+    script = tmp_path / "workload.py"
+    script.write_text("print('ok')\n")
+    args = _make_sanitize_args(
+        ["python3", str(script)],
+        torch_trace=False,
+        ml_trace_with_params="values",
+    )
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_base.console_warning",
+        lambda *a, **k: warnings.append(" ".join(str(x) for x in a)),
+    )
+
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    profiler.sanitize()
+
+    assert any("ml-trace-with-params" in w for w in warnings)
+    # No launcher injection happens without a tracing flag.
+    assert "launch.py" not in args.remaining
 
 
 # ---------------------------------------------------------------------------

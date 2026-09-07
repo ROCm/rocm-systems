@@ -15,7 +15,9 @@ import threading
 from collections.abc import Iterable
 from importlib.machinery import PathFinder
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Union
+
+from utils.inject_roctx import marker_format
 
 
 def _missing_range_push(_label: str) -> None:
@@ -41,6 +43,8 @@ class _CoreState:
         self.range_pop: Callable[[], None] = _missing_range_pop
         self.framework_roots: list[str] = []
         self.roctx_candidate_paths: list[str] = []
+        self.capture_args: bool = True
+        self.capture_arg_values: bool = False
 
 
 _STATE = _CoreState()
@@ -138,8 +142,31 @@ def resolve_user_caller_location() -> str:
     return "python.dispatch:0"
 
 
-# Wire format: "<op_path>:#N@file:line/...[|<backend>]". The optional
-# "|<backend>" suffix attributes the scope to its backend.
+# Operator-argument capture configuration.
+
+
+def set_args_capture(capture_args: bool, capture_arg_values: bool) -> None:
+    """Configure operator-argument capture. Scalar values are recorded only
+    when both ``capture_args`` and ``capture_arg_values`` are True.
+    """
+    _STATE.capture_args = bool(capture_args)
+    _STATE.capture_arg_values = bool(capture_arg_values)
+
+
+def args_capture_enabled() -> bool:
+    """Return whether operator args are captured (default True)."""
+    return _STATE.capture_args
+
+
+def args_values_enabled() -> bool:
+    """Return whether scalar arg values are captured (default False). Values
+    are captured only when args capture is also enabled.
+    """
+    return _STATE.capture_args and _STATE.capture_arg_values
+
+
+# Wire format: "<op_path>:#N@file:line/...[|args=<ENC>][|<backend>]". The args
+# segment carries the percent-encoded leaf-operator args.
 
 
 def encode_marker_name(name: str) -> str:
@@ -149,24 +176,27 @@ def encode_marker_name(name: str) -> str:
     return name.replace("%", "%25").replace("/", "%2F")
 
 
-def compose_marker(marker: str, context: str, backend: str = "") -> str:
+def compose_marker(marker: str, context: str, backend: str = "", args: str = "") -> str:
     """Return the wire-format string for a scope nested under the current
-    marker and context stacks. Marker segments are percent-encoded.
+    marker and context stacks. Marker segments are percent-encoded. Empty
+    ``args`` and ``backend`` are omitted.
     """
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
     op_path = "/".join(encode_marker_name(name) for name in [*marker_stack, marker])
     full = op_path + ":" + "/".join([*context_stack, context])
+    if args:
+        full = f"{full}|args={marker_format.encode_args(args)}"
     if backend:
         full = f"{full}|{backend}"
     return full
 
 
-def _push_scope(marker: str, context: str, backend: str = "") -> None:
+def _push_scope(marker: str, context: str, backend: str = "", args: str = "") -> None:
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
 
-    _STATE.range_push(compose_marker(marker, context, backend))
+    _STATE.range_push(compose_marker(marker, context, backend, args))
 
     marker_stack.append(marker)
     context_stack.append(context)
@@ -189,15 +219,24 @@ def _pop_scope() -> None:
             context_stack.pop()
 
 
-def install_global_wraps(backends: Iterable[str] = ()) -> None:
+def install_global_wraps(
+    backends: Union[str, Iterable[str]] = "",
+    capture_args: bool = True,
+    capture_arg_values: bool = False,
+) -> None:
     """Install ROCTX instrumentation for each named backend.
 
-    ``backends`` is an iterable of framework names (e.g. ``["torch"]``).
-    Empty input is a no-op.
+    ``backends`` is an iterable of framework names (e.g. ``["torch"]``), or a
+    comma-separated string. ``capture_args`` and ``capture_arg_values`` configure
+    operator-argument capture. Empty input is a no-op.
     """
     from .registry import install_many
 
-    names = [str(n).strip() for n in backends if str(n).strip()]
+    if isinstance(backends, str):
+        names = [n.strip() for n in backends.split(",") if n.strip()]
+    else:
+        names = [str(n).strip() for n in backends if str(n).strip()]
     if not names:
         return
+    set_args_capture(capture_args, capture_arg_values)
     install_many(names)

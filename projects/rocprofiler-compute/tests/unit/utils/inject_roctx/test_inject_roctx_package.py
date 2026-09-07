@@ -7,8 +7,10 @@ and ``core._push_scope`` / ``_pop_scope``."""
 
 import functools
 import importlib
+import json
 import sys
 import types
+from pathlib import Path
 
 import common  # noqa: F401
 import pytest
@@ -42,6 +44,17 @@ def make_backend(name, install_fn=None):
     return backend
 
 
+@pytest.fixture(autouse=True)
+def reset_args_capture():
+    """Reset operator-argument capture configuration to defaults around each
+    test."""
+    from utils.inject_roctx import core
+
+    core.set_args_capture(True, False)
+    yield
+    core.set_args_capture(True, False)
+
+
 # ---------------------------------------------------------------------------
 # install_global_wraps
 # ---------------------------------------------------------------------------
@@ -59,20 +72,131 @@ def captured_install(monkeypatch):
     return calls
 
 
-def test_install_global_wraps_empty_input_is_noop(captured_install):
+def test_install_global_wraps_empty_inputs_are_noop(captured_install):
     from utils.inject_roctx.core import install_global_wraps
 
+    install_global_wraps("")
     install_global_wraps([])
-    install_global_wraps(())
     assert captured_install == []
 
 
-def test_install_global_wraps_list_input(captured_install):
+def test_install_global_wraps_single_name(captured_install):
     from utils.inject_roctx.core import install_global_wraps
 
-    install_global_wraps(["torch"])
+    install_global_wraps("torch")
+    assert captured_install == [["torch"]]
+
+
+def test_install_global_wraps_comma_split_with_whitespace(captured_install):
+    from utils.inject_roctx.core import install_global_wraps
+
+    install_global_wraps("torch , , triton")
+    assert captured_install == [["torch", "triton"]]
+
+
+def test_install_global_wraps_iterable_input(captured_install):
+    from utils.inject_roctx.core import install_global_wraps
+
     install_global_wraps(["torch", "triton"])
-    assert captured_install == [["torch"], ["torch", "triton"]]
+    assert captured_install == [["torch", "triton"]]
+
+
+def test_install_global_wraps_threads_capture_config(captured_install):
+    from utils.inject_roctx import core
+
+    core.install_global_wraps("torch", capture_args=True, capture_arg_values=True)
+    assert core._STATE.capture_args is True
+    assert core._STATE.capture_arg_values is True
+
+    core.install_global_wraps("torch", capture_args=False, capture_arg_values=False)
+    assert core._STATE.capture_args is False
+    assert core._STATE.capture_arg_values is False
+
+
+def test_install_global_wraps_empty_backends_leaves_config_untouched(captured_install):
+    from utils.inject_roctx import core
+
+    core.set_args_capture(True, False)
+    core.install_global_wraps("", capture_args=False, capture_arg_values=True)
+    # No backends: the call is a no-op and must not mutate capture config.
+    assert core._STATE.capture_args is True
+    assert core._STATE.capture_arg_values is False
+    assert captured_install == []
+
+
+# ---------------------------------------------------------------------------
+# launch.parse_launcher_options
+# ---------------------------------------------------------------------------
+
+
+def test_parse_launcher_options_defaults_capture_on_shapes():
+    from utils.inject_roctx import launch
+
+    frameworks, capture_args, capture_arg_values, remaining = (
+        launch.parse_launcher_options(["--frameworks", "torch", "--", "t.py", "-n"])
+    )
+    assert frameworks == ["torch"]
+    assert capture_args is True
+    assert capture_arg_values is False
+    assert remaining == ["t.py", "-n"]
+
+
+def test_parse_launcher_options_parses_capture_flags():
+    from utils.inject_roctx import launch
+
+    frameworks, capture_args, capture_arg_values, remaining = (
+        launch.parse_launcher_options([
+            "--frameworks",
+            "torch",
+            "triton",
+            "--capture-args",
+            "1",
+            "--capture-arg-values",
+            "1",
+            "--",
+            "t.py",
+        ])
+    )
+    assert frameworks == ["torch", "triton"]
+    assert capture_args is True
+    assert capture_arg_values is True
+    assert remaining == ["t.py"]
+
+
+def test_parse_launcher_options_capture_off():
+    from utils.inject_roctx import launch
+
+    _frameworks, capture_args, capture_arg_values, _remaining = (
+        launch.parse_launcher_options([
+            "--capture-args",
+            "0",
+            "--capture-arg-values",
+            "0",
+            "--",
+            "t.py",
+        ])
+    )
+    assert capture_args is False
+    assert capture_arg_values is False
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("on", True),
+        ("true", True),
+        ("YES", True),
+        ("0", False),
+        ("off", False),
+        ("", False),
+        ("nonsense", False),
+    ],
+)
+def test_launch_flag_parsing(value, expected):
+    from utils.inject_roctx import launch
+
+    assert launch._flag(value) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +303,7 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
     monkeypatch.setattr(
         triton_backend,
         "_push_scope",
-        lambda marker, ctx, backend="": pushes.append((marker, backend)),
+        lambda marker, ctx, backend="", args="": pushes.append((marker, backend)),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
     monkeypatch.setattr(triton_backend._STATE, "jit_function", None)
@@ -205,7 +329,7 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     monkeypatch.setattr(
         triton_backend,
         "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
+        lambda marker, ctx, backend="", args="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
     monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", None)
@@ -232,7 +356,7 @@ def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
     monkeypatch.setattr(
         triton_backend,
         "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
+        lambda marker, ctx, backend="", args="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
     # Reset the per-thread guard.
@@ -273,7 +397,7 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
     monkeypatch.setattr(
         triton_backend,
         "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
+        lambda marker, ctx, backend="", args="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
     # Reset the per-thread guard.
@@ -435,7 +559,7 @@ def test_torch_push_scope_routes_to_native_tier_when_active(torch_backend_tiers)
         def active(self):
             return True
 
-        def push(self, marker, context, backend):
+        def push(self, marker, context, backend, args=""):
             seen.append((marker, context, backend))
             return True
 
@@ -460,7 +584,7 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
         def active(self):
             return self.active_flag
 
-        def push(self, marker, context, backend):
+        def push(self, marker, context, backend, args=""):
             return True
 
         def pop(self):
@@ -477,3 +601,304 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
     assert pushed == ["native_op/py_op:#1@x:1/#2@x:2|torch"]
     assert popped == [None]
     assert native_pops == [None]
+
+
+# ---------------------------------------------------------------------------
+# Operator args capture
+# ---------------------------------------------------------------------------
+
+_MARKER_ARGS_CODEC_PATH = Path(__file__).resolve().parents[3] / "marker_args_codec.json"
+_MARKER_ARGS_CODEC = json.loads(_MARKER_ARGS_CODEC_PATH.read_text(encoding="utf-8"))
+
+
+def test_marker_args_codec_limits():
+    from utils.inject_roctx import marker_format
+
+    assert marker_format.MAX_ARGS_LEN == _MARKER_ARGS_CODEC["max_args_len"]
+    assert marker_format.MAX_ARG_ITEMS == _MARKER_ARGS_CODEC["max_arg_items"]
+    assert (
+        marker_format.MAX_NESTED_ARG_ITEMS == _MARKER_ARGS_CODEC["max_nested_arg_items"]
+    )
+
+
+def test_python_arg_formatters_limit_nested_items():
+    from utils.inject_roctx import core, marker_format
+    from utils.inject_roctx._backends import torch as torch_backend
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    core.set_args_capture(True, False)
+    item_limit = marker_format.MAX_NESTED_ARG_ITEMS
+    items = list(range(item_limit + 1))
+    expected = f"[{', '.join(['int'] * item_limit)}]"
+
+    assert torch_backend._format_dispatch_arg(items) == expected
+    assert triton_backend._format_triton_arg(items) == expected
+
+
+@pytest.mark.parametrize(
+    "case",
+    _MARKER_ARGS_CODEC["cases"],
+    ids=[case["name"] for case in _MARKER_ARGS_CODEC["cases"]],
+)
+def test_marker_args_codec_encode_decode(case):
+    from utils.inject_roctx import marker_format
+
+    encoded = marker_format.encode_args(case["plaintext"])
+    assert encoded == case["encoded"]
+    assert marker_format.decode_args(encoded) == case["plaintext"]
+
+
+def test_core_push_scope_appends_args_segment_before_backend(core_with_python_tier):
+    core, pushed, _ = core_with_python_tier
+
+    core._push_scope("op", "#1@x:1", backend="torch", args="(f32[2x2])")
+    assert pushed == ["op:#1@x:1|args=(f32[2x2])|torch"]
+
+
+def test_core_push_scope_args_segment_without_backend(core_with_python_tier):
+    core, pushed, _ = core_with_python_tier
+
+    core._push_scope("op", "#1@x:1", args="(f32[2x2])")
+    assert pushed == ["op:#1@x:1|args=(f32[2x2])"]
+
+
+def test_core_push_scope_encodes_pipe_in_args(core_with_python_tier):
+    core, pushed, _ = core_with_python_tier
+
+    core._push_scope("op", "#1@x:1", backend="torch", args="a|b")
+    assert pushed == ["op:#1@x:1|args=a%7Cb|torch"]
+
+
+def test_torch_push_scope_forwards_args_to_native_tier(torch_backend_tiers):
+    torch_backend, pushed, _ = torch_backend_tiers
+
+    seen: list[tuple] = []
+
+    class Hook:
+        def active(self):
+            return True
+
+        def push(self, marker, context, backend, args=""):
+            seen.append((marker, context, backend, args))
+            return True
+
+        def pop(self):
+            pass
+
+    torch_backend._STATE.native_hook = Hook()
+    torch_backend._push_scope("op", "#1@x:1", backend="torch", args="(f32[2x2])")
+
+    assert seen == [("op", "#1@x:1", "torch", "(f32[2x2])")]
+    assert pushed == []
+
+
+def test_args_capture_config_gate():
+    from utils.inject_roctx import core
+
+    core.set_args_capture(True, False)
+    assert core.args_capture_enabled() is True
+    assert core.args_values_enabled() is False
+
+    core.set_args_capture(False, False)
+    assert core.args_capture_enabled() is False
+
+    core.set_args_capture(False, True)
+    assert core.args_values_enabled() is False
+
+    core.set_args_capture(True, True)
+    assert core.args_values_enabled() is True
+
+
+def test_cap_args_truncates_long_blobs():
+    from utils.inject_roctx import marker_format
+
+    long_blob = "x" * (marker_format.MAX_ARGS_LEN + 50)
+    capped = marker_format.cap_args(long_blob)
+    assert capped.endswith("...")
+    assert len(capped) == marker_format.MAX_ARGS_LEN + len("...")
+    assert marker_format.cap_args("short") == "short"
+
+
+def test_triton_build_args_tensor_and_scalar():
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    fake_tensor = types.SimpleNamespace(shape=(2, 3), dtype="torch.float32")
+    params = [
+        types.SimpleNamespace(name="x_ptr"),
+        types.SimpleNamespace(name="n_elements"),
+    ]
+    self_obj = types.SimpleNamespace(params=params)
+
+    blob = triton_backend._build_triton_args(
+        self_obj, (fake_tensor, 1024), {"grid": (8,), "BLOCK_SIZE": 256}
+    )
+    assert "x_ptr=float32[2x3]" in blob
+    assert "n_elements=int" in blob
+    assert "grid" not in blob
+    assert "BLOCK_SIZE=int" in blob
+
+    core.set_args_capture(True, True)
+    blob_values = triton_backend._build_triton_args(
+        self_obj, (fake_tensor, 1024), {"grid": (8,), "BLOCK_SIZE": 256}
+    )
+    assert "n_elements=1024" in blob_values
+    assert "BLOCK_SIZE=256" in blob_values
+
+
+def test_triton_build_args_drops_compiled_kernel_preamble():
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    class _LazyDict:
+        pass
+
+    class _HookChain:
+        pass
+
+    fn = types.SimpleNamespace(
+        params=[
+            types.SimpleNamespace(name="x_ptr"),
+            types.SimpleNamespace(name="out_ptr"),
+            types.SimpleNamespace(name="n_elements"),
+            types.SimpleNamespace(name="BLOCK_SIZE"),
+        ]
+    )
+    self_obj = types.SimpleNamespace(params=None, src=types.SimpleNamespace(fn=fn))
+
+    x = types.SimpleNamespace(shape=(8,), dtype="torch.float32")
+    out = types.SimpleNamespace(shape=(8,), dtype="torch.float32")
+    preamble = (8, 1, 1, 0, 12345, (4, 1, 0), _LazyDict(), _HookChain(), _HookChain())
+    blob = triton_backend._build_triton_args(self_obj, preamble + (x, out, 8, 256), {})
+
+    assert blob == (
+        "(x_ptr=float32[8], out_ptr=float32[8], n_elements=int, BLOCK_SIZE=int)"
+    )
+    assert "LazyDict" not in blob
+    assert "HookChain" not in blob
+
+
+def test_triton_build_args_drops_internal_types_without_names():
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    core.set_args_capture(True, True)
+
+    class _LazyDict:
+        pass
+
+    _LazyDict.__name__ = "LazyDict"
+    blob = triton_backend._build_triton_args(
+        types.SimpleNamespace(), (_LazyDict(), 1024), {}
+    )
+    assert "LazyDict" not in blob
+    assert "1024" in blob
+
+
+def test_triton_build_args_caps_combined_positional_and_keyword():
+    from utils.inject_roctx import marker_format
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    cap = marker_format.MAX_ARG_ITEMS
+    self_obj = types.SimpleNamespace(params=None)
+
+    blob = triton_backend._build_triton_args(
+        self_obj, tuple(range(cap)), {f"k{i}": i for i in range(cap)}
+    )
+    assert len(blob[1:-1].split(", ")) == cap
+    assert "k0=" not in blob
+
+    blob = triton_backend._build_triton_args(
+        self_obj, (1, 2), {f"k{i}": i for i in range(cap)}
+    )
+    assert len(blob[1:-1].split(", ")) == cap
+    assert "k0=int" in blob
+    assert f"k{cap - 2}=" not in blob
+
+
+def test_triton_build_args_respects_gate():
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    core.set_args_capture(False, False)
+    blob = triton_backend._build_triton_args(
+        types.SimpleNamespace(params=None), (1, 2), {}
+    )
+    assert blob == ""
+
+
+def test_torch_build_dispatch_args_formats(monkeypatch):
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    class FakeTensor:
+        def __init__(self, shape, dtype):
+            self.shape = shape
+            self.dtype = dtype
+
+    fake_torch = types.SimpleNamespace(Tensor=FakeTensor)
+    monkeypatch.setattr(torch_backend._STATE, "torch", fake_torch)
+
+    func = types.SimpleNamespace(
+        _schema=types.SimpleNamespace(arguments=[types.SimpleNamespace(name="self")])
+    )
+
+    t = FakeTensor((4, 8), "torch.float16")
+    blob = torch_backend._build_dispatch_args(func, (t,), {"dim": 1})
+    assert "self=float16[4x8]" in blob
+    assert "dim=int" in blob
+
+    core.set_args_capture(True, True)
+    blob_values = torch_backend._build_dispatch_args(func, (t,), {"dim": 1})
+    assert "dim=1" in blob_values
+
+
+def test_torch_build_dispatch_args_without_schema(monkeypatch):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    class FakeTensor:
+        def __init__(self, shape, dtype):
+            self.shape = shape
+            self.dtype = dtype
+
+    fake_torch = types.SimpleNamespace(Tensor=FakeTensor)
+    monkeypatch.setattr(torch_backend._STATE, "torch", fake_torch)
+
+    t = FakeTensor((2, 3), "torch.float32")
+    blob = torch_backend._build_dispatch_args(object(), (t,), {})
+    assert blob == "(float32[2x3])"
+
+
+def test_torch_build_dispatch_args_for_mm_relu_cat(monkeypatch):
+    torch = pytest.importorskip("torch")
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    monkeypatch.setattr(torch_backend._STATE, "torch", torch)
+    core.set_args_capture(True, False)
+
+    a = torch.zeros(2, 3, dtype=torch.float32)
+    b = torch.zeros(3, 4, dtype=torch.float32)
+    t = torch.zeros(2, 3, dtype=torch.float32)
+
+    assert (
+        torch_backend._build_dispatch_args(torch.ops.aten.mm.default, (a, b), {})
+        == "(self=float32[2x3], mat2=float32[3x4])"
+    )
+    assert (
+        torch_backend._build_dispatch_args(torch.ops.aten.relu.default, (t,), {})
+        == "(self=float32[2x3])"
+    )
+    assert (
+        torch_backend._build_dispatch_args(
+            torch.ops.aten.cat.default, ([t, t],), {"dim": 0}
+        )
+        == "(tensors=[float32[2x3], float32[2x3]], dim=int)"
+    )
+
+    core.set_args_capture(True, True)
+    assert (
+        torch_backend._build_dispatch_args(
+            torch.ops.aten.cat.default, ([t, t],), {"dim": 1}
+        )
+        == "(tensors=[float32[2x3], float32[2x3]], dim=1)"
+    )
