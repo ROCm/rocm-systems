@@ -30,7 +30,7 @@ target_sources(
     PRIVATE ${rocprofiler_sdk_sources} ${rocprofiler_sdk_headers}
 )
 
-add_subdirectory(kfd_events)
+add_subdirectory(buffered)
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

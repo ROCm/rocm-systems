@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/backend.hpp"
-#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
 #include <cstddef>
@@ -13,15 +11,14 @@
 namespace rocprofsys::domains::buffered
 {
 
-template <typename SdkBackend>
+template <typename SdkBackend, typename Externals>
 inline void
-on_kfd_event_page_fault(
-    typename SdkBackend::buffer_tracing_kfd_event_page_fault_record_t* record, void* data)
+on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record,
+                        void*                                             data)
 {}
 
-template <typename SdkBackend =
-              backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>>
-inline constexpr auto kfd_event_page_fault = buffered_domain_definition<SdkBackend>{
+template <typename SdkBackend, typename Externals>
+inline constexpr auto k_kfd_event_page_fault = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{
             .name  = "kfd_event_page_fault",
@@ -30,8 +27,8 @@ inline constexpr auto kfd_event_page_fault = buffered_domain_definition<SdkBacke
             .group = domain_group{ .name = "kfd_events" },
         },
     .on_records = buffered_callback_dispatcher<
-        SdkBackend, typename SdkBackend::buffer_tracing_kfd_event_page_fault_record_t,
-        on_kfd_event_page_fault<SdkBackend>>::callback
+        SdkBackend, typename SdkBackend::kfd_event_page_fault_record,
+        on_kfd_event_page_fault<SdkBackend, Externals>>::callback
 };
 
 }  // namespace rocprofsys::domains::buffered
