@@ -49,18 +49,13 @@ typedef enum rocDecVideoSurfaceFormat_enum {
 } rocDecVideoSurfaceFormat;
 
 // Returns the output surface format for a chroma format + bit depth, mirroring
-// the shipped selection chain. Unrecognized chroma formats return
-// rocDecVideoSurfaceFormat_Native (the "decoder chooses" sentinel).
-//
-// NOTE: this mirrors the *current* shipped behavior at roc_video_dec.cpp:309,
-// where the Monochrome case is not handled (the `|| rocDecVideoChromaFormat_Monochrome`
-// operand is the enum constant 0, i.e. always false, so the condition reduces to
-// `== rocDecVideoChromaFormat_420`). Monochrome therefore falls through to the
-// default arm. The accompanying test expects Monochrome to select NV12/P016, so
-// the Monochrome rows fail against this mirror until the fix is applied.
+// the shipped selection chain. Monochrome selects the same format as 4:2:0
+// (NV12/P016). Unrecognized chroma formats return rocDecVideoSurfaceFormat_Native
+// (the "decoder chooses" sentinel).
 inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chroma_format, uint8_t bitdepth_minus_8) {
     switch (chroma_format) {
     case rocDecVideoChromaFormat_420:
+    case rocDecVideoChromaFormat_Monochrome:
         return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016
                                 : rocDecVideoSurfaceFormat_NV12;
     case rocDecVideoChromaFormat_444:
