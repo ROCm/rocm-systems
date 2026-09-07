@@ -534,7 +534,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
                    .prologue_requires_consumer);
   const auto &record_policy = plan.prologue;
   EXPECT_FALSE(record_policy.skip_unobserved_barrier_only_initialization);
-  EXPECT_TRUE(record_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(record_policy.one_based_owner_ids);
   EXPECT_FALSE(record_policy.persistent_state_requires_in_place_entry);
 
@@ -544,7 +543,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_TRUE(plan.prologue_requires_consumer);
   const auto &sampled_policy = plan.prologue;
   EXPECT_FALSE(sampled_policy.skip_unobserved_barrier_only_initialization);
-  EXPECT_FALSE(sampled_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(sampled_policy.one_based_owner_ids);
   EXPECT_FALSE(sampled_policy.persistent_state_requires_in_place_entry);
 
@@ -554,7 +552,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_TRUE(plan.prologue_requires_consumer);
   const auto &inline_policy = plan.prologue;
   EXPECT_TRUE(inline_policy.skip_unobserved_barrier_only_initialization);
-  EXPECT_FALSE(inline_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_TRUE(inline_policy.one_based_owner_ids);
   EXPECT_TRUE(inline_policy.persistent_state_requires_in_place_entry);
 }

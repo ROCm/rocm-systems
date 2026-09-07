@@ -35,7 +35,6 @@ struct MoiObjectFacts {
 /// and emission; modes own only the meaning that changes those mechanics.
 struct MoiPrologueModePolicy {
   bool skip_unobserved_barrier_only_initialization = false;
-  bool backup_compact_spill_for_runtime_sampling = false;
   bool one_based_owner_ids = false;
   bool persistent_state_requires_in_place_entry = false;
 };

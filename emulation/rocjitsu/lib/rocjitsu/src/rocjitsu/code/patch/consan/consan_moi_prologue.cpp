@@ -1979,16 +1979,11 @@ void try_apply_owner_epoch_prologue_patch(
     const bool needs_dynamic_stack_scalar_backup =
         kernel_point.moi_branch_only_spill &&
         kernel_point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr.has_value();
-    // A mode whose compact probe protects its borrowed scalar window only at
-    // the access body can use that window earlier for runtime workgroup
-    // selection. Its policy therefore requests an independent entry save
-    // before any site-local spill exists.
-    const bool needs_mode_runtime_scalar_backup =
-        mode_policy.backup_compact_spill_for_runtime_sampling &&
-        kernel_point.has_compact_moi_scalar_spill() && request.moi_runtime_sample_stride > 1u;
-    const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
-                                                needs_dynamic_stack_scalar_backup ||
-                                                needs_mode_runtime_scalar_backup;
+    // Runtime workgroup selection is computed at each eligible probe; it has
+    // no entry-cached value. A compact site-local spill therefore introduces
+    // no prologue consumer and must not make an entry backup live.
+    const bool needs_full_entry_scalar_backup =
+        needs_branch_only_scalar_backup || needs_dynamic_stack_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
         kernel_point.moi_owner_sgpr.automatic() &&
         request.moi_owner_source == ConSanMoiOwnerSource::HwId &&

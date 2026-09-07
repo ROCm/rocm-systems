@@ -5763,6 +5763,48 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
   }
 }
 
+TEST(ConSanMoi, SparseRecordReplayCompactSpillDoesNotStageUnusedEntryBackup) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint32_t> words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      build_s_mov_b32(/*sdst=*/8u, /*ssrc0=*/0u, kArch),
+      build_s_mov_b32(/*sdst=*/8u, /*ssrc0=*/1u, kArch),
+      build_s_endpgm(kArch),
+  };
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(words, "gfx1250_sparse_compact_initialized_entry");
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_init_owner_epoch = true;
+  options.moi_exec_save_sgpr = 0u;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{70u, 72u},
+  };
+  options.moi_dispatch_identity.set_sgpr(60u);
+  options.moi_persistent_sgprs.exact_workgroup =
+      ConSanMoiPersistentWorkgroupRegisters{50u, 51u, 52u};
+  options.moi_runtime_sample_stride = 65'536u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_FALSE(prologue->entry_scalar_backup);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
 TEST(ConSanMoi, RecordReplayRelocationDoesNotRequireIndirectJumpState) {
   const auto access = build_cdna3_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
                                                /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_CDNA3);
