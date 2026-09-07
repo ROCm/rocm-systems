@@ -451,7 +451,7 @@ class VirtualGPU : public device::VirtualDevice {
   const Device& dev() const { return roc_device_; }
 
   void profilingBegin(amd::Command& command, bool sdmaProfiling = false);
-  void profilingEnd(bool clearHwEvent = false);
+  void profilingEnd(bool clearHwEvent = false, bool publishOrderingEdge = true);
 
   void updateCommandsState(amd::Command* list) const;
 
@@ -475,8 +475,10 @@ class VirtualGPU : public device::VirtualDevice {
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
 
-  //! Appends a barrier packet whose completion signal is a device resident ordering edge
-  void PublishOrderingEdge(amd::Marker& vcmd);
+  //! Appends a barrier packet whose completion signal is a device resident ordering edge,
+  //! naming a twin of the current command's completion signal.  Eligibility is tested by the
+  //! caller; see the call sites.
+  void PublishOrderingEdge();
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
