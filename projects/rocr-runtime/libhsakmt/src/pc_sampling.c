@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <assert.h>
 #include <errno.h>
 

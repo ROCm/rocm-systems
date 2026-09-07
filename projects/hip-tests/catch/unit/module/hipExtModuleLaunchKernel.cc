@@ -82,6 +82,11 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
+#ifdef HIP_TESTS_SPIRV_BUILD
+  // SPIR-V builds emit copyKernel.s as SPIR-V, which carries no AMDGPU
+  // .uniform_work_group_size metadata for this test to parse.
+  HIP_SKIP_TEST("copyKernel.s has no AMDGPU metadata in SPIR-V builds.");
+#endif
   // Open copyKernel.s and read the file
   const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
