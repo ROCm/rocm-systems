@@ -1507,6 +1507,100 @@ TEST(ConSanMoi, Cdna4SampledRelocatesOrdinaryAtomicAcquireSequence) {
   EXPECT_NE(std::ranges::find(cave, metadata.packed.descriptor), cave.end());
 }
 
+TEST(ConSanMoi, Gfx1250SampledAssignsDistinctWindowsToGeneratedBufferPollingLoops) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr size_t kAcquireWord = 17u;
+  constexpr size_t kAcquireWords = 10u;
+  constexpr size_t kRetryBranchWord = 23u;
+  constexpr std::array<uint32_t, 27> one_polling_loop = {
+      0x84188209u, 0xBF860000u, 0x7E0A0280u, 0xBE9C0132u, 0xBE9E00FFu, 0xFFFFF000u, 0xBE9F0080u,
+      0x8B05FF1Eu, 0x0000007Fu, 0xBF870009u, 0x84059905u, 0x8B1DFF1Du, 0x01FFFFFFu, 0xBF870009u,
+      0x8C1D051Du, 0x851E871Eu, 0xBFC50000u, 0xC4050018u, 0x40883804u,
+      0x00000005u, // buffer_load_b32 v4, v5, s[28:31], s24 offen scope:device
+      0xBFC00000u, // s_wait_loadcnt 0
+      0x7E340504u, // v_readfirstlane_b32 s26, v4
+      0xBF06811Au, // s_cmp_eq_u32 s26, 1
+      0xBFA1FFE8u, // s_cbranch_scc0 to the address-setup loop header
+      0xEE0AC07Cu, 0x00080000u,
+      0x00000000u, // global_inv scope:device
+  };
+  static_assert(one_polling_loop.size() == kAcquireWord + kAcquireWords);
+  std::vector<uint32_t> text_words;
+  text_words.insert(text_words.end(), one_polling_loop.begin(), one_polling_loop.end());
+  text_words.insert(text_words.end(), one_polling_loop.begin(), one_polling_loop.end());
+  const auto first_read = instrumentation::build_ds_load_b32(
+      /*vdst=*/4u, /*vaddr=*/2u, /*byte_offset=*/4u, kArch);
+  const auto second_read = instrumentation::build_ds_load_b32(
+      /*vdst=*/4u, /*vaddr=*/2u, /*byte_offset=*/8u, kArch);
+  ASSERT_TRUE(first_read && second_read);
+  text_words.insert(text_words.end(), first_read->begin(), first_read->end());
+  text_words.insert(text_words.end(), second_read->begin(), second_read->end());
+  text_words.push_back(build_s_endpgm(kArch));
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(70u);
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{42u, 43u, 44u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(8u);
+  options.moi_runtime_sample_stride = 1u;
+  options.max_patches = 4u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_sampled_buffer_poll"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
+  for (size_t index = 0; index < 2u; ++index) {
+    const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences[index];
+    EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
+    EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
+    ASSERT_TRUE(sequence.acquire_polling_loop_header_text_offset);
+    EXPECT_EQ(*sequence.acquire_polling_loop_header_text_offset,
+              index * one_polling_loop.size() * sizeof(uint32_t));
+  }
+
+  std::vector<const ConSanPatchInfo *> sync_patches;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
+      sync_patches.push_back(&patch);
+  }
+  ASSERT_EQ(sync_patches.size(), 2u)
+      << testing::PrintToString(result.patches) << testing::PrintToString(result.warnings);
+  std::ranges::sort(sync_patches, {},
+                    [](const ConSanPatchInfo *patch) { return patch->anchor_offset; });
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (size_t index = 0; index < sync_patches.size(); ++index) {
+    const ConSanPatchInfo &sync = *sync_patches[index];
+    ASSERT_GT(sync.spilled_vgpr_count, 0u);
+    EXPECT_EQ(sync.anchor_offset, index * one_polling_loop.size() * sizeof(uint32_t));
+    EXPECT_EQ(sync.original_size, one_polling_loop.size() * sizeof(uint32_t));
+    ASSERT_TRUE(sync.relocated_guest_instruction_offset);
+    const std::vector<uint32_t> relocated =
+        text_words_at_offset(patched, *sync.relocated_guest_instruction_offset,
+                             one_polling_loop.size() * sizeof(uint32_t));
+    ASSERT_EQ(relocated.size(), one_polling_loop.size());
+    EXPECT_TRUE(
+        std::ranges::equal(std::span<const uint32_t>(one_polling_loop).first(kRetryBranchWord),
+                           std::span<const uint32_t>(relocated).first(kRetryBranchWord)));
+    EXPECT_EQ(relocated[kRetryBranchWord] & 0xffff0000u,
+              one_polling_loop[kRetryBranchWord] & 0xffff0000u);
+    EXPECT_TRUE(std::ranges::equal(
+        std::span<const uint32_t>(one_polling_loop).subspan(kRetryBranchWord + 1u),
+        std::span<const uint32_t>(relocated).subspan(kRetryBranchWord + 1u)));
+    const int64_t relocated_retry_target =
+        static_cast<int64_t>(kRetryBranchWord + 1u) +
+        static_cast<int16_t>(relocated[kRetryBranchWord] & 0xffffu);
+    EXPECT_EQ(relocated_retry_target, 0);
+  }
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
 TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
   constexpr std::array<uint32_t, 2> kGlobalLoad = {
       0xDE508004u,

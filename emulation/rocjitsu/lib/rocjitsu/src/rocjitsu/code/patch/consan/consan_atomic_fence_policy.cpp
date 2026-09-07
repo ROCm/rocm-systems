@@ -160,11 +160,14 @@ struct AtomicEncodingDecision {
 
   const ConSanAtomicLoweringClassification classification =
       classify_consan_atomic_lowering(site, inventory.arch(), !ordinary);
-  const bool record_buffer_ordinary =
-      ordinary && engine == ConSanCapabilityEngine::RecordReplay && classification.form &&
+  const bool causal_buffer_ordinary =
+      ordinary &&
+      (engine == ConSanCapabilityEngine::RecordReplay ||
+       engine == ConSanCapabilityEngine::Sampled) &&
+      classification.form &&
       classification.form->kind == ConSanAtomicLoweringFormKind::BufferResourceVectorOffset;
   const ConSanAtomicClassifierReason reason =
-      engine == ConSanCapabilityEngine::InlineShadow || (ordinary && !record_buffer_ordinary)
+      engine == ConSanCapabilityEngine::InlineShadow || (ordinary && !causal_buffer_ordinary)
           ? classification.exact_ordering_reason
           : classification.causal_ordering_reason;
   const ConSanAtomicPolicyReason policy_reason = atomic_classifier_reason(reason);

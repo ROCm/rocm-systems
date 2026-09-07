@@ -1082,13 +1082,50 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       proposed.push_back(*best);
   }
 
+  // Each directional half may order only one selected access window. Resolve
+  // that constraint before assigning CFG-disconnected fallbacks: the raw
+  // window-first search intentionally proposes every window for which one
+  // candidate is nearest, and most of those windows become free here.
+  std::vector<bool> rejected(proposed.size(), false);
+  for (size_t i = 0; i < proposed.size(); ++i) {
+    for (size_t j = i + 1u; j < proposed.size(); ++j) {
+      if (rejected[i] || rejected[j] ||
+          proposed[i].candidate_index != proposed[j].candidate_index ||
+          proposed[i].side != proposed[j].side)
+        continue;
+      const Window &lhs = windows[proposed[i].window_index];
+      const Window &rhs = windows[proposed[j].window_index];
+      if (lhs.mapping == rhs.mapping && lhs.slot == rhs.slot) {
+        // The same physical access and atomic in a shared helper appear once
+        // per owning kernel CFG. They need one physical patch, not competing
+        // duplicate attachments.
+        rejected[j] = true;
+        continue;
+      }
+      if (proposed[i].distance < proposed[j].distance)
+        rejected[j] = true;
+      else if (proposed[j].distance < proposed[i].distance)
+        rejected[i] = true;
+      else
+        rejected[i] = rejected[j] = true;
+    }
+  }
+  std::vector<Association> resolved;
+  resolved.reserve(proposed.size());
+  for (size_t index = 0; index < proposed.size(); ++index) {
+    if (!rejected[index])
+      resolved.push_back(proposed[index]);
+  }
+  proposed = std::move(resolved);
+
   // Generic access and atomic helpers can both have recovered kernel owners
   // without an interprocedural CFG edge connecting their reusable bodies.
   // The emitted probe still validates dispatch, workgroup, owner, epoch,
-  // Ready-window identity, and watchpoint state before it publishes. Attach
-  // otherwise-unmatched atomics to the closest role-compatible window owned
-  // by the same kernel; concurrent/static aliases fail through the existing
-  // transactional collision path rather than overwriting metadata.
+  // Ready-window identity, and watchpoint state before it publishes. Assign
+  // each otherwise-unmatched directional half to the closest compatible
+  // window that is still unclaimed after the stronger CFG associations above.
+  // This is a deterministic one-to-one fallback, rather than choosing an
+  // already-claimed nearest window and dropping the synchronization site.
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const Candidate &candidate = candidates[candidate_index];
     for (const Association::Side missing_side :
@@ -1106,6 +1143,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!role_has_side)
         continue;
       std::optional<Association> best;
+      std::optional<size_t> displaced;
       for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
         const Window &window = windows[window_index];
         if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
@@ -1128,78 +1166,39 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                             window_index,
                             {std::numeric_limits<uint32_t>::max(), text_distance},
                             missing_side};
-        if (!best || current.distance < best->distance)
+        const auto incumbent = std::ranges::find_if(proposed, [&](const Association &association) {
+          return association.window_index == window_index;
+        });
+        std::optional<size_t> displaced_index;
+        if (incumbent != proposed.end()) {
+          const size_t incumbent_index =
+              static_cast<size_t>(std::distance(proposed.begin(), incumbent));
+          const bool incumbent_has_opposite_side =
+              std::ranges::any_of(proposed, [&](const Association &association) {
+                return association.candidate_index == incumbent->candidate_index &&
+                       association.side != incumbent->side;
+              });
+          const bool candidate_has_opposite_side =
+              std::ranges::any_of(proposed, [&](const Association &association) {
+                return association.candidate_index == candidate_index &&
+                       association.side != missing_side;
+              });
+          if (!incumbent_has_opposite_side || candidate_has_opposite_side)
+            continue;
+          displaced_index = incumbent_index;
+        }
+        if (!best || (displaced && !displaced_index) ||
+            (displaced.has_value() == displaced_index.has_value() &&
+             current.distance < best->distance)) {
           best = current;
+          displaced = displaced_index;
+        }
       }
-      if (best)
+      if (best) {
+        if (displaced)
+          proposed.erase(proposed.begin() + static_cast<ptrdiff_t>(*displaced));
         proposed.push_back(*best);
-    }
-  }
-
-  // One sampled window has one metadata slot. Multiple synchronization sites
-  // must not race to claim that slot: the earliest dynamic publisher would
-  // otherwise win even when a later, CFG-nearer acquire is the edge that
-  // actually orders the payload. Prefer the strongest static association and
-  // reject equal evidence rather than making execution order part of the
-  // sanitizer's answer. Window indices include their recovered kernel-owner
-  // context, so mutually exclusive shared-helper owners remain independent.
-  std::vector<bool> rejected(proposed.size(), false);
-  const auto candidate_has_opposite_side = [&](size_t association_index) {
-    const Association &association = proposed[association_index];
-    return std::ranges::any_of(proposed, [&](const Association &other) {
-      return other.candidate_index == association.candidate_index && other.side != association.side;
-    });
-  };
-  for (size_t i = 0; i < proposed.size(); ++i) {
-    for (size_t j = i + 1u; j < proposed.size(); ++j) {
-      if (proposed[i].window_index != proposed[j].window_index)
-        continue;
-      // An acquire-release operation can have independent release and acquire
-      // payload associations. If one of those halves competes with the only
-      // association of a single-role atomic, retain the single-role edge: the
-      // acquire-release operation remains covered by its opposite half, while
-      // rejecting the other edge would drop an admitted atomic entirely.
-      const bool lhs_has_opposite_side = candidate_has_opposite_side(i);
-      const bool rhs_has_opposite_side = candidate_has_opposite_side(j);
-      if (proposed[i].candidate_index != proposed[j].candidate_index &&
-          lhs_has_opposite_side != rhs_has_opposite_side) {
-        rejected[lhs_has_opposite_side ? i : j] = true;
-        continue;
       }
-      if (proposed[i].distance < proposed[j].distance)
-        rejected[j] = true;
-      else if (proposed[j].distance < proposed[i].distance)
-        rejected[i] = true;
-      else
-        rejected[i] = rejected[j] = true;
-    }
-  }
-
-  // Each directional half may order only one selected access window. An
-  // acquire-release RMW may legitimately attach its release half to a
-  // preceding write and its acquire half to a later read.
-  for (size_t i = 0; i < proposed.size(); ++i) {
-    for (size_t j = i + 1u; j < proposed.size(); ++j) {
-      if (rejected[i] || rejected[j])
-        continue;
-      if (proposed[i].candidate_index != proposed[j].candidate_index ||
-          proposed[i].side != proposed[j].side)
-        continue;
-      const Window &lhs = windows[proposed[i].window_index];
-      const Window &rhs = windows[proposed[j].window_index];
-      if (lhs.mapping == rhs.mapping && lhs.slot == rhs.slot) {
-        // The same physical access and atomic in a shared helper appear once
-        // per owning kernel CFG. They need one physical patch, not competing
-        // duplicate attachments.
-        rejected[j] = true;
-        continue;
-      }
-      if (proposed[i].distance < proposed[j].distance)
-        rejected[j] = true;
-      else if (proposed[j].distance < proposed[i].distance)
-        rejected[i] = true;
-      else
-        rejected[i] = rejected[j] = true;
     }
   }
 
@@ -1213,7 +1212,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     std::optional<size_t> release_association;
     std::optional<size_t> acquire_association;
     for (size_t i = 0; i < proposed.size(); ++i) {
-      if (rejected[i] || proposed[i].candidate_index != candidate_index)
+      if (proposed[i].candidate_index != candidate_index)
         continue;
       if (proposed[i].side == Association::Side::Release)
         release_association = i;
@@ -1227,15 +1226,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           std::ranges::count_if(proposed, [&](const Association &association) {
             return association.candidate_index == candidate_index;
           });
-      const size_t rejected_count = std::ranges::count_if(
-          std::views::iota(size_t{0}, proposed.size()), [&](size_t association_index) {
-            return proposed[association_index].candidate_index == candidate_index &&
-                   rejected[association_index];
-          });
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync has no surviving causal-window association at text " +
-          std::to_string(candidates[candidate_index].source.site.text_offset) + " (proposed=" +
-          std::to_string(proposed_count) + ", rejected=" + std::to_string(rejected_count) + ")");
+          std::to_string(candidates[candidate_index].source.site.text_offset) +
+          " (proposed=" + std::to_string(proposed_count) + ")");
       continue;
     }
     Candidate candidate = candidates[candidate_index];
@@ -1267,6 +1261,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     ConSanMoiAtomicAddressPlan address_plan;
     uint64_t physical_anchor_offset = 0;
     uint32_t relocated_guest_size = 0;
+    std::vector<uint32_t> leading_guest_words;
     std::vector<uint32_t> trailing_guest_words;
     ConSanMoiOperatingPoint point;
     bool composes_access_fragment = false;
@@ -1287,16 +1282,20 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                  fragment.patch.anchor_offset == site.text_offset &&
                  fragment.patch.original_size == site.size;
         });
-    const uint64_t physical_anchor_offset = site.text_offset;
+    const bool relocates_polling_loop = candidate.source.relocates_polling_loop();
+    const uint64_t physical_anchor_offset =
+        relocates_polling_loop ? candidate.source.patch_text_offset() : site.text_offset;
     uint32_t relocated_guest_size = site.size;
+    std::vector<uint32_t> leading_guest_words;
     std::vector<uint32_t> trailing_guest_words;
     if (candidate.deferred_acquire &&
         composed_access_fragment == result.staged_text_fragments.end() &&
         candidate.source.sequence->end_text_offset > site.text_offset + site.size) {
       const uint64_t sequence_end = candidate.source.sequence->end_text_offset;
-      const uint64_t sequence_size = sequence_end - site.text_offset;
-      if (!moi_resource_offsets_share_block(resource_state, site.text_offset,
-                                            sequence_end - sizeof(uint32_t)) ||
+      const uint64_t sequence_size = sequence_end - physical_anchor_offset;
+      if ((!relocates_polling_loop &&
+           !moi_resource_offsets_share_block(resource_state, site.text_offset,
+                                             sequence_end - sizeof(uint32_t))) ||
           sequence_size > std::numeric_limits<uint32_t>::max() ||
           sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
         result.warnings.emplace_back(
@@ -1304,9 +1303,25 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         continue;
       }
       relocated_guest_size = static_cast<uint32_t>(sequence_size);
-      trailing_guest_words.resize((relocated_guest_size - site.size) / sizeof(uint32_t));
+      leading_guest_words.resize((site.text_offset - physical_anchor_offset) / sizeof(uint32_t));
+      std::memcpy(leading_guest_words.data(), old_text.data() + physical_anchor_offset,
+                  leading_guest_words.size() * sizeof(uint32_t));
+      trailing_guest_words.resize((sequence_end - site.text_offset - site.size) / sizeof(uint32_t));
       std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
                   trailing_guest_words.size() * sizeof(uint32_t));
+    }
+    if (relocates_polling_loop && target_profile->has_selectable_vgpr_bank) {
+      const ConSanProgramContainer *container =
+          resolve_moi_evidence_container(result.program_inventory, candidate.atomic.source_site);
+      if (container == nullptr ||
+          consan_selectable_vgpr_bank_mode_at(arch, bytes, container->text_file_offset,
+                                              container->entry_text_offset,
+                                              candidate.source.patch_file_offset())
+                  .value_or(0u) != 0u) {
+        result.warnings.emplace_back(
+            "ConSan MOI sampled atomic sync requires a low-bank polling-loop entry");
+        continue;
+      }
     }
     if (physical_anchor_offset > old_text.size() ||
         relocated_guest_size > old_text.size() - physical_anchor_offset)
@@ -1315,8 +1330,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         result.patches.begin(), result.patches.end(), [&](const ConSanPatchLoweringProduct &patch) {
           const uint64_t patch_end =
               patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
-          return site.text_offset < patch_end &&
-                 patch.anchor_offset < site.text_offset + relocated_guest_size;
+          return physical_anchor_offset < patch_end &&
+                 patch.anchor_offset < physical_anchor_offset + relocated_guest_size;
         });
     const bool overlaps_staged =
         std::ranges::any_of(result.staged_text_fragments, [&](const ConSanTextFragment &fragment) {
@@ -1325,19 +1340,22 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             return false;
           const uint64_t fragment_end =
               fragment.patch.anchor_offset + std::max<uint32_t>(fragment.patch.original_size, 1u);
-          return site.text_offset < fragment_end &&
-                 fragment.patch.anchor_offset < site.text_offset + relocated_guest_size;
+          return physical_anchor_offset < fragment_end &&
+                 fragment.patch.anchor_offset < physical_anchor_offset + relocated_guest_size;
         });
     if (overlaps_committed || overlaps_staged)
       continue;
     const ConSanCandidateResourcePlan *existing = resource_plan_for_site(
-        result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
+        result.resource_plans, ConSanResourceSiteKind::Atomic, physical_anchor_offset);
     ConSanCandidateResourcePlan plan =
         existing ? *existing
                  : plan_moi_resource_site(resource_state, options, options, operating_point,
-                                          ConSanResourceSiteKind::Atomic, index, site.text_offset,
-                                          candidate.atomic.source_site, scratch_count, nullptr,
-                                          &candidate.atomic.lowering_form);
+                                          ConSanResourceSiteKind::Atomic, index,
+                                          physical_anchor_offset, candidate.atomic.source_site,
+                                          scratch_count, nullptr, &candidate.atomic.lowering_form,
+                                          /*require_spill=*/relocates_polling_loop);
+    if (physical_anchor_offset != site.text_offset)
+      plan.semantic_text_offset = site.text_offset;
     plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
@@ -1392,7 +1410,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, probe->resources);
     selected.push_back({std::move(*probe), std::move(candidate), *owner_descriptor, address_plan,
                         physical_anchor_offset, relocated_guest_size,
-                        std::move(trailing_guest_words), std::move(candidate_point),
+                        std::move(leading_guest_words), std::move(trailing_guest_words),
+                        std::move(candidate_point),
                         composed_access_fragment != result.staged_text_fragments.end()});
   }
   if (selected.empty()) {
@@ -1422,37 +1441,39 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       return;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;
-    auto words =
-        planned.candidate.deferred_acquire
-            ? build_sampled_pending_acquire_cave_words(
-                  bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
-                  planned.owner_descriptor_file_offset, planned.address_plan, *emission_plan,
-                  planned.spill ? &*planned.spill : nullptr,
-                  planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, planned.candidate.bank_count,
-                  planned.candidate.release_selected_slot, layout, result.errors,
-                  &guest_instruction_offset, planned.trailing_guest_words, &emitted_guest_size)
-            : build_sampled_atomic_sync_cave_words(
-                  bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
-                  planned.owner_descriptor_file_offset, planned.address_plan, *emission_plan,
-                  planned.spill ? &*planned.spill : nullptr,
-                  planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, planned.candidate.bank_count, layout,
-                  result.errors, &guest_instruction_offset, planned.trailing_guest_words,
-                  &emitted_guest_size);
+    auto words = planned.candidate.deferred_acquire
+                     ? build_sampled_pending_acquire_cave_words(
+                           bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
+                           planned.owner_descriptor_file_offset, planned.address_plan,
+                           *emission_plan, planned.spill ? &*planned.spill : nullptr,
+                           planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                           planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                           planned.candidate.selected_slot, planned.candidate.bank_count,
+                           planned.candidate.release_selected_slot, layout, result.errors,
+                           &guest_instruction_offset, planned.leading_guest_words,
+                           planned.trailing_guest_words, &emitted_guest_size)
+                     : build_sampled_atomic_sync_cave_words(
+                           bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
+                           planned.owner_descriptor_file_offset, planned.address_plan,
+                           *emission_plan, planned.spill ? &*planned.spill : nullptr,
+                           planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                           planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                           planned.candidate.selected_slot, planned.candidate.bank_count, layout,
+                           result.errors, &guest_instruction_offset, planned.leading_guest_words,
+                           planned.trailing_guest_words, &emitted_guest_size);
     if (!words)
       return;
     ConSanPatchInfo patch;
     patch.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
-    patch.anchor_offset = planned.candidate.source.site.text_offset;
+    patch.anchor_offset = planned.physical_anchor_offset;
     patch.original_size = planned.relocated_guest_size;
     note_moi_probe_patch_info(patch, planned);
     auto fragment = make_consan_around_text_fragment(
         std::move(*words), guest_instruction_offset, planned.relocated_guest_size,
         planned.candidate.atomic.intent_ids(), {}, std::move(patch), result.errors,
-        "MOI sampled atomic sync", emitted_guest_size);
+        "MOI sampled atomic sync", emitted_guest_size,
+        /*replacement_preserves_source_span=*/
+        planned.candidate.source.relocates_polling_loop());
     if (!fragment)
       return;
     if (planned.composes_access_fragment)

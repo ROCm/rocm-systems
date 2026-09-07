@@ -65,15 +65,15 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
          overlaps(form.destination_vgpr, form.destination_register_count);
 }
 
-[[nodiscard]] bool append_sampled_atomic_guest(std::vector<uint32_t> &words,
-                                               std::span<const uint8_t> bytes,
-                                               const ConSanAtomicSite &site, bool is_rmw,
-                                               rj_code_arch_t arch,
-                                               uint32_t *guest_instruction_offset,
-                                               uint32_t *emitted_guest_size = nullptr) {
+[[nodiscard]] bool append_sampled_atomic_guest(
+    std::vector<uint32_t> &words, std::span<const uint8_t> bytes, const ConSanAtomicSite &site,
+    bool is_rmw, rj_code_arch_t arch, uint32_t *guest_instruction_offset,
+    std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
+    uint32_t *emitted_guest_size = nullptr) {
   const size_t guest_begin = words.size();
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+  words.insert(words.end(), leading_guest_words.begin(), leading_guest_words.end());
   for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
@@ -83,6 +83,7 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
   // not splice a generic atomic wait into that target-native sequence.
   if (is_rmw && !append_moi_flat_load_wait(words, arch))
     return false;
+  words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
   if (emitted_guest_size)
     *emitted_guest_size = static_cast<uint32_t>((words.size() - guest_begin) * sizeof(uint32_t));
   return true;
@@ -181,12 +182,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const MoiAtomicEvidenceSourceView &source, const ConSanAtomicLoweringForm &lowering_form,
-    uint64_t owner_descriptor_file_offset,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
-    bool defer_guest, SampledAtomicPreludeState &state, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
+    uint64_t owner_descriptor_file_offset, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
+    rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
     uint32_t *emitted_guest_size) {
   const ConSanAtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
@@ -199,21 +200,16 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const bool guest_first =
       spill && sampled_atomic_spill_overlaps_guest_operands(*spill, lowering_form);
   assert(!defer_guest || !guest_first);
-  const bool guest_preserves_address =
-      sampled_atomic_guest_preserves_address(lowering_form);
+  const bool guest_preserves_address = sampled_atomic_guest_preserves_address(lowering_form);
   assert(!guest_first || guest_preserves_address);
   if (guest_first && !guest_preserves_address) {
     errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
     return false;
   }
-  if (guest_first && !append_sampled_atomic_guest(words, bytes, site, is_rmw, arch,
-                                                  guest_instruction_offset, emitted_guest_size))
+  if (guest_first &&
+      !append_sampled_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
+                                   leading_guest_words, trailing_guest_words, emitted_guest_size))
     return false;
-  if (guest_first) {
-    words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
-    if (emitted_guest_size)
-      *emitted_guest_size += static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
-  }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -283,12 +279,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!guest_first) {
     if (!defer_guest) {
       if (!append_sampled_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
+                                       leading_guest_words, trailing_guest_words,
                                        emitted_guest_size))
         return false;
-      words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
-      if (emitted_guest_size)
-        *emitted_guest_size +=
-            static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
     }
     if (guest_preserves_address) {
       words.push_back(build_v_mov_b32_e32(
@@ -304,12 +297,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
     const ConSanAtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
-    const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
-    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
-    std::optional<uint32_t> release_selected_slot, const ConSanMoiReportBufferLayout &layout,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
+    uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
+    const ConSanMoiReportBufferLayout &layout, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, std::span<const uint32_t> leading_guest_words,
     std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
   const ConSanAtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
@@ -352,12 +345,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return std::nullopt;
     return encoded.packed.descriptor;
   };
-  const auto success_descriptor =
-      descriptor_for(!is_rmw ? ConSanMoiSampledSyncOutcome::NotApplicable
-                     : is_cas          ? ConSanMoiSampledSyncOutcome::CasSuccess
-                     : site.returns_old_value.value_or(false)
-                         ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
-                         : ConSanMoiSampledSyncOutcome::RmwNoReturn);
+  const auto success_descriptor = descriptor_for(
+      !is_rmw                                  ? ConSanMoiSampledSyncOutcome::NotApplicable
+      : is_cas                                 ? ConSanMoiSampledSyncOutcome::CasSuccess
+      : site.returns_old_value.value_or(false) ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
+                                               : ConSanMoiSampledSyncOutcome::RmwNoReturn);
   const auto failure_descriptor =
       is_cas ? descriptor_for(ConSanMoiSampledSyncOutcome::CasFailure) : success_descriptor;
   if (!success_descriptor || !failure_descriptor)
@@ -379,9 +371,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   SampledAtomicPreludeState prelude;
   if (!append_sampled_atomic_prelude(
           words, bytes, source, lowering_form, owner_descriptor_file_offset, address_plan, plan,
-          spill,
-          scalar_spill, private_layout, arch, saved_address, /*defer_guest=*/false, prelude, errors,
-          guest_instruction_offset, trailing_guest_words, emitted_guest_size))
+          spill, scalar_spill, private_layout, arch, saved_address, /*defer_guest=*/false, prelude,
+          errors, guest_instruction_offset, leading_guest_words, trailing_guest_words,
+          emitted_guest_size))
     return std::nullopt;
   if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
@@ -559,12 +551,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
     const ConSanAtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
-    const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, const ConSanMoiPrivateStateLayout *private_layout,
-    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
-    const ConSanMoiReportBufferLayout &layout, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const ConSanMoiPrivateStateLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
+    uint32_t bank_count, const ConSanMoiReportBufferLayout &layout,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
     uint32_t *emitted_guest_size) {
   const ConSanAtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
@@ -615,12 +607,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return std::nullopt;
     return encoded.packed.descriptor;
   };
-  const auto success_descriptor =
-      descriptor_for(!is_rmw ? ConSanMoiSampledSyncOutcome::NotApplicable
-                     : is_cas          ? ConSanMoiSampledSyncOutcome::CasSuccess
-                     : site.returns_old_value.value_or(false)
-                         ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
-                         : ConSanMoiSampledSyncOutcome::RmwNoReturn);
+  const auto success_descriptor = descriptor_for(
+      !is_rmw                                  ? ConSanMoiSampledSyncOutcome::NotApplicable
+      : is_cas                                 ? ConSanMoiSampledSyncOutcome::CasSuccess
+      : site.returns_old_value.value_or(false) ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
+                                               : ConSanMoiSampledSyncOutcome::RmwNoReturn);
   const auto failure_descriptor =
       is_cas ? descriptor_for(ConSanMoiSampledSyncOutcome::CasFailure) : success_descriptor;
   if (!success_descriptor || !failure_descriptor)
@@ -662,7 +653,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   sequence.require(append_sampled_atomic_prelude(
       words, bytes, source, lowering_form, owner_descriptor_file_offset, address_plan, plan, spill,
       scalar_spill, private_layout, arch, saved_address, defer_guest, prelude, errors,
-      guest_instruction_offset, trailing_guest_words, emitted_guest_size));
+      guest_instruction_offset, leading_guest_words, trailing_guest_words, emitted_guest_size));
   if (sequence &&
       !append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources, bank_count,
                                         bank, expected, *plan.owner_epoch_vgprs.owner, arch)) {
@@ -867,14 +858,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::vector<uint32_t> deferred_guest_words;
     const bool guest_ok =
         append_sampled_atomic_guest(deferred_guest_words, bytes, site, is_rmw, arch,
-                                    /*guest_instruction_offset=*/nullptr, emitted_guest_size);
+                                    /*guest_instruction_offset=*/nullptr, leading_guest_words,
+                                    trailing_guest_words, emitted_guest_size);
     sequence.require(guest_ok);
     if (guest_ok) {
-      deferred_guest_words.insert(deferred_guest_words.end(), trailing_guest_words.begin(),
-                                  trailing_guest_words.end());
-      if (emitted_guest_size)
-        *emitted_guest_size +=
-            static_cast<uint32_t>(trailing_guest_words.size() * sizeof(uint32_t));
       if (guest_instruction_offset)
         *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());

@@ -612,7 +612,7 @@ TEST(ConSanAtomicFencePolicy, FenceEvidenceSourceDerivesGeometryFromCanonicalHan
   EXPECT_FALSE(consan_moi_impl::resolve_moi_fence_evidence_source(inventory, stale).has_value());
 }
 
-TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceCommunication) {
+TEST(ConSanAtomicFencePolicy, Gfx1250CausalModesAdmitExactBufferOrdinaryFenceCommunication) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
   ConSanSyncEvent communication = make_ordinary_store_event();
   communication.operation = ConSanSyncOperation::OrdinaryLoad;
@@ -629,26 +629,29 @@ TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceC
     return build_atomic_inventory({communication, fence}, {sequence}, {}, {std::move(site)},
                                   {candidate}, gfx1250);
   };
-  const ConSanAtomicFencePolicyResult supported =
-      plan_consan_atomic_fence_observation(make_inventory(make_cdna5_buffer_load_site()),
-                                           atomic_request(ConSanCapabilityEngine::RecordReplay));
-  ASSERT_TRUE(supported.valid());
-  ASSERT_EQ(supported.plan.atomic_site_decisions.size(), 1u);
-  ASSERT_EQ(supported.plan.fence_site_decisions.size(), 1u);
-  EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  for (const ConSanCapabilityEngine engine :
+       {ConSanCapabilityEngine::RecordReplay, ConSanCapabilityEngine::Sampled}) {
+    const ConSanAtomicFencePolicyResult supported = plan_consan_atomic_fence_observation(
+        make_inventory(make_cdna5_buffer_load_site()), atomic_request(engine));
+    ASSERT_TRUE(supported.valid());
+    ASSERT_EQ(supported.plan.atomic_site_decisions.size(), 1u);
+    ASSERT_EQ(supported.plan.fence_site_decisions.size(), 1u);
+    EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+    EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
 
-  ConSanOrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
-  malformed.raw_rsrc.reset();
-  const ConSanAtomicFencePolicyResult rejected = plan_consan_atomic_fence_observation(
-      make_inventory(std::move(malformed)), atomic_request(ConSanCapabilityEngine::RecordReplay));
-  ASSERT_TRUE(rejected.valid());
-  EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(rejected.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::UnsupportedEncoding);
-  EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(rejected.plan.fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::MissingCommunicationEvent);
+    ConSanOrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
+    malformed.raw_rsrc.reset();
+    const ConSanAtomicFencePolicyResult rejected = plan_consan_atomic_fence_observation(
+        make_inventory(std::move(malformed)), atomic_request(engine));
+    ASSERT_TRUE(rejected.valid());
+    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind,
+              ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().reason,
+              ConSanAtomicPolicyReason::UnsupportedEncoding);
+    EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(rejected.plan.fence_site_decisions.front().reason,
+              ConSanFencePolicyReason::MissingCommunicationEvent);
+  }
 }
 
 TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTypedReason) {

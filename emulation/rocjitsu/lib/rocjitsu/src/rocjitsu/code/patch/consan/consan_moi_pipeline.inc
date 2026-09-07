@@ -55,17 +55,24 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
-      const ConSanProgramSite *source = problem.inventory().program_site(candidate.source_site);
-      if (source == nullptr) {
+      const std::optional<MoiAtomicEvidenceSourceView> source =
+          resolve_moi_atomic_evidence_source(problem.inventory(), candidate);
+      if (!source) {
         errors.emplace_back("ConSan MOI atomic resource planning lost its source site");
         return;
       }
+      const bool relocates_sampled_polling_loop =
+          request.moi_engine == ConSanMoiEngine::Sampled && source->relocates_polling_loop();
+      const uint64_t patch_text_offset =
+          relocates_sampled_polling_loop ? source->patch_text_offset() : source->site.text_offset;
       const uint16_t scratch_count =
           mode.atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
-      ConSanCandidateResourcePlan plan =
-          plan_moi_resource_site(state, request, debug, point, ConSanResourceSiteKind::Atomic,
-                                 index, source->text_offset(), candidate.source_site, scratch_count,
-                                 nullptr, &candidate.lowering_form);
+      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
+          state, request, debug, point, ConSanResourceSiteKind::Atomic, index, patch_text_offset,
+          candidate.source_site, scratch_count, nullptr, &candidate.lowering_form,
+          /*require_spill=*/relocates_sampled_polling_loop);
+      if (patch_text_offset != source->site.text_offset)
+        plan.semantic_text_offset = source->site.text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }

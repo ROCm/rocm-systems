@@ -90,7 +90,21 @@ resolve_moi_atomic_evidence_source(const ProgramInventory &inventory,
       sequence->end_text_offset < site->text_offset + site->size) {
     return std::nullopt;
   }
-  return MoiAtomicEvidenceSourceView{event, sequence, *site};
+  MoiAtomicEvidenceSourceView result{event, sequence, *site};
+  if (sequence->acquire_polling_loop_header_text_offset) {
+    const uint64_t loop_header = *sequence->acquire_polling_loop_header_text_offset;
+    if (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
+        sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
+        event->kind != ConSanSyncKind::OrdinaryMemory ||
+        loop_header >= sequence->begin_text_offset ||
+        sequence->begin_text_offset != site->text_offset ||
+        sequence->end_text_offset <= loop_header ||
+        site->text_offset - loop_header > site->file_offset ||
+        sequence->end_text_offset - loop_header > std::numeric_limits<uint32_t>::max()) {
+      return std::nullopt;
+    }
+  }
+  return result;
 }
 
 std::optional<MoiFenceEvidenceSourceView>

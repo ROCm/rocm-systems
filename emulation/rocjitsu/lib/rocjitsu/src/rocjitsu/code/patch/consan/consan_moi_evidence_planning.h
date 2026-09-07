@@ -39,6 +39,18 @@ struct MoiAtomicEvidenceSourceView {
   [[nodiscard]] bool is_rmw() const {
     return event != nullptr && event->kind == ConSanSyncKind::Atomic;
   }
+  [[nodiscard]] bool relocates_polling_loop() const {
+    return sequence->acquire_polling_loop_header_text_offset &&
+           *sequence->acquire_polling_loop_header_text_offset < sequence->begin_text_offset;
+  }
+  [[nodiscard]] uint64_t patch_text_offset() const {
+    return relocates_polling_loop() ? *sequence->acquire_polling_loop_header_text_offset
+                                    : site.text_offset;
+  }
+  [[nodiscard]] uint64_t patch_file_offset() const {
+    return relocates_polling_loop() ? site.file_offset - (site.text_offset - patch_text_offset())
+                                    : site.file_offset;
+  }
 };
 
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
