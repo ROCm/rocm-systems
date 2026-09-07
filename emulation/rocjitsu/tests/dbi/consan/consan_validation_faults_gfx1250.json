@@ -4,6 +4,48 @@
   "evidence_model": "reviewed against fresh target-specific inventories",
   "review_required": false,
   "workloads": {
+    "hipkittens-bf16fp32-cdna5-naive": {
+      "faults": [
+        {
+          "id": "barrier-drop-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first split signal/wait pair at .text+0x09bc/.text+0x09cc is the unconditional tile-publication barrier in the executed gemm_naive_kernel reduction iteration. All four waves cooperatively populate the A and B LDS tiles before this edge and issue peer LDS reads afterward. The exact 64x64x32 command launches one complete workgroup and one reduction iteration, so it necessarily reaches the preselected sequence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9fe162c3afef62c6|kernel=_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii|kind=barrier|pc=0x00000000000009bc|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:9fe162c3afef62c6|kernel=_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii|event=barrier|pc=0x00000000000009bc|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:9fe162c3afef62c6|kernel=_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii|event=barrier|pc=0x00000000000009cc|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "any"
+            },
+            "record-replay": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "any"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii"
+              }
+            }
+          }
+        }
+      ]
+    },
     "tp1-prefill": {
       "faults": [
         {

@@ -2028,6 +2028,90 @@ class ConSanValidationTest(unittest.TestCase):
                     ],
                 )
 
+    def test_gfx1250_manifest_registers_exact_cdna5_hipkittens_row(self) -> None:
+        workloads = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx1250")["workloads"]
+        }
+        row = workloads["hipkittens-bf16fp32-cdna5-naive"]
+        self.assertEqual(
+            row["relative_path"],
+            (
+                "rocjitsu-test-corpus-build/kernels-gfx1250-hipkittens/cases/"
+                "hipkittens/hipkittens_gemm_bf16fp32_gfx1250_naive"
+            ),
+        )
+        self.assertEqual(row["command_arguments"], ("64", "64", "32", "1", "1"))
+        self.assertEqual(row["fault_families"], ("barrier-drop",))
+        self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
+
+        workload = validation.WORKLOAD_BY_ID[row["id"]]
+        self.assertEqual(
+            validation._workload_command(
+                Path("/workspace"),
+                "gfx1250",
+                workload,
+                "clean",
+                Path("/workspace/unused.json"),
+            ),
+            [
+                "/workspace/"
+                "rocjitsu-test-corpus-build/kernels-gfx1250-hipkittens/cases/"
+                "hipkittens/hipkittens_gemm_bf16fp32_gfx1250_naive",
+                "64",
+                "64",
+                "32",
+                "1",
+                "1",
+            ],
+        )
+
+    def test_gfx1250_cdna5_hipkittens_fault_targets_tile_publication(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        workload = validation.WORKLOAD_BY_ID[
+            "hipkittens-bf16fp32-cdna5-naive"
+        ]
+        fault = validation._load_fault(
+            path,
+            "gfx1250",
+            workload,
+            "barrier-drop-tile-publication",
+        )
+
+        kernel = "_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii"
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        sequence = fault["environment"][
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"
+        ]
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x00000000000009bc", site)
+        self.assertIn("pc=0x00000000000009cc", sequence)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn("All four waves", fault["reach_witness"]["evidence"])
+
+        inline_policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(inline_policy["detector"], "detected")
+        self.assertEqual(inline_policy["oracle"], "any")
+        self.assertEqual(
+            inline_policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
+            kernel,
+        )
+        self.assertEqual(trials, [{}])
+
+        replay_policy, trials = validation._fault_trials(fault, "record-replay")
+        self.assertEqual(replay_policy["detector"], "detected")
+        self.assertEqual(replay_policy["oracle"], "any")
+        self.assertEqual(
+            replay_policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"],
+            "1",
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx950_manifest_registers_exact_hip_streamk_rows(self) -> None:
         workloads = {
             workload["id"]: workload

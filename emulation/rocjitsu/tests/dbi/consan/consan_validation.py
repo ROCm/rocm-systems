@@ -609,6 +609,30 @@ WORKLOADS = (
         run_timeout_seconds=60,
     ),
     Workload(
+        id="hipkittens-bf16fp32-cdna5-naive",
+        priority="P0",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx1250-hipkittens/cases/"
+            "hipkittens/hipkittens_gemm_bf16fp32_gfx1250_naive"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        # One complete 64x64 output tile and one 32-wide reduction step retain
+        # every instruction in this fixed kernel while avoiding redundant
+        # emulation of identical workgroups and loop iterations.
+        command_arguments=("64", "64", "32", "1", "1"),
+        targets=("gfx1250",),
+        run_timeout_seconds=60,
+    ),
+    Workload(
         id="hip-streamk-simple-m256-n256-k256",
         priority="P1",
         corpus="rocjitsu-test-corpus",
@@ -1945,6 +1969,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # the executable manifest instead of requiring an ad hoc CLI override.
         "qwen-prefill": {
             "run_timeout_seconds": 360,
+        },
+        # The target-specific naive HipKittens runner launches one complete
+        # exact-validation workgroup. Select it deterministically instead of
+        # relying on its dispatch token to hit the production replay stride.
+        "hipkittens-bf16fp32-cdna5-naive": {
+            "record_replay_runtime_sample_stride": 1,
         },
         # The strict Inline Shadow row completes in roughly 31 seconds after
         # transformation under RocJitsu. Keep a bounded twofold margin without
