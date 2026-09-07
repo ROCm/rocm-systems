@@ -5,13 +5,18 @@
 
 import argparse
 import gzip
+import os
+import sys
+from collections import OrderedDict
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils.tty import show_all
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -189,3 +194,175 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
         OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
+
+
+# ---------------------------------------------------------------------------
+# pre_processing output_format dispatch
+# ---------------------------------------------------------------------------
+
+
+def make_analyzer(
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+    output_name: str = None,
+) -> OmniAnalyze_Base:
+    """Return an analyzer wired for pre_processing() with no workload on disk.
+
+    pre_processing() normally walks args.path to load sysinfo.csv and join
+    counter files. An empty path list plus a stubbed initalize_runs() reduces
+    it to the --output-format dispatch these tests are about.
+    """
+    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: OrderedDict())
+
+    args = argparse.Namespace(
+        output_format=output_format,
+        output_name=output_name,
+        path=[],
+        gpu_kernel=None,
+        gpu_id=None,
+        gpu_dispatch_id=None,
+    )
+    analyzer = OmniAnalyze_Base(args, {})
+    analyzer._profiling_config = {}
+    return analyzer
+
+
+def render_report(analyzer: OmniAnalyze_Base, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Write one rendered panel to analyzer._output via the real tty renderer."""
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_args, **_kwargs: metric_dataframe
+    )
+
+    show_all(
+        argparse.Namespace(
+            decimal=2,
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=True,
+            normal_unit="per_wave",
+            path=[["fixture"]],
+            time_unit="ns",
+            view=None,
+        ),
+        runs,
+        arch_configs,
+        analyzer._output,
+        profiling_config={"filter_blocks": []},
+    )
+
+
+def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
+    """--output-format txt with --output-name writes <name>.txt in the cwd."""
+    mocks = common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    monkeypatch.chdir(tmp_path)
+
+    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    analyzer.pre_processing()
+
+    try:
+        report = tmp_path / "analysis_report.txt"
+        assert report.is_file()
+        assert not analyzer._output.closed
+        assert Path(analyzer._output.name).resolve() == report
+        assert analyzer._output.writable()
+        assert "analysis_report.txt" in mocks["warning"].call_args.args[1]
+    finally:
+        analyzer._output.close()
+
+
+def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
+    """Without --output-name the txt file falls back to rocprof_compute_<uuid>."""
+    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    monkeypatch.chdir(tmp_path)
+
+    analyzer = make_analyzer(monkeypatch, "txt")
+    analyzer.pre_processing()
+
+    try:
+        created = list(tmp_path.iterdir())
+        assert len(created) == 1
+        assert created[0].match("rocprof_compute_*.txt")
+    finally:
+        analyzer._output.close()
+
+
+def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
+    """--output-format stdout routes to the terminal and touches no file."""
+    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    monkeypatch.chdir(tmp_path)
+
+    analyzer = make_analyzer(monkeypatch, "stdout")
+    analyzer.pre_processing()
+
+    assert analyzer._output is sys.stdout
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_txt_output_matches_stdout_output(tmp_path, monkeypatch, capsys) -> None:
+    """The txt file and the terminal receive byte-identical report content."""
+    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    monkeypatch.chdir(tmp_path)
+
+    txt_analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    txt_analyzer.pre_processing()
+    try:
+        render_report(txt_analyzer, monkeypatch)
+        # The analyzer never closes _output, so flush before reading it back.
+        txt_analyzer._output.flush()
+        txt_report = (tmp_path / "analysis_report.txt").read_text(encoding="utf-8")
+    finally:
+        txt_analyzer._output.close()
+
+    stdout_analyzer = make_analyzer(monkeypatch, "stdout")
+    stdout_analyzer.pre_processing()
+    capsys.readouterr()
+    render_report(stdout_analyzer, monkeypatch)
+    stdout_report = capsys.readouterr().out
+
+    assert txt_report == stdout_report
+    assert "30. Memory Bandwidth Analysis" in txt_report
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses directory write permissions",
+)
+def test_pre_processing_txt_unwritable_directory_raises(tmp_path, monkeypatch) -> None:
+    """An unwritable cwd surfaces the raw OSError from the unguarded open()."""
+    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    read_only = tmp_path / "read_only"
+    read_only.mkdir()
+    read_only.chmod(0o555)
+    monkeypatch.chdir(read_only)
+
+    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    try:
+        with pytest.raises(PermissionError):
+            analyzer.pre_processing()
+    finally:
+        read_only.chmod(0o755)
