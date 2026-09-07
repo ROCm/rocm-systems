@@ -2932,7 +2932,8 @@ hipError_t Graph::RunOneNode(Node node) {
     // Process child graph separately, since there is no connection
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList);
+      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList,
+                                    cross_stream_producers_.count(node) != 0);
       if (status != hipSuccess) {
         releaseWaitOrderCommands();
         return status;
@@ -3024,10 +3025,10 @@ hipError_t Graph::RunOneNode(Node node) {
 void Graph::FindCrossStreamProducers(int32_t base_stream) {
   cross_stream_producers_.clear();
   for (auto node : vertices_) {
-    // A dependency that crosses a stream id, less child graph nodes, whose completion command
-    // RunOneNode() collects only after the child has been enqueued.
+    // A dependency that crosses a stream id.  The command a consumer of a child graph waits on
+    // is the last one the child queued, which is on the child graph node's own stream.
     for (auto dep : node->GetDependencies()) {
-      if (dep->stream_id_ != node->stream_id_ && dep->GetType() != hipGraphNodeTypeGraph) {
+      if (dep->stream_id_ != node->stream_id_) {
         cross_stream_producers_.insert(dep);
       }
     }
@@ -3041,7 +3042,8 @@ void Graph::FindCrossStreamProducers(int32_t base_stream) {
 
 // ================================================================================================
 hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
-                           const amd::Command::EventWaitList* parent_waitlist) {
+                           const amd::Command::EventWaitList* parent_waitlist,
+                           bool waited_cross_stream) {
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
   }
@@ -3115,6 +3117,9 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   // Wait for leafs in the graph's app stream
   if (wait_list.size() > 0) {
     auto end_marker = new amd::Marker(*streams_[base_stream], true, wait_list);
+    // The last command this graph queues.  RunOneNode() collects it only after the child has
+    // been enqueued, so the parent cannot mark it; the flag comes down from there instead.
+    end_marker->setCrossStreamProducer(waited_cross_stream);
     end_marker->enqueue();
     end_marker->release();
     for (auto command : wait_list) {
