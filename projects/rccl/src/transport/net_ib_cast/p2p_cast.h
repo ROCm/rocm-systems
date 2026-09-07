@@ -103,4 +103,11 @@ static inline uint32_t ctsFifoTag(volatile void* slotBase, uint32_t rxReqId) {
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].tag;
 }
 
+static inline bool ibCastCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
+  if ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) == 0) return false;
+  volatile void* slotBase = (volatile void*)comm->ctsFifo[slot];
+  const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
+  return side->nSegments > 1 && side->idx == (uint64_t)ctsFifoIdx(slotBase, r);
+}
+
 #endif // NET_IB_P2P_H_
