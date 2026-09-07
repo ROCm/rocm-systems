@@ -167,6 +167,47 @@ jobs:
           exit 1
         fi
 
+  banned-includes:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+    - name: check-banned-includes
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -eu
+
+        # Headers retired by the timemory-removal PR series. Once a header is
+        # gone from the tree it must not come back: add a line here in the same
+        # PR that removes the last include of it.
+        #
+        # Format, one entry per line:  <header path>|<what to use instead>
+        BANNED=$(cat <<'EOF'
+        timemory/utility/filepath.hpp|use "common/path.hpp" (rocprofsys::path::)
+        EOF
+        )
+
+        FILES=$(find source examples tests -type f | grep -E '\.(h|hpp|c|cpp)(|\.in)$')
+
+        FAIL=0
+        while IFS='|' read -r HEADER ADVICE; do
+          [ -n "${HEADER}" ] || continue
+          PATTERN=$(echo "${HEADER}" | sed 's/\./\\./g')
+          MATCHES=$(grep -nE "include *[<\"]${PATTERN}[>\"]" ${FILES} || true)
+          if [ -n "${MATCHES}" ]; then
+            echo -e "\nError! Banned header included: ${HEADER}"
+            echo -e "  -> ${ADVICE}\n"
+            echo -e "### MATCHES: ###"
+            echo -e "${MATCHES}"
+            echo -e "################"
+            FAIL=1
+          fi
+        done <<< "${BANNED}"
+
+        exit ${FAIL}
+
   fixedwidth-types:
     runs-on: ubuntu-latest
 
