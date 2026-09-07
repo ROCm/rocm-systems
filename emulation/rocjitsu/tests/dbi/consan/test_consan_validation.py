@@ -5658,6 +5658,70 @@ class ConSanValidationTest(unittest.TestCase):
             "2",
         )
 
+    def test_gfx1250_hgemm_quick_shards_asymmetric_benchmark_blocks(self) -> None:
+        workload = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-hgemm-quick"]
+        )
+        commands = validation._workload_commands(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark.json"),
+        )
+        expected_sizes = [
+            [127, 127, 1, 127],
+            [128, 128, 1, 128],
+            [129, 129, 1, 129],
+            [511, 511, 1, 511],
+            [512, 512, 1, 512],
+            [513, 513, 1, 513],
+        ]
+        expected_blocks = [expected_sizes, expected_sizes[:3]]
+        expected_clients = [2, 2, 2, 1, 1, 1]
+        self.assertEqual(workload.run_timeout_seconds, 360)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 300)
+        self.assertEqual(workload.tensile_shard_parallelism, 3)
+        self.assertEqual(workload.tensile_fault_shard_index, 0)
+        self.assertIsNone(workload.tensile_expected_client_passes)
+        self.assertEqual(len(commands), 6)
+        for index, command in enumerate(commands):
+            self.assertEqual(
+                command[command.index("--expect-client-passes") + 1],
+                str(expected_clients[index]),
+            )
+            self.assertEqual(
+                json.loads(
+                    command[command.index("--exact-problem-sizes-json") + 1]
+                ),
+                [expected_sizes[index]],
+            )
+            self.assertEqual(
+                json.loads(
+                    command[
+                        command.index(
+                            "--expect-source-exact-problem-size-blocks-json"
+                        )
+                        + 1
+                    ]
+                ),
+                expected_blocks,
+            )
+            self.assertNotIn(
+                "--expect-source-exact-problem-sizes-json", command
+            )
+
+        fault_command = validation._fault_workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            Path("/artifacts/fault.json"),
+        )
+        self.assertEqual(
+            fault_command[fault_command.index("--expect-client-passes") + 1],
+            "2",
+        )
+
     def test_gfx1250_spmm_f8_ml_shards_every_benchmark_block(self) -> None:
         workload = validation._effective_workload(
             "gfx1250", validation.WORKLOAD_BY_ID["tensile-spmm-f8-ml"]

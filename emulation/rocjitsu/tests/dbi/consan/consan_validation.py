@@ -243,8 +243,12 @@ class Workload:
     tensile_exact_problem_size_shards: tuple[
         tuple[tuple[int, ...], ...], ...
     ] = ()
+    tensile_expected_source_exact_problem_size_blocks: tuple[
+        tuple[tuple[int, ...], ...], ...
+    ] = ()
     tensile_expected_numeric_rows_per_shard: tuple[int, ...] = ()
     tensile_expected_client_passes: int | None = None
+    tensile_expected_client_passes_per_shard: tuple[int, ...] = ()
     tensile_shard_parallelism: int = 1
     tensile_fault_shard_index: int | None = None
     tensile_streamk_fixed_grid: int | None = None
@@ -1402,10 +1406,14 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
 
 def _validate_tensile_sharding(workload: Workload) -> None:
     shards = workload.tensile_exact_problem_size_shards
+    source_blocks = workload.tensile_expected_source_exact_problem_size_blocks
     expected_rows = workload.tensile_expected_numeric_rows_per_shard
+    expected_clients = workload.tensile_expected_client_passes_per_shard
     if not shards:
         if (
-            expected_rows
+            source_blocks
+            or expected_rows
+            or expected_clients
             or workload.tensile_shard_parallelism != 1
             or workload.tensile_fault_shard_index is not None
         ):
@@ -1424,6 +1432,17 @@ def _validate_tensile_sharding(workload: Workload) -> None:
     ):
         raise RuntimeError(
             f"{workload.id} must declare one positive numeric-row count per shard"
+        )
+    if expected_clients and (
+        len(expected_clients) != len(shards)
+        or any(clients <= 0 for clients in expected_clients)
+    ):
+        raise RuntimeError(
+            f"{workload.id} must declare one positive client count per shard"
+        )
+    if expected_clients and workload.tensile_expected_client_passes is not None:
+        raise RuntimeError(
+            f"{workload.id} cannot mix aggregate and per-shard client counts"
         )
     if not 1 <= workload.tensile_shard_parallelism <= min(4, len(shards)):
         raise RuntimeError(
@@ -1451,6 +1470,29 @@ def _validate_tensile_sharding(workload: Workload) -> None:
             sizes.append(size)
     if len(set(sizes)) != len(sizes):
         raise RuntimeError(f"{workload.id} repeats a Tensile Exact problem size")
+    if source_blocks:
+        for block in source_blocks:
+            if not block:
+                raise RuntimeError(
+                    f"{workload.id} has an empty expected source problem-size block"
+                )
+            for size in block:
+                if not size or any(
+                    type(dimension) is not int or dimension <= 0
+                    for dimension in size
+                ):
+                    raise RuntimeError(
+                        f"{workload.id} has a malformed expected source Exact problem size"
+                    )
+            if len(set(block)) != len(block):
+                raise RuntimeError(
+                    f"{workload.id} repeats a size inside an expected source block"
+                )
+        source_sizes = {size for block in source_blocks for size in block}
+        if set(sizes) != source_sizes:
+            raise RuntimeError(
+                f"{workload.id} shards do not cover its expected source block inventories"
+            )
 
 
 def _validate_workload_manifest() -> None:
@@ -2071,6 +2113,41 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
                 ((513, 513, 1, 513),),
             ),
             "tensile_expected_client_passes": 2,
+            "tensile_shard_parallelism": 3,
+            "tensile_fault_shard_index": 0,
+        },
+        # HGEMM has two benchmark clients with intentionally asymmetric Exact
+        # inventories: both own the three 127--129 shapes, while only the first
+        # owns the three 511--513 shapes. Preserve that source structure as a
+        # fail-closed contract, retaining both clients for shared sizes and
+        # dropping the empty second client for the larger-size shards.
+        "tensile-sk-hgemm-quick": {
+            "tensile_inner_timeout_seconds": 300,
+            "run_timeout_seconds": 360,
+            "tensile_exact_problem_size_shards": (
+                ((127, 127, 1, 127),),
+                ((128, 128, 1, 128),),
+                ((129, 129, 1, 129),),
+                ((511, 511, 1, 511),),
+                ((512, 512, 1, 512),),
+                ((513, 513, 1, 513),),
+            ),
+            "tensile_expected_source_exact_problem_size_blocks": (
+                (
+                    (127, 127, 1, 127),
+                    (128, 128, 1, 128),
+                    (129, 129, 1, 129),
+                    (511, 511, 1, 511),
+                    (512, 512, 1, 512),
+                    (513, 513, 1, 513),
+                ),
+                (
+                    (127, 127, 1, 127),
+                    (128, 128, 1, 128),
+                    (129, 129, 1, 129),
+                ),
+            ),
+            "tensile_expected_client_passes_per_shard": (2, 2, 2, 1, 1, 1),
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
@@ -3230,6 +3307,7 @@ def _workload_command(
     *,
     tensile_exact_problem_sizes: tuple[tuple[int, ...], ...] | None = None,
     tensile_expected_numeric_rows: int | None = None,
+    tensile_expected_client_passes: int | None = None,
 ) -> list[str]:
     workload = _resolved_workload(target, workload)
     overhead = phase == "overhead"
@@ -3326,18 +3404,28 @@ def _workload_command(
                     str(expected_numeric_rows),
                 )
             )
-        if workload.tensile_expected_client_passes is not None:
+        expected_client_passes = (
+            tensile_expected_client_passes
+            if tensile_expected_client_passes is not None
+            else workload.tensile_expected_client_passes
+        )
+        if expected_client_passes is not None:
             command.extend(
                 (
                     "--expect-client-passes",
-                    str(workload.tensile_expected_client_passes),
+                    str(expected_client_passes),
                 )
             )
         if tensile_exact_problem_sizes is not None:
+            source_blocks = (
+                workload.tensile_expected_source_exact_problem_size_blocks
+            )
             source_problem_sizes = tuple(
-                size
-                for shard in workload.tensile_exact_problem_size_shards
-                for size in shard
+                dict.fromkeys(
+                    size
+                    for shard in workload.tensile_exact_problem_size_shards
+                    for size in shard
+                )
             )
             if not source_problem_sizes:
                 raise ValidationError(
@@ -3348,10 +3436,22 @@ def _workload_command(
                 (
                     "--exact-problem-sizes-json",
                     json.dumps(tensile_exact_problem_sizes, separators=(",", ":")),
-                    "--expect-source-exact-problem-sizes-json",
-                    json.dumps(source_problem_sizes, separators=(",", ":")),
                 )
             )
+            if source_blocks:
+                command.extend(
+                    (
+                        "--expect-source-exact-problem-size-blocks-json",
+                        json.dumps(source_blocks, separators=(",", ":")),
+                    )
+                )
+            else:
+                command.extend(
+                    (
+                        "--expect-source-exact-problem-sizes-json",
+                        json.dumps(source_problem_sizes, separators=(",", ":")),
+                    )
+                )
         if workload.tensile_streamk_fixed_grid is not None:
             command.extend(
                 (
@@ -3452,6 +3552,9 @@ def _workload_commands(
     expected_rows = workload.tensile_expected_numeric_rows_per_shard or (
         None,
     ) * len(shards)
+    expected_clients = workload.tensile_expected_client_passes_per_shard or (
+        None,
+    ) * len(shards)
     return [
         _workload_command(
             workspace,
@@ -3462,10 +3565,12 @@ def _workload_commands(
             inner_repetitions_override,
             tensile_exact_problem_sizes=shard,
             tensile_expected_numeric_rows=shard_expected_rows,
+            tensile_expected_client_passes=shard_expected_clients,
         )
-        for shard, shard_expected_rows in zip(
+        for shard, shard_expected_rows, shard_expected_clients in zip(
             shards,
             expected_rows,
+            expected_clients,
             strict=True,
         )
     ]
@@ -3492,6 +3597,11 @@ def _fault_workload_command(
         tensile_expected_numeric_rows=(
             workload.tensile_expected_numeric_rows_per_shard[index]
             if workload.tensile_expected_numeric_rows_per_shard
+            else None
+        ),
+        tensile_expected_client_passes=(
+            workload.tensile_expected_client_passes_per_shard[index]
+            if workload.tensile_expected_client_passes_per_shard
             else None
         ),
     )
@@ -6613,6 +6723,13 @@ def _run_profile(
             ],
             "tensile_expected_numeric_rows_per_shard": list(
                 resolved_workload.tensile_expected_numeric_rows_per_shard
+            ),
+            "tensile_expected_source_exact_problem_size_blocks": [
+                [list(size) for size in block]
+                for block in resolved_workload.tensile_expected_source_exact_problem_size_blocks
+            ],
+            "tensile_expected_client_passes_per_shard": list(
+                resolved_workload.tensile_expected_client_passes_per_shard
             ),
         },
         "environment": recorded_environment,

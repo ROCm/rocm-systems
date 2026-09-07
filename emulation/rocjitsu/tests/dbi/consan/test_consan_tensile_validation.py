@@ -306,6 +306,71 @@ class TensileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "block 1 differs"):
             tensile_validation._exact_problem_size_inventory(document)
 
+    def test_block_aware_shard_drops_clients_without_selected_size(self) -> None:
+        small = (127, 127, 1, 127)
+        large = (511, 511, 1, 511)
+        source_document = {
+            "BenchmarkProblems": [
+                [
+                    {"OperationType": "GEMM"},
+                    {
+                        "ProblemSizes": [
+                            {"Exact": list(small)},
+                            {"Exact": list(large)},
+                        ]
+                    },
+                    {"ProblemSizes": [{"Exact": list(small)}]},
+                ]
+            ]
+        }
+        expected_blocks = ((small, large), (small,))
+        with temporary_root() as root:
+            source = root / "source.yaml"
+            selected = root / "selected.yaml"
+            source.write_text(
+                yaml.safe_dump(source_document, sort_keys=False), encoding="utf-8"
+            )
+            inventory = tensile_validation._write_exact_problem_size_shard(
+                source,
+                selected,
+                (large,),
+                (small, large),
+                expected_blocks,
+            )
+            filtered = yaml.safe_load(selected.read_text(encoding="utf-8"))
+        self.assertEqual(inventory, (small, large))
+        self.assertEqual(len(filtered["BenchmarkProblems"]), 1)
+        self.assertEqual(
+            tensile_validation._exact_problem_size_block_inventories(filtered),
+            ((large,),),
+        )
+
+    def test_block_aware_shard_fails_closed_on_per_client_corpus_change(
+        self,
+    ) -> None:
+        small = (127, 127, 1, 127)
+        large = (511, 511, 1, 511)
+        document = {
+            "BenchmarkProblems": [
+                [
+                    {"OperationType": "GEMM"},
+                    {"ProblemSizes": [{"Exact": list(small)}]},
+                    {"ProblemSizes": [{"Exact": list(large)}]},
+                ]
+            ]
+        }
+        with temporary_root() as root:
+            source = root / "source.yaml"
+            source.write_text(yaml.safe_dump(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "block inventories changed"):
+                tensile_validation._write_exact_problem_size_shard(
+                    source,
+                    root / "selected.yaml",
+                    (small,),
+                    (small, large),
+                    ((small, large), (small,)),
+                )
+
     def test_exact_problem_size_shard_fails_closed_on_corpus_change(self) -> None:
         document = {"ProblemSizes": [{"Exact": [128, 128, 1, 1024]}]}
         with temporary_root() as root:
@@ -335,6 +400,22 @@ class TensileValidationTest(unittest.TestCase):
                 argparse.ArgumentTypeError
             ):
                 tensile_validation._problem_sizes_json(invalid)
+
+    def test_problem_size_block_parser_preserves_asymmetric_inventories(self) -> None:
+        self.assertEqual(
+            tensile_validation._problem_size_blocks_json(
+                "[[[127,127,1,127],[511,511,1,511]],[[127,127,1,127]]]"
+            ),
+            (
+                ((127, 127, 1, 127), (511, 511, 1, 511)),
+                ((127, 127, 1, 127),),
+            ),
+        )
+        for invalid in ("[]", "[[]]", "{}"):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                argparse.ArgumentTypeError
+            ):
+                tensile_validation._problem_size_blocks_json(invalid)
 
     def test_numeric_validation_requires_a_real_passed_row(self) -> None:
         passed = (

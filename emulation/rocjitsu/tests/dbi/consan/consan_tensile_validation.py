@@ -443,6 +443,33 @@ def _problem_sizes_json(value: str) -> tuple[tuple[int, ...], ...]:
     return sizes
 
 
+def _problem_size_blocks_json(
+    value: str,
+) -> tuple[tuple[tuple[int, ...], ...], ...]:
+    try:
+        document = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(
+            f"must be a JSON array of Exact problem-size blocks: {error}"
+        ) from error
+    if not isinstance(document, list) or not document:
+        raise argparse.ArgumentTypeError(
+            "must be a nonempty JSON array of Exact problem-size blocks"
+        )
+    blocks = []
+    for block in document:
+        if not isinstance(block, list) or not block:
+            raise argparse.ArgumentTypeError(
+                "every expected source problem-size block must be nonempty"
+            )
+        try:
+            sizes = _problem_sizes_json(json.dumps(block))
+        except argparse.ArgumentTypeError as error:
+            raise argparse.ArgumentTypeError(str(error)) from error
+        blocks.append(sizes)
+    return tuple(blocks)
+
+
 def _exact_problem_size_blocks(document: object) -> list[list[object]]:
     blocks = []
 
@@ -463,7 +490,9 @@ def _exact_problem_size_blocks(document: object) -> list[list[object]]:
     return blocks
 
 
-def _exact_problem_size_inventory(document: object) -> tuple[tuple[int, ...], ...]:
+def _exact_problem_size_block_inventories(
+    document: object,
+) -> tuple[tuple[tuple[int, ...], ...], ...]:
     blocks = _exact_problem_size_blocks(document)
     if not blocks:
         raise ValueError("exact-size sharding requires at least one ProblemSizes block")
@@ -500,6 +529,11 @@ def _exact_problem_size_inventory(document: object) -> tuple[tuple[int, ...], ..
                 f"ProblemSizes block {block_index} contains duplicate Exact entries"
             )
         inventories.append(tuple(sizes))
+    return tuple(inventories)
+
+
+def _exact_problem_size_inventory(document: object) -> tuple[tuple[int, ...], ...]:
+    inventories = _exact_problem_size_block_inventories(document)
     source_inventory = inventories[0]
     for block_index, inventory in enumerate(inventories[1:], start=1):
         if inventory != source_inventory:
@@ -515,12 +549,23 @@ def _write_exact_problem_size_shard(
     destination: Path,
     selected: tuple[tuple[int, ...], ...],
     expected_source: tuple[tuple[int, ...], ...],
+    expected_source_blocks: tuple[tuple[tuple[int, ...], ...], ...] | None = None,
 ) -> tuple[tuple[int, ...], ...]:
     try:
         document = yaml.safe_load(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         raise ValueError(f"cannot read Tensile YAML: {error}") from error
-    source_inventory = _exact_problem_size_inventory(document)
+    source_blocks = _exact_problem_size_block_inventories(document)
+    source_inventory = (
+        _exact_problem_size_inventory(document)
+        if expected_source_blocks is None
+        else tuple(dict.fromkeys(size for block in source_blocks for size in block))
+    )
+    if expected_source_blocks is not None and source_blocks != expected_source_blocks:
+        raise ValueError(
+            "source Exact problem-size block inventories changed: "
+            f"found={source_blocks}, expected={expected_source_blocks}"
+        )
     if source_inventory != expected_source:
         raise ValueError(
             "source Exact problem-size inventory changed: "
@@ -532,11 +577,66 @@ def _write_exact_problem_size_shard(
 
     filtered = copy.deepcopy(document)
     selected_set = set(selected)
-    for block in _exact_problem_size_blocks(filtered):
-        block[:] = [
-            entry for entry in block if tuple(entry["Exact"]) in selected_set
-        ]
-    filtered_inventory = _exact_problem_size_inventory(filtered)
+    if expected_source_blocks is None:
+        for block in _exact_problem_size_blocks(filtered):
+            block[:] = [
+                entry for entry in block if tuple(entry["Exact"]) in selected_set
+            ]
+    else:
+        if not isinstance(filtered, dict) or not isinstance(
+            filtered.get("BenchmarkProblems"), list
+        ):
+            raise ValueError(
+                "block-aware exact-size sharding requires a BenchmarkProblems list"
+            )
+        benchmark_problems = filtered["BenchmarkProblems"]
+        configured_clients = sum(
+            max(0, len(problem) - 1)
+            for problem in benchmark_problems
+            if isinstance(problem, list)
+        )
+        if configured_clients != len(source_blocks):
+            raise ValueError(
+                "block-aware exact-size sharding requires one ProblemSizes block "
+                "per configured benchmark client"
+            )
+        retained_problems = []
+        for problem in benchmark_problems:
+            if not isinstance(problem, list) or len(problem) < 2:
+                raise ValueError(
+                    "block-aware exact-size sharding requires each BenchmarkProblems "
+                    "entry to contain a problem type and benchmark clients"
+                )
+            problem_type, *clients = problem
+            retained_clients = []
+            for client in clients:
+                client_blocks = _exact_problem_size_blocks(client)
+                if len(client_blocks) != 1:
+                    raise ValueError(
+                        "block-aware exact-size sharding requires exactly one "
+                        "ProblemSizes block per configured benchmark client"
+                    )
+                client_blocks[0][:] = [
+                    entry
+                    for entry in client_blocks[0]
+                    if tuple(entry["Exact"]) in selected_set
+                ]
+                if client_blocks[0]:
+                    retained_clients.append(client)
+            if retained_clients:
+                retained_problems.append([problem_type, *retained_clients])
+        benchmark_problems[:] = retained_problems
+    filtered_inventory = (
+        _exact_problem_size_inventory(filtered)
+        if expected_source_blocks is None
+        else tuple(
+            dict.fromkeys(
+                size
+                for block in _exact_problem_size_block_inventories(filtered)
+                for size in block
+            )
+        )
+    )
     if filtered_inventory != tuple(
         size for size in source_inventory if size in selected_set
     ):
@@ -575,14 +675,25 @@ def main() -> int:
         "--expect-source-exact-problem-sizes-json",
         type=_problem_sizes_json,
     )
+    parser.add_argument(
+        "--expect-source-exact-problem-size-blocks-json",
+        type=_problem_size_blocks_json,
+    )
     args = parser.parse_args()
 
-    if (args.exact_problem_sizes_json is None) != (
-        args.expect_source_exact_problem_sizes_json is None
+    expected_source_forms = sum(
+        value is not None
+        for value in (
+            args.expect_source_exact_problem_sizes_json,
+            args.expect_source_exact_problem_size_blocks_json,
+        )
+    )
+    if (args.exact_problem_sizes_json is None and expected_source_forms != 0) or (
+        args.exact_problem_sizes_json is not None and expected_source_forms != 1
     ):
         parser.error(
-            "--exact-problem-sizes-json and "
-            "--expect-source-exact-problem-sizes-json must be used together"
+            "--exact-problem-sizes-json requires exactly one expected source "
+            "inventory form"
         )
 
     workspace = args.workspace.resolve()
@@ -620,7 +731,15 @@ def main() -> int:
                 config,
                 execution_config,
                 args.exact_problem_sizes_json,
-                args.expect_source_exact_problem_sizes_json,
+                args.expect_source_exact_problem_sizes_json
+                or tuple(
+                    dict.fromkeys(
+                        size
+                        for block in args.expect_source_exact_problem_size_blocks_json
+                        for size in block
+                    )
+                ),
+                args.expect_source_exact_problem_size_blocks_json,
             )
         except ValueError as error:
             detail = {"config": str(config), "reason": str(error)}
@@ -740,6 +859,14 @@ def main() -> int:
         "source_exact_problem_sizes": (
             [list(size) for size in source_problem_sizes]
             if source_problem_sizes is not None
+            else None
+        ),
+        "source_exact_problem_size_blocks": (
+            [
+                [list(size) for size in block]
+                for block in args.expect_source_exact_problem_size_blocks_json
+            ]
+            if args.expect_source_exact_problem_size_blocks_json is not None
             else None
         ),
         "target": args.gpu_target,
