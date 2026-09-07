@@ -1415,6 +1415,45 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // This is critical for handling cross-level dependencies with stream reuse
   std::unordered_map<int, amd::Command*> segment_last_command;
 
+  // Hoisted out of the dispatch loop: a producer's ordering edge is decided as it is submitted,
+  // and that needs its consumers' streams.  The assignment is per level and unchanged by this.
+  for (int level = 0; level <= max_dependency_level_; ++level) {
+    auto level_it = segments_per_level_.find(level);
+    if (level_it != segments_per_level_.end()) {
+      AssignStreamsToSegments(level_it->second, launch_stream, streams, segment_to_stream);
+    }
+  }
+
+  // Segments whose completion another stream waits on.  A hint: a missing entry costs a host
+  // resident wait, an extra one costs a barrier packet.
+  std::unordered_set<int> cross_stream_producers;
+  for (const auto& seg_stream : segment_to_stream) {
+    // Mirrors the wait_list test in the loop below, one level up.
+    const auto& consumer = segments_[seg_stream.first];
+    for (int dep_segment_id : consumer.segment_ids_dependencies) {
+      auto dep_it = segment_to_stream.find(dep_segment_id);
+      if (dep_it != segment_to_stream.end() && dep_it->second != seg_stream.second) {
+        cross_stream_producers.insert(dep_segment_id);
+      }
+    }
+  }
+  // The join at the bottom also waits on each other stream's last command.  Which segment that
+  // is depends on iteration order, so mark every segment at a stream's top level instead.
+  std::unordered_map<hip::Stream*, int> stream_top_level;
+  for (const auto& seg_stream : segment_to_stream) {
+    const int level = segments_[seg_stream.first].dependency_level;
+    auto it = stream_top_level.find(seg_stream.second);
+    if (it == stream_top_level.end() || level > it->second) {
+      stream_top_level[seg_stream.second] = level;
+    }
+  }
+  for (const auto& seg_stream : segment_to_stream) {
+    if (seg_stream.second != launch_stream &&
+        segments_[seg_stream.first].dependency_level == stream_top_level[seg_stream.second]) {
+      cross_stream_producers.insert(seg_stream.first);
+    }
+  }
+
   // Process segments level by level using the pre-calculated max_dependency_level_
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto level_it = segments_per_level_.find(level);
@@ -1423,9 +1462,6 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
 
     const auto& segments_at_level = level_it->second;
-
-    // Assign streams to segments at this level
-    AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
 
     // Process each segment at this level
     for (int segment_id : segments_at_level) {
@@ -1465,6 +1501,10 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
       // Create accumulate command for this segment
       amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(*current_stream, {}, nullptr);
+
+      // A cross stream producer gets a device resident value word for its completion, the way an
+      // eager hipEventRecord/hipStreamWaitEvent pair already does.  Set before enqueue().
+      accumulate->setCrossStreamProducer(cross_stream_producers.count(segment_id) != 0);
 
       // Enqueue this segment using the helper function
       status = EnqueueSegment(segment, current_stream, accumulate);

@@ -268,6 +268,8 @@ class Command : public Event {
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
+  //! Set by the enqueuer when another stream will wait on this command's completion
+  bool crossStreamProducer_ = false;
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
@@ -316,6 +318,13 @@ class Command : public Event {
     }
   }
   bool getPktCapturingState() const { return packetCapturing_; }
+
+  //! Declare that another stream will wait on this command's completion.  Must be set before
+  //! enqueue(): the device layer reads it while submitting.
+  void setCrossStreamProducer(bool value) { crossStreamProducer_ = value; }
+
+  //! Does another stream wait on this command's completion?
+  bool isCrossStreamProducer() const { return crossStreamProducer_; }
 
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,

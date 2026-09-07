@@ -1511,7 +1511,11 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
       reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
   bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames);
 
-  profilingEnd();
+  // submitAccumulate() takes a fresh HwEvent for the segment, and that is the one a consumer
+  // reads; an edge published here would name the signal it is about to stop pointing at.
+  constexpr bool kClearHwEvent = false;
+  constexpr bool kPublishOrderingEdge = false;
+  profilingEnd(kClearHwEvent, kPublishOrderingEdge);
 
   return result;
 }
@@ -2112,7 +2116,12 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  * created for whatever command we are running and calls end() to get the
  * current host timestamp if no signal is available.
  */
-void VirtualGPU::profilingEnd(bool clearHwEvent) {
+void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
+  // A separate packet, so it sits behind the command it denotes.
+  if (publishOrderingEdge && command_->isCrossStreamProducer()) {
+    PublishOrderingEdge();
+  }
+
   if (!command_->getPktCapturingState() && command_->profilingInfo().enabled_) {
     if (timestamp_->HwProfiling() == false) {
       timestamp_->end();
@@ -4057,27 +4066,34 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
-// Publish a device resident twin of this marker's completion signal, so that a queue which
-// later waits on this event names a value word in its own local memory.
+// Publish a device resident twin of the current command's completion signal, so that a queue
+// which later waits on this event names a value word in its own local memory.
 //
-// hipEventRecord is the only producer shape that needs this: a cross stream dependency is
-// always record-then-wait, and profilingBegin() picks the recorded command's HwEvent out of
-// the wait list.  Markers from hipStreamWaitEvent carry marker_ts_ == false and are the
-// consuming side.
+// Eligibility is the caller's: an eager hipEventRecord marker is recognised by marker_ts_, a
+// graph's producer by setCrossStreamProducer().  A hipStreamWaitEvent marker is the consumer.
 //
 // Cost is one barrier-AND packet with no dependencies and no cache operation, appended after
-// the marker's own packet, plus the read and the arming store in AcquireOrderingEdge().  The
+// the command's own packet, plus the read and the arming store in AcquireOrderingEdge().  The
 // ordinary completion signal keeps every other role - HwEvent, host waits, profiling
 // timestamps, async handlers - none of which an ordering edge signal may take.
-void VirtualGPU::PublishOrderingEdge(amd::Marker& vcmd) {
-  if (!vcmd.profilingInfo().marker_ts_ || !dev().orderingEdgeSignals()) {
+void VirtualGPU::PublishOrderingEdge() {
+  if (!dev().orderingEdgeSignals()) {
     return;
   }
   auto* hw_event = reinterpret_cast<ProfilingSignal*>(command_->HwEvent());
+  if (hw_event == nullptr) {
+    return;
+  }
+  // The edge is decremented by a barrier packet on gpu_queue_, ordered against that ring only,
+  // so it can stand in only for a signal this queue's command processor produces.  Against one
+  // an SDMA engine retires it is unordered, and a consumer would proceed mid-copy.
+  if (hw_event->engine_ != HwQueueEngine::Compute) {
+    return;
+  }
   // A signal that already carries an edge is not given a second one.  That happens when a
   // marker is coalesced onto the previous barrier's HwEvent, and the earlier edge is the
   // right answer there: a coalesced marker denotes the same point in the stream.
-  if (hw_event == nullptr || hw_event->edge_handle_.load(std::memory_order_relaxed) != 0) {
+  if (hw_event->edge_handle_.load(std::memory_order_relaxed) != 0) {
     return;
   }
   uint32_t slot = 0;
@@ -4135,7 +4151,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
           }
           hasPendingDispatch_ = false;
         }
-        PublishOrderingEdge(vcmd);
+        if (vcmd.profilingInfo().marker_ts_) {
+          PublishOrderingEdge();
+        }
       }
       profilingEnd();
     }
