@@ -17,6 +17,10 @@ class CoverageBuildFlagsTest(unittest.TestCase):
         self.assertTrue(cmake_options.endswith(
             "-DENABLE_CODE_COVERAGE=ON -DENABLE_DEVICE_COVERAGE=AUTO"
         ))
+        # configure_coverage_build is append-only and relies on CMake last-wins,
+        # so the seeded OFF must not linger and mask a regression that stops
+        # emitting the AUTO override.
+        self.assertNotIn("-DENABLE_DEVICE_COVERAGE=OFF", cmake_options)
 
     def test_coverage_report_replaces_host_only_install_flag(self):
         flags, cmake_options = configure_coverage_build(
@@ -31,6 +35,7 @@ class CoverageBuildFlagsTest(unittest.TestCase):
         self.assertTrue(cmake_options.endswith(
             "-DENABLE_CODE_COVERAGE=ON -DENABLE_DEVICE_COVERAGE=AUTO"
         ))
+        self.assertNotIn("-DENABLE_DEVICE_COVERAGE=OFF", cmake_options)
 
     def test_non_coverage_build_disables_cached_coverage_options(self):
         original_flags = [

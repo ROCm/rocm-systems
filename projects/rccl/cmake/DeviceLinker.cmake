@@ -119,17 +119,11 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 # Optimization flags (passed to both compile and link modes of the driver)
 # ---------------------------------------------------------------------------
 if(ENABLE_DEVICE_COVERAGE)
-  # Device coverage must drop DWARF entirely (-g0), even for an explicit --debug
-  # build. LLVM source-based coverage does NOT use DWARF: the region/line mapping
-  # lives in __llvm_covfun/__llvm_covmap and the counters in __llvm_prf_*, so
-  # llvm-cov needs only device.elf + the merged .profdata. RCCL instantiates
-  # thousands of specialized device kernels; even -gline-tables-only emits ~660 MB
-  # of .debug_* (one subprogram DIE per function). Together with the instrumented
-  # .text (~1.5 GB) that pushes the per-arch device.elf past ~2 GB (INT32_MAX), at
-  # which point the compressed HIP fat binary can no longer be unbundled at load
-  # (COMGR AMD_COMGR_ACTION_UNBUNDLE fails -> "Failed to unbundle code object" ->
-  # every collective kernel launch returns hipErrorInvalidDeviceFunction). Dropping
-  # DWARF holds the object comfortably under that limit without affecting coverage.
+  # Drop DWARF (-g0) even under --debug. LLVM source-based coverage lives in
+  # __llvm_covfun/__llvm_covmap + __llvm_prf_*, not DWARF, so llvm-cov needs
+  # only device.elf + .profdata. With thousands of specialized kernels, keeping
+  # debug info pushes the per-arch device.elf past the ~2 GB (INT32_MAX) HIP
+  # fat-binary unbundling limit, after which every kernel launch fails.
   set(DL_OPT_FLAGS -O1 -g0)
 elseif(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
@@ -223,6 +217,12 @@ if(DL_DEVICE_PROFILE_RT)
     -Xoffload-linker "${DL_DEVICE_PROFILE_ANCHOR}"
     -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
 endif()
+
+# The coverage instrumentation flags and the device profile-runtime link flags
+# always travel together on the fat-object / dispatcher compiles below, so fold
+# the adjacent pair into one variable (both expand to nothing unless
+# ENABLE_DEVICE_COVERAGE). A future coverage-flag addition is then a single edit.
+set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Main-module coverage drain: deterministic compilation-unit ID (-cuid).
@@ -692,8 +692,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${ONERANK_FAT_OBJ}
@@ -728,8 +727,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      ${DL_COVERAGE_FLAGS}
-      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -MD -MF ${COLLECTIVES_DEPFILE}
@@ -751,8 +749,7 @@ else()
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      ${DL_COVERAGE_FLAGS}
-      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${COLLECTIVES_FAT_OBJ}
@@ -783,8 +780,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
@@ -804,8 +800,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
@@ -825,8 +820,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
@@ -846,8 +840,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
@@ -937,8 +930,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -962,11 +954,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
@@ -985,11 +975,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
@@ -1018,8 +1006,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -1040,8 +1027,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -1062,11 +1048,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
@@ -1085,11 +1069,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
@@ -1108,8 +1090,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -1130,11 +1111,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
@@ -1153,11 +1132,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
@@ -1176,11 +1153,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
@@ -1199,11 +1174,9 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
-    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
@@ -1241,11 +1214,9 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      ${DL_COVERAGE_FLAGS}
-      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
-      ${DL_INHERITED_FLAGS}
       -w
       -c -o ${_ce_reduce_obj}
       ${_ce_reduce_src}
@@ -1353,8 +1324,7 @@ if(GENERATE_SYM_KERNELS)
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
         ${DL_INHERITED_FLAGS}
-        ${DL_COVERAGE_FLAGS}
-        ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+        ${DL_DEVICE_COVERAGE_FLAGS}
         -std=c++17
         -fPIC
         ${_this_bc_flag}
