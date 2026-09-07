@@ -227,6 +227,24 @@ TEST(InstructionBuilder, BuildSGetregB32) {
   EXPECT_FALSE(build_s_getreg_b32(/*sdst=*/128, *hwreg, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
+TEST(InstructionBuilder, BuildSSetregB32) {
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/1, /*offset=*/12, /*size_bits=*/8);
+  ASSERT_TRUE(hwreg);
+  EXPECT_EQ(*hwreg, 0x3B01u);
+
+  const auto word = build_s_setreg_b32(/*ssrc=*/20, *hwreg, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(word);
+  EXPECT_EQ(*word, 0xB9143B01u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(std::string_view(inst->mnemonic()), "s_setreg_b32");
+
+  EXPECT_FALSE(build_s_setreg_b32(/*ssrc=*/128, *hwreg, ROCJITSU_CODE_ARCH_CDNA5));
+}
+
 TEST(InstructionBuilder, BuildVMbcntLaneIdSequence) {
   const auto low = build_v_mbcnt_lo_u32_b32(
       /*vdst=*/13, /*src0=*/0xC1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);

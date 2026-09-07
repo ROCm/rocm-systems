@@ -206,6 +206,7 @@ struct MoiTargetFacts {
   bool available = false;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
   bool requires_aligned_flat_compare_swap_data_pair = false;
+  bool has_selectable_vgpr_bank = false;
 };
 
 [[nodiscard]] MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch);

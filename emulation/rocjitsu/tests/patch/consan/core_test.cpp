@@ -409,12 +409,16 @@ TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
 
   requirement.has_report_buffer = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 5u);
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 6u);
   requirement.runtime_sample_stride = 2u;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
   requirement.automatic_banked_record_capture = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 14u);
   requirement = {.has_report_buffer = true, .dynamic_stack_spill = true};
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 6u);
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 7u);
+  requirement = {.has_report_buffer = true, .scalar_spill = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 4u);
 
   requirement = {.engine = ConSanMoiEngine::Sampled, .has_report_buffer = true};
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);

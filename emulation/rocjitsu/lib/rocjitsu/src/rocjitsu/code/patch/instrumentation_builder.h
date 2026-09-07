@@ -59,6 +59,13 @@ build_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_setreg_b32(uint16_t ssrc, uint16_t hwreg, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return std::nullopt;
+  return rocjitsu::build_s_setreg_b32(ssrc, hwreg, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return build_rdna3_s_mov_b64(sdst, ssrc0, arch);

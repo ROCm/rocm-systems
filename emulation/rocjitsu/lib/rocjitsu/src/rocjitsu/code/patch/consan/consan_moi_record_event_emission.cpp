@@ -14,6 +14,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 
 #include <algorithm>
 #include <array>
@@ -90,18 +91,35 @@ using consan_moi_detail::kFenceRecordLayout;
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
 
   const ConSanTargetProfile *target = consan_target_profile(arch);
+  const bool preserve_vgpr_bank_dynamically =
+      target != nullptr && target->has_selectable_vgpr_bank &&
+      options.selectable_vgpr_bank_save_sgpr && scalar_spill == nullptr;
   const std::optional<uint16_t> vgpr_msb_mode =
-      target != nullptr && target->has_selectable_vgpr_bank
+      target != nullptr && target->has_selectable_vgpr_bank && !preserve_vgpr_bank_dynamically
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
                                                 container.entry_text_offset, site.file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
+  const std::optional<uint16_t> vgpr_msb_hwreg =
+      preserve_vgpr_bank_dynamically
+          ? build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, /*size_bits=*/8u)
+          : std::nullopt;
+  if (preserve_vgpr_bank_dynamically && !vgpr_msb_hwreg) {
+    errors.emplace_back("ConSan MOI barrier record patch could not encode MODE.VGPR_MSB");
+    return std::nullopt;
+  }
   words.reserve(
-      186 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
+      190 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
-  if (select_low_vgpr_bank)
+  if (preserve_vgpr_bank_dynamically) {
+    require_emission.append("ConSan MOI barrier record patch could not preserve MODE.VGPR_MSB",
+                            instrumentation::build_s_getreg_b32(
+                                *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch),
+                            instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
+  } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
+  }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -159,9 +177,14 @@ using consan_moi_detail::kFenceRecordLayout;
   }
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (select_low_vgpr_bank)
+  if (preserve_vgpr_bank_dynamically) {
+    require_emission.append("ConSan MOI barrier record patch could not restore MODE.VGPR_MSB",
+                            instrumentation::build_s_setreg_b32(
+                                *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch));
+  } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+  }
   const uint32_t staged_guest_instruction_offset =
       static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.push_back(original_barrier_word);

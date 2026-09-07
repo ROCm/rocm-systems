@@ -34,6 +34,7 @@ struct MoiRecordEventEmissionPlan {
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> derived_owner;
+  std::optional<uint16_t> selectable_vgpr_bank_save_sgpr;
   uint16_t required_sgpr_count = 0;
 };
 
@@ -46,20 +47,19 @@ struct MoiRecordEventEmissionPlan {
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSourceView &source,
-    const ConSanAtomicLoweringForm &lowering_form,
-    const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiRecordEventEmissionPlan &options,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
+    const ConSanAtomicLoweringForm &lowering_form, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t record_index,
+    uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSourceView &source,
     const ConSanAtomicLoweringForm &communication_lowering_form,
-    const ConSanProgramContainer &container,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
+    const ConSanProgramContainer &container, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t record_index,
+    uint32_t record_capacity_or_count, size_t fence_records_offset,
     std::span<const uint32_t> displaced_tail_words, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr);
 

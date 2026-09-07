@@ -57,6 +57,14 @@ build_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
   return pack_sopk(/*op=*/17, sdst, hwreg);
 }
 
+/// @brief Encode RDNA4-class `s_setreg_b32 hwreg, ssrc`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_setreg_b32(uint16_t ssrc, uint16_t hwreg, rj_code_arch_t arch) {
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) || ssrc > 127)
+    return std::nullopt;
+  return pack_sopk(/*op=*/18, ssrc, hwreg);
+}
+
 /// @brief Encode v_mov_b32_e32 for the given target ISA.
 ///
 /// @param vdst  Destination VGPR.

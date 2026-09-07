@@ -10068,7 +10068,6 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
   constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
-  constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words = {
       *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_CDNA5),
       0xD8340000u,
@@ -10098,19 +10097,95 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const uint32_t select_low =
-      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
-  const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_CDNA5);
   const auto barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier, result.patches.end());
+  ASSERT_TRUE(barrier->relocated_guest_instruction_offset);
   EXPECT_EQ(barrier->anchor_offset, 3u * sizeof(uint32_t));
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
-  EXPECT_EQ(std::ranges::count(words, select_low), 1u);
-  EXPECT_EQ(std::ranges::count(words, restore_guest), 1u);
-  EXPECT_LT(std::ranges::find(words, select_low), std::ranges::find(words, restore_guest));
+  const auto hwreg = build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, 8u);
+  ASSERT_TRUE(hwreg);
+  const uint16_t bank_save_sgpr = static_cast<uint16_t>(
+      test_moi_transient_sgpr_assignments(result).front().exec_save_sgpr + 5u);
+  const auto save =
+      instrumentation::build_s_getreg_b32(bank_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto restore =
+      instrumentation::build_s_setreg_b32(bank_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(save && restore);
+  const auto saved = std::ranges::find(words, *save);
+  const auto restored = std::ranges::find(words, *restore);
+  ASSERT_NE(saved, words.end());
+  ASSERT_NE(restored, words.end());
+  EXPECT_LT(saved, restored);
+  const size_t guest_word =
+      (*barrier->relocated_guest_instruction_offset - barrier->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_LT(guest_word, words.size());
+  EXPECT_LT(restored, words.begin() + static_cast<ptrdiff_t>(guest_word));
+  EXPECT_EQ(words[guest_word], kBarrierSignal);
+}
+
+TEST(ConSanMoi, Gfx1250RecordReplayBarrierPreservesPathDependentVgprMsbMode) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
+  const auto bypass_mode = instrumentation::build_s_cbranch_scc1(/*offset_dwords=*/1, kArch);
+  ASSERT_TRUE(bypass_mode);
+  const std::vector<uint32_t> text_words = {
+      *bypass_mode,
+      *build_gfx1250_s_set_vgpr_msb(/*mode=*/1u, kArch),
+      kBarrierSignal,
+      0xBF94FFFFu, // s_barrier_wait -1
+      *build_gfx1250_s_set_vgpr_msb_transition(/*previous_mode=*/1u, /*new_mode=*/0u, kArch),
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      build_s_endpgm(kArch),
+  };
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2u, 0u, 0u, 0u, 2u);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_path_dependent_barrier_bank"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto hwreg = build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, 8u);
+  ASSERT_TRUE(hwreg);
+  constexpr uint16_t kBankSaveSgpr = 35u;
+  const auto save = instrumentation::build_s_getreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  const auto clear = instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, kArch);
+  const auto restore = instrumentation::build_s_setreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  ASSERT_TRUE(save && clear && restore);
+  const auto saved = std::ranges::find(words, *save);
+  const auto cleared = std::ranges::find(words, *clear);
+  const auto restored = std::ranges::find(words, *restore);
+  ASSERT_NE(saved, words.end());
+  ASSERT_NE(cleared, words.end());
+  ASSERT_NE(restored, words.end());
+  EXPECT_LT(saved, cleared);
+  EXPECT_LT(cleared, restored);
+  const size_t guest_word =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_LT(guest_word, words.size());
+  EXPECT_LT(restored, words.begin() + static_cast<ptrdiff_t>(guest_word));
+  EXPECT_EQ(words[guest_word], kBarrierSignal);
 }
 
 TEST(ConSanMoi, Gfx1250SelectableBankTransitionUsesPrivatePersistentState) {

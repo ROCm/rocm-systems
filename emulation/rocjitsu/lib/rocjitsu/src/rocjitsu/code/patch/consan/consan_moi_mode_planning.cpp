@@ -13,7 +13,8 @@ namespace rocjitsu::consan_moi_impl {
 MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   return target ? MoiTargetFacts{true, target->direct_call_form,
-                                 target->flat_compare_swap_data_pair_alignment > 1u}
+                                 target->flat_compare_swap_data_pair_alignment > 1u,
+                                 target->has_selectable_vgpr_bank}
                 : MoiTargetFacts{};
 }
 
