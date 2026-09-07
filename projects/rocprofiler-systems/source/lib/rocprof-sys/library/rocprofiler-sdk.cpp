@@ -31,7 +31,9 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
-#include "library/rocprofiler-sdk/service_compatibility.hpp"
+#if(ROCPROFSYS_USE_SPM)
+#    include "library/rocprofiler-sdk/service_compatibility.hpp"
+#endif
 #include "library/rocprofiler-sdk/spm.hpp"
 #include "library/rocprofiler-sdk/spm_internal.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
@@ -2529,9 +2531,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     sdk_backend_t::check_version_compatibility();
 
-    auto       _callback_domains    = tracing_config_t::get_callback_domains();
-    auto       _buffered_domain     = tracing_config_t::get_buffered_domains();
-    auto       _counter_events      = config::get_rocm_counter_events();
+    const auto callback_domains     = tracing_config_t::get_callback_domains();
+    const auto buffered_domains     = tracing_config_t::get_buffered_domains();
+    const auto rocm_counter_events  = config::get_rocm_counter_events();
     const auto requested_spm_config = spm::configuration{
         .counter_events  = spm::get_events(),
         .sample_interval = spm::get_sample_interval(),
@@ -2539,8 +2541,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #if(ROCPROFSYS_USE_SPM || ROCPROFILER_VERSION >= 600)
     const auto gpu_perf_counter_events = get_gpu_perf_counters();
 #endif
-    auto _version = tracing_config_t::get_version();
-    if(_version.formatted() == 0)
+    const auto sdk_version = tracing_config_t::get_version();
+    if(sdk_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -2549,7 +2551,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->client_fini = fini_func;
 
     _data->initialize();
-    if(!_counter_events.empty()) _data->initialize_event_info();
+    if(!rocm_counter_events.empty())
+    {
+        _data->initialize_event_info();
+    }
 
 #if(ROCPROFSYS_USE_SPM)
     // A build without SPM cannot activate both services, so its unavailable-SPM
@@ -2620,7 +2625,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
         })
     {
-        if(_callback_domains.count(itr) > 0)
+        if(callback_domains.contains(itr))
         {
             auto _ops = tracing_config_t::get_operations(itr);
             _data->backtrace_operations.emplace(
@@ -2640,8 +2645,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         set_kernel_rename_and_stream_correlation_id, _data));
 
 #if(ROCPROFILER_VERSION >= 700)
-    if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
             _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
@@ -2649,12 +2654,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-    if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
+    if(callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_RCCL_API))
     {
         rocprofiler_sdk::rccl_comm_data_initialize();
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2667,7 +2672,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
     // ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see
     // ::rocprofiler_hsa_core_api_id_t ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2678,7 +2683,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2691,7 +2696,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
 #if(ROCPROFILER_VERSION >= 600)
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2713,17 +2718,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
 #if(ROCPROFILER_VERSION >= 10202)
     // Initialize KFD event metadata
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) ||
+       buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
     {
         rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2735,7 +2740,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->kfd_page_fault_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2747,7 +2752,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->kfd_page_migrate_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2759,7 +2764,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->kfd_queue_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2778,7 +2783,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->kfd_event_queue_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2790,7 +2795,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             nullptr, 0, _data->kfd_event_unmap_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(buffered_domains.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
@@ -2803,14 +2808,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-    if(!_counter_events.empty())
+    if(!rocm_counter_events.empty())
     {
         // Resolve counter names to counter IDs per agent
         for(const auto& itr : _data->gpu_agents)
         {
             const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
             _data->agent_events.emplace(
-                _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
+                _agent_id, create_agent_profile(_agent_id, rocm_counter_events, _data));
         }
 
         // --- Dispatch-mode kernel counters ---

@@ -9,7 +9,9 @@
 #include "rocprof-sys/library/rocprofiler-sdk/spm_sample.hpp"
 
 #include <gtest/gtest.h>
-#include <rocprofiler-sdk/fwd.h>
+#if ROCPROFSYS_USE_SPM
+#    include <rocprofiler-sdk/fwd.h>
+#endif
 
 #include <algorithm>
 #include <array>

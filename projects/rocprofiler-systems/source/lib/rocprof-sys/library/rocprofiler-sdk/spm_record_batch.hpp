@@ -155,7 +155,8 @@ private:
         samples.reserve(m_timestamp_slots.size());
         std::ranges::transform(
             m_timestamp_slots, std::back_inserter(samples), [](const auto& slot) {
-                auto sample = timestamp_sample{ .timestamp = slot.timestamp };
+                auto sample =
+                    timestamp_sample{ .timestamp = slot.timestamp, .values = {} };
                 sample.values.reserve(slot.value_count);
                 return sample;
             });
