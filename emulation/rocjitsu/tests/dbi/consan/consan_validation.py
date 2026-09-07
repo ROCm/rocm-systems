@@ -2096,6 +2096,38 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "pytorch-norm-softmax": {
             "run_timeout_seconds": 60,
         },
+        # This sparse matrix has nine benchmark clients with four distinct
+        # Exact shapes. Retain every client that owns a selected shape, prune
+        # only structurally empty clients, and give each shape an independent
+        # oracle and teardown verdict.
+        "tensile-spmm-tdm-all": {
+            "tensile_inner_timeout_seconds": 300,
+            "run_timeout_seconds": 360,
+            "tensile_exact_problem_size_shards": (
+                ((32, 32, 1, 64),),
+                ((64, 64, 1, 128),),
+                ((64, 64, 1, 256),),
+                ((128, 128, 1, 256),),
+            ),
+            "tensile_expected_source_exact_problem_size_blocks": (
+                (
+                    (32, 32, 1, 64),
+                    (64, 64, 1, 128),
+                    (128, 128, 1, 256),
+                ),
+                ((32, 32, 1, 64), (64, 64, 1, 128)),
+                ((32, 32, 1, 64), (64, 64, 1, 256)),
+                ((32, 32, 1, 64), (128, 128, 1, 256)),
+                ((32, 32, 1, 64), (64, 64, 1, 128)),
+                ((32, 32, 1, 64), (64, 64, 1, 256)),
+                ((32, 32, 1, 64), (64, 64, 1, 256)),
+                ((32, 32, 1, 64), (64, 64, 1, 256)),
+                ((32, 32, 1, 64), (64, 64, 1, 256)),
+            ),
+            "tensile_expected_client_passes_per_shard": (9, 3, 5, 2),
+            "tensile_shard_parallelism": 4,
+            "tensile_fault_shard_index": 0,
+        },
         # The two SGEMM benchmark blocks repeat the same six Exact sizes but
         # have very different solution spaces. Preserve both blocks in every
         # shard and give each size an independent all-client oracle, teardown

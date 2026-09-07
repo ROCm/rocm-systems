@@ -5658,6 +5658,74 @@ class ConSanValidationTest(unittest.TestCase):
             "2",
         )
 
+    def test_gfx1250_spmm_tdm_all_shards_heterogeneous_clients(self) -> None:
+        workload = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-spmm-tdm-all"]
+        )
+        commands = validation._workload_commands(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark.json"),
+        )
+        expected_sizes = [
+            [32, 32, 1, 64],
+            [64, 64, 1, 128],
+            [64, 64, 1, 256],
+            [128, 128, 1, 256],
+        ]
+        expected_blocks = [
+            [expected_sizes[0], expected_sizes[1], expected_sizes[3]],
+            [expected_sizes[0], expected_sizes[1]],
+            [expected_sizes[0], expected_sizes[2]],
+            [expected_sizes[0], expected_sizes[3]],
+            [expected_sizes[0], expected_sizes[1]],
+            [expected_sizes[0], expected_sizes[2]],
+            [expected_sizes[0], expected_sizes[2]],
+            [expected_sizes[0], expected_sizes[2]],
+            [expected_sizes[0], expected_sizes[2]],
+        ]
+        expected_clients = [9, 3, 5, 2]
+        self.assertEqual(workload.run_timeout_seconds, 360)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 300)
+        self.assertEqual(workload.tensile_shard_parallelism, 4)
+        self.assertEqual(workload.tensile_fault_shard_index, 0)
+        self.assertEqual(len(commands), 4)
+        for index, command in enumerate(commands):
+            self.assertEqual(
+                command[command.index("--expect-client-passes") + 1],
+                str(expected_clients[index]),
+            )
+            self.assertEqual(
+                json.loads(
+                    command[command.index("--exact-problem-sizes-json") + 1]
+                ),
+                [expected_sizes[index]],
+            )
+            self.assertEqual(
+                json.loads(
+                    command[
+                        command.index(
+                            "--expect-source-exact-problem-size-blocks-json"
+                        )
+                        + 1
+                    ]
+                ),
+                expected_blocks,
+            )
+
+        fault_command = validation._fault_workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            Path("/artifacts/fault.json"),
+        )
+        self.assertEqual(
+            fault_command[fault_command.index("--expect-client-passes") + 1],
+            "9",
+        )
+
     def test_gfx1250_f8gemm_quick_shards_every_exact_problem_size(self) -> None:
         workload = validation._effective_workload(
             "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-f8gemm-quick"]
