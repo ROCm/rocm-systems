@@ -7,8 +7,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 
-#include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
@@ -1929,6 +1929,7 @@ void associate_ordinary_acquire_sync_sequences(
   struct Association {
     size_t cache_index = 0;
     std::optional<size_t> cache_tail_index;
+    std::optional<uint64_t> polling_loop_header_text_offset;
   };
   const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(sync_sequences);
   std::unordered_map<size_t, Association> associations;
@@ -1945,7 +1946,17 @@ void associate_ordinary_acquire_sync_sequences(
     if (is_workgroup_flat_communication(program_inventory, *load) &&
         !exact_workgroup_flat_acquire_encoding(program_inventory, *load))
       continue;
-    std::vector<size_t> cache_matches;
+    const auto make_association = [&](size_t cache_index, std::optional<size_t> cache_tail_index,
+                                      BoundedAcquirePathKind path) {
+      std::optional<uint64_t> polling_loop_header_text_offset;
+      if (path == BoundedAcquirePathKind::ExactSelfLoopExit && load_sequence.basic_block_index &&
+          *load_sequence.basic_block_index < blocks.size() &&
+          blocks[*load_sequence.basic_block_index] != nullptr) {
+        polling_loop_header_text_offset = blocks[*load_sequence.basic_block_index]->start_offset();
+      }
+      return Association{cache_index, cache_tail_index, polling_loop_header_text_offset};
+    };
+    std::vector<Association> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
     std::vector<Association> cache_pair_matches;
     const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
@@ -1978,7 +1989,7 @@ void associate_ordinary_acquire_sync_sequences(
                      : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathSingleFence;
       if (consan_ordinary_acquire_metadata_compatible(inventory.program_sites, *load, load_sequence,
                                                       *cache, cache_sequence, metadata_policy))
-        cache_matches.push_back(cache_index);
+        cache_matches.push_back(make_association(cache_index, std::nullopt, *path));
     }
 
     if (bounded_metadata_matches.empty()) {
@@ -2022,13 +2033,13 @@ void associate_ordinary_acquire_sync_sequences(
                                                          metadata_policy)) {
           continue;
         }
-        cache_pair_matches.push_back({first_index, tail_index});
+        cache_pair_matches.push_back(make_association(first_index, tail_index, *path));
       }
     }
 
     std::optional<Association> association;
     if (cache_matches.size() == 1u) {
-      association = Association{cache_matches.front(), std::nullopt};
+      association = cache_matches.front();
     } else if (bounded_metadata_matches.empty() && cache_matches.empty() &&
                cache_pair_matches.size() == 1u) {
       association = cache_pair_matches.front();
@@ -2065,6 +2076,8 @@ void associate_ordinary_acquire_sync_sequences(
       sequence.confidence =
           combine_consan_sync_confidence(sequence.confidence, cache_tail->confidence);
     sequence.confidence_reason = "bounded ordinary-load/acquire-cache compiler-bookkeeping proof";
+    sequence.acquire_polling_loop_header_text_offset =
+        association->second.polling_loop_header_text_offset;
     sequence.identity += "|acquire-cache=" + cache.identity;
     if (cache_tail != nullptr)
       sequence.identity += "|acquire-cache-tail=" + cache_tail->identity;

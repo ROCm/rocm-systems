@@ -331,6 +331,11 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
   /// synchronization event: it is meaningful only as part of the containing
   /// communication sequence.
   std::optional<uint64_t> release_wait_text_offset;
+  /// Header of an exactly proven compiler polling loop whose successful exit
+  /// reaches this acquire sequence's fence. A consumer that relocates the
+  /// acquire must include this header so the loop backedge cannot re-enter a
+  /// partially executed instrumentation prologue.
+  std::optional<uint64_t> acquire_polling_loop_header_text_offset;
   std::optional<uint32_t> basic_block_index;
   bool in_cyclic_cfg_component = false;
   bool inside_scalar_clause = false;

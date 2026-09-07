@@ -204,10 +204,14 @@ void try_stage_fence_record_fragments(std::span<const uint8_t> bytes, const ConS
     info.anchor_offset = patch_text_offset;
     info.original_size = patch_size;
     note_moi_probe_patch_info(info, planned);
-    auto fragment =
-        make_consan_around_text_fragment(std::move(*cave_words), guest_instruction_offset,
-                                         patch_size, planned.candidate.intent_ids(), {},
-                                         std::move(info), result.errors, "MOI fence record patch");
+    auto fragment = make_consan_around_text_fragment(
+        std::move(*cave_words), guest_instruction_offset, patch_size,
+        planned.candidate.intent_ids(), {}, std::move(info), result.errors,
+        "MOI fence record patch",
+        planned.source.relocates_polling_loop() ? std::optional<uint32_t>{patch_size}
+                                                : std::nullopt,
+        /*replacement_preserves_source_span=*/
+        planned.source.relocates_polling_loop());
     if (!fragment)
       return;
     if (!planned.source.captures_address_before_guest() &&

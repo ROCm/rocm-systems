@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
@@ -246,6 +247,9 @@ struct KernelTextLayout {
   std::vector<uint64_t> branch_island_slots;
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
+  /// Guest-copy targets for branches internal to client-preserved source spans,
+  /// keyed by the source coordinate of the branch itself.
+  std::unordered_map<uint64_t, uint64_t> direct_branch_target_overrides;
   std::vector<RecoveredIndirectFixup> recovered_indirect_fixups;
   /// Source-side builders that must be rewritten because one indirect consumer
   /// has multiple recovered targets and therefore cannot be replaced by one

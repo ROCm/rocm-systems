@@ -10188,6 +10188,75 @@ TEST(ConSanMoi, Gfx1250RecordReplayBarrierPreservesPathDependentVgprMsbMode) {
   EXPECT_EQ(words[guest_word], kBarrierSignal);
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayFencePreservesPathDependentVgprMsbMode) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const auto bypass_mode = instrumentation::build_s_cbranch_scc1(/*offset_dwords=*/1, kArch);
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
+      /*vaddr=*/4u, /*vsrc=*/6u, /*vdst=*/7u, /*return_old_value=*/true,
+      /*scope=*/2u, kArch);
+  ASSERT_TRUE(bypass_mode && atomic);
+  constexpr std::array<uint32_t, 3> kRelease = {
+      0xEE0B0000u,
+      0x00000000u,
+      0x00000000u, // global_wb
+  };
+  std::vector<uint32_t> text_words = {
+      *bypass_mode,
+      *build_gfx1250_s_set_vgpr_msb(/*mode=*/0x40u, kArch),
+  };
+  text_words.insert(text_words.end(), kRelease.begin(), kRelease.end());
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.push_back(*build_gfx1250_s_set_vgpr_msb_transition(
+      /*previous_mode=*/0x40u, /*new_mode=*/0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 0u, 1u, 1u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_path_dependent_fence_bank"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto hwreg = build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, 8u);
+  ASSERT_TRUE(hwreg);
+  constexpr uint16_t kBankSaveSgpr = 35u;
+  const auto save = instrumentation::build_s_getreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  const auto clear = instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, kArch);
+  const auto restore = instrumentation::build_s_setreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  ASSERT_TRUE(save && clear && restore);
+  const auto saved = std::ranges::find(words, *save);
+  const auto cleared = std::ranges::find(words, *clear);
+  const auto restored = std::ranges::find(words, *restore);
+  ASSERT_NE(saved, words.end());
+  ASSERT_NE(cleared, words.end());
+  ASSERT_NE(restored, words.end());
+  EXPECT_LT(saved, cleared);
+  EXPECT_LT(cleared, restored);
+  const size_t guest_word =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_LE(guest_word + kRelease.size(), words.size());
+  EXPECT_TRUE(std::equal(kRelease.begin(), kRelease.end(),
+                         words.begin() + static_cast<ptrdiff_t>(guest_word)));
+  EXPECT_LT(words.begin() + static_cast<ptrdiff_t>(guest_word), restored);
+}
+
 TEST(ConSanMoi, Gfx1250SelectableBankTransitionUsesPrivatePersistentState) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   const std::vector<uint32_t> text_words = {
@@ -11625,6 +11694,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplayWrapsGeneratedBufferPollingAcquireLoop) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr size_t kAcquireWord = 17u;
   constexpr size_t kAcquireWords = 10u;
   constexpr std::array<uint32_t, 28> text_words = {
@@ -11640,12 +11710,12 @@ TEST(ConSanMoi, Gfx1250RecordReplayWrapsGeneratedBufferPollingAcquireLoop) {
       0x00000000u, // global_inv scope:device
       0xBFB00000u, // s_endpgm
   };
-  const std::span<const uint32_t> acquire_sequence(text_words.data() + kAcquireWord, kAcquireWords);
+  const std::span<const uint32_t> relocated_polling_loop(text_words.data(),
+                                                         kAcquireWord + kAcquireWords);
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
-  options.scratch_vgpr = 24u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_identity.set_sgpr(70u);
   options.set_moi_owner_epoch_vgprs(40u, 41u);
@@ -11667,25 +11737,58 @@ TEST(ConSanMoi, Gfx1250RecordReplayWrapsGeneratedBufferPollingAcquireLoop) {
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence.begin_text_offset, kAcquireWord * sizeof(uint32_t));
   EXPECT_EQ(sequence.end_text_offset, (kAcquireWord + kAcquireWords) * sizeof(uint32_t));
+  ASSERT_TRUE(sequence.acquire_polling_loop_header_text_offset);
+  EXPECT_EQ(*sequence.acquire_polling_loop_header_text_offset, 0u);
   const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(fence, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(fence->anchor_offset, kAcquireWord * sizeof(uint32_t));
-  EXPECT_EQ(fence->original_size, acquire_sequence.size() * sizeof(uint32_t));
+  ASSERT_GT(fence->spilled_vgpr_count, 0u);
+  EXPECT_GT(fence->required_private_segment_size, 0u);
+  EXPECT_EQ(fence->anchor_offset, 0u);
+  EXPECT_EQ(fence->original_size, relocated_polling_loop.size() * sizeof(uint32_t));
   ASSERT_TRUE(fence->relocated_guest_instruction_offset);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> relocated_sequence =
       text_words_at_offset(patched, *fence->relocated_guest_instruction_offset,
-                           acquire_sequence.size() * sizeof(uint32_t));
-  ASSERT_EQ(relocated_sequence.size(), acquire_sequence.size());
-  EXPECT_TRUE(std::ranges::equal(acquire_sequence.first(6u),
-                                 std::span<const uint32_t>(relocated_sequence).first(6u)));
-  EXPECT_EQ(relocated_sequence[6] & 0xffff0000u, acquire_sequence[6] & 0xffff0000u);
-  EXPECT_NE(relocated_sequence[6], acquire_sequence[6])
-      << "the copied retry branch must be relocated across the inserted capture prefix";
-  EXPECT_TRUE(std::ranges::equal(acquire_sequence.last(3u),
-                                 std::span<const uint32_t>(relocated_sequence).last(3u)));
+                           relocated_polling_loop.size() * sizeof(uint32_t));
+  ASSERT_EQ(relocated_sequence.size(), relocated_polling_loop.size());
+  constexpr size_t kRetryBranchWord = 23u;
+  EXPECT_TRUE(
+      std::ranges::equal(relocated_polling_loop.first(kRetryBranchWord),
+                         std::span<const uint32_t>(relocated_sequence).first(kRetryBranchWord)));
+  EXPECT_EQ(relocated_sequence[kRetryBranchWord] & 0xffff0000u,
+            relocated_polling_loop[kRetryBranchWord] & 0xffff0000u);
+  EXPECT_TRUE(std::ranges::equal(
+      relocated_polling_loop.subspan(kRetryBranchWord + 1u),
+      std::span<const uint32_t>(relocated_sequence).subspan(kRetryBranchWord + 1u)));
+  const int64_t relocated_retry_target =
+      static_cast<int64_t>(kRetryBranchWord + 1u) +
+      static_cast<int16_t>(relocated_sequence[kRetryBranchWord] & 0xffffu);
+  EXPECT_EQ(relocated_retry_target, 0)
+      << "the retry backedge must remain after the one-time scratch spill prologue";
+  const auto clear = instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, kArch);
+  ASSERT_TRUE(clear);
+  const auto hwreg = build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, 8u);
+  ASSERT_TRUE(hwreg);
+  constexpr uint16_t kBankSaveSgpr = 85u;
+  const auto save = instrumentation::build_s_getreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  const auto restore = instrumentation::build_s_setreg_b32(kBankSaveSgpr, *hwreg, kArch);
+  ASSERT_TRUE(save && restore);
+  const uint64_t after_guest_offset =
+      *fence->relocated_guest_instruction_offset + relocated_polling_loop.size() * sizeof(uint32_t);
+  const std::vector<uint32_t> output_mode_capture =
+      text_words_at_offset(patched, after_guest_offset, 2u * sizeof(uint32_t));
+  ASSERT_EQ(output_mode_capture.size(), 2u);
+  EXPECT_EQ(output_mode_capture[0], *save);
+  EXPECT_EQ(output_mode_capture[1], *clear);
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, fence->trampoline_offset, fence->trampoline_size);
+  const auto restored = std::ranges::find(trampoline, *restore);
+  ASSERT_NE(restored, trampoline.end());
+  EXPECT_GT(
+      restored - trampoline.begin(),
+      static_cast<ptrdiff_t>((after_guest_offset - fence->trampoline_offset) / sizeof(uint32_t)));
   expect_record_replay_text_transaction(result);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }

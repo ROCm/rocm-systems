@@ -26,8 +26,7 @@ resolve_moi_evidence_container(const ProgramInventory &inventory, ConSanProgramS
 /// sequence-qualified scope supersedes the decoder's instruction-local fact.
 [[nodiscard]] std::optional<ConSanAtomicSite>
 materialize_moi_communication_site(const ProgramInventory &inventory,
-                                   ConSanProgramSiteId source_site,
-                                   ConSanSyncSequenceId sequence);
+                                   ConSanProgramSiteId source_site, ConSanSyncSequenceId sequence);
 
 /// Short-lived lowering view resolved from an atomic evidence plan. Pointers
 /// refer into the immutable inventory that owns the plan's handles; decoded
@@ -65,19 +64,30 @@ struct MoiFenceEvidenceSourceView {
            sequence != nullptr && fence_site != nullptr && communication_site.size != 0u &&
            communication_site.width_bits != 0u;
   }
+  [[nodiscard]] bool relocates_polling_loop() const {
+    return sequence->acquire_polling_loop_header_text_offset &&
+           *sequence->acquire_polling_loop_header_text_offset < sequence->begin_text_offset;
+  }
   [[nodiscard]] bool captures_address_before_guest() const {
     return association->memory_role == ConSanSyncMemoryRole::Acquire &&
-           communication_event->kind == ConSanSyncKind::OrdinaryMemory;
+           communication_event->kind == ConSanSyncKind::OrdinaryMemory && !relocates_polling_loop();
   }
   [[nodiscard]] uint64_t patch_text_offset() const {
+    if (relocates_polling_loop())
+      return *sequence->acquire_polling_loop_header_text_offset;
     return captures_address_before_guest() ? sequence->begin_text_offset
                                            : fence_event->text_offset();
   }
   [[nodiscard]] uint64_t patch_file_offset() const {
+    if (relocates_polling_loop())
+      return communication_site.file_offset -
+             (sequence->begin_text_offset - *sequence->acquire_polling_loop_header_text_offset);
     return captures_address_before_guest() ? communication_site.file_offset
                                            : fence_site->file_offset;
   }
   [[nodiscard]] uint32_t patch_size() const {
+    if (relocates_polling_loop())
+      return static_cast<uint32_t>(sequence->end_text_offset - patch_text_offset());
     return captures_address_before_guest()
                ? static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset)
                : fence_site->size;

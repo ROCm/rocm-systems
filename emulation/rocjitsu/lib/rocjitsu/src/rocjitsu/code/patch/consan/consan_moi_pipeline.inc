@@ -88,7 +88,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, point, ConSanResourceSiteKind::Fence, index, patch_text_offset,
           candidate.source_site, fence_record_scratch_count(candidate.communication_lowering_form),
-          nullptr, &candidate.communication_lowering_form);
+          nullptr, &candidate.communication_lowering_form,
+          /*require_spill=*/source->relocates_polling_loop());
       if (patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};

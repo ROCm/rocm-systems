@@ -4480,6 +4480,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                      .target_window_bytes = static_cast<uint64_t>(branch->size()),
                      .allow_window_growth = false,
                      .translated_words = std::move(branch_words)});
+                if (source_target >= static_cast<int64_t>(offset) &&
+                    source_target < static_cast<int64_t>(source_span_end)) {
+                  layout.direct_branch_target_overrides.insert_or_assign(
+                      branch->src_loc(),
+                      copied_target_begin + (static_cast<uint64_t>(source_target) - offset));
+                }
               }
             }
             for (const InstructionRewriteMarker &marker : client_rewrite->markers) {

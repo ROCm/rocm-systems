@@ -4152,8 +4152,6 @@ TEST(BinaryTranslator, ClientRewriteWrapsByteIdenticalSingleEntryPollingLoop) {
   const uint32_t poll = build_s_nop(1, ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t retry =
       cdna4::build_sopp(cdna4::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(-2)})[0];
-  const uint32_t relocated_retry =
-      cdna4::build_sopp(cdna4::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(-3)})[0];
   const uint32_t finish = build_s_nop(2, ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t after = build_s_nop(8, ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint32_t> words = {poll, retry, finish,
@@ -4186,9 +4184,9 @@ TEST(BinaryTranslator, ClientRewriteWrapsByteIdenticalSingleEntryPollingLoop) {
   const auto translated_words = std::span<const uint32_t>(
       reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
   ASSERT_GE(translated_words.size(), 6u);
-  EXPECT_TRUE(std::ranges::equal(std::array{before, poll, relocated_retry, finish, after,
-                                            build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
-                                 translated_words.first(6u)));
+  EXPECT_TRUE(std::ranges::equal(
+      std::array{before, poll, retry, finish, after, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+      translated_words.first(6u)));
 
   const auto placement_for = [&](uint64_t source_offset) {
     return std::ranges::find(result.text_placements, source_offset,
@@ -4199,6 +4197,8 @@ TEST(BinaryTranslator, ClientRewriteWrapsByteIdenticalSingleEntryPollingLoop) {
   ASSERT_NE(placement_for(2u * sizeof(uint32_t)), result.text_placements.end());
   EXPECT_EQ(placement_for(0u)->target_offset, 0u)
       << "entry into the wrapped region must execute its prefix";
+  EXPECT_EQ(translated_words[2], retry)
+      << "an internal retry must target the preserved guest copy and skip the prefix";
   EXPECT_EQ(placement_for(sizeof(uint32_t))->target_offset, 2u * sizeof(uint32_t));
   EXPECT_EQ(placement_for(2u * sizeof(uint32_t))->target_offset, 3u * sizeof(uint32_t));
 }

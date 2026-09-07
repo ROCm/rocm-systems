@@ -545,18 +545,40 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI fence record runtime guest exceeds ELF bytes");
     return std::nullopt;
   }
+  const bool preserve_vgpr_bank_dynamically = target->has_selectable_vgpr_bank &&
+                                              options.selectable_vgpr_bank_save_sgpr &&
+                                              scalar_spill == nullptr;
+  const bool preserve_guest_output_vgpr_bank =
+      preserve_vgpr_bank_dynamically && source.relocates_polling_loop();
   const std::optional<uint16_t> vgpr_msb_mode =
-      target->has_selectable_vgpr_bank
+      target->has_selectable_vgpr_bank && !preserve_vgpr_bank_dynamically
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
                                                 container.entry_text_offset, patch_file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
+  const std::optional<uint16_t> vgpr_msb_hwreg =
+      preserve_vgpr_bank_dynamically
+          ? build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, /*size_bits=*/8u)
+          : std::nullopt;
+  if (preserve_vgpr_bank_dynamically && !vgpr_msb_hwreg) {
+    errors.emplace_back("ConSan MOI fence record patch could not encode MODE.VGPR_MSB");
+    return std::nullopt;
+  }
   words.reserve(words.size() + patch_size / sizeof(uint32_t) + 80u +
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
-                (select_low_vgpr_bank ? 2u : 0u));
-  if (select_low_vgpr_bank)
+                (preserve_vgpr_bank_dynamically ? 4u : (select_low_vgpr_bank ? 2u : 0u)));
+  if (preserve_guest_output_vgpr_bank) {
+    require_emission.append("ConSan MOI fence record patch could not select low VGPR bank",
+                            instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
+  } else if (preserve_vgpr_bank_dynamically) {
+    require_emission.append("ConSan MOI fence record patch could not preserve MODE.VGPR_MSB",
+                            instrumentation::build_s_getreg_b32(
+                                *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch),
+                            instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
+  } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
+  }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -589,6 +611,12 @@ using consan_moi_detail::kFenceRecordLayout;
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + patch_file_offset + offset, sizeof(word));
     words.push_back(word);
+  }
+  if (preserve_guest_output_vgpr_bank) {
+    require_emission.append("ConSan MOI fence record patch could not preserve guest MODE.VGPR_MSB",
+                            instrumentation::build_s_getreg_b32(
+                                *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch),
+                            instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
   }
   if (!source.captures_address_before_guest() && !append_address_capture())
     return std::nullopt;
@@ -661,9 +689,14 @@ using consan_moi_detail::kFenceRecordLayout;
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (select_low_vgpr_bank)
+  if (preserve_vgpr_bank_dynamically) {
+    require_emission.append("ConSan MOI fence record patch could not restore MODE.VGPR_MSB",
+                            instrumentation::build_s_setreg_b32(
+                                *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch));
+  } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+  }
   words.insert(words.end(), displaced_tail_words.begin(), displaced_tail_words.end());
   if (!sequence.finish())
     return std::nullopt;

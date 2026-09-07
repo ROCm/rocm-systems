@@ -234,6 +234,8 @@ enum class FragmentMarkerRole : uint64_t {
     composed[*normal_exit_branch_offset / sizeof(uint32_t)] = build_s_branch(*branch, arch);
   }
   rewrite.replacement_words = std::move(composed);
+  if (replacement != nullptr && replacement->replacement_preserves_source_span)
+    rewrite.preserved_source_span_byte_offset = static_cast<uint32_t>(replacement_begin);
   return rewrite;
 }
 
@@ -447,7 +449,7 @@ std::optional<ConSanTextFragment> make_consan_around_text_fragment(
     std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
     std::span<const ConSanProbeIntentId> intent_ids, ConSanRuntimeStaticMapping runtime_mapping,
     ConSanPatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
-    std::optional<uint32_t> emitted_guest_size) {
+    std::optional<uint32_t> emitted_guest_size, bool replacement_preserves_source_span) {
   const uint64_t byte_size = words.size() * sizeof(uint32_t);
   const uint32_t emitted_size = emitted_guest_size.value_or(guest_size);
   if (guest_size == 0u || guest_size % sizeof(uint32_t) != 0u || emitted_size == 0u ||
@@ -471,6 +473,7 @@ std::optional<ConSanTextFragment> make_consan_around_text_fragment(
                                ? std::vector<uint32_t>(words.begin() + guest_word,
                                                        words.begin() + guest_word + guest_words)
                                : std::vector<uint32_t>{},
+      .replacement_preserves_source_span = replacement_preserves_source_span,
       .after_words = std::vector<uint32_t>(words.begin() + guest_word + guest_words, words.end()),
       .branch_fixups = {},
       .sync_relocations = {},

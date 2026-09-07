@@ -207,6 +207,10 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta) {
   }
   for (BranchFixup &fixup : layout.branch_fixups)
     fixup.target_inst_offset += delta;
+  for (auto &[source_offset, target_offset] : layout.direct_branch_target_overrides) {
+    (void)source_offset;
+    target_offset += delta;
+  }
   for (uint64_t &slot : layout.branch_island_slots)
     slot += delta;
   for (RecoveredIndirectFixup &fixup : layout.recovered_indirect_fixups)
@@ -625,6 +629,10 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
   }
   for (BranchFixup &fixup : layout.branch_fixups)
     rebaser.rebase(fixup.target_inst_offset);
+  for (auto &[source_offset, target_offset] : layout.direct_branch_target_overrides) {
+    (void)source_offset;
+    rebaser.rebase(target_offset);
+  }
   for (RecoveredIndirectFixup &fixup : layout.recovered_indirect_fixups)
     rebaser.rebase(fixup.target_window_offset);
   for (IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
@@ -839,7 +847,11 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
       TextLayoutFailureReason::BranchOutOfRange);
 
   for (const BranchFixup &fixup : layout.branch_fixups) {
-    auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
+    const auto override = layout.direct_branch_target_overrides.find(fixup.source_inst_offset);
+    const std::optional<uint64_t> target_target =
+        override != layout.direct_branch_target_overrides.end()
+            ? std::optional<uint64_t>{override->second}
+            : target_for_source_offset(layout, fixup.source_target_offset);
     if (!target_target) {
       return relocation_error(
           fixup.source_inst_offset,

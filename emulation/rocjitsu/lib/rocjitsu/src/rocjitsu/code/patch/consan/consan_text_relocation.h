@@ -21,7 +21,8 @@ namespace rocjitsu {
     std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
     std::span<const ConSanProbeIntentId> intent_ids, ConSanRuntimeStaticMapping runtime_mapping,
     ConSanPatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
-    std::optional<uint32_t> emitted_guest_size = std::nullopt);
+    std::optional<uint32_t> emitted_guest_size = std::nullopt,
+    bool replacement_preserves_source_span = false);
 
 /// Atomically stage descriptor mutations and inline programs against the
 /// current composition image. Mode-local builders never publish partial bytes.

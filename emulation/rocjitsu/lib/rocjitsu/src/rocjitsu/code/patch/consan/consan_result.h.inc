@@ -320,6 +320,10 @@ struct ConSanTextFragment {
   ConSanRuntimeStaticMapping runtime_mapping;
   std::vector<uint32_t> before_words;
   std::vector<uint32_t> replacement_words;
+  /// The replacement contains one byte-identical copy of the complete owned
+  /// source span at its guest marker. This permits a bounded multi-block guest
+  /// region, including internal direct branches, to remain translator-owned.
+  bool replacement_preserves_source_span = false;
   std::vector<uint32_t> after_words;
   std::vector<ConSanTextFragmentBranchFixup> branch_fixups;
   std::vector<ConSanTextFragmentSyncRelocation> sync_relocations;

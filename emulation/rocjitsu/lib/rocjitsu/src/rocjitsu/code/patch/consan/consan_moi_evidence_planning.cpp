@@ -137,6 +137,17 @@ resolve_moi_fence_evidence_source(const ProgramInventory &inventory,
 
   MoiFenceEvidenceSourceView result{association, fence_event, communication_event,
                                     sequence,    fence_site,  *communication_site};
+  if (sequence->acquire_polling_loop_header_text_offset) {
+    const uint64_t loop_header = *sequence->acquire_polling_loop_header_text_offset;
+    if (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
+        sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
+        communication_event->kind != ConSanSyncKind::OrdinaryMemory ||
+        loop_header >= sequence->begin_text_offset || sequence->end_text_offset <= loop_header ||
+        sequence->begin_text_offset - loop_header > communication_site->file_offset ||
+        sequence->end_text_offset - loop_header > std::numeric_limits<uint32_t>::max()) {
+      return std::nullopt;
+    }
+  }
   if (result.captures_address_before_guest() &&
       (sequence->kind != ConSanSyncKind::OrdinaryMemory ||
        sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
