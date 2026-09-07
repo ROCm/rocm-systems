@@ -2116,6 +2116,28 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
+        # The single F8 client generates 12 solutions for each of its nine
+        # exact problems. Give every size an independent numerical oracle,
+        # coverage gate, and teardown verdict instead of allowing one slow
+        # problem to hide completed work behind the monolithic row's bound.
+        "tensile-sk-f8gemm-quick": {
+            "tensile_inner_timeout_seconds": 300,
+            "run_timeout_seconds": 360,
+            "tensile_exact_problem_size_shards": (
+                ((127, 127, 1, 1024),),
+                ((128, 128, 1, 1024),),
+                ((129, 129, 1, 1024),),
+                ((511, 511, 1, 1024),),
+                ((512, 512, 1, 1024),),
+                ((513, 513, 1, 1024),),
+                ((127, 128, 1, 640),),
+                ((128, 128, 1, 640),),
+                ((129, 128, 1, 640),),
+            ),
+            "tensile_expected_numeric_rows_per_shard": (12,) * 9,
+            "tensile_shard_parallelism": 4,
+            "tensile_fault_shard_index": 0,
+        },
         # HGEMM has two benchmark clients with intentionally asymmetric Exact
         # inventories: both own the three 127--129 shapes, while only the first
         # owns the three 511--513 shapes. Preserve that source structure as a
