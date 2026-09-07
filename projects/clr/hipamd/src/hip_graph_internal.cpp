@@ -1283,7 +1283,13 @@ int GraphExecSegmented::CollectDeclaredPriorityInGraph(Graph* graph, int depth,
                                                        std::unordered_set<const Graph*>& visited) {
   int priority = hip::Stream::Priority::Normal;
   bool declared = false;
-  if (graph == nullptr || depth >= kMaxChildGraphPriorityDepth) {
+  if (graph == nullptr) {
+    return priority;
+  }
+  if (depth >= kMaxChildGraphPriorityDepth) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+            "[hipGraph] Child graph priority walk exceeded max depth %d; treating deeper graphs as Normal",
+            kMaxChildGraphPriorityDepth);
     return priority;
   }
   if (!visited.insert(graph).second) {
