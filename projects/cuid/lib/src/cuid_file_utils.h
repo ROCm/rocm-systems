@@ -17,14 +17,14 @@
 // own before renaming it into place, instead of a TOCTOU-prone chmod() on the
 // destination path after the rename (CWE-367).
 inline int CuidCreateExclusiveFile(const char* path, mode_t mode) {
-  // NOTE: without O_EXCL|O_NOFOLLOW this follows a symlink planted at `path` and
-  // reuses/overwrites an existing file -- see the accompanying test, which
-  // fails here. The fix adds O_EXCL|O_NOFOLLOW.
-  int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+  // O_EXCL fails if `path` already exists (including as a symlink), and
+  // O_NOFOLLOW additionally refuses a symlink at the final component, so the
+  // file is always freshly created and owned by us.
+  int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
   if (fd < 0) {
     return -1;
   }
-  ::fchmod(fd, mode);
+  ::fchmod(fd, mode);  // exact mode regardless of umask
   return fd;
 }
 

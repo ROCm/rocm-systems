@@ -23,6 +23,7 @@
 #include "src/cuid_nic.h"
 #include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
+#include "src/cuid_file_utils.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
 
@@ -475,11 +476,27 @@ amdcuid_status_t CuidFile::save() {
     return AMDCUID_STATUS_FILE_ERROR;
   }
 
-  // Create temporary file first for atomic write
+  // Create temporary file first for atomic write. Create it with the final
+  // permissions on a descriptor we own (O_EXCL|O_NOFOLLOW), so the mode is set
+  // before the rename and no TOCTOU-prone chmod() on the destination path is
+  // needed afterwards (CWE-367). rename() preserves the mode.
   std::string temp_path = file_path_ + ".tmp";
-  std::ofstream file(temp_path);
+  const mode_t temp_mode = is_privileged_ ? (S_IRUSR | S_IWUSR)
+                                          : (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  int temp_fd = CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
+  if (temp_fd < 0) {
+    // Clear a stale temp left by a previous run and retry once.
+    unlink(temp_path.c_str());
+    temp_fd = CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
+  }
+  if (temp_fd < 0) {
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+  close(temp_fd);
 
+  std::ofstream file(temp_path);
   if (!file.is_open()) {
+    unlink(temp_path.c_str());
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
 
@@ -595,14 +612,8 @@ amdcuid_status_t CuidFile::save() {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
 
-  // Set permissions
-  if (!is_privileged_) {
-    // Unprivileged file: readable by all (644)
-    chmod(file_path_.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-  } else {
-    // Privileged file: readable by root only (600)
-    chmod(file_path_.c_str(), S_IRUSR | S_IWUSR);
-  }
+  // Permissions were set at temp-file creation (see temp_mode above) and are
+  // preserved by rename(); no post-rename chmod() on file_path_ is needed.
 
   return AMDCUID_STATUS_SUCCESS;
 }
