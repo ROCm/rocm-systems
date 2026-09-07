@@ -33,6 +33,7 @@
 #include "core/counter_dimensions.hpp"
 
 #include "core/logger.h"
+#include "core/error_string_util.h"
 #include "core/pm4_factory.h"
 #include "pm4/cmd_builder.h"
 #include "pm4/pmc_builder.h"
@@ -192,7 +193,9 @@ PUBLIC_API uint32_t hsa_ven_amd_aqlprofile_version_minor() { return HSA_AQLPROFI
 
 // Returns the last error message
 PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_error_string(const char** str) {
-  *str = aql_profile::Logger::LastMessage().c_str();
+  // Copy into thread-local storage; returning LastMessage().c_str() directly
+  // aliases Logger's per-thread buffer, which the next logged message overwrites.
+  *str = aql_profile::StableErrorString(aql_profile::Logger::LastMessage());
   return HSA_STATUS_SUCCESS;
 }
 

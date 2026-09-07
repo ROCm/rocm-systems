@@ -16,12 +16,11 @@ namespace aql_profile {
 // thread-local storage rather than aliasing a caller-owned buffer that may be
 // overwritten or reallocated after this function returns.
 inline const char* StableErrorString(const std::string& message) {
-  // NOTE: returning message.c_str() aliases the caller's buffer. When the caller
-  // passes Logger's per-thread message_ entry, the next logged message
-  // overwrites/reallocates it and this pointer no longer reflects `message` --
-  // see the accompanying test, which fails here. The fix copies into
-  // thread-local storage.
-  return message.c_str();
+  // Copy into thread-local storage so the returned pointer stays valid until the
+  // next call on this thread, independent of the caller's buffer lifetime.
+  thread_local std::string storage;
+  storage = message;
+  return storage.c_str();
 }
 
 }  // namespace aql_profile
