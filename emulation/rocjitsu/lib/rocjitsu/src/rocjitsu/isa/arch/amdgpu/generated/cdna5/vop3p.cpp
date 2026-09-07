@@ -4461,7 +4461,8 @@ DecodeResult decodeVPkMinNumF64Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VPkLshlAddU64Vop3p::VPkLshlAddU64Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_lshl_add_u64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_pk_lshl_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
