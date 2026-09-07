@@ -1785,10 +1785,34 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<size_t> match_signed_delta_add_consumer(const AnalysisContext &ctx,
-                                                                    const AnalysisBlock &block,
-                                                                    uint16_t pair_lo,
-                                                                    uint16_t tmp_sreg) {
+/// @brief Recognize the block boundary recovery itself inserts before a proven consumer.
+///
+/// @details The first discovery round sees the complete signed-delta arm in one block. Its fixup
+/// makes the set-PC a leader on the next round, splitting the consumer from the arithmetic that
+/// proves its value. Cross only that mechanical split: an external entry or another predecessor
+/// could reach the consumer with an unrelated pair and must remain incomplete.
+[[nodiscard]] bool is_sole_fallthrough_consumer(const std::vector<AnalysisBlock> &blocks,
+                                                std::span<const size_t> predecessor_counts,
+                                                size_t source_block_index,
+                                                size_t consumer_inst_index) {
+  if (source_block_index + 1 >= blocks.size())
+    return false;
+  const AnalysisBlock &source = blocks[source_block_index];
+  const AnalysisBlock &consumer = blocks[source_block_index + 1];
+  if (consumer.external_entry || consumer.first_index != consumer_inst_index ||
+      source.last_index + 1 != consumer_inst_index)
+    return false;
+
+  return predecessor_counts[source_block_index + 1] == 1 &&
+         std::ranges::find(source.successors, source_block_index + 1) != source.successors.end();
+}
+
+[[nodiscard]] std::optional<size_t>
+match_signed_delta_add_consumer(const AnalysisContext &ctx,
+                                const std::vector<AnalysisBlock> &blocks,
+                                std::span<const size_t> predecessor_counts, size_t block_index,
+                                uint16_t pair_lo, uint16_t tmp_sreg) {
+  const AnalysisBlock &block = blocks[block_index];
   // Match the positive half of the compiler-emitted signed PC-delta template:
   //
   //   s_add_u32  pair_lo, pair_lo, tmp
@@ -1846,7 +1870,8 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   size_t setpc_index = high_index + 1;
   while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
     ++setpc_index;
-  if (setpc_index > block.last_index)
+  if (setpc_index > block.last_index &&
+      !is_sole_fallthrough_consumer(blocks, predecessor_counts, block_index, setpc_index))
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode, pair_lo,
@@ -1872,6 +1897,8 @@ struct SignedDeltaSubMatch {
 
 [[nodiscard]] std::optional<SignedDeltaSubMatch>
 match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock &block,
+                                const std::vector<AnalysisBlock> &blocks,
+                                std::span<const size_t> predecessor_counts, size_t block_index,
                                 uint16_t pair_lo, uint16_t tmp_sreg) {
   // Match the negative half of the same signed PC-delta template:
   //
@@ -1914,7 +1941,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     skipped_xcnt = skipped_xcnt || ctx.insts[abs_index]->mnemonic() == "s_wait_xcnt";
     ++abs_index;
   }
-  if (abs_index + 3 > block.last_index)
+  if (abs_index + 2 > block.last_index)
     return std::nullopt;
   const Instruction &abs_inst = *ctx.insts[abs_index];
   const Instruction &low_inst = *ctx.insts[abs_index + 1];
@@ -1922,7 +1949,8 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   size_t setpc_index = abs_index + 3;
   while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
     ++setpc_index;
-  if (setpc_index > block.last_index)
+  if (setpc_index > block.last_index &&
+      !is_sole_fallthrough_consumer(blocks, predecessor_counts, block_index, setpc_index))
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
@@ -5007,6 +5035,7 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
   //
   //   s_getpc_b64 pair
   //   s_add_i32 tmp, literal, 4
+  //   [s_delay_alu]
   //   s_cmp_ge_i32 tmp, 0
   //   s_cbranch_scc1 add_half
   // sub_half:
@@ -5030,6 +5059,13 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
   block_by_offset.reserve(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
     block_by_offset.emplace(blocks[block_index].offset, block_index);
+  std::vector<size_t> predecessor_counts(blocks.size(), 0);
+  for (const AnalysisBlock &block : blocks) {
+    for (size_t successor : block.successors) {
+      if (successor < predecessor_counts.size())
+        ++predecessor_counts[successor];
+    }
+  }
 
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   if (!add_i32_opcode)
@@ -5040,14 +5076,28 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
       continue;
 
     const Instruction &term = *ctx.insts[entry.last_index];
-    if ((term.flags() & COND_BRANCH) == 0)
+    // The add half is correct only when SCC says the signed temporary is
+    // nonnegative. Accepting another conditional branch would turn this from
+    // a proof into a pattern-shaped guess.
+    if (term.mnemonic() != "s_cbranch_scc1")
       continue;
     const auto branch_delta = term.branch_offset_bytes();
     if (!branch_delta)
       continue;
 
-    const size_t getpc_index = entry.last_index - 3;
-    const size_t temp_index = entry.last_index - 2;
+    const size_t compare_index = entry.last_index - 1;
+    size_t temp_index = compare_index - 1;
+    // CDNA5 schedules the scalar comparison behind the temporary producer with
+    // an explicit dependency delay. It changes no registers or condition code,
+    // and is part of the compiler's canonical signed-delta template.
+    if (ctx.insts[temp_index]->mnemonic() == "s_delay_alu") {
+      if (temp_index == entry.first_index)
+        continue;
+      --temp_index;
+    }
+    if (temp_index == entry.first_index)
+      continue;
+    const size_t getpc_index = temp_index - 1;
     const Instruction &getpc_inst = *ctx.insts[getpc_index];
     const Instruction &temp_inst = *ctx.insts[temp_index];
     auto pair_lo =
@@ -5057,6 +5107,11 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
 
     const uint32_t temp_word = ctx.facts[temp_index].word;
     const auto tmp_sreg = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
+    const Instruction &compare_inst = *ctx.insts[compare_index];
+    const uint32_t compare_word = ctx.facts[compare_index].word;
+    if (compare_inst.size() != sizeof(uint32_t) || compare_inst.mnemonic() != "s_cmp_ge_i32" ||
+        (compare_word & 0xffu) != tmp_sreg || ((compare_word >> 8) & 0xffu) != kInlineInt0)
+      continue;
     uint32_t literal = 0;
     if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                      text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
@@ -5074,10 +5129,11 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     if (sub_block_it == block_by_offset.end() || add_block_it == block_by_offset.end())
       continue;
 
-    auto sub_consumer =
-        match_signed_delta_sub_consumer(ctx, blocks[sub_block_it->second], *pair_lo, tmp_sreg);
-    auto add_consumer =
-        match_signed_delta_add_consumer(ctx, blocks[add_block_it->second], *pair_lo, tmp_sreg);
+    auto sub_consumer = match_signed_delta_sub_consumer(ctx, blocks[sub_block_it->second], blocks,
+                                                        predecessor_counts, sub_block_it->second,
+                                                        *pair_lo, tmp_sreg);
+    auto add_consumer = match_signed_delta_add_consumer(ctx, blocks, predecessor_counts,
+                                                        add_block_it->second, *pair_lo, tmp_sreg);
     if (!sub_consumer || !add_consumer)
       continue;
 

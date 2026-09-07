@@ -3333,6 +3333,82 @@ TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateAcrossDependencyDelay) {
+  constexpr uint16_t kPcSreg = 28;
+  constexpr uint16_t kTmpSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 48;
+
+  // This is the exact control-flow shape emitted by the gfx1250 Tensile sparse
+  // kernels: the scheduler puts s_delay_alu between the signed temporary and
+  // its comparison. Both set-PC consumers still name the shared target at 0x38.
+  const std::vector<uint32_t> words = {
+      cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.ssrc0 = 0, .sdst = kPcSreg})[0],
+      cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
+                        {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      kSignedDeltaLiteral,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5),
+      cdna5::build_sopc(cdna5::kSCmpGeI32Sopc, {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0],
+      cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 4})[0],
+      cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],
+      cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
+                        {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      cdna5::build_sop2(cdna5::kSSubCoCiU32Sop2,
+                        {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = kPcSreg, .sdst = 0})[0],
+      cdna5::build_sop2(cdna5::kSAddCoU32Sop2,
+                        {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      cdna5::build_sop2(cdna5::kSAddCoCiU32Sop2,
+                        {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = kPcSreg, .sdst = 0})[0],
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {}, /*wavefront_size=*/32u);
+  ASSERT_EQ(fixups.size(), 2u);
+  EXPECT_EQ(fixups[0].source_call_offset, 36u);
+  EXPECT_EQ(fixups[1].source_call_offset, 48u);
+  EXPECT_EQ(fixups[0].source_target_offset, 56u);
+  EXPECT_EQ(fixups[1].source_target_offset, 56u);
+  EXPECT_FALSE(fixups[0].source_incomplete);
+  EXPECT_FALSE(fixups[1].source_incomplete);
+  EXPECT_TRUE(fixups[0].source_targets_exhaustive);
+  EXPECT_TRUE(fixups[1].source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, SignedDeltaTemplateRejectsWrongCondition) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),
+      pack_sop2(2, kTmpSreg, kLiteralOperand, kInlineInt4),
+      44,
+      pack_sopc(3, kTmpSreg, kInlineInt0),
+      pack_sopp(4, 4), // s_cbranch_scc0 would select the wrong signed arm.
+      pack_sop1(0x30, kTmpSreg, kTmpSreg),
+      pack_sop2(1, kPcSreg, kPcSreg, kTmpSreg),
+      pack_sop2(5, kPcSreg + 1, kPcSreg + 1, kInlineInt0),
+      pack_sop1(0x1d, 0, kPcSreg),
+      pack_sop2(0, kPcSreg, kPcSreg, kTmpSreg),
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),
+      pack_sop1(0x1d, 0, kPcSreg),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+
+  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {},
+                                            /*wavefront_size=*/64u)
+                  .empty());
+}
+
 TEST(CfgAnalysis, Gfx1250RecoversStraightLineNegativeDeltaAcrossDelayAlu) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kTmpSreg = 12;
