@@ -196,23 +196,27 @@ hipError_t Var::GetDeviceVarPtr(amd::Memory** mem, int deviceId) {
 }
 
 // ================================================================================================
-static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
-                               hipModule_t hmod, int deviceId) {
+static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name, hipModule_t hmod,
+                               int deviceId) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
-  guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
+  if (dev_program == nullptr) {
+    LogPrintfError("Cannot find device program while quering for symbol: %s", name.c_str());
+    return hipErrorInvalidImage;
+  }
 
   amd::Memory* mem = nullptr;
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
-    guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    LogPrintfError("Cannot create memory for device Var: %s", name.c_str());
+    return hipErrorInvalidSymbol;
   }
   // Handle size 0 symbols
   if (size != 0) {
     if (mem == nullptr || device_ptr == nullptr) {
       LogPrintfError("Cannot get memory for creating device Var: %s", name.c_str());
-      guarantee(false, "Cannot get memory for creating device var");
+      return hipErrorInvalidSymbol;
     }
     amd::MemObjMap::AddMemObj(device_ptr, mem);
   }
