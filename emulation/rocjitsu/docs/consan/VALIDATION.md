@@ -282,17 +282,20 @@ budget. It requires exactly one numeric row, verifies the selected Stream-K
 mode and every emitted gfx1250 object, and refuses the fixed-grid request if
 the resolved TensileLite checkout no longer exposes its runtime control.
 
-The complete `tensile-sk-mxf4gemm-tdm` and `tensile-sk-mxf8gemm-tdm` rows are
-deliberately sharded by their six declared Exact problem sizes. Every shard
-retains all generated solutions (16 for MXF4 and 6 for MXF8), has an
-independent numeric oracle and ConSan teardown/coverage gate, and executes
-through RocJitsu with up to four shards concurrent. MXF4 has a 1,200-second
-inner and 1,260-second enclosing bound; MXF8 has a 120-second inner and
-180-second enclosing bound. The runner verifies each source YAML still
-contains exactly its six expected sizes before writing any filtered
+The complete `tensile-sk-mxf4gemm-tdm`, `tensile-sk-mxf8gemm-tdm`, and
+`tensile-sk-mxf8f4gemm-tdm` rows are deliberately sharded by their declared
+Exact problem sizes. Every shard retains all generated solutions (16 for MXF4
+and 6 for each MXF8 family), has an independent numeric oracle and ConSan
+teardown/coverage gate, and executes through RocJitsu. The six-size MXF4 and
+MXF8 rows execute with up to four shards concurrent; MXF4 has a 1,200-second
+inner and 1,260-second enclosing bound, while MXF8 has a 120-second inner and
+180-second enclosing bound. The three-size mixed MXF8/F4 row executes with up
+to three shards concurrent and has a 300-second inner and 360-second enclosing
+bound for its larger 512-square problem. The runner verifies each source YAML
+still contains exactly its expected sizes before writing any filtered
 configuration, so a corpus addition, deletion, reorder, duplicate, or
-non-Exact problem form fails closed instead of silently narrowing the 96-row
-or 36-row denominator.
+non-Exact problem form fails closed instead of silently narrowing the 96-row,
+36-row, or 18-row denominator.
 
 The two-block `tensile-sk-sgemm-quick` row is likewise sharded by its six
 shared Exact sizes. Every shard retains both distinct solution spaces,
