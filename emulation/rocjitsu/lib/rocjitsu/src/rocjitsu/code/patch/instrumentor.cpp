@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
