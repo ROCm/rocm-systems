@@ -306,6 +306,18 @@ inventories must remain identical and exactly match the manifest, preventing
 the former execution-bound monolithic process from being replaced by a
 partial first-block claim.
 
+The two-client `tensile-sk-hgemm-quick` row deliberately has asymmetric Exact
+inventories. Both clients contain the 127, 128, and 129 square shapes, while
+only the first contains 511, 512, and 513. Its six one-size shards therefore
+retain and require both clients for the first three shapes, then prune the
+empty second client and require one client for the last three. The manifest
+records each source client inventory independently; the runner verifies their
+order and exact contents before filtering, verifies that each configured
+client owns exactly one `ProblemSizes` block, and fails closed if the source
+structure changes. This preserves the full asymmetric denominator without
+requiring empty benchmark clients to execute. Three shards run concurrently
+with 300-second inner and 360-second enclosing bounds.
+
 The eight-block `tensile-spmm-f8-ml` row uses the same contract for the three
 Exact sizes repeated identically by every block. The filtered YAML must retain
 all eight blocks and selects one size in each; differing block inventories
