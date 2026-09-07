@@ -57,14 +57,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4 -Wall")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4 -Wall)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC -Wall")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC -Wall)
 endif()
 
 # Set supported GPU Targets
@@ -137,7 +132,7 @@ if(HIP_FOUND AND rocdecode_FOUND)
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS} -std=gnu++17)
     if(FFMPEG_FOUND AND rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
     else()
