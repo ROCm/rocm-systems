@@ -24,13 +24,15 @@ THE SOFTWARE.
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 // Parse a comma-separated list of device indices, e.g. the value of
 // ROCR_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES. The argument is typically the
 // result of std::getenv(); that pointer aliases the process environment and
 // must not be written through (undefined behaviour, C11 6.22.4.6 / C++
-// [c.strings]). Comma-delimited tokens are converted with std::atoi; empty
+// [c.strings]). The input is copied before tokenising so the caller's buffer is
+// never modified. Comma-delimited tokens are converted with std::atoi; empty
 // tokens (leading/trailing/consecutive commas) are skipped. The result is not
 // sorted; callers apply their own ordering.
 static inline std::vector<int> ParseVisibleDevicesCsv(const char* env) {
@@ -38,12 +40,18 @@ static inline std::vector<int> ParseVisibleDevicesCsv(const char* env) {
     if (env == nullptr) {
         return devices;
     }
-    // NOTE: std::strtok writes a NUL over each delimiter in its first argument.
-    // When `env` is a std::getenv() return value this modifies the environment
-    // in place -- see the accompanying non-mutation test, which fails here.
-    for (char* token = std::strtok(const_cast<char*>(env), ","); token != nullptr;
-         token = std::strtok(nullptr, ",")) {
-        devices.push_back(std::atoi(token));
+    const std::string csv(env);  // copy: never write through the caller's pointer
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t comma = csv.find(',', start);
+        const std::size_t end = (comma == std::string::npos) ? csv.size() : comma;
+        if (end > start) {  // skip empty tokens
+            devices.push_back(std::atoi(csv.substr(start, end - start).c_str()));
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
     }
     return devices;
 }

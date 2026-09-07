@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include "rocjpeg_vaapi_decoder.h"
+#include "rocjpeg_parse_helpers.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1083,19 +1084,15 @@ RocJpegStatus RocJpegVappiDecoder::GetHipInteropMem(VASurfaceID surface_id, HipI
  */
 void RocJpegVappiDecoder::GetVisibleDevices(std::vector<int>& visible_devices_vetor) {
     // First, check if the ROCR_VISIBLE_DEVICES environment variable is present
-    char *visible_devices = std::getenv("ROCR_VISIBLE_DEVICES");
+    const char *visible_devices = std::getenv("ROCR_VISIBLE_DEVICES");
     // If ROCR_VISIBLE_DEVICES is not present, check if HIP_VISIBLE_DEVICES is present
     if (visible_devices == nullptr) {
         visible_devices = std::getenv("HIP_VISIBLE_DEVICES");
     }
-    if (visible_devices != nullptr) {
-        char *token = std::strtok(visible_devices,",");
-        while (token != nullptr) {
-            visible_devices_vetor.push_back(std::atoi(token));
-            token = std::strtok(nullptr,",");
-        }
+    // Parse via a helper that copies before tokenising, so the std::getenv()
+    // buffer (the process environment) is never modified (mutating it is UB).
+    visible_devices_vetor = ParseVisibleDevicesCsv(visible_devices);
     std::sort(visible_devices_vetor.begin(), visible_devices_vetor.end());
-    }
 }
 
 /**
