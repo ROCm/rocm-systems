@@ -141,7 +141,9 @@ TEST(AmdSmiFabricRuntimeLayout, WindowBoundariesHaveTheirShippedValues)
 {
     EXPECT_EQ(kAmdSmiFabricV1PayloadBegin, 12u);
     EXPECT_EQ(kAmdSmiFabricV1PayloadEnd, 256u);
+    EXPECT_EQ(kAmdSmiFabricReserved8GpuEnd, 284u);
     EXPECT_EQ(kAmdSmiFabricInfo8GpuSize, 288u);
+    EXPECT_EQ(kAmdSmiFabricReserved16GpuEnd, 316u);
     EXPECT_EQ(kAmdSmiFabricInfo16GpuSize, 320u);
     EXPECT_GE(kAmdSmiFabricInfoBufferSize, kAmdSmiFabricInfo16GpuSize);
 }
@@ -210,6 +212,33 @@ TEST(AmdSmiFabricRuntimeLayout, CanaryValueInsideThePayloadIsStillAWrite)
     buffer.bytes[kAmdSmiFabricV1PayloadBegin + 88] = kAmdSmiFabricBufferCanary;
 
     EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
+}
+
+// The untouched-tail windows must be checked to their last byte, not just their first: a runtime
+// that wrote one byte into either tail matches no layout.
+TEST(AmdSmiFabricRuntimeLayout, DirtyLastByteOfATailIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, 256);
+    buffer.bytes[287] = 0;
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, 288);
+    buffer.bytes[315] = 0;
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
+}
+
+// Stopping short of the 16-GPU reserved end confirms no layout, which pins that boundary at 316.
+TEST(AmdSmiFabricRuntimeLayout, ShortOfTheSixteenGpuReservedEndIsUnknown)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, 312);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
 
 // Reserved filled but the payload never touched matches no runtime; every arm requires both.
