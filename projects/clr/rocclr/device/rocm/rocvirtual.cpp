@@ -2898,7 +2898,9 @@ void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
   // Here rather than in each submit method: this is the one point every command passes on
   // its way out, with its packets already in the ring and its HwEvent still set.  The edge
   // is a separate packet, so it has to sit behind the point it denotes.
-  if (publishOrderingEdge && command_->isCrossStreamProducer()) {
+  // Not when clearHwEvent is set: the block below releases the HwEvent, and that is the only
+  // route a consumer has to the edge, so one published here could never be named.
+  if (publishOrderingEdge && !clearHwEvent && command_->isCrossStreamProducer()) {
     PublishOrderingEdge();
   }
 
