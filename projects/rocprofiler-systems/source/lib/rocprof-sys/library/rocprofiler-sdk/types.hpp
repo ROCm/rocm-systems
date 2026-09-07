@@ -63,6 +63,8 @@ using callback_tracing_cb_t =
     void (*)(typename SdkBackend::callback_tracing_record_t record,
              typename SdkBackend::user_data_t* user_data, void* callback_data);
 
+using configure_cb_t = void (*)();
+
 struct domain_group
 {
     std::string_view name;
@@ -88,6 +90,7 @@ struct buffered_domain_definition
     domain_descriptor               meta;
     buffer_tracing_cb_t<SdkBackend> on_records;
     buffer_properties               buffer = k_default_buffer_properties;
+    configure_cb_t                  on_configure;
 };
 
 template <typename SdkBackend>
@@ -95,6 +98,7 @@ struct callback_domain_definition
 {
     domain_descriptor                 meta;
     callback_tracing_cb_t<SdkBackend> on_record;
+    configure_cb_t                    on_configure;
 };
 
 struct domain_configuration
