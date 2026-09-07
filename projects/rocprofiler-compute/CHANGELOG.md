@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
+
 ### Resolved issues
 
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
@@ -58,6 +60,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
   * Analyze mode reports every process in a single run, with a `pid` column
     identifying each one.
+* Added ``--ml-trace-with-params {off,shapes,values}`` to capture operator arguments during ML API tracing (Torch and Triton). When set to ``shapes`` or ``values``, the captured arguments are written to a new ``Args`` column in ``ml_api_trace/consolidated.csv``.
 
 * Redesigned the standalone roofline HTML to improve user experience and interactivity.
 

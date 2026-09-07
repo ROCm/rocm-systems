@@ -375,7 +375,7 @@ union reg_write_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << std::hex << " addr:0x" << regaddr << " data:0x" << regdata << std::dec;
+        ss << "me:" << me << " pipe:" << pipe << std::hex << " addr:0x" << regaddr << " data:0x" << regdata << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_WRITE"; };
@@ -400,7 +400,7 @@ union reg_init_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
+        ss << "me:" << me << " pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_INIT"; };

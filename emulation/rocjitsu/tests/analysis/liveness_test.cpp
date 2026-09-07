@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
@@ -390,6 +390,53 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_TRUE(set.contains({RegClass::SGPR, 4, 1}));
   EXPECT_FALSE(set.contains({RegClass::VGPR, 4, 1}));
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsIsTheAnyOfCounterpartToContains) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 4, 1});
+
+  // contains() is all-of, intersects() is any-of: a pair straddling s4 is not
+  // contained but does intersect. Register allocation depends on the latter --
+  // a candidate run is unusable if even one of its lanes is taken.
+  EXPECT_FALSE(set.contains({RegClass::SGPR, 3, 2}));
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 3, 2}));
+
+  // Half-open over [index, index + width).
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 2, 3}));
+  EXPECT_FALSE(set.intersects({RegClass::SGPR, 2, 2})) << "s4 is outside [2, 4)";
+  EXPECT_FALSE(set.intersects({RegClass::SGPR, 5, 4}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsKeepsRegisterClassesSeparate) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::ACC_VGPR, 0, 1}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsAnswersFalseForUntrackedClasses) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  // Matches contains(): classes outside the dataflow model are not "present".
+  // free_registers.h documents why its callers must not search one.
+  EXPECT_FALSE(set.intersects({RegClass::EXEC, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::VCC, 0, 1}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsToleratesRunsPastTheTrackedRange) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  // A run starting in range and extending past it reports the in-range hit
+  // rather than reading past the bitset.
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 0, 255}));
+  EXPECT_FALSE(set.intersects(
+      {RegClass::SGPR, static_cast<uint16_t>(REGISTER_SET_ALLOCATABLE_SGPRS + 8), 4}));
 }
 
 TEST(RegisterSetAnalysis, TracksGfx1250HighBankVectorRegisters) {
@@ -5290,6 +5337,29 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   LivenessAnalysis gfx1250(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
                            gfx1250_options);
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
+}
+
+TEST(LivenessAnalysis, FreeVgprAllocationRejectsUnnameableRunWidth) {
+  // A candidate run is tested as one RegisterRef, whose width is a uint8_t.
+  // These queries take the width as a uint16_t, so a wider run is expressible
+  // and must fail closed: truncating 256 to 0 would test only the run's first
+  // lane and hand back a base whose other 255 lanes were never checked.
+  auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const Instruction &use = *blocks[0]->instructions().begin();
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 1024;
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  // v0 is live and globally used, so the widest nameable run starts at v1. The
+  // 255/256 pair is what separates the width gate from an ordinary no-fit.
+  EXPECT_EQ(liveness.find_free_run(&use, 255), 1);
+  EXPECT_EQ(liveness.find_free_run(&use, 256), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 255, 0, 1, 1024), 1);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 256, 0, 1, 1024), std::nullopt);
 }
 
 TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {

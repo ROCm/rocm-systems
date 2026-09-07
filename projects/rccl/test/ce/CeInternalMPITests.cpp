@@ -29,7 +29,7 @@ using namespace MPITestConstants;
 // Internal CE helpers not in ce_coll.h; accessible in Debug builds (-fvisibility=hidden not applied).
 ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
                             hipStreamBatchMemOpParams* batchParams,
-                            size_t* opIdx);
+                            size_t* opIdx, hipStream_t stream);
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
@@ -121,7 +121,8 @@ protected:
     {
         PrepSyncResult res;
         res.batch = makePrepSyncBatch();
-        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx),
+        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx,
+                                 getActiveStream()),
                   ncclSuccess);
         return res;
     }
@@ -348,7 +349,8 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     for(int n = 1; n <= kCallCount; ++n)
     {
         size_t opIdx = 0;
-        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+                  ncclSuccess)
             << "call " << n;
         EXPECT_EQ(ceComm->ceColl.ceSeqNum, initialSeq + static_cast<uint32_t>(n))
             << "ceSeqNum should increment by 1 per call, call " << n << "/" << kCallCount;
@@ -650,13 +652,14 @@ TEST_F(CeFaultInjTest, SyncPrepErrorPropagates)
     size_t opIdx = 0;
 
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_SYNC_PREP), ncclSuccess);
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_SYNC_PREP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
 }
 
@@ -737,7 +740,7 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     auto   batch = makePrepSyncBatch();
     size_t opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError);
 
     ncclCeBatchOpsParams emptyParams{};
@@ -750,7 +753,8 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
     EXPECT_EQ(ncclCeFaultGet(ceComm), 0u) << "All faults should be cleared";
 
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess);
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess);
 }
 
 #endif // ENABLE_FAULT_INJECTION

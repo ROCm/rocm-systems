@@ -1149,6 +1149,41 @@ In multi-pass counter collection, each pass generates its output in a separate `
 
    - Each pass runs the application from start to finish.
 
+Kernel replay (beta)
+++++++++++++++++++++
+
+By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). ``--replay-mode kernel --kernel-replay-beta-enabled`` switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process. Before replay, rocprofv3 snapshots every tracked coarse-grained device allocation owned by that agent, plus discovered module-scope device variables, and restores that snapshot between passes so every group observes identical captured inputs.
+
+This is useful when re-running the whole application per group is expensive or non-deterministic. Without ``--replay-mode kernel``, multiple ``--pmc`` groups use application replay as usual.
+
+Because capture is per-agent rather than per-kernel -- replay makes no attempt to determine which allocations a kernel actually reaches -- host memory use during a replayed dispatch is proportional to the agent's entire tracked device footprint, and both the initial snapshot and every restore between passes scale with it.
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
+
+The preceding command collects both counter groups in a single run of ``<application_path>``, replaying each dispatch once per group instead of running the application twice.
+
+.. note::
+
+   - ``--replay-mode kernel`` requires ``--pmc`` and ``--kernel-replay-beta-enabled``.
+
+   - ``--replay-mode kernel`` collects counters only. It cannot be combined with ``--att``, PC sampling, or ``--spm``, and rocprofv3 rejects those combinations. Counter groups are the only thing that changes from one pass to the next, so any other service would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
+
+   - This feature is in beta. The flags, the SDK API, and the output schema may change.
+
+   - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent.
+
+   - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
+
+   - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+
+   - HIP graph launches are not replayed (warn once, run once).
+
+   - Only single-packet, single-dispatch submissions are replayed. A multi-packet submission runs once without replay and warns once.
+
+For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay-rocprofv3`. Tool authors should see :ref:`using-kernel-replay` and :ref:`kernel-replay-sdk-api`.
+
 .. _extra-counters:
 
 Extra counters

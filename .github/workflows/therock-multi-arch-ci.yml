@@ -33,6 +33,8 @@ on:
       - opened
       - synchronize
       - reopened
+      - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -59,6 +61,26 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
+      baseline_repository:
+        type: string
+        default: ""
+        description: "Repository to query for baseline_run_id. Defaults to github.repository for workflow_dispatch."
 
 permissions:
   contents: read
@@ -70,34 +92,64 @@ concurrency:
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: >-
+    ${{
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'ci:multi-arch'
+    }}
 
 jobs:
-  configure:
-    name: Configure Changed Projects
+  ci-gate:
+    name: Check CI Label
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for multi-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:multi-arch') }}" >> "${GITHUB_OUTPUT}"
+
+  configure:
+    name: Configure Changed Projects
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
+      # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
+      build_stages: ${{ steps.build_stages.outputs.build_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/repos-config.json
+          sparse-checkout: |
+            .github/repos-config.json
+            .github/scripts/compute_build_stages.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
           path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
+          # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
+          # build_tools/project_mappings.json are needed to map changed projects
+          # to build stages. Keep this ref in sync with the setup job's ref.
+          sparse-checkout: |
+            BUILD_TOPOLOGY.toml
+            build_tools/github_actions
+            build_tools/_therock_utils
+            build_tools/project_mappings.json
+            build_tools/artifact_subprojects.json
+          sparse-checkout-cone-mode: false
 
-      - name: Configure CI
-        id: configure
+      - name: Configure CI for pull request
+        id: configure-pr
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -108,9 +160,30 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
+      - name: Configure CI for manual run
+        id: configure-manual
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "changed_projects=" >> "${GITHUB_OUTPUT}"
+          echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
+          echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
+
+      # Map the changed projects to the minimal allowlist of TheRock build
+      # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
+      # this only reads it). Empty output = build all (fan-out / unknown project
+      # / run_all_tests CI-infra change).
+      - name: Compute build-stage allowlist
+        id: build_stages
+        run: |
+          python3 .github/scripts/compute_build_stages.py \
+            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --therock-path "_therock"
+
   setup:
-    needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    needs: [ci-gate, configure]
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -119,16 +192,24 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
-      # which cascades to ALL downstream stages. No stages can be reused.
-      # Hard-coding to empty for now.
+      # Per-PR selective build: the configure job maps the changed projects to
+      # the minimal allowlist of build stages via TheRock's build topology.
+      # TheRock (ROCm/TheRock#7600) builds only these stages and skips every
+      # other stage outright (no build, no artifact copy). Empty = build all,
+      # the fail-safe for fan-out / unknown-project / CI-infra changes.
+      build_stages: ${{ needs.configure.outputs.build_stages }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
+      baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -156,7 +237,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -168,7 +249,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -182,7 +263,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -192,7 +273,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -201,22 +282,38 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - ci-gate
+      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python build_tools/github_actions/workflow_summary.py \
+          python3 build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
+
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
+        run: |
+          echo "TheRock Multi-Arch CI is skipped by default for pull requests."
+          echo "Add the ci:multi-arch label to enable it."
+
+      - name: Report gate failure
+        if: ${{ needs.ci-gate.result != 'success' }}
+        run: |
+          echo "TheRock Multi-Arch CI gate did not complete successfully."
+          exit 1

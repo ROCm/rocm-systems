@@ -193,7 +193,7 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 `System` (see [Component taxonomy](#component-taxonomy)). Functional suites always carry a `ReadOnly`
 or `ReadWrite` operation suffix; unit suites omit it. Only combinations that have tests are
 registered — currently `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`, `SystemFunctionalReadOnly`,
-`IfoeFunctionalReadOnly`, `GpuUnit`, and `SystemUnit`. This keeps component, type, and operation
+`IfoeFunctionalReadOnly`, `GpuUnit`, `NicUnit`, and `SystemUnit`. This keeps component, type, and operation
 independently filterable via `--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures

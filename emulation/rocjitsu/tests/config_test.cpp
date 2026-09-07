@@ -209,6 +209,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
   EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_EQ(kmd::gfx_target_name(120501u), "gfx1251");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1251"), 120501u);
   EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
   EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
@@ -1148,6 +1150,25 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
   EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
+}
+
+TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
+  const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
+    "device":{"gfx_target_version":120501}}}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsGfx1251SimulationUntilExecutionIsImplemented) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1251"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

@@ -18,10 +18,18 @@
 
 extern "C" {
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+#endif
+// Using known extension, array designators
 static const char* container_type_name[AMDSMI_MAX_CONTAINER_TYPE] = {
     [AMDSMI_CONTAINER_LXC] = "lxc",
     [AMDSMI_CONTAINER_DOCKER] = "docker",
 };
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   DIR* d;
@@ -186,7 +194,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   //        In case the other info fail, get at least something.
   char exe_realpath[PATH_MAX] = {0};
   ssize_t len = readlink(name_path.c_str(), exe_realpath, sizeof(exe_realpath) - 1);
-  std::string name = (len > 0) ? std::string(exe_realpath, len) : "N/A";
+  std::string name = (len > 0) ? std::string(exe_realpath, static_cast<size_t>(len)) : "N/A";
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 

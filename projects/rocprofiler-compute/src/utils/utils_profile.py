@@ -19,6 +19,7 @@ import config
 import utils.utils_profile_csv as csv_ops
 from utils import csv_compression, rocpd_data
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
+from utils.inject_roctx.marker_format import decode_args
 from utils.logger import (
     console_debug,
     console_error,
@@ -40,13 +41,26 @@ _PROFILER_INTERNAL_RE = re.compile(
     r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
 )
 
+_LLVM_DUPLICATE_OPTION = "registered more than once"
+_ROCPROFILER_REGISTER_CONFLICT = "ROCPROFILER_REGISTER_LIBRARY is already set to"
+_DUPLICATE_ROCM_MESSAGE = (
+    "The workload and the profiler loaded two different ROCm installations in "
+    "the same process. Duplicate ROCm libraries abort at startup. Install "
+    "PyTorch and rocm[profiler] from the same package index: "
+    "https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/"
+    "how-to/profile/mode.html#torch-trace-requirements"
+)
+
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
-# inject_roctx appends a trailing "|<backend>" suffix to marker names.
+# inject_roctx appends a trailing "|<backend>" suffix to marker names, with an
+# optional "|args=<ENC>" segment that precedes it.
 _UNKNOWN_BACKEND = "unknown"
 _BACKEND_SUFFIX_RE = re.compile(
     r"\|(" + "|".join(re.escape(b) for b in KNOWN_ML_API_BACKENDS) + r")$"
 )
+# Captures the optional percent-encoded args segment.
+_ARGS_SEGMENT_RE = re.compile(r"\|args=([^|]*)$")
 
 
 def is_live_attach(
@@ -126,6 +140,13 @@ def _classify_output_line(line: str) -> None:
         console_debug(line)
     else:
         console_error(line, exit=False)
+
+
+def _duplicate_rocm_install_message(output: str) -> Optional[str]:
+    """Return the duplicate-ROCm hint if the output shows that failure."""
+    if _LLVM_DUPLICATE_OPTION in output or _ROCPROFILER_REGISTER_CONFLICT in output:
+        return _DUPLICATE_ROCM_MESSAGE
+    return None
 
 
 def run_prof(
@@ -271,6 +292,9 @@ def run_prof(
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
+        duplicate_rocm_message = _duplicate_rocm_install_message(output)
+        if duplicate_rocm_message is not None:
+            console_error(duplicate_rocm_message, exit=False)
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"
@@ -417,39 +441,52 @@ def get_submodules(package_name: str) -> list[str]:
     return submodules
 
 
-def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:
-    """Return (clean_function, backend) for one Function cell.
+def _parse_function_fields(
+    function_value: Optional[str],
+) -> tuple[str, str, str]:
+    """Return (clean_function, backend, args) for one Function cell.
 
-    Values with no recognized backend suffix return "unknown".
+    Splits off the trailing ``|<backend>`` suffix and the ``|args=<ENC>``
+    segment that precedes it. Untagged or unrecognized values return backend
+    "unknown" and empty args.
     """
     if function_value is None:
-        return "", _UNKNOWN_BACKEND
+        return "", _UNKNOWN_BACKEND, ""
     raw = str(function_value)
+    backend = _UNKNOWN_BACKEND
     match = _BACKEND_SUFFIX_RE.search(raw)
-    if match is None:
-        return raw, _UNKNOWN_BACKEND
-    return raw[: match.start()], match.group(1)
+    if match is not None:
+        backend = match.group(1)
+        raw = raw[: match.start()]
+    args = ""
+    args_match = _ARGS_SEGMENT_RE.search(raw)
+    if args_match is not None:
+        args = decode_args(args_match.group(1))
+        raw = raw[: args_match.start()]
+    return raw, backend, args
 
 
 def _augment_marker_rows(
     rows: list[dict], fieldnames: list[str]
 ) -> tuple[list[dict], list[str], int, list[str]]:
     """Move the wire backend suffix from the Function column into a Backend
-    column.
+    column and the wire args segment into an Args column.
 
-    Returns the rows, the field names including Backend, the count of rows whose
-    Function has no recognized backend suffix, and up to three sample Function
-    values from those rows.
+    Returns the rows, the field names including Backend and Args, the count of
+    rows whose Function has no recognized backend suffix, and up to three sample
+    Function values from those rows.
     """
     augmented_fieldnames = list(fieldnames)
-    if "Backend" not in augmented_fieldnames:
-        augmented_fieldnames.append("Backend")
+    for column in ("Backend", "Args"):
+        if column not in augmented_fieldnames:
+            augmented_fieldnames.append(column)
     unknown_samples: list[str] = []
     unknown_count = 0
     for row in rows:
-        clean_function, backend = _parse_function_backend(row.get("Function", ""))
+        clean_function, backend, args = _parse_function_fields(row.get("Function", ""))
         row["Function"] = clean_function
         row["Backend"] = backend
+        row["Args"] = args
         if backend == _UNKNOWN_BACKEND:
             unknown_count += 1
             sample = clean_function or "<empty>"
