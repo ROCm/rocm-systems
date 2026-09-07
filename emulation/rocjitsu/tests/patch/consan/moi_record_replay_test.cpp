@@ -10113,6 +10113,48 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   EXPECT_LT(std::ranges::find(words, select_low), std::ranges::find(words, restore_guest));
 }
 
+TEST(ConSanMoi, Gfx1250SelectableBankTransitionUsesPrivatePersistentState) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint32_t> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xBF860001u, // Subsequent guest code selects a nonzero VGPR bank.
+      // Match generated matrix kernels which use nearly the complete scalar
+      // tail, leaving no five-register scalar tuple for Record/Replay's exact
+      // entry state.
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/98u, kArch),
+      build_s_endpgm(kArch),
+  };
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+
+  // Wave32 gfx1250 allocates 16 VGPRs per descriptor granule. Twenty encoded
+  // granules therefore describe 336 physical registers even though the
+  // visible low-bank operands in this reduced reproducer have small indices.
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_selectable_bank_persistent_state",
+                               /*vgpr_granulated=*/20u),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  // RocJitsu bounds the descriptor's 336-register physical allocation to the
+  // complete 256-register directly encoded bank used by MOI placement.
+  EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 256u);
+  EXPECT_TRUE(result.moi_operating_point.automatic_moi_private_epoch);
+  EXPECT_FALSE(test_moi_owner_vgpr(result));
+  EXPECT_FALSE(test_moi_epoch_vgpr(result));
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("private-epoch persistent state") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_code_object();
   ASSERT_FALSE(bytes.empty());

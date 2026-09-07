@@ -4578,7 +4578,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
-  EXPECT_EQ(patch->scratch_vgpr, 5u);
+  EXPECT_EQ(patch->scratch_vgpr, 6u);
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->dynamic_private_segment_addend, 6u * sizeof(uint32_t));
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);

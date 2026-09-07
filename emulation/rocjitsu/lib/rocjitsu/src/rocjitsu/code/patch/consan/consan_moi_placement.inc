@@ -3307,12 +3307,13 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
   const ProgramInventory &program_inventory = problem.inventory();
+  const std::span<const uint8_t> bytes = planning_state.bytes;
+  const rj_code_arch_t arch = planning_state.arch;
   std::vector<std::string> &diagnostics = update.diagnostics;
   std::vector<ConSanMoiPrologueScratchVgprAssignment> &prologue_scratch_assignments =
       update.prologue_scratch_assignments;
-  const std::span<const uint8_t> bytes = planning_state.bytes;
-  const rj_code_arch_t arch = planning_state.arch;
   MoiPersistentStateFacts persistent_facts;
+  bool has_selectable_bank_transition_owner = false;
   for (const ConSanCandidateResourcePlan &plan : resource_plans) {
     if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
         plan.owner_kernel_ids.empty()) {
@@ -3328,6 +3329,15 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
       persistent_facts.has_operational_dynamic_lds_owner |=
           kernel != nullptr && kernel->has_dynamic_lds;
+      if (kernel != nullptr && kernel->has_text_range &&
+          kernel->text_file_offset <= bytes.size() &&
+          kernel->entry_text_offset <= bytes.size() - kernel->text_file_offset) {
+        const uint64_t begin = kernel->text_file_offset + kernel->entry_text_offset;
+        if (kernel->code_size <= bytes.size() - begin) {
+          has_selectable_bank_transition_owner |= consan_selectable_vgpr_bank_transition_in_range(
+              arch, bytes, begin, begin + kernel->code_size);
+        }
+      }
     }
   }
   const MoiPersistentStateDemand persistent_demand =
@@ -3343,6 +3353,17 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         return kernel.uses_cluster_workgroup_id;
       });
   const ConSanTargetProfile *target = consan_target_profile(arch);
+  // Persistent VGPR values must survive arbitrary guest bank-selection state.
+  // Once a CDNA5 owner changes that state, the eight-bit register numbers in
+  // its instructions no longer provide a complete physical-register bound.
+  // Unlike a site-local scratch window, persistent values cannot be selected
+  // transiently around every guest use. Treat the descriptor's complete
+  // selectable-bank allocation as occupied and route an overflowing tuple
+  // through scalar or private state. Owners which never change bank retain
+  // the ordinary precise explicit-operand placement path.
+  constexpr uint32_t kDirectlyEncodedVgprCount = 256u;
+  const uint32_t persistent_vgpr_limit =
+      target && target->has_selectable_vgpr_bank ? kDirectlyEncodedVgprCount : kMaxVgprs;
   const bool target_uses_persistent_dispatch_vgprs =
       target && target->moi_dispatch_identity_placement !=
                     ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
@@ -3383,10 +3404,9 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     // allocation instead. On CDNA3/4, ACCUM_OFFSET bounds this search below the
     // physical AccVGPR bank even when the descriptor's total VGPR allocation
     // extends through that bank.
-    const uint32_t safe_base =
-        plan.has_indirect_vgpr_access
-            ? std::min<uint32_t>(plan.current_vgpr_count, plan.ordinary_vgpr_limit)
-            : plan.max_referenced_vgpr_count;
+    const uint32_t safe_base = plan.has_indirect_vgpr_access || has_selectable_bank_transition_owner
+                                   ? plan.current_vgpr_count
+                                   : plan.max_referenced_vgpr_count;
     persistent_base = std::max(persistent_base, safe_base);
   }
   if (has_explicit_owner_epoch) {
@@ -4037,7 +4057,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       scalar_model != ConSanScalarPlacementModel::DescriptorPartitioned &&
       !debug.test_force_private_epoch &&
       persistent_demand.scalar_state_required_for_private_or_overflow &&
-      (persistent_end > kMaxVgprs || prefer_private_epoch);
+      (persistent_end > persistent_vgpr_limit || prefer_private_epoch);
   if (rdna_needs_scalar_epoch) {
     const std::string rdna_arch_name = rj_code_arch_name(arch);
     if (needs_persistent_dispatch_vgprs) {
@@ -4130,8 +4150,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         " owner; retaining the existing private-state fallback");
   }
   const bool needs_private_epoch = options.automatic_moi_private_epoch ||
-                                   debug.test_force_private_epoch || persistent_end > kMaxVgprs ||
-                                   prefer_private_epoch;
+                                   debug.test_force_private_epoch ||
+                                   persistent_end > persistent_vgpr_limit || prefer_private_epoch;
   if (needs_private_epoch && !has_dynamic_stack_owner) {
     options.moi_initialize_owner_epoch = true;
     options.automatic_moi_private_epoch = true;

@@ -3336,7 +3336,8 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
     text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes =
-      make_gfx1250_code_object(text_words, "gfx1250_banked_lds_scalar_spill");
+      make_gfx1250_code_object(text_words, "gfx1250_banked_lds_scalar_spill",
+                               /*vgpr_granulated=*/16u);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;

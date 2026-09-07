@@ -1686,7 +1686,7 @@ std::vector<uint8_t> first_note_segment_bytes(std::span<const uint8_t> image) {
 std::vector<uint8_t>
 make_gfx1250_code_object(std::span<const uint32_t> text_words,
                          std::string_view kernel_name = "barrier_lifecycle",
-                         uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated,
+                         uint32_t vgpr_granulated = 0u,
                          bool wave32 = true, bool uses_dynamic_stack = false) {
   std::vector<uint8_t> image = make_rdna4_lds_code_object(text_words, kernel_name, vgpr_granulated,
                                                           wave32, uses_dynamic_stack);

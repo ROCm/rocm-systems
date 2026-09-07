@@ -1728,6 +1728,8 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
   EXPECT_GE(*result.resource_plans.front().scratch_vgpr, 3u);
+  EXPECT_EQ(*result.resource_plans.front().scratch_vgpr % 2u, 0u)
+      << "CDNA5 instrumentation uses the first scratch pair for FLAT addresses";
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 }

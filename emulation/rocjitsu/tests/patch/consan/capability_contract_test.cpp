@@ -433,7 +433,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
         .moi_placement =
             {
-                .scratch_vgpr_alignment = 1,
+                .scratch_vgpr_alignment = 2,
                 .branch_only_spill_embeds_setup_state = true,
                 .automatic_dispatch_sgpr_requires_owner_admission = true,
             },
@@ -624,6 +624,10 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   });
   expect_invalid("unsupported scratch VGPR alignment",
                  [](auto &profiles) { profiles[0].moi_placement.scratch_vgpr_alignment = 4u; });
+  expect_invalid("even tuple target with unaligned scratch VGPR pairs", [](auto &profiles) {
+    profiles[0].requires_even_vgpr_tuples = true;
+    profiles[0].moi_placement.scratch_vgpr_alignment = 1u;
+  });
   expect_invalid("unknown workgroup payload consumption", [](auto &profiles) {
     profiles[0].moi_placement.full_workgroup_payload_consumption =
         static_cast<ConSanMoiWorkgroupPayloadConsumption>(255u);

@@ -632,6 +632,7 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanScalarPlacementModel::SpillBacked) ||
         (profile.moi_placement.scratch_vgpr_alignment != 1u &&
          profile.moi_placement.scratch_vgpr_alignment != 2u) ||
+        (profile.requires_even_vgpr_tuples && profile.moi_placement.scratch_vgpr_alignment != 2u) ||
         static_cast<uint8_t>(profile.moi_placement.full_workgroup_payload_consumption) >
             static_cast<uint8_t>(ConSanMoiWorkgroupPayloadConsumption::EntryCapture) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
