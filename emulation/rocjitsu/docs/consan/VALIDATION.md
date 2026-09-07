@@ -318,6 +318,14 @@ structure changes. This preserves the full asymmetric denominator without
 requiring empty benchmark clients to execute. Three shards run concurrently
 with 300-second inner and 360-second enclosing bounds.
 
+The single-client `tensile-sk-f8gemm-quick` row is sharded across all nine of
+its Exact sizes. Every leaf retains and requires all 12 generated solutions,
+an independent numerical oracle, and an independent ConSan coverage and
+teardown verdict. Four leaves execute concurrently with 300-second inner and
+360-second enclosing bounds. The complete source inventory is checked before
+filtering, so the gate fails closed if a size is added, removed, reordered, or
+changed instead of silently validating a stale subset.
+
 The eight-block `tensile-spmm-f8-ml` row uses the same contract for the three
 Exact sizes repeated identically by every block. The filtered YAML must retain
 all eight blocks and selects one size in each; differing block inventories
