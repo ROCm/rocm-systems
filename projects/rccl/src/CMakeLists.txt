@@ -1161,13 +1161,13 @@ if (DUMP_ASM) # Save temporary files from kernel compilation
 
   add_custom_command(TARGET rccl POST_BUILD
     COMMENT "Disassembling RCCL library"
-    COMMAND /bin/bash -c "${OBJ_DUMP} --offload-fatbin librccl.so"
+    COMMAND sh -c "${OBJ_DUMP} --offload-fatbin librccl.so"
     VERBATIM
   )
   foreach(GPUARCH ${GPU_TARGETS})
     add_custom_command(TARGET rccl POST_BUILD
         COMMENT "Disassembling RCCL library to dump assembly for ${GPUARCH}"
-        COMMAND /bin/bash -c "${OBJ_DUMP} -d -l --source --symbolize-operands librccl.so.0.hipv4-amdgcn-amd-amdhsa--${GPUARCH} > librccl.${GPUARCH}.s"
+        COMMAND sh -c "${OBJ_DUMP} -d -l --source --symbolize-operands librccl.so.0.hipv4-amdgcn-amd-amdhsa--${GPUARCH} > librccl.${GPUARCH}.s"
         VERBATIM
     )
   endforeach()
@@ -1373,13 +1373,13 @@ endif()
 ## Set RCCL link options
 ## Find out available memory
 execute_process(
-  COMMAND bash "-c" "test -r /sys/fs/cgroup/memory.max && cat /sys/fs/cgroup/memory.max || echo"
+  COMMAND sh "-c" "test -r /sys/fs/cgroup/memory.max && cat /sys/fs/cgroup/memory.max || echo"
   OUTPUT_VARIABLE memory_max_string)
 if (${memory_max_string} MATCHES "^[0-9]+")
   math(EXPR detected_memory_gb "${memory_max_string} / (1024 * 1024 * 1024)")
 else()
   execute_process(
-    COMMAND bash "-c" "free | grep -o '[[:digit:]]*' | head -1"
+    COMMAND sh "-c" "free | grep -o '[[:digit:]]*' | head -1"
     OUTPUT_VARIABLE memory_max_string)
   ## memory_max_string holds the free memory in KB
   if (${memory_max_string} MATCHES "^[0-9]+")
