@@ -33,6 +33,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "multiseg.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -193,6 +194,9 @@ struct ncclIbRequestCompletionRecord {
   bool completions[NCCL_IB_MAX_QPS];
 };
 
+// Forward declaration; full definition (with multi-segment fields) is below.
+struct ncclIbMrHandle;
+
 struct ncclIbRequest {
   struct ncclIbNetCommBase* base;
   int type;
@@ -219,6 +223,10 @@ struct ncclIbRequest {
       int size;
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
+      // Local MR handle for this send; used by the multi-segment WR builder to
+      // resolve the per-segment local lkey. NULL/single-segment
+      // handles use lkeys[] directly on the fast path.
+      struct ncclIbMrHandle* mh;
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
     } send;
@@ -254,6 +262,23 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t tag;
   uint64_t idx;
 };
+static_assert(sizeof(struct ncclIbSendFifo) == 64, "CTS slot is one cache line");
+
+// Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
+// equal the CTS slot's idx so a later single-segment reuse of the same CTS
+// index ignores a stale side slot.
+struct alignas(64) ncclIbSegLayout {
+  uint64_t idx;
+  uint32_t nSegments;
+  uint32_t pad;
+  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
+  uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+};
+
+// Worst-case work requests posted for one multi-recv send on a single QP: each
+// request's chunk may be split at every local and remote segment boundary it
+// spans. Single-segment sends use exactly one WR per request.
+#define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -333,10 +358,35 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-// Wrapper to track an MR per-device, if needed
+// NCCL_IB_MAX_SEGMENTS (cap on physical segments per registered buffer) is
+// defined in multiseg.h so the wire-protocol structs above and the pure helpers
+// can both reference it.
+//
+// Wrapper to track an MR per-device, if needed.
+//
+// Single-segment buffers (the common case) use only mrs[]; nSegments == 1.
+// Multi-segment cuMem/VMM buffers register one dma-buf MR per physical segment
+// per device; segStart/segLen describe the segment VA layout and segMrs holds
+// the per-segment, per-device MRs. mrs[] aliases segment 0 for compatibility
+// with the single-segment fast path.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
+  int nSegments;                                             // 1 = legacy single MR
+  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];                  // VA start of each segment
+  size_t segLen[NCCL_IB_MAX_SEGMENTS];                    // bytes per segment
+  ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
+
+// Select the MR covering [addr, addr+len) for device devIndex.
+// - Single-segment handles return the legacy mrs[devIndex].
+// - Multi-segment handles return the containing segment's MR, or NULL if the
+//   range is not fully contained in one physical segment.
+static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h, uintptr_t addr, size_t len, int devIndex) {
+  if (h == NULL) return NULL;
+  if (h->nSegments <= 1) return h->mrs[devIndex];
+  int s = ncclIbSegmentIndexForRange(h->nSegments, h->segStart, h->segLen, addr, len);
+  return (s < 0) ? NULL : h->segMrs[s][devIndex];
+}
 
 // Forward declaration
 struct ncclIbResiliency;
@@ -440,8 +490,15 @@ struct ncclIbSendComm {
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // Side table immediately after ctsFifo so one covering MR registers both.
+  // Receiver RDMA-writes this only when nSegments>1 and the peer advertised
+  // NCCL_IB_CAP_MULTISEG.
+  struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  // A multi-segment send may split one request's per-QP chunk into up to one WR
+  // per local+remote segment boundary crossing. Size the WR/SGE pools
+  // for the worst case; single-segment sends use exactly one WR per request.
+  struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -455,6 +512,7 @@ struct ncclIbSendComm {
   struct ncclIbRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
+  uint32_t peerCaps;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -463,8 +521,18 @@ static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
               "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
+static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
+static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
+                offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
+              "segLayoutFifo must immediately follow ctsFifo for a covering MR");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
+
+static inline bool ncclIbCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
+  const volatile struct ncclIbSendFifo* cts = &comm->ctsFifo[slot][r];
+  const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
+  return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && side->idx == cts->idx && side->nSegments > 1;
+}
 
 struct ncclIbGpuFlush {
   struct ibv_mr* hostMr;
@@ -494,6 +562,11 @@ struct ncclIbRemCtsFifo {
   uint32_t flags;
 };
 
+struct alignas(64) ncclIbRemSegLayout {
+  struct ncclIbSegLayout elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  uint64_t addr;
+};
+
 struct alignas(16) ncclIbRecvCommDev {
   struct ncclIbNetCommDevBase base;
   struct ncclIbGpuFlush gpuFlush;
@@ -502,6 +575,7 @@ struct alignas(16) ncclIbRecvCommDev {
   // side to gather CTS messages (formatted by the receiver) and write them to
   // the sender's CTS FIFO.
   struct ibv_mr* ctsFifoMr;
+  struct ibv_mr* segLayoutFifoMr;
   // MR that is obtained after registering the completion records on the
   // receiver side. The RKey of this MR is provided to the sender side, to allow
   // the sender side to access receiver's completion records using RDMA
@@ -526,6 +600,8 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
+  struct ncclIbRemSegLayout remSegLayout;
+  uint32_t peerCaps;
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
   struct ncclIbRequestCompletionRecord cmplsRecords[NET_IB_MAX_REQUESTS];
@@ -593,6 +669,7 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
 ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle);
+ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);

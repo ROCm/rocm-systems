@@ -32,9 +32,11 @@
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
+#include <algorithm>
 #include <cstdlib>
 #include <regex>
 #include <sstream>
+#include <vector>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -841,22 +843,6 @@ class UBR_MultiSegment : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Multi-segment registration currently relies on dmabuf support from the
-    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
-    // restrict every UBR_MultiSegment test to a single node so the multi-node
-    // tests are not exercised.
-    void SetUp() override
-    {
-        RegistrationTestBase::SetUp();
-        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
-            return;
-        }
-        if (MPITestConstants::detectNodeCount() != 1) {
-            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
-                            "dmabuf support is available from the HIP/HSA layer";
-        }
-    }
-
     struct MultiSegmentBuffer
     {
         hipDeviceptr_t                                vaBase      = 0;
@@ -1113,6 +1099,97 @@ TEST_F(UBR_MultiSegment, Generic)
     ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
         << "Expected NET 'numSegments " << kNumSegments
         << "' for the complete ncclCommRegister range";
+}
+
+/**
+ * @brief NET proxy registration clips the final physical segment.
+ *
+ * Registers two complete VMM mappings plus half of a third, then runs an
+ * AllReduce whose receive half ends at the final registered byte. This drives
+ * sendProxyRegBuffer and recvProxyRegBuffer through netIbRegMrMultiSeg with a
+ * short final MR and verifies the mapped-but-unregistered tail is untouched.
+ */
+TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    if (MPITestConstants::detectNodeCount() != 2) {
+        GTEST_SKIP() << "Requires exactly two nodes to exercise NET proxy registration";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled())
+        << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+    ASSERT_TRUE(isPerRankLoggingEnabled())
+        << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int kMappedSegments = 3;
+    constexpr uint8_t kSentinel = 0xA7;
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, kSegmentSize, kMappedSegments, buf));
+    if (buf.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM allocation unavailable on this runtime";
+    }
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    const size_t registeredBytes = 2 * buf.segmentSize + buf.segmentSize / 2;
+    const size_t halfSize = registeredBytes / 2;
+    const size_t tailSize = buf.totalSize - registeredBytes;
+    ASSERT_EQ(registeredBytes % sizeof(T), 0u);
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+
+    char* base = reinterpret_cast<char*>(buf.vaBase);
+    void* sendBuf = base;
+    void* recvBuf = base + halfSize;
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemset(base + registeredBytes, kSentinel, tailSize));
+
+    void* regHandle = nullptr;
+    ASSERT_MPI_EQ(
+        ncclSuccess,
+        ncclCommRegister(getActiveCommunicator(), buf.vaBase, registeredBytes,
+                         &regHandle));
+    auto regCleanup = makeScopeGuard([&]() {
+        if (regHandle)
+            HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+    });
+    ASSERT_MPI_NE(regHandle, nullptr);
+
+    int rank = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+    const size_t count = halfSize / sizeof(T);
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    ASSERT_MPI_EQ(
+        ncclSuccess,
+        ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                      getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    std::vector<uint8_t> tail(tailSize);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(tail.data(), base + registeredBytes, tailSize,
+                        hipMemcpyDeviceToHost));
+    EXPECT_TRUE(std::all_of(tail.begin(), tail.end(),
+                            [](uint8_t byte) { return byte == kSentinel; }))
+        << "NET transfer wrote beyond the clipped registration range";
+
+    REGLogChecker checker = getLogChecker();
+    ASSERT_TRUE(checker.hasNETRegistration())
+        << "NET proxy registration path did not execute";
+    ASSERT_TRUE(checker.hasNumSegments(kMappedSegments))
+        << "Expected NET proxy to enumerate three physical segments";
 }
 
 /**

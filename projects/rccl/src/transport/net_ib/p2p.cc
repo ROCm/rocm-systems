@@ -96,11 +96,224 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
+// Multi-segment (AIRUNTIME-2351 classic-path follow-up) variant of
+// ncclIbMultiSend. It splits each request's per-QP chunk into one RDMA-write WR
+// per local+remote physical segment slice, so a transfer that straddles a
+// segment boundary uses the correct per-segment lkey/rkey. Invoked only when at
+// least one request's local or remote buffer is multi-segment; the
+// single-segment fast path below stays byte-for-byte unchanged.
+static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int slot) {
+  struct ncclIbRequest** reqs = comm->sendReqs[slot];
+  volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
+  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+  int nreqs = slots[0].nreqs;
+  if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+
+  int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
+  ncclResult_t ret;
+
+  // Cumulative wr_id across requests; placed on the final signaled WR so
+  // completion accounting matches ncclIbMultiSend.
+  uint64_t wr_id = 0ULL;
+  for (int r = 0; r < nreqs; r++) wr_id += (uint64_t)(slot & 0xff) << (r * 8);
+
+  uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
+  bool needSizesWr = (nreqs > 1);
+  bool arExtra =
+    (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold);
+  bool extraImmWr = needSizesWr || arExtra;   // dedicated final WR carries the imm
+
+  int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
+  uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
+
+  int qpIndex = -1;
+  ncclIbQp* qp = NULL;
+  for (int i = 0; i < nqps; i++) {
+    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qp, &qpIndex));
+    int devIndex = qp->devIndex;
+    int remDevIdx = qp->remDevIdx;
+
+    // Per-request chunk length on this QP (computed independently of the
+    // resiliency skip so skipped QPs still advance the offsets consistently).
+    uint32_t chunkLen[NCCL_NET_IB_MAX_RECVS];
+    for (int r = 0; r < nreqs; r++) {
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), IB_WRITE_CHUNK_ALIGNMENT) * IB_WRITE_CHUNK_ALIGNMENT;
+      }
+      chunkLen[r] = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
+    }
+
+    // Selective retransmission: skip already-delivered QPs, keeping offsets synced.
+    if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
+      for (int r = 0; r < nreqs; r++)
+        sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
+      continue;
+    }
+
+    int w = 0;
+    for (int r = 0; r < nreqs; r++) {
+      uint64_t localBase = (uintptr_t)reqs[r]->send.data;
+      uint64_t remoteBase = slots[r].addr;
+      struct ncclIbMrHandle* mh = reqs[r]->send.mh;
+
+      // Local segment offset/VA tables (contiguous VMM VAs => linear addresses).
+      uint64_t lVA[NCCL_IB_MAX_SEGMENTS], lOff[NCCL_IB_MAX_SEGMENTS + 1];
+      int nLocal;
+      uint64_t localReqOff = 0;
+      if (mh && mh->nSegments > 1) {
+        nLocal = mh->nSegments;
+        for (int s = 0; s < nLocal; s++) {
+          lVA[s] = mh->segStart[s];
+          lOff[s] = mh->segStart[s] - mh->segStart[0];
+        }
+        lOff[nLocal] = lOff[nLocal - 1] + mh->segLen[nLocal - 1];
+        if (localBase < mh->segStart[0]) return ncclInternalError;
+        localReqOff = localBase - mh->segStart[0];
+      } else {
+        nLocal = 1;
+        lVA[0] = localBase;
+        lOff[0] = 0;
+        lOff[1] = reqs[r]->send.size;
+      }
+      // Remote segment tables from the side table when the peer published a
+      // matching multi-seg layout; otherwise a single-segment view of the CTS slot.
+      uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
+      int nRemote;
+      uint64_t remoteReqOff = 0;
+      bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
+      if (remoteMulti) {
+        nRemote = side[r].nSegments;
+        for (int s = 0; s < nRemote; s++) {
+          rVA[s] = side[r].segStart[s];
+          rOff[s] = side[r].segStart[s] - side[r].segStart[0];
+        }
+        if (remoteBase < side[r].segStart[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - side[r].segStart[0];
+        uint64_t remoteReqEnd = remoteReqOff + slots[r].size;
+        if (remoteReqEnd < remoteReqOff) return ncclInternalError;
+        while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
+        rOff[nRemote] = remoteReqEnd;
+      } else {
+        nRemote = 1;
+        rVA[0] = remoteBase;
+        rOff[0] = 0;
+        rOff[1] = slots[r].size;
+      }
+
+      if (chunkLen[r] == 0) {
+        // Zero-length write preserves the chain/imm; segment-0 keys suffice.
+        struct ibv_send_wr* wr = comm->wrs + w;
+        struct ibv_sge* sge = comm->sges + w;
+        memset(wr, 0, sizeof(struct ibv_send_wr));
+        wr->opcode = IBV_WR_RDMA_WRITE;
+        wr->send_flags = 0;
+        wr->wr_id = wr_id;
+        wr->wr.rdma.remote_addr = remoteBase + sendOffsets[r];
+        wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[0][remDevIdx] : slots[r].rkeys[remDevIdx];
+        sge->addr = localBase + sendOffsets[r];
+        sge->length = 0;
+        sge->lkey = reqs[r]->send.lkeys[devIndex];
+        wr->sg_list = sge;
+        wr->num_sge = 0;
+        w++;
+      } else {
+        struct ncclIbSegSlice slices[2 * NCCL_IB_MAX_SEGMENTS];
+        int ns =
+          ncclIbSplitTransferAtOffsets(nLocal, lVA, lOff, nRemote, rVA, rOff, localReqOff + sendOffsets[r],
+                                       remoteReqOff + sendOffsets[r], chunkLen[r], slices, 2 * NCCL_IB_MAX_SEGMENTS);
+        if (ns <= 0) {
+          WARN("NET/IB: multi-segment send split failed (data=%p off=%u len=%u)", reqs[r]->send.data, sendOffsets[r],
+               chunkLen[r]);
+          return ncclInternalError;
+        }
+        for (int k = 0; k < ns; k++) {
+          if (w >= NCCL_IB_MAX_WRS_PER_SEND) {
+            WARN("NET/IB: multi-segment send exceeded WR pool (%d)", NCCL_IB_MAX_WRS_PER_SEND);
+            return ncclInternalError;
+          }
+          struct ibv_send_wr* wr = comm->wrs + w;
+          struct ibv_sge* sge = comm->sges + w;
+          memset(wr, 0, sizeof(struct ibv_send_wr));
+          wr->opcode = IBV_WR_RDMA_WRITE;
+          wr->send_flags = 0;
+          wr->wr_id = wr_id;
+          wr->wr.rdma.remote_addr = slices[k].remoteAddr;
+          wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
+          sge->addr = slices[k].localAddr;
+          sge->length = slices[k].len;
+          sge->lkey =
+            (mh && mh->nSegments > 1) ? mh->segMrs[slices[k].localSeg][devIndex]->lkey : reqs[r]->send.lkeys[devIndex];
+          wr->sg_list = sge;
+          wr->num_sge = 1;
+          w++;
+        }
+      }
+    }
+
+    // Final WR carries the WRITE_WITH_IMM (and, for multi-recv, the sizes array),
+    // mirroring ncclIbMultiSend's lastWr handling.
+    struct ibv_send_wr* lastWr;
+    if (extraImmWr) {
+      if (w >= NCCL_IB_MAX_WRS_PER_SEND + 1) {
+        WARN("NET/IB: multi-segment send exceeded WR pool");
+        return ncclInternalError;
+      }
+      lastWr = comm->wrs + w;
+      memset(lastWr, 0, sizeof(struct ibv_send_wr));
+      if (needSizesWr) {
+        lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
+        lastWr->sg_list = &(comm->devs[devIndex].sge);
+        lastWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
+        lastWr->sg_list[0].length = nreqs * sizeof(int);
+        lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
+        lastWr->num_sge = 1;
+      } else {
+        lastWr->num_sge = 0;
+      }
+      w++;
+    } else {
+      lastWr = comm->wrs + (w - 1);   // reuse the last data WR
+    }
+    lastWr->wr_id = wr_id;
+    lastWr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+    lastWr->imm_data = htobe32(immData);
+    lastWr->send_flags = IBV_SEND_SIGNALED;
+
+    for (int k = 0; k < w - 1; k++) comm->wrs[k].next = comm->wrs + k + 1;
+    comm->wrs[w - 1].next = NULL;
+
+    struct ibv_send_wr* bad_wr;
+    ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+    if (ret != ncclSuccess) {
+      ncclIbStatsFatalError(&comm->base.stats);
+      return ret;
+    }
+
+    for (int r = 0; r < nreqs; r++) {
+      sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
+      reqs[r]->send.sentData[qpIndex] = true;
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+
+  // Multi-segment: if any request's local or remote buffer spans
+  // multiple physical segments, use the segment-splitting builder.
+  for (int r = 0; r < nreqs; r++) {
+    struct ncclIbMrHandle* mh = reqs[r]->send.mh;
+    if ((mh && mh->nSegments > 1) || ncclIbCtsRemoteMultiSeg(comm, slot, r)) {
+      return ncclIbMultiSendSegmented(comm, slot);
+    }
+  }
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
         reqs[0]->base, reqs[0]->id, slot, nreqs);
@@ -374,7 +587,9 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
       ncclIbAddEvent(req, qp->devIndex);
     }
 
-    // Store all lkeys
+    // Store all lkeys (segment 0 alias; the multi-segment builder resolves the
+    // per-segment lkey from req->send.mh). mrs[] aliases segment 0.
+    req->send.mh = mhandleWrapper;
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       req->send.lkeys[i] = mhandleWrapper->mrs[i]->lkey;
     }
@@ -479,14 +694,45 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
+  bool postSide = false;
+  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    for (int i = 0; i < req->nreqs; i++) {
+      if (comm->remSegLayout.elems[slot][i].nSegments > 1) {
+        postSide = true;
+        break;
+      }
+    }
+  }
+
+  struct ibv_sge sgeSide;
+  struct ibv_send_wr wrSide;
+  struct ibv_send_wr* firstWr = &wr;
+  if (postSide) {
+    memset(&wrSide, 0, sizeof(wrSide));
+    memset(&sgeSide, 0, sizeof(sgeSide));
+    wrSide.wr.rdma.remote_addr =
+      comm->remSegLayout.addr + (uint64_t)slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSegLayout);
+    wrSide.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
+    sgeSide.addr = (uint64_t)comm->remSegLayout.elems[slot];
+    sgeSide.length = req->nreqs * sizeof(struct ncclIbSegLayout);
+    sgeSide.lkey = comm->devs[ctsQp->devIndex].segLayoutFifoMr->lkey;
+    wrSide.sg_list = &sgeSide;
+    wrSide.num_sge = 1;
+    wrSide.opcode = IBV_WR_RDMA_WRITE;
+    wrSide.send_flags = 0; // unsignaled, never inline
+    wrSide.next = &wr;
+    firstWr = &wrSide;
+  }
+
   TRACE(NCCL_NET,
         "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
-        "qp_num=%u)",
-        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
+        "qp_num=%u side=%d)",
+        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num,
+        (int)postSide);
 
   struct ibv_send_wr* bad_wr;
   ncclResult_t postFifoRet;
-  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr), postFifoRet, postFifoFail);
+  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, firstWr, &bad_wr), postFifoRet, postFifoFail);
   TRACE(NCCL_VERBS,
         "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, "
         "imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
@@ -585,14 +831,45 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   for (int i = 0; i < n; i++) {
     localElem[i].addr = (uint64_t)data[i];
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandles[i];
-    // Send all applicable rkeys
+    if (mhandleWrapper == NULL) {
+      WARN("NET/IB: irecv[%d] has a NULL mhandle", i);
+      ret = ncclInternalError;
+      goto irecvFail;
+    }
+    // Send all applicable rkeys (segment 0 alias for the single-segment path).
     for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+      if (mhandleWrapper->mrs[j] == NULL) {
+        WARN("NET/IB: irecv[%d] missing MR for device %d", i, j);
+        ret = ncclInternalError;
+        goto irecvFail;
+      }
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
     }
     localElem[i].nreqs = n;
     localElem[i].size = sizes[i]; // Sanity/Debugging
     localElem[i].tag = tags[i];
-    localElem[i].idx = comm->base.fifoHead + 1;
+    localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
+
+    // Multi-segment layout goes on the side table, never in CTS.
+    struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
+    if (mhandleWrapper->nSegments > 1 && (comm->peerCaps & NCCL_IB_CAP_MULTISEG)) {
+      sideElem[i].nSegments = mhandleWrapper->nSegments;
+      for (int s = 0; s < mhandleWrapper->nSegments; s++) {
+        sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
+        for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+          if (mhandleWrapper->segMrs[s][j] == NULL) {
+            WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
+            ret = ncclInternalError;
+            goto irecvFail;
+          }
+          sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
+        }
+      }
+      sideElem[i].idx = localElem[i].idx;
+    } else {
+      sideElem[i].nSegments = 0;
+      sideElem[i].idx = 0;
+    }
   }
 
   // Post to FIFO to notify sender
@@ -633,14 +910,11 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   ncclResult_t ret = ncclSuccess;
   ncclResult_t iflushRet = ncclSuccess;
   struct ncclIbRequest* req = NULL;
-  struct ncclIbMrHandle* mhandle = NULL;
-  int last = -1;
+  bool hasData = false;
   for (int i = 0; i < n; i++)
-    if (sizes[i]) last = i;
-  if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
+    if (sizes[i]) hasData = true;
+  if (comm->flushEnabled == 0 || !hasData) return ncclSuccess;
 
-  // Only flush once using the last non-zero receive
-  mhandle = (struct ncclIbMrHandle*)mhandles[last];
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, iflushFail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
@@ -674,26 +948,83 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+      wr.sg_list = &comm->devs[i].gpuFlush.sge;
+      wr.num_sge = 1;
+      wr.opcode = IBV_WR_RDMA_READ;
+      wr.send_flags = IBV_SEND_SIGNALED;
+
+      TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
+      TIME_START(4);
+      struct ibv_send_wr* bad_wr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+      TIME_STOP(4);
+
+      ncclIbAddEvent(req, i);
+
+      TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
     } else {
-      wr.wr.rdma.remote_addr = (uint64_t)data[last];
-      wr.wr.rdma.rkey = mhandle->mrs[i]->rkey;
+      // A multi-recv may place each entry in a different MR. Build one chain
+      // that touches every non-zero entry and every segment it overlaps.
+      struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
+      int nFlushWrs = 0;
+      memset(flushWrs, 0, sizeof(flushWrs));
+      for (int r = 0; r < n; r++) {
+        if (sizes[r] == 0) continue;
+        struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[r];
+        if (mhandle != NULL && mhandle->nSegments > 1) {
+          int flushSeg[NCCL_IB_MAX_SEGMENTS];
+          int nFlushSeg =
+            ncclIbSegmentsOverlappingRange(mhandle->nSegments, mhandle->segStart, mhandle->segLen, (uintptr_t)data[r],
+                                           (size_t)sizes[r], flushSeg, NCCL_IB_MAX_SEGMENTS);
+          if (nFlushSeg < 1) {
+            WARN("NET/IB: flush buffer %p size %d does not overlap any registered segment", data[r], sizes[r]);
+            ret = ncclInternalError;
+            goto iflushFail;
+          }
+          for (int s = 0; s < nFlushSeg; s++) {
+            int seg = flushSeg[s];
+            uintptr_t segBase = mhandle->segStart[seg];
+            uintptr_t rangeStart = (uintptr_t)data[r];
+            struct ibv_mr* flushMr = mhandle->segMrs[seg][i];
+            if (flushMr == NULL) {
+              WARN("NET/IB: flush missing MR for receive %d segment %d device %d", r, seg, i);
+              ret = ncclInternalError;
+              goto iflushFail;
+            }
+            flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)(rangeStart > segBase ? rangeStart : segBase);
+            flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
+            nFlushWrs++;
+          }
+        } else {
+          struct ibv_mr* flushMr = ncclIbMrForRange(mhandle, (uintptr_t)data[r], sizeof(int), i);
+          if (flushMr == NULL) {
+            WARN("NET/IB: flush missing MR for receive %d buffer %p", r, data[r]);
+            ret = ncclInternalError;
+            goto iflushFail;
+          }
+          flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)data[r];
+          flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
+          nFlushWrs++;
+        }
+      }
+      for (int w = 0; w < nFlushWrs; w++) {
+        flushWrs[w].wr_id = wr.wr_id;
+        flushWrs[w].sg_list = &comm->devs[i].gpuFlush.sge;
+        flushWrs[w].num_sge = 1;
+        flushWrs[w].opcode = IBV_WR_RDMA_READ;
+        flushWrs[w].send_flags = (w == nFlushWrs - 1) ? IBV_SEND_SIGNALED : 0;
+        flushWrs[w].next = (w + 1 < nFlushWrs) ? &flushWrs[w + 1] : NULL;
+      }
+      TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=%ld)", __func__, nFlushWrs,
+            req, req->base, wr.wr_id);
+      TIME_START(4);
+      struct ibv_send_wr* bad_wr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr), iflushRet, iflushFail);
+      TIME_STOP(4);
+      ncclIbAddEvent(req, i);
     }
-    wr.sg_list = &comm->devs[i].gpuFlush.sge;
-    wr.num_sge = 1;
-    wr.opcode = IBV_WR_RDMA_READ;
-    wr.send_flags = IBV_SEND_SIGNALED;
-
-    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-          wr.wr_id);
-    TIME_START(4);
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
-    TIME_STOP(4);
-
-    ncclIbAddEvent(req, i);
-
-    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-          wr.wr_id);
   }
 
   *request = req;
