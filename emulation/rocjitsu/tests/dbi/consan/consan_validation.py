@@ -2152,9 +2152,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # exact problems. Give every size an independent numerical oracle,
         # coverage gate, and teardown verdict instead of allowing one slow
         # problem to hide completed work behind the monolithic row's bound.
+        # The 511-square shard completes in about 211 seconds alone but can
+        # take just over 300 seconds under the retained four-way campaign
+        # parallelism, so keep a bounded twofold-variance margin.
         "tensile-sk-f8gemm-quick": {
-            "tensile_inner_timeout_seconds": 300,
-            "run_timeout_seconds": 360,
+            "tensile_inner_timeout_seconds": 420,
+            "run_timeout_seconds": 480,
             "tensile_exact_problem_size_shards": (
                 ((127, 127, 1, 1024),),
                 ((128, 128, 1, 1024),),

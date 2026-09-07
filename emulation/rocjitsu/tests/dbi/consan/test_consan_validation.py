@@ -5748,8 +5748,8 @@ class ConSanValidationTest(unittest.TestCase):
             [128, 128, 1, 640],
             [129, 128, 1, 640],
         ]
-        self.assertEqual(workload.run_timeout_seconds, 360)
-        self.assertEqual(workload.tensile_inner_timeout_seconds, 300)
+        self.assertEqual(workload.run_timeout_seconds, 480)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 420)
         self.assertEqual(workload.tensile_shard_parallelism, 4)
         self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 9)
