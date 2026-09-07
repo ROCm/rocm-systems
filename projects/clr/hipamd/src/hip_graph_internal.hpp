@@ -2012,23 +2012,22 @@ class GraphKernelNode : public GraphNode {
   //! with independent slots there is nothing to disagree about, and a node whose
   //! attributes were set one at a time no longer loses all but the last.
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
+    // Every slot is assigned, including the was-set flags, so the destination
+    // ends up an exact mirror of the source. Copying only the slots the source
+    // has set would leave a previously-set destination slot behind, and the two
+    // nodes would then disagree about an attribute hipGraphKernelNodeCopyAttributes
+    // is specified to have copied. For priority that is not only a readback
+    // discrepancy: prioritySet_ is what HasDeclaredPriority() reports, so a stale
+    // one would have the segment scheduler act on a declaration this node never
+    // inherited. A slot whose was-set flag is false carries no meaning, so
+    // assigning it unconditionally is harmless.
     clusterDim_ = srcNode->clusterDim_;
-    if (srcNode->accessPolicyWindowSet_) {
-      accessPolicyWindow_.base_ptr = srcNode->accessPolicyWindow_.base_ptr;
-      accessPolicyWindow_.hitProp = srcNode->accessPolicyWindow_.hitProp;
-      accessPolicyWindow_.hitRatio = srcNode->accessPolicyWindow_.hitRatio;
-      accessPolicyWindow_.missProp = srcNode->accessPolicyWindow_.missProp;
-      accessPolicyWindow_.num_bytes = srcNode->accessPolicyWindow_.num_bytes;
-      accessPolicyWindowSet_ = true;
-    }
-    if (srcNode->cooperativeSet_) {
-      cooperative_ = srcNode->cooperative_;
-      cooperativeSet_ = true;
-    }
-    if (srcNode->prioritySet_) {
-      priority_ = srcNode->priority_;
-      prioritySet_ = true;
-    }
+    accessPolicyWindow_ = srcNode->accessPolicyWindow_;
+    accessPolicyWindowSet_ = srcNode->accessPolicyWindowSet_;
+    cooperative_ = srcNode->cooperative_;
+    cooperativeSet_ = srcNode->cooperativeSet_;
+    priority_ = srcNode->priority_;
+    prioritySet_ = srcNode->prioritySet_;
     return hipSuccess;
   }
 
