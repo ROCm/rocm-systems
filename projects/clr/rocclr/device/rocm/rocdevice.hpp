@@ -81,7 +81,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   Flags flags_;
 
-  //! Handle of a device resident twin of signal_, published by a hipEventRecord marker so
+  //! Handle of a device resident twin of signal_, published by the producing command so
   //! another queue can name it in barrier_packet_.dep_signal[] instead of signal_; zero when
   //! none was published.  The consumer reads it without this object's lock: the release store
   //! in VirtualGPU::PublishOrderingEdge() publishes edge_owner_ and edge_slot_ with it, and

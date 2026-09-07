@@ -2148,17 +2148,22 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
 
+  // submitAccumulate() takes a fresh HwEvent for the segment, and that is the one a consumer
+  // reads; an edge published here would name the signal it is about to stop pointing at.
+  constexpr bool kKeepHwEvent = false;
+  constexpr bool kPublishOrderingEdge = false;
+
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
       LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
                      finalLastSlot->completion_signal.handle);
-      profilingEnd();
+      profilingEnd(kKeepHwEvent, kPublishOrderingEdge);
       return false;
     }
   }
 
-  profilingEnd();
+  profilingEnd(kKeepHwEvent, kPublishOrderingEdge);
   return true;
 }
 
@@ -2889,7 +2894,14 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  * created for whatever command we are running and calls end() to get the
  * current host timestamp if no signal is available.
  */
-void VirtualGPU::profilingEnd(bool clearHwEvent) {
+void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
+  // Here rather than in each submit method: this is the one point every command passes on
+  // its way out, with its packets already in the ring and its HwEvent still set.  The edge
+  // is a separate packet, so it has to sit behind the point it denotes.
+  if (publishOrderingEdge && command_->isCrossStreamProducer()) {
+    PublishOrderingEdge();
+  }
+
   if (!command_->getPktCapturingState() && command_->profilingInfo().enabled_) {
     if (timestamp_ != nullptr) {
       if (timestamp_->HwProfiling() == false) {
@@ -5271,27 +5283,38 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
-// Publish a device resident twin of this marker's completion signal, so that a queue which
-// later waits on this event names a value word in its own local memory.
+// Publish a device resident twin of the current command's completion signal, so that a queue
+// which later waits on this event names a value word in its own local memory.
 //
-// hipEventRecord is the only producer shape that needs this: a cross stream dependency is
-// always record-then-wait, and profilingBegin() picks the recorded command's HwEvent out of
-// the wait list.  Markers from hipStreamWaitEvent carry marker_ts_ == false and are the
-// consuming side.
+// Eligibility is decided by the caller, because the two producer shapes are recognised by
+// unrelated tests: an eager hipEventRecord marker by marker_ts_, and a command an enqueuer
+// marked with setCrossStreamProducer() by that bit.  Markers from hipStreamWaitEvent carry
+// marker_ts_ == false and are the consuming side.
 //
 // Cost is one barrier-AND packet with no dependencies and no cache operation, appended after
-// the marker's own packet, plus the read and the arming store in AcquireOrderingEdge().  The
+// the command's own packet, plus the read and the arming store in AcquireOrderingEdge().  The
 // ordinary completion signal keeps every other role - HwEvent, host waits, profiling
 // timestamps, async handlers - none of which an ordering edge signal may take.
-void VirtualGPU::PublishOrderingEdge(amd::Marker& vcmd) {
-  if (!vcmd.profilingInfo().marker_ts_ || !dev().orderingEdgeSignals()) {
+void VirtualGPU::PublishOrderingEdge() {
+  if (!dev().orderingEdgeSignals()) {
     return;
   }
   auto* hw_event = reinterpret_cast<ProfilingSignal*>(command_->HwEvent());
+  if (hw_event == nullptr) {
+    return;
+  }
+  // The edge is decremented by a barrier packet on gpu_queue_ carrying no dependencies, so it
+  // can only stand in for a completion signal this queue's own command processor produces.  A
+  // command an SDMA engine retires - a copy that took the async path - is not one: its signal
+  // and the edge packet are unordered, and a consumer that named the edge would proceed while
+  // the copy was still running.
+  if (hw_event->engine_ != HwQueueEngine::Compute) {
+    return;
+  }
   // A signal that already carries an edge is not given a second one.  That happens when a
   // marker is coalesced onto the previous barrier's HwEvent, and the earlier edge is the
   // right answer there: a coalesced marker denotes the same point in the stream.
-  if (hw_event == nullptr || hw_event->edge_handle_.load(std::memory_order_relaxed) != 0) {
+  if (hw_event->edge_handle_.load(std::memory_order_relaxed) != 0) {
     return;
   }
   uint32_t slot = 0;
@@ -5380,7 +5403,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         }
         hasPendingDispatch_ = false;
       }
-      PublishOrderingEdge(vcmd);
+      if (vcmd.profilingInfo().marker_ts_) {
+        PublishOrderingEdge();
+      }
     }
     // A record sets the window to its own event and barrier signal; a wait/other
     // marker has a zero coalesceEvent() and so clears it, which a wait relies on.
