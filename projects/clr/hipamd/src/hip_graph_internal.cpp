@@ -1288,7 +1288,8 @@ int GraphExecSegmented::CollectDeclaredPriorityInGraph(Graph* graph, int depth,
   }
   if (depth >= kMaxChildGraphPriorityDepth) {
     ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
-            "[hipGraph] Child graph priority walk exceeded max depth %d; treating deeper graphs as Normal",
+            "[hipGraph] Child graph priority walk exceeded max depth %d; treating deeper "
+            "graphs as Normal",
             kMaxChildGraphPriorityDepth);
     return priority;
   }
