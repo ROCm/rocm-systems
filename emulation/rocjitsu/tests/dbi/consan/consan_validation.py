@@ -2093,6 +2093,24 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "tensile_shard_parallelism": 4,
             "tensile_fault_shard_index": 0,
         },
+        # The mixed MXF8/F4 object has three exact problems and six generated
+        # solutions per problem. Give each size its own numerical oracle,
+        # coverage gate, and teardown verdict so a compiler/DBT failure in one
+        # slice cannot be obscured by a partial monolithic transcript. The
+        # 512-square slice needs roughly 30 seconds per generated solution in
+        # Sampled emulation, so retain a bounded five-minute inner allowance.
+        "tensile-sk-mxf8f4gemm-tdm": {
+            "tensile_inner_timeout_seconds": 300,
+            "run_timeout_seconds": 360,
+            "tensile_exact_problem_size_shards": (
+                ((128, 128, 1, 2048),),
+                ((128, 128, 1, 1056),),
+                ((512, 512, 1, 2048),),
+            ),
+            "tensile_expected_numeric_rows_per_shard": (6, 6, 6),
+            "tensile_shard_parallelism": 3,
+            "tensile_fault_shard_index": 0,
+        },
         # Preserve all six exact problems and all 16 generated solutions per
         # problem, but give each exact size an independent numeric oracle,
         # teardown verdict, and coverage gate. Four RocJITsu-backed shards fit
