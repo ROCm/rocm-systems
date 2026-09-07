@@ -30,6 +30,14 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 # tests in extreme circumstances
 option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)
 
+# Long-running performance sweeps (labelled perf-nightly). Off by default: they take a
+# large share of the CI test budget, and what they are good for is a trend across runs
+# rather than a per-commit gate, so a single noisy run failing a PR costs more than it
+# catches. The shorter perf regressions stay in the default set. Nightly jobs and local
+# perf work turn this on.
+option(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS
+       "Register the long-running performance sweep tests" OFF)
+
 enable_testing()
 include(CTest)
 
@@ -84,6 +92,11 @@ add_subdirectory(thread-trace)
 add_subdirectory(pc_sampling)
 add_subdirectory(hip-graph-tracing)
 add_subdirectory(counter-collection)
+add_subdirectory(kernel-replay-concurrency)
+add_subdirectory(kernel-replay-local-context)
+add_subdirectory(perf-common)
+add_subdirectory(kernel-replay-perf)
+add_subdirectory(queue-hooks-perf)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
@@ -119,3 +132,9 @@ add_subdirectory(anytime-tool-config)
 # python bindings
 add_subdirectory(python-bindings)
 add_subdirectory(rocprofv3-avail)
+
+add_test(
+    NAME rocprofiler-sdk-spm-runner-preflight
+    COMMAND ${Python3_EXECUTABLE} -m unittest spm_runner_preflight_test
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(rocprofiler-sdk-spm-runner-preflight PROPERTIES LABELS "unittests")

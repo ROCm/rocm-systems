@@ -21,7 +21,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
@@ -336,6 +336,55 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     NAMESPACE ${PROJECT_NAME}::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
+
+  # Option to build test binaries during the main build (without running them)
+  option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
+
+  if(BUILD_TESTS)
+    include(ExternalProject)
+    set(ROCJPEG_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
+    set(ROCJPEG_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
+
+    # Stage-install the library and its cmake/include artifacts into the build
+    # tree so ExternalProject find_package() works without requiring a prior
+    # sudo make install. cmake --install --prefix rewrites all install paths,
+    # and configure_package_config_file generates relocatable relative paths,
+    # so the staged config correctly resolves headers and libs.
+    add_custom_target(stage_${PROJECT_NAME}
+      COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${ROCJPEG_STAGE_DIR}
+      DEPENDS ${PROJECT_NAME}
+      COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
+    )
+
+    # Helper macro to add one ExternalProject test and register its install
+    # ROCM_PATH keeps pointing at the real ROCm tree so find_package(HIP),
+    # libva, etc. resolve correctly. CMAKE_PREFIX_PATH is prepended with the
+    # stage dir so find_package(rocjpeg) picks up the staged config instead
+    # of any previously installed version.
+    macro(rocjpeg_add_test_ext TEST_EXE TEST_SOURCE_DIR)
+      ExternalProject_Add(test_${TEST_EXE}
+        SOURCE_DIR ${TEST_SOURCE_DIR}
+        CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
+                   -DCMAKE_PREFIX_PATH=${ROCJPEG_STAGE_DIR}
+                   -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ""
+        DEPENDS stage_${PROJECT_NAME}
+      )
+      ExternalProject_Get_Property(test_${TEST_EXE} BINARY_DIR)
+      install(PROGRAMS ${BINARY_DIR}/${TEST_EXE} DESTINATION ${ROCJPEG_TEST_BIN_DIR} OPTIONAL)
+    endmacro()
+
+    # Sample tests
+    rocjpeg_add_test_ext(jpegdecode             ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecode)
+    rocjpeg_add_test_ext(jpegdecodebatched       ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatched)
+    rocjpeg_add_test_ext(jpegdecodeperf          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodePerf)
+    rocjpeg_add_test_ext(jpegdecodeasync         ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeAsync)
+    rocjpeg_add_test_ext(jpegdecodebatchedasync  ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatchedAsync)
+    # Negative API test (source under test/)
+    rocjpeg_add_test_ext(rocjpegnegativetest     ${CMAKE_CURRENT_SOURCE_DIR}/test/rocjpeg_negative_api_tests)
+  endif()
 
   # make test with CTest
   set(BUILD_FROM_SOURCE ON)
