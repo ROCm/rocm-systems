@@ -136,7 +136,8 @@ TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), expectedAddrMode + sizeof(uint32_t));
 }
 
-// Every other case spells its extent as the constant it pins, so nothing else catches a moved boundary.
+// Most extent cases spell their extents as the constants they pin, so this is what catches a
+// boundary that quietly moves along with its uses.
 TEST(AmdSmiFabricRuntimeLayout, WindowBoundariesHaveTheirShippedValues)
 {
     EXPECT_EQ(kAmdSmiFabricV1PayloadBegin, 12u);
