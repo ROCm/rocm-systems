@@ -907,6 +907,28 @@ def test_aggregate_warns_about_capping_only_once() -> None:
     warning_mock.assert_not_called()
 
 
+def test_aggregate_caps_wave_occupancy_at_max_waves_per_cu() -> None:
+    """wave_cnt exceeding max_waves_per_cu is capped at 100 percent."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=0b1, wave_cnt=40),
+                make_record(1, 0x20, 1, dispatch_id=0, exec_mask=0b1, wave_cnt=4),
+            ]
+        )
+    )
+
+    result = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+
+    by_offset = result.set_index("code_object_offset")["wave_occupancy_percent"]
+    assert by_offset[0x10] == 100.0
+    assert by_offset[0x20] == pytest.approx(4 / 32 * 100)
+
+
 def test_aggregate_does_not_warn_when_every_mask_fits() -> None:
     """A mask within the wave size stays silent."""
     records = load_pc_sample_records(
