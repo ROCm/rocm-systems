@@ -3451,6 +3451,47 @@ TEST(CfgAnalysis, Gfx1250RecoversStraightLineNegativeDeltaAcrossDelayAlu) {
   EXPECT_TRUE(fixups.front().source_targets_exhaustive);
 }
 
+TEST(CfgAnalysis, Gfx1250RecoversNegativeDeltaWithPrefetchBetweenSubtractHalves) {
+  constexpr uint16_t kPcSreg = 24;
+  constexpr uint16_t kTmpSreg = 26;
+  constexpr uint16_t kPrefetchSreg = 11;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+
+  // Production MXF8/F4 Tensile output schedules an unrelated instruction-
+  // prefetch setup between the low subtract and its high borrow. The pair
+  // still computes the static target at 0x04: getpc produces 0x0c and the
+  // signed delta is -8.
+  const std::vector<uint32_t> words = {
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.ssrc0 = 0, .sdst = kPcSreg})[0],
+      cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
+                        {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      0xfffffff4u,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5),
+      cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],
+      cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
+                        {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 159, .sdst = kPrefetchSreg})[0],
+      0xF404A000u,
+      0x16000000u,
+      cdna5::build_sop2(cdna5::kSSubCoCiU32Sop2,
+                        {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = kPcSreg, .sdst = 0})[0],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {}, /*wavefront_size=*/32u);
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_EQ(fixups.front().source_getpc_offset, 8u);
+  EXPECT_EQ(fixups.front().source_call_offset, 48u);
+  EXPECT_EQ(fixups.front().source_target_offset, 4u);
+  EXPECT_TRUE(fixups.front().source_targets_exhaustive);
+}
+
 TEST(CfgAnalysis, KeepsDistinctBuildersReachingSameTarget) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;

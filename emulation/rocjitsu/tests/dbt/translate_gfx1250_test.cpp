@@ -3005,6 +3005,61 @@ TEST(BinaryTranslatorE2E, Gfx1250CompilerLongJumpCompactsIdempotentlyAfterPaddin
   EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250CompactsNegativeLongJumpWithInterleavedPrefetch) {
+  constexpr uint16_t kPcSreg = 24;
+  constexpr uint16_t kTmpSreg = 26;
+  constexpr uint16_t kPrefetchSreg = 11;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  // This is the backward compiler long-jump form emitted in the mixed MXF8/F4
+  // Tensile workload: prefetch setup is scheduled between the low subtract and
+  // its high borrow. It must remain a recoverable static transfer rather than
+  // making the strict revision translator reject the object as indirect code.
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA5),
+      kGfx1250SEndpgm,
+      rocjitsu::build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA5),
+      cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
+                        {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      0xfffffff4u,
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5),
+      cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],
+      cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
+                        {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 159, .sdst = kPrefetchSreg})[0],
+      0xF404A000u,
+      0x16000000u,
+      cdna5::build_sop2(cdna5::kSSubCoCiU32Sop2,
+                        {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      rocjitsu::build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA5),
+      kGfx1250SEndpgm,
+  };
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }),
+            0);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250MarkedLongJumpStaysLongWhenTargetIsDirectlyReachable) {
   constexpr uint16_t kPcSreg = 4;
   constexpr uint16_t kGfx1250SAddNcU64Opcode = 83;

@@ -1079,6 +1079,25 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 [[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word, std::string_view mnemonic,
                                   uint16_t sreg);
 
+[[nodiscard]] bool is_gfx1250_pc_builder_padding(const AnalysisContext &ctx, size_t index,
+                                                 uint16_t pair_lo, uint16_t tmp_sreg,
+                                                 bool allow_xcnt) {
+  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return false;
+  const Instruction &inst = *ctx.insts[index];
+  if ((allow_xcnt && inst.mnemonic() == "s_wait_xcnt") ||
+      inst.mnemonic() == "s_prefetch_inst_pc_rel") {
+    return true;
+  }
+  // The immediate move configures the following instruction prefetch. It is
+  // scheduling-only for this proof only when it clobbers neither the PC pair
+  // nor the temporary carrying the signed delta.
+  if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+    return false;
+  const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+  return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
+}
+
 [[nodiscard]] std::optional<TempDeltaPattern> match_temp_add_pattern(const AnalysisContext &ctx,
                                                                      size_t index,
                                                                      size_t last_index,
@@ -1163,7 +1182,17 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (ctx.insts[abs_index]->mnemonic() == "s_delay_alu")
     ++abs_index;
   const size_t low_index = abs_index + 1;
-  const size_t high_index = low_index + 1;
+  size_t high_index = low_index + 1;
+  // Recent CDNA5 Tensile output overlaps instruction-prefetch setup with the
+  // carry dependency between the low and high subtracts. The move/prefetch do
+  // not affect either value being proven and the canonical relocated builder
+  // may safely NOP them with the rest of this contiguous recovery range.
+  while (high_index <= last_index &&
+         is_gfx1250_pc_builder_padding(ctx, high_index, pair_lo,
+                                       static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu),
+                                       /*allow_xcnt=*/false)) {
+    ++high_index;
+  }
   if (high_index > last_index)
     return std::nullopt;
 
@@ -1828,47 +1857,28 @@ match_signed_delta_add_consumer(const AnalysisContext &ctx,
   if (!add_u32_opcode || !addc_u32_opcode)
     return std::nullopt;
 
-  const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
-      return false;
-    const Instruction &inst = *ctx.insts[index];
-    // The gfx1250 sequence drains XCNT before an instruction prefetch. The
-    // shader manual defines S_WAIT_XCNT as a counter wait, so neither it nor
-    // the prefetch changes the PC pair or the signed-delta temporary. This
-    // block is the conditional branch target, so it lies past the recovery
-    // range and keeps both instructions verbatim; the predicate only skips them
-    // while locating the arithmetic and set-PC consumer. The subtract half sits
-    // inside the range and has to reproduce its drain -- see
-    // match_signed_delta_sub_consumer.
-    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
-      return true;
-    // The compiler also emits a scalar immediate move to configure the
-    // prefetch. It is safe to skip only when its destination is outside the
-    // getpc pair being proven AND is not tmp_sreg — a move into tmp_sreg would
-    // change the value the following s_add/s_abs consumes while recovery keeps
-    // computing the target from the original literal.
-    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
-      return false;
-    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
-    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
-  };
-
   size_t low_index = block.first_index;
-  while (low_index <= block.last_index && is_gfx1250_padding(low_index))
+  while (low_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, low_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true))
     ++low_index;
   if (low_index > block.last_index)
     return std::nullopt;
   const Instruction &low_inst = *ctx.insts[low_index];
 
   size_t high_index = low_index + 1;
-  while (high_index <= block.last_index && is_gfx1250_padding(high_index))
+  while (high_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, high_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true))
     ++high_index;
   if (high_index > block.last_index)
     return std::nullopt;
   const Instruction &high_inst = *ctx.insts[high_index];
 
   size_t setpc_index = high_index + 1;
-  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+  while (setpc_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, setpc_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true))
     ++setpc_index;
   if (setpc_index > block.last_index &&
       !is_sole_fallthrough_consumer(blocks, predecessor_counts, block_index, setpc_index))
@@ -1916,20 +1926,6 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   if (!sub_u32_opcode || !subb_u32_opcode)
     return std::nullopt;
 
-  const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
-      return false;
-    const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
-      return true;
-    // Skip a prefetch-config move only when it clobbers neither the getpc pair
-    // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
-    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
-      return false;
-    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
-    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
-  };
-
   // Padding skipped ahead of the subtract half lies inside the recovery range,
   // which patch_recovered_builder_fixups overwrites with the canonical builder
   // and NOP-fills. Losing the prefetch and its configuration move only costs a
@@ -1937,17 +1933,31 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   // so the rewrite has to reproduce the drain.
   size_t abs_index = block.first_index;
   bool skipped_xcnt = false;
-  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index)) {
+  while (abs_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, abs_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true)) {
     skipped_xcnt = skipped_xcnt || ctx.insts[abs_index]->mnemonic() == "s_wait_xcnt";
     ++abs_index;
   }
   if (abs_index + 2 > block.last_index)
     return std::nullopt;
   const Instruction &abs_inst = *ctx.insts[abs_index];
-  const Instruction &low_inst = *ctx.insts[abs_index + 1];
-  const Instruction &high_inst = *ctx.insts[abs_index + 2];
-  size_t setpc_index = abs_index + 3;
-  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+  const size_t low_index = abs_index + 1;
+  const Instruction &low_inst = *ctx.insts[low_index];
+  size_t high_index = low_index + 1;
+  while (high_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, high_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true)) {
+    skipped_xcnt = skipped_xcnt || ctx.insts[high_index]->mnemonic() == "s_wait_xcnt";
+    ++high_index;
+  }
+  if (high_index > block.last_index)
+    return std::nullopt;
+  const Instruction &high_inst = *ctx.insts[high_index];
+  size_t setpc_index = high_index + 1;
+  while (setpc_index <= block.last_index &&
+         is_gfx1250_pc_builder_padding(ctx, setpc_index, pair_lo, tmp_sreg,
+                                       /*allow_xcnt=*/true))
     ++setpc_index;
   if (setpc_index > block.last_index &&
       !is_sole_fallthrough_consumer(blocks, predecessor_counts, block_index, setpc_index))
@@ -1955,10 +1965,10 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *sub_u32_opcode, pair_lo,
                                 pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word, *subb_u32_opcode,
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *subb_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
