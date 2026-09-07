@@ -48,10 +48,10 @@ bool CuidFileLock::acquire() {
   // For exclusive (write) locks, first open existing file with O_RDWR.
   // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
   if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_NOFOLLOW, 0666);
     if (lock_fd_ < 0 && errno == ENOENT) {
       mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
       umask(old_umask);
       if (lock_fd_ >= 0) {
         fchmod(lock_fd_, 0666);
@@ -59,7 +59,7 @@ bool CuidFileLock::acquire() {
     }
   } else {
     // Try to open existing file for shared (read) lock
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY | O_NOFOLLOW, 0666);
   }
 
   // If file doesn't exist and we need a shared lock, try to create it
@@ -67,7 +67,7 @@ bool CuidFileLock::acquire() {
     // Try to create the lock file - may fail if not privileged, which is OK
     // The file should be created by root when generating CUIDs
     mode_t old_umask = umask(0);  // Temporarily clear umask for proper permissions
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
     umask(old_umask);  // Restore umask
 
     // If created successfully, also chmod to ensure permissions are correct
@@ -123,23 +123,23 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
   // For exclusive (write) locks, first open existing file with O_RDWR.
   // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
   if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_NOFOLLOW, 0666);
     if (lock_fd_ < 0 && errno == ENOENT) {
       mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
       umask(old_umask);
       if (lock_fd_ >= 0) {
         fchmod(lock_fd_, 0666);
       }
     }
   } else {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY | O_NOFOLLOW, 0666);
   }
 
   // If file doesn't exist and we need a shared lock, try to create it
   if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
     mode_t old_umask = umask(0);
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
     umask(old_umask);
     if (lock_fd_ >= 0) {
       fchmod(lock_fd_, 0666);
@@ -206,23 +206,23 @@ bool CuidFileLock::try_acquire() {
   // For exclusive (write) locks, first open existing file with O_RDWR.
   // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
   if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_NOFOLLOW, 0666);
     if (lock_fd_ < 0 && errno == ENOENT) {
       mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
       umask(old_umask);
       if (lock_fd_ >= 0) {
         fchmod(lock_fd_, 0666);
       }
     }
   } else {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY | O_NOFOLLOW, 0666);
   }
 
   // If file doesn't exist and we need a shared lock, try to create it
   if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
     mode_t old_umask = umask(0);
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
     umask(old_umask);
     if (lock_fd_ >= 0) {
       fchmod(lock_fd_, 0666);
@@ -476,10 +476,12 @@ amdcuid_status_t CuidFile::save() {
     return AMDCUID_STATUS_FILE_ERROR;
   }
 
-  // Create temporary file first for atomic write. Create it with the final
-  // permissions on a descriptor we own (O_EXCL|O_NOFOLLOW), so the mode is set
-  // before the rename and no TOCTOU-prone chmod() on the destination path is
-  // needed afterwards (CWE-367). rename() preserves the mode.
+  // Create the temporary file with the final permissions on a descriptor we own
+  // (O_EXCL|O_NOFOLLOW) and write the contents through that same descriptor, so
+  // neither the permissions nor the data can be redirected by a symlink swapped
+  // in at the temp path (TOCTOU, CWE-367). The mode is set before rename(),
+  // which preserves it, so no chmod() on the destination path is needed. The
+  // file content is accumulated in memory and written once at the end.
   std::string temp_path = file_path_ + ".tmp";
   const mode_t temp_mode = is_privileged_ ? (S_IRUSR | S_IWUSR)
                                           : (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -492,13 +494,8 @@ amdcuid_status_t CuidFile::save() {
   if (temp_fd < 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
-  close(temp_fd);
 
-  std::ofstream file(temp_path);
-  if (!file.is_open()) {
-    unlink(temp_path.c_str());
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
+  std::ostringstream file;
 
   // Write header comment
   file << "# AMD CUID Device Information File\n";
@@ -604,7 +601,24 @@ amdcuid_status_t CuidFile::save() {
     }
   }
 
-  file.close();
+  // Write the accumulated content through the descriptor we created and own.
+  const std::string content = file.str();
+  const char* data = content.data();
+  size_t remaining = content.size();
+  while (remaining > 0) {
+    const ssize_t written = write(temp_fd, data, remaining);
+    if (written < 0) {
+      close(temp_fd);
+      unlink(temp_path.c_str());
+      return AMDCUID_STATUS_FILE_ERROR;
+    }
+    data += written;
+    remaining -= static_cast<size_t>(written);
+  }
+  if (close(temp_fd) != 0) {
+    unlink(temp_path.c_str());
+    return AMDCUID_STATUS_FILE_ERROR;
+  }
 
   // Atomically move temp file to actual file
   if (rename(temp_path.c_str(), file_path_.c_str()) != 0) {
