@@ -1,8 +1,6 @@
 import os
 import sys
 import subprocess
-from github import Github
-from git import Repo
 
 
 def run(cmd, **kwargs):
@@ -11,6 +9,11 @@ def run(cmd, **kwargs):
 
 
 def main():
+    # Imported lazily so `run` (and its tests) can be imported without the
+    # optional github/git packages installed.
+    from github import Github
+    from git import Repo
+
     # 1) Read and validate env vars
     token = os.getenv("GITHUB_TOKEN")
     repo_full = os.getenv("GITHUB_REPOSITORY")
