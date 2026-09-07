@@ -46,6 +46,18 @@ std::optional<ConSanMoiSampledSyncRole> sampled_atomic_role(ConSanMoiAtomicEvent
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<uint32_t>
+sampled_atomic_byte_count(const MoiAtomicEvidenceSourceView &source) {
+  const uint32_t width_bits = source.site.width_bits;
+  if (width_bits == 0u || width_bits % 8u != 0u)
+    return std::nullopt;
+  // The CAS outcome path snapshots one compare and one result dword. Other
+  // synchronization sites only need their exact address range and may be wide.
+  if (consan_atomic_is_compare_exchange(source.site) && width_bits != 32u)
+    return std::nullopt;
+  return width_bits / 8u;
+}
+
 [[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicLoweringForm &form) {
   if (!form.destination_vgpr || form.destination_register_count == 0u)
     return true;
@@ -328,6 +340,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::span<const uint32_t> trailing_guest_words, uint32_t *emitted_guest_size) {
   const ConSanAtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
+  const bool is_cas = is_rmw && consan_atomic_is_compare_exchange(site);
+  const std::optional<uint32_t> byte_count = sampled_atomic_byte_count(source);
   const auto event_kind = moi_atomic_event_kind(source.sequence->memory_role);
   const uint32_t pending_owner_bank_count = consan_moi_sampled_pending_acquire_owner_bank_count(
       layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
@@ -336,7 +350,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       bank_count == 0u || !std::has_single_bit(bank_count) || pending_owner_bank_count == 0u ||
       selected_slot > layout.sampled_causal_window_capacity ||
       bank_count > layout.sampled_causal_window_capacity - selected_slot ||
-      !address_plan.supported() || !site.scope || site.width_bits != 32u)
+      !address_plan.supported() || !site.scope || !byte_count)
     return std::nullopt;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
@@ -350,14 +364,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (site.file_offset > bytes.size() || site.size > bytes.size() - site.file_offset)
     return std::nullopt;
 
-  const bool is_cas = is_rmw && consan_atomic_is_compare_exchange(site);
   if (is_cas &&
       (!site.data_vgpr || !site.destination_vgpr || !site.returns_old_value.value_or(false)))
     return std::nullopt;
   const auto descriptor_for = [&](ConSanMoiSampledSyncOutcome outcome) -> std::optional<uint32_t> {
     const auto encoded = encode_consan_moi_sampled_sync_metadata({
         .address = 1,
-        .byte_count = 4,
+        .byte_count = *byte_count,
         .kind = ConSanMoiSampledSyncKind::Atomic,
         .role = *role,
         .scope = *scope,
@@ -493,7 +506,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                  static_cast<uint16_t>(saved_address + 1u)))
       .require(record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
                                         offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
-                                    4u))
+                                    *byte_count))
       .require(record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
                                      offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
                                  *plan.owner_epoch_vgprs.epoch))
@@ -582,6 +595,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     uint32_t *emitted_guest_size) {
   const ConSanAtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
+  const bool is_cas = is_rmw && consan_atomic_is_compare_exchange(site);
+  const std::optional<uint32_t> byte_count = sampled_atomic_byte_count(source);
   const auto event_kind = moi_atomic_event_kind(source.sequence->memory_role);
   if (!plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
       static_cast<uint32_t>(plan.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
@@ -596,7 +611,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
-  if (!address_plan.supported() || !site.scope || site.width_bits != 32u)
+  if (!address_plan.supported() || !site.scope || !byte_count)
     return std::nullopt;
   const auto role = event_kind ? sampled_atomic_role(*event_kind, is_rmw) : std::nullopt;
   const auto scope = consan_moi_sampled_sync_scope(*site.scope);
@@ -607,7 +622,6 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   }
 
-  const bool is_cas = is_rmw && consan_atomic_is_compare_exchange(site);
   if (is_cas &&
       (!site.data_vgpr || !site.destination_vgpr || !site.returns_old_value.value_or(false))) {
     errors.emplace_back("ConSan MOI sampled atomic metadata requires an exact CAS outcome");
@@ -617,7 +631,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto descriptor_for = [&](ConSanMoiSampledSyncOutcome outcome) -> std::optional<uint32_t> {
     const ConSanMoiSampledSyncEncodeResult encoded = encode_consan_moi_sampled_sync_metadata({
         .address = 1,
-        .byte_count = 4,
+        .byte_count = *byte_count,
         .kind = ConSanMoiSampledSyncKind::Atomic,
         .role = *role,
         .scope = *scope,
@@ -816,7 +830,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
             record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address), saved_address))
         .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
                                    static_cast<uint16_t>(saved_address + 1u)))
-        .require(record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u))
+        .require(record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
+                                      *byte_count))
         .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
                                    *plan.owner_epoch_vgprs.epoch))
         .require(record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),

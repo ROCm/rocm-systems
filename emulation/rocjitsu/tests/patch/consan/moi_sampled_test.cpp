@@ -1683,6 +1683,59 @@ TEST(ConSanMoi, Gfx1250SampledAssignsDistinctWindowsToGeneratedBufferPollingLoop
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
+TEST(ConSanMoi, Gfx1250SampledPublishesWideBufferReleaseRange) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto lds_store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  std::vector<uint32_t> text_words = {
+      lds_store[0], lds_store[1], 0xC4074008u, 0x4088800Cu,
+      0x0000008Bu, // buffer_store_b128 v[12:15], v139, s[64:67], s8 offen scope:device
+      0xBF800000u, // s_nop 0
+      0xBFC00000u, // s_wait_loadcnt 0
+      0xBFC10000u, // s_wait_storecnt 0
+      0xEE0B007Cu,  0x00080000u,
+      0x00000000u, // global_wb scope:device
+  };
+  text_words.resize(800u, build_s_nop(0u, kArch));
+  text_words.back() = build_s_endpgm(kArch);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(70u);
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{42u, 43u, 44u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(8u);
+  options.max_patches = 4u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_sampled_wide_buffer_release"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.program_inventory.sync().sync_sequences,
+                                  [](const ConSanSyncSequence &sequence) {
+                                    return sequence.kind == ConSanSyncKind::OrdinaryMemory &&
+                                           sequence.memory_role == ConSanSyncMemoryRole::Release;
+                                  }));
+  const auto sync = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(sync->scratch_vgpr);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, sync->trampoline_offset, sync->trampoline_size);
+  EXPECT_EQ(count_subsequence(
+                cave, make_expected_literal_offset_store_words(
+                          offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), /*value=*/16u,
+                          /*address_vgpr=*/*sync->scratch_vgpr,
+                          /*value_vgpr=*/static_cast<uint16_t>(*sync->scratch_vgpr + 2u), kArch)),
+            1u);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
 TEST(ConSanMoi, Gfx1250SampledRelocatesBankedPollingLoopWithScalarSpill) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint8_t kEntryMode = 3u;
