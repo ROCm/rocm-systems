@@ -18,10 +18,18 @@ namespace amd::smi {
 // replaced with a symlink, redirecting the mode change to an attacker-chosen
 // file (CWE-367 / CWE-732). Returns 0 on success, -1 on error (errno set).
 inline int SetFileModeNoFollow(const char* path, mode_t mode) {
-  // NOTE: chmod() resolves symlinks, so this still follows a symlink swapped in
-  // at `path` after the file was created -- see the accompanying test, which
-  // fails here. The fix opens with O_NOFOLLOW and fchmod()s the fd.
-  return ::chmod(path, mode);
+  // O_NOFOLLOW makes the open fail if the final path component is a symlink, and
+  // fchmod() acts on the opened descriptor rather than re-resolving the path --
+  // together these close the chmod(path) TOCTOU window.
+  const int fd = ::open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) {
+    return -1;
+  }
+  const int rc = ::fchmod(fd, mode);
+  const int saved_errno = errno;
+  ::close(fd);
+  errno = saved_errno;
+  return rc;
 }
 
 }  // namespace amd::smi
