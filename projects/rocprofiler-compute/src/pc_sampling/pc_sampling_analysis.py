@@ -49,6 +49,7 @@ NORMALIZED_RECORD_COLUMNS = [
 SOURCE_LINE_MISSING = "N/A"
 
 MAX_ACTIVE_THREAD_PERCENT = 100.0
+MAX_WAVE_OCCUPANCY_PERCENT = 100.0
 
 # A kernel built for wave64 running on a device that reports a wave size of 32
 # sets more lanes than that size. Nothing in the sampled data says which wave
@@ -209,8 +210,9 @@ def aggregate_pc_sample_records(
     aggregated["active_thread_percent"] = np.minimum(
         active_thread_percent, MAX_ACTIVE_THREAD_PERCENT
     )
-    aggregated["wave_occupancy_percent"] = (
-        aggregated["wave_occupancy_percent"] / max_waves_per_cu * 100
+    aggregated["wave_occupancy_percent"] = np.minimum(
+        aggregated["wave_occupancy_percent"] / max_waves_per_cu * 100,
+        MAX_WAVE_OCCUPANCY_PERCENT,
     )
     return aggregated
 
