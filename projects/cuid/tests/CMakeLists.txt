@@ -52,6 +52,7 @@ set(TEST_SOURCES_ROOT
 set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_exclusive_file_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/file_lock_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc
