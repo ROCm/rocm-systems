@@ -206,10 +206,34 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
     return false;
   }
-  if (guest_first &&
-      !append_sampled_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
-                                   leading_guest_words, trailing_guest_words, emitted_guest_size))
+  const bool wraps_banked_polling_loop =
+      source.relocates_polling_loop() && plan.polling_loop_entry_vgpr_bank_mode.has_value();
+  const uint8_t polling_loop_entry_mode =
+      static_cast<uint8_t>(plan.polling_loop_entry_vgpr_bank_mode.value_or(0u));
+  const auto append_guest = [&]() {
+    if (wraps_banked_polling_loop && !guest_first && polling_loop_entry_mode != 0u) {
+      const auto restore_entry = instrumentation::build_s_set_vgpr_msb_transition(
+          /*previous_mode=*/0u, polling_loop_entry_mode, arch);
+      if (!restore_entry)
+        return false;
+      words.push_back(*restore_entry);
+    }
+    return append_sampled_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
+                                       leading_guest_words, trailing_guest_words,
+                                       emitted_guest_size);
+  };
+  if (guest_first && !append_guest())
     return false;
+  // A guest-first polling loop establishes bank zero itself before any spill
+  // or instrumentation. Otherwise, select the scratch bank before preserving
+  // registers and restore the original entry mode only around the guest span.
+  if (wraps_banked_polling_loop && !guest_first && polling_loop_entry_mode != 0u) {
+    const auto select_scratch = instrumentation::build_s_set_vgpr_msb_transition(
+        polling_loop_entry_mode, /*new_mode=*/0u, arch);
+    if (!select_scratch)
+      return false;
+    words.push_back(*select_scratch);
+  }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -278,9 +302,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   }
   if (!guest_first) {
     if (!defer_guest) {
-      if (!append_sampled_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
-                                       leading_guest_words, trailing_guest_words,
-                                       emitted_guest_size))
+      if (!append_guest())
         return false;
     }
     if (guest_preserves_address) {

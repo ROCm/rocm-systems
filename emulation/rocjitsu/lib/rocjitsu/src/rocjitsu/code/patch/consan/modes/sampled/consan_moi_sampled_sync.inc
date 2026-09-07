@@ -66,6 +66,7 @@ struct SampledBarrierCandidate {
       .workgroup_sources = *workgroup_sources,
       .owner_epoch_vgprs = owner_epoch_vgprs,
       .scratch_vgpr = scratch_vgpr,
+      .polling_loop_entry_vgpr_bank_mode = std::nullopt,
   };
 }
 using SampledCfgDistance = MoiCfgDistance;
@@ -1264,6 +1265,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> leading_guest_words;
     std::vector<uint32_t> trailing_guest_words;
     ConSanMoiOperatingPoint point;
+    std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
     bool composes_access_fragment = false;
   };
   std::vector<Planned> selected;
@@ -1310,16 +1312,26 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
                   trailing_guest_words.size() * sizeof(uint32_t));
     }
+    std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
     if (relocates_polling_loop && target_profile->has_selectable_vgpr_bank) {
       const ConSanProgramContainer *container =
           resolve_moi_evidence_container(result.program_inventory, candidate.atomic.source_site);
-      if (container == nullptr ||
-          consan_selectable_vgpr_bank_mode_at(arch, bytes, container->text_file_offset,
-                                              container->entry_text_offset,
-                                              candidate.source.patch_file_offset())
-                  .value_or(0u) != 0u) {
+      if (container != nullptr) {
+        polling_loop_entry_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+            arch, bytes, container->text_file_offset, container->entry_text_offset,
+            candidate.source.patch_file_offset());
+      }
+      const auto polling_loop_exit_vgpr_bank_mode =
+          container != nullptr
+              ? consan_selectable_vgpr_bank_mode_at(
+                    arch, bytes, container->text_file_offset, container->entry_text_offset,
+                    candidate.source.patch_file_offset() + relocated_guest_size)
+              : std::nullopt;
+      if (!polling_loop_entry_vgpr_bank_mode || !polling_loop_exit_vgpr_bank_mode ||
+          *polling_loop_exit_vgpr_bank_mode != 0u) {
         result.warnings.emplace_back(
-            "ConSan MOI sampled atomic sync requires a low-bank polling-loop entry");
+            "ConSan MOI sampled atomic sync requires a known entry and low-bank polling-loop "
+            "exit");
         continue;
       }
     }
@@ -1411,7 +1423,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     selected.push_back({std::move(*probe), std::move(candidate), *owner_descriptor, address_plan,
                         physical_anchor_offset, relocated_guest_size,
                         std::move(leading_guest_words), std::move(trailing_guest_words),
-                        std::move(candidate_point),
+                        std::move(candidate_point), polling_loop_entry_vgpr_bank_mode,
                         composed_access_fragment != result.staged_text_fragments.end()});
   }
   if (selected.empty()) {
@@ -1430,7 +1442,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       return;
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                planned.point, mode_semantics, arch);
-    const auto emission_plan = plan_sampled_sync_emission(
+    auto emission_plan = plan_sampled_sync_emission(
         options, options, planned.point, result.moi_operating_point,
         planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
@@ -1439,6 +1451,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         /*transient_assignment_already_resolved=*/true, "sampled atomic sync", result.errors);
     if (!emission_plan)
       return;
+    emission_plan->polling_loop_entry_vgpr_bank_mode = planned.polling_loop_entry_vgpr_bank_mode;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;
     auto words = planned.candidate.deferred_acquire

@@ -30,6 +30,10 @@ struct MoiSampledSyncEmissionPlan {
   ConSanMoiWorkgroupSources workgroup_sources;
   ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
   uint16_t scratch_vgpr = 0;
+  /// Selectable-bank state at a relocated polling-loop header. Such a loop is
+  /// admitted only when its complete relocated span is proven to exit in bank
+  /// zero, which is the state required by the following instrumentation.
+  std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
 };
 
 /// Sampled atomic scratch ABI owned jointly by its planner and emitter.

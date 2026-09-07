@@ -1601,6 +1601,96 @@ TEST(ConSanMoi, Gfx1250SampledAssignsDistinctWindowsToGeneratedBufferPollingLoop
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
+TEST(ConSanMoi, Gfx1250SampledRelocatesBankedPollingLoopWithScalarSpill) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kEntryMode = 3u;
+  constexpr size_t kRetryBranchWord = 23u;
+  constexpr std::array<uint32_t, 27> polling_loop = {
+      0x84188209u, 0xBF860000u, 0x7E0A0280u, 0xBE9C0132u, 0xBE9E00FFu, 0xFFFFF000u, 0xBE9F0080u,
+      0x8B05FF1Eu, 0x0000007Fu, 0xBF870009u, 0x84059905u, 0x8B1DFF1Du, 0x01FFFFFFu, 0xBF870009u,
+      0x8C1D051Du, 0x851E871Eu, 0xBFC50000u, 0xC4050018u, 0x40883804u,
+      0x00000005u, // buffer_load_b32 v4, v5, s[28:31], s24 offen scope:device
+      0xBFC00000u, // s_wait_loadcnt 0
+      0x7E340504u, // v_readfirstlane_b32 s26, v4
+      0xBF06811Au, // s_cmp_eq_u32 s26, 1
+      0xBFA1FFE8u, // s_cbranch_scc0 to the address-setup loop header
+      0xEE0AC07Cu, 0x00080000u,
+      0x00000000u, // global_inv scope:device
+  };
+  std::vector<uint32_t> text_words = {
+      *build_gfx1250_s_set_vgpr_msb(kEntryMode, kArch),
+  };
+  text_words.insert(text_words.end(), polling_loop.begin(), polling_loop.end());
+  const auto read = instrumentation::build_ds_load_b32(
+      /*vdst=*/4u, /*vaddr=*/2u, /*byte_offset=*/4u, kArch);
+  ASSERT_TRUE(read);
+  text_words.insert(text_words.end(), read->begin(), read->end());
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) == dead_router_sgprs.end())
+      text_words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, kArch));
+  }
+  text_words.resize(1200u, build_s_nop(0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(
+      text_words, "gfx1250_sampled_banked_buffer_poll", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 40u;
+  options.set_moi_owner_epoch_vgprs(60u, 61u);
+  options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{62u, 63u, 64u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(4u);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.test_force_vgpr_spill = true;
+  options.moi_runtime_sample_stride = 1u;
+  options.max_patches = 4u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().spill_backed);
+  const auto sync = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(sync->anchor_offset, sizeof(uint32_t));
+  EXPECT_EQ(sync->original_size, polling_loop.size() * sizeof(uint32_t));
+  ASSERT_TRUE(sync->relocated_guest_instruction_offset);
+
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, sync->trampoline_offset, sync->trampoline_size);
+  const size_t guest_word =
+      (*sync->relocated_guest_instruction_offset - sync->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_LE(guest_word + polling_loop.size(), cave.size());
+  EXPECT_EQ(cave[guest_word - 1u],
+            *build_gfx1250_s_set_vgpr_msb_transition(/*previous_mode=*/0u, kEntryMode, kArch));
+  const auto relocated = std::span<const uint32_t>(cave).subspan(guest_word, polling_loop.size());
+  EXPECT_TRUE(std::ranges::equal(relocated.first(kRetryBranchWord),
+                                 std::span<const uint32_t>(polling_loop).first(kRetryBranchWord)));
+  EXPECT_EQ(relocated[kRetryBranchWord] & 0xffff0000u,
+            polling_loop[kRetryBranchWord] & 0xffff0000u);
+  EXPECT_TRUE(
+      std::ranges::equal(relocated.subspan(kRetryBranchWord + 1u),
+                         std::span<const uint32_t>(polling_loop).subspan(kRetryBranchWord + 1u)));
+  const int64_t relocated_retry_target =
+      static_cast<int64_t>(kRetryBranchWord + 1u) +
+      static_cast<int16_t>(relocated[kRetryBranchWord] & 0xffffu);
+  EXPECT_EQ(relocated_retry_target, 0);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+}
+
 TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
   constexpr std::array<uint32_t, 2> kGlobalLoad = {
       0xDE508004u,
