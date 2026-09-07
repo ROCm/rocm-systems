@@ -120,6 +120,8 @@ target_link_libraries(${AMDCUID_TST_EXECUTABLE} amdcuid_static GTest::gtest Thre
 # Register two CTest targets split by privilege level.
 add_test(NAME cuid_unprivileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstUnprivileged.*)
 add_test(NAME cuid_privileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstPrivileged.*)
+# Standalone host-only suites that are not privilege-split.
+add_test(NAME cuid_exclusive_file_test COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=CuidCreateExclusiveFileTest.*)
 
 # Platform-specific config directory
 if(WIN32)
