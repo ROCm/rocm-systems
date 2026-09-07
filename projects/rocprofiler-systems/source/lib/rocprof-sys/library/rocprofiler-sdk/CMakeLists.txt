@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-#
 set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/counters.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fwd.cpp
@@ -21,6 +20,9 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/trace_control.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl_internal.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/types.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/buffered_domain.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/callback_domain.hpp
 )
 
 target_sources(
