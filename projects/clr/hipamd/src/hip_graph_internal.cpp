@@ -2964,6 +2964,12 @@ hipError_t Graph::RunOneNode(Node node) {
       releaseWaitOrderCommands();
       return status;
     }
+    // All of them, before enqueue: a consumer waits on all of them.  A command with no
+    // completion signal is covered instead by the marker Event::notifyCmdQueue() adds.
+    const bool cross_stream = cross_stream_producers_.count(node) != 0;
+    for (auto command : node->GetCommands()) {
+      command->setCrossStreamProducer(cross_stream);
+    }
     // If a wait was requested, then process the list
     if (node->GetWait() && !waitList.empty()) {
       node->UpdateEventWaitLists(waitList);
@@ -3012,11 +3018,39 @@ hipError_t Graph::RunOneNode(Node node) {
   return hipSuccess;
 }
 
+// The nodes whose completion another stream waits on.  A hint: a missing entry costs a host
+// resident wait, an extra one costs a barrier packet.  Known before a producer is enqueued,
+// because by the time a consumer discovers the edge its producer has been submitted.
+void Graph::FindCrossStreamProducers(int32_t base_stream) {
+  cross_stream_producers_.clear();
+  for (auto node : vertices_) {
+    // A dependency that crosses a stream id, less child graph nodes, whose completion command
+    // RunOneNode() collects only after the child has been enqueued.
+    for (auto dep : node->GetDependencies()) {
+      if (dep->stream_id_ != node->stream_id_ && dep->GetType() != hipGraphNodeTypeGraph) {
+        cross_stream_producers_.insert(dep);
+      }
+    }
+    // The join at the bottom of RunNodes() waits on each other stream's last leaf.  Which leaf
+    // that is depends on traversal order, so mark every leaf off the base stream.
+    if (node->GetEdges().empty() && node->stream_id_ != base_stream) {
+      cross_stream_producers_.insert(node);
+    }
+  }
+}
+
 // ================================================================================================
 hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
                            const amd::Command::EventWaitList* parent_waitlist) {
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
+  }
+  // Computed once per base stream: rebuilding it per launch would put a container
+  // clear/insert on a path that takes no lock.  Safe only because a graph has one pending
+  // launch at a time.
+  if (cross_stream_base_ != base_stream) {
+    FindCrossStreamProducers(base_stream);
+    cross_stream_base_ = base_stream;
   }
 
   // childgraph node has dependencies on parent graph nodes from other streams
