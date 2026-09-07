@@ -17,6 +17,8 @@
 
 #include "NetIbMPITestBase.hpp"
 
+#include <hsa/hsa_ext_amd.h>
+
 #ifdef MPI_TESTS_ENABLED
 
 namespace {
@@ -37,20 +39,47 @@ protected:
         return !v || atoi(v) != 0;
     }
 
-    bool gdrSupported() {
+    int gdrPtrSupport() {
         ncclNetProperties_t props;
-        if (GetDeviceProperties(0, &props) != ncclSuccess) return false;
-        return (props.ptrSupport & NCCL_PTR_CUDA) != 0;
+        if (GetDeviceProperties(0, &props) != ncclSuccess) return 0;
+        return props.ptrSupport & (NCCL_PTR_CUDA | NCCL_PTR_DMABUF);
+    }
+
+    // Registers a GPU buffer for GDR: through regMr() where peermem is available,
+    // otherwise through a dma-buf export. The export offset is taken for the
+    // page-aligned base, because ncclIbRegMrDmaBuf aligns the address down itself.
+    ncclResult_t RegisterGdrMemory(void* comm, void* buffer, size_t size, void** mhandle) {
+        if (gdrPtrSupport() & NCCL_PTR_CUDA)
+            return RegisterMemory(comm, buffer, size, NCCL_PTR_CUDA, mhandle);
+
+        const uintptr_t pageSize = sysconf(_SC_PAGESIZE);
+        const uintptr_t alignedAddr = reinterpret_cast<uintptr_t>(buffer) & ~(pageSize - 1);
+        const size_t alignedSize =
+            (reinterpret_cast<uintptr_t>(buffer) + size - alignedAddr + pageSize - 1) & ~(pageSize - 1);
+
+        int fd = -1;
+        uint64_t exportOffset = 0;
+        hsa_status_t exportStatus = hsa_amd_portable_export_dmabuf(reinterpret_cast<const void*>(alignedAddr),
+                                                                   alignedSize, &fd, &exportOffset);
+        if (exportStatus != HSA_STATUS_SUCCESS || fd < 0) {
+            ADD_FAILURE() << "hsa_amd_portable_export_dmabuf failed: hsa_status=" << exportStatus;
+            return ncclSystemError;
+        }
+
+        ncclResult_t res = RegisterDmaBufMemory(comm, buffer, size, NCCL_PTR_CUDA, exportOffset, fd, mhandle);
+        (void)close(fd);
+
+        return res;
     }
 
     // Runs `iterations` of GPU recv + flush across 2 ranks on device 0.
     // rank 0 = receiver + flush, rank 1 = sender. Returns rank 0's last flush
     // completion result via `rank0LastFlush` (may be null).
     //
-    // The data buffer is plain hipMalloc so the whitebox regMr(NCCL_PTR_CUDA)
-    // succeeds (raw VMM pointers require regMrDmaBuf). The exercised scratchpad is
-    // the recv comm's INTERNAL gpuFlush, which becomes dma-buf-backed purely from
-    // NCCL_CUMEM_ENABLE=1 - independent of the data buffer's allocator.
+    // The data buffer is plain hipMalloc, registered through RegisterGdrMemory. The
+    // exercised scratchpad is the recv comm's INTERNAL gpuFlush, which becomes
+    // dma-buf-backed purely from NCCL_CUMEM_ENABLE=1 - independent of how the data
+    // buffer is allocated or registered.
     void RunRecvFlushBurst(int iterations, bool verifyData,
                            ncclResult_t* rank0LastFlush) {
         const int rank = MPIEnvironment::world_rank;
@@ -68,7 +97,7 @@ protected:
 
         void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         void* mhandle = nullptr;
-        EXPECT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
+        EXPECT_EQ(RegisterGdrMemory(comm, buffer, bufferSize, &mhandle), ncclSuccess);
         NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
         ncclResult_t lastFlush = ncclSuccess;
@@ -129,7 +158,7 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
                                           false, kMinGpusPerNode, kNoNodeLimit));
     if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
+    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
     RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
@@ -144,7 +173,8 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
                                           false, kMinGpusPerNode, kNoNodeLimit));
     if (cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
+    if (!(gdrPtrSupport() & NCCL_PTR_CUDA))
+        GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
 
     ncclResult_t flush = ncclSuccess;
     RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
@@ -160,7 +190,7 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (scratchpadFlushEnabled())
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
+    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
     RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
@@ -174,7 +204,7 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
+    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
     RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false, &flush);
