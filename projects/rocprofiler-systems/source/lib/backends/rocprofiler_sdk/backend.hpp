@@ -174,6 +174,10 @@ struct backend
         Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 #endif
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
