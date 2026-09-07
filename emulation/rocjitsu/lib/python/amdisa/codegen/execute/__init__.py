@@ -208,13 +208,21 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
     )
     DISPATCH['vector_qsad'] = lambda c: gen_vector_qsad(
-        c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.profile.uses_vgpr_msb_indexing,
+        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
-        c.dst_ops, c.src_ops, c.dtype, c.result_writer
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        c.result_writer,
+        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3
@@ -309,6 +317,7 @@ def _register_handlers() -> None:
         c.dtype,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['pk_fmac_vop2'] = lambda c: (
         gen_pk_fmac_vop3(c.dst_ops, c.src_ops)
