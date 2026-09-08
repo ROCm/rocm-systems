@@ -276,6 +276,7 @@ if(BUILD_TESTS)
   # of this; the other 36 need fakes written.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
+    collectives-test.cc
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -328,7 +329,8 @@ if(BUILD_TESTS)
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc"
+    COLLECTIVES_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/collectives.cc")
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
   foreach(_hip_tgt hip::host hip::device)
     if(TARGET ${_hip_tgt})
@@ -767,6 +769,7 @@ endforeach()
 # Same --gc-sections coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/collectives-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
@@ -829,6 +832,7 @@ foreach(_enq_variant "" "-devlinker")
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+    COLLECTIVES_CC_PATH="${RCCL_HIPIFY_DIR}/src/collectives.cc"
   )
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
