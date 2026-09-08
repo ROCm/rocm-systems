@@ -115,7 +115,10 @@ struct TrampolinePlan {
   bool preserve_vcc = false;
   bool preserve_m0 = false;
   std::vector<SpecialStateSlot> special_state_saves; ///< Filled by plan_probe_call.
-  RegisterSet builder_clobbers;     ///< {link} | {target pair} | {scc/special temps}; feeds spill.
+  /// {link} | {target pair} | {scc/special temps} | {argument VGPRs}; feeds spill.
+  /// The argument VGPRs are the only member not chosen dead -- the ABI fixes them
+  /// -- so they are the only one that can intersect the live set.
+  RegisterSet builder_clobbers;
   uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 

@@ -57,7 +57,6 @@ constexpr uint32_t kGuestValue = 7;
 // searching the patched text for it.
 constexpr uint32_t kArgSentinel = 0xA5A5A5A5u;
 
-
 // Per-arch knobs: the sim/config arch string, the code arch (for builders), the
 // ELF machine flag, and the wavefront size.
 struct ArgSimArch {
@@ -80,11 +79,13 @@ inline constexpr ArgSimArch kRdna4ArgArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
 // VGPR budget, a patch-time constraint only: make_amdgpu_kernel_elf defaults to
 // 8 unified VGPRs with the AGPR window at v4, so the kernel owns v0..v3 as
 // ordinary VGPRs, and one argument in v0 plus the probe's v3 both fit. A fixture
-// wanting more arguments, or a probe scratch register at v4 or above, must pass
-// a larger granulated_vgpr_count -- otherwise the orchestrator's ownership gate
-// rejects the site in SetUp and the test fails for the wrong reason. Execution
-// is unaffected either way: DbiSim dispatches its own descriptor with the full
-// register file (see dbi_sim.h).
+// passing more than four argument dwords must raise granulated_vgpr_count, or
+// the orchestrator's argument-ownership gate rejects the site in SetUp and the
+// test fails for the wrong reason. Note that gate covers the *argument* VGPRs
+// only -- nothing checks a probe body's own clobbers against the bound, so a
+// probe scratch register at v4 or above is accepted here rather than rejected.
+// Execution is unaffected either way: DbiSim dispatches its own descriptor with
+// the full register file (see dbi_sim.h).
 class DbiArgSimBase : public ::testing::Test {
 protected:
   explicit DbiArgSimBase(const ArgSimArch &a) : a_(a) {}
@@ -139,7 +140,8 @@ protected:
     ASSERT_EQ(v1.size(), a_.wave_size);
 
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
-      EXPECT_EQ(v3[lane], kArgSentinel) << "lane " << lane << ": probe did not receive its argument";
+      EXPECT_EQ(v3[lane], kArgSentinel)
+          << "lane " << lane << ": probe did not receive its argument";
       EXPECT_EQ(v1[lane], kGuestValue)
           << "lane " << lane << ": the guest's v0 did not survive carrying the argument";
     }

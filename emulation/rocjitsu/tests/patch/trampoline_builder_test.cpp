@@ -559,25 +559,38 @@ RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
 // Each argument costs a v_mov_b32 plus its literal word. The count is what the
 // orchestrator sizes the trampoline from, and what the emit-time drift guard
 // checks the synthesized envelope against.
-TEST(TrampolineBuilderPlan, EachArgumentAddsTwoEnvelopeWords) {
+// Each argument costs a v_mov_b32 plus its literal word, and passing any
+// argument at all opens the full-mask window (three EXEC toggles) so the writes
+// define every lane. Both components are in the count the orchestrator sizes the
+// trampoline from and the emit-time drift guard checks against.
+TEST(TrampolineBuilderPlan, ArgumentsAddTwoWordsEachPlusTheFullMaskWindow) {
   TrampolinePlan none;
+  none.arch = ROCJITSU_CODE_ARCH_CDNA2;
   std::string err;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(none, arg_abi(0), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
 
   TrampolinePlan three;
+  three.arch = ROCJITSU_CODE_ARCH_CDNA2;
   three.probe_args = {1u, 2u, 3u};
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(three, arg_abi(3), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
-  EXPECT_EQ(three.before_word_count, none.before_word_count + 6);
+  constexpr uint32_t kArgWords = 3 * 2;
+  constexpr uint32_t kExecToggles = 3;
+  constexpr uint32_t kExecSaveRestore = 2; // the EXEC temp's s_mov pair
+  EXPECT_EQ(three.before_word_count,
+            none.before_word_count + kArgWords + kExecToggles + kExecSaveRestore);
 }
 
 // The envelope writes the argument VGPRs, so they are builder clobbers and the
 // orchestrator's spill set picks them up when they are live.
 TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
   TrampolinePlan plan;
+  // An argument-passing plan reserves the EXEC temp, which resolves a per-arch
+  // operand code, so unlike a bare no-argument plan it is not arch-agnostic.
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
   plan.probe_args = {7u, 8u};
   std::string err;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
@@ -588,11 +601,11 @@ TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
   EXPECT_FALSE(plan.builder_clobbers.contains(RegisterRef{RegClass::VGPR, 2, 1}));
 }
 
-// Unlike the SGPR temps, the argument VGPRs are fixed by the ABI rather than
-// chosen dead, so one can be live at the anchor. That has to force the EXEC save
-// that bracketing the spill stores requires -- the probe body clobbering nothing
-// is not enough to conclude the site does not spill.
-TEST(TrampolineBuilderPlan, LiveArgumentVgprForcesTheExecSave) {
+// Passing arguments opens the full-mask window so every lane's copy is defined,
+// which needs the EXEC temp to restore the anchor mask from. Reserved whether or
+// not the site spills: a probe reading an argument through an EXEC-independent
+// op would otherwise see the guest's value in the inactive lanes.
+TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
   auto exec_saved = [](const TrampolinePlan &plan) {
     for (const SpecialStateSlot &s : plan.special_state_saves)
       if (s.operand == scalar_operand_exec_lo(plan.arch))
@@ -601,13 +614,21 @@ TEST(TrampolineBuilderPlan, LiveArgumentVgprForcesTheExecSave) {
   };
 
   std::string err;
+  TrampolinePlan no_args;
+  no_args.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(no_args, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_FALSE(exec_saved(no_args)) << "a no-argument, no-spill site needs no EXEC temp";
+
+  // Nothing live, nothing the probe clobbers -- the site still opens the window.
   TrampolinePlan dead_arg;
   dead_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
   dead_arg.probe_args = {1u};
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(dead_arg, arg_abi(1), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
-  EXPECT_FALSE(exec_saved(dead_arg));
+  EXPECT_TRUE(exec_saved(dead_arg));
 
   TrampolinePlan live_arg;
   live_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
@@ -709,11 +730,13 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
   EXPECT_EQ(decode_sop1_ssrc0(swappc), plan.target_pair_base);
 }
 
-// Arguments are materialized in the words immediately preceding the call, in
-// declaration order from the ABI's base VGPR. Position matters: after the spill
-// stores and after the anchor-EXEC restore, so a live argument VGPR is already
-// saved and the writes land under the guest's mask.
-TEST(TrampolineBuilderEmit, MaterializesArgumentsImmediatelyBeforeTheCall) {
+// Arguments are materialized in declaration order from the ABI's base VGPR, and
+// inside the full-mask window: after the `exec, -1` widen and immediately before
+// the anchor-EXEC restore. That is what defines the argument in every lane
+// rather than only the lanes active at the anchor. Emitting them after the
+// restore -- the obvious "just before the call" position -- would leave the
+// inactive lanes holding whatever the guest left there.
+TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   TrampolinePlan plan = make_probe_plan();
   plan.probe_args = {0xAAAA0000u, 0xBBBB1111u};
   std::string err;
@@ -724,21 +747,34 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsImmediatelyBeforeTheCall) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
-           decode_sop1_sdst(word) == plan.link_pair_base;
-  });
-  ASSERT_NE(swappc, w.end());
+  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  ASSERT_NE(widen_at, w.end()) << "no full-mask widen; an argument site must open the window";
 
-  // Two arguments, two words each, ending where the call begins.
-  const auto args_begin = swappc - 4;
-  ASSERT_GE(args_begin - w.begin(), 0);
+  // The anchor-mask restore closing the window is the next EXEC write after it.
+  const auto restore_at = std::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
+  });
+  ASSERT_NE(restore_at, w.end());
+
+  // Two arguments, two words each, ending where the window closes.
+  const auto args_begin = restore_at - 4;
+  ASSERT_GT(args_begin - widen_at, 0) << "argument writes must fall inside the window";
   const auto arg0 = build_v_mov_b32_imm(0, 0xAAAA0000u, plan.arch);
   const auto arg1 = build_v_mov_b32_imm(1, 0xBBBB1111u, plan.arch);
   EXPECT_EQ(args_begin[0], arg0[0]);
   EXPECT_EQ(args_begin[1], arg0[1]);
   EXPECT_EQ(args_begin[2], arg1[0]);
   EXPECT_EQ(args_begin[3], arg1[1]);
+
+  // And still before the call.
+  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+           decode_sop1_sdst(word) == plan.link_pair_base;
+  });
+  ASSERT_NE(swappc, w.end());
+  EXPECT_LT(restore_at - w.begin(), swappc - w.begin());
 }
 
 // A call passing nothing emits no argument words at all -- the v0 write that a
