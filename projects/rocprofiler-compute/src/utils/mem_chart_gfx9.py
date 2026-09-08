@@ -325,19 +325,10 @@ def _build_request_edges(
 def _format_supporting_display(
     supporting: tuple,
 ) -> tuple[Any, str]:
-    """Format supporting metrics for chart annotation.
-
-    Single metric: returns (value, "%").
-    Multiple metrics: returns (pipe-joined string, "").
-    """
+    """Format the single supporting metric for chart annotation."""
     if not supporting:
         return (None, "%")
-    if len(supporting) == 1:
-        return (supporting[0].value, "%")
-    return (
-        " | ".join(s.display for s in supporting),
-        "",
-    )
+    return (supporting[0].value, "%")
 
 
 def _collect_stall_rows(
