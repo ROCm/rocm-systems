@@ -165,7 +165,19 @@ namespace RcclUnitTesting
       return isMatch ? TEST_SUCCESS : TEST_FAIL;
     }
 
-    CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+    if (this->funcType == ncclCollRecv && numOutputBytes != 0)
+    {
+      PtrUnion staging;
+      CHECK_HIP(hipHostMalloc(&staging.ptr, numOutputBytes));
+      CHECK_HIP(hipMemcpy(staging.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+      CHECK_HIP(hipDeviceSynchronize());
+      memcpy(this->outputCpu.ptr, staging.ptr, numOutputBytes);
+      CHECK_HIP(hipHostFree(staging.ptr));
+    }
+    else
+    {
+      CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+    }
 
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
