@@ -65,12 +65,9 @@ Every fixture runs as an uninstrumented baseline and under SuperCollider,
 Record/Replay, Sampled, and Inline Shadow. The common matrix is registered for
 CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
-path is part of this tier. CDNA4 additionally runs the identical contract on a
-physical `gfx950`, followed by an ordered uninstrumented health check. The
-Slice 0 registered matrix contains 2,908 simulator cases and 593 physical
-cases, for 3,501 total. The current whole-matrix qualification evidence and
-its wall, CPU, and aggregate process-duration accounting are maintained in
-[PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
+path is part of this tier. A matching physical target runs the same contract,
+followed by an ordered uninstrumented health check. Current qualification
+results are maintained in the per-target status ledgers linked above.
 
 The initial target-capability disposition is:
 

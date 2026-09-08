@@ -10,8 +10,6 @@ migration seam. The design is deliberately organized around target-independent
 semantic contracts. Target-specific code is restricted to facts and mechanics
 that genuinely differ between GPU instruction sets or kernel ABIs.
 
-[PRODUCTION_DESIGN.md](PRODUCTION_DESIGN.md) records the reasoning and the
-incremental migration plan that produced these boundaries.
 [CAPABILITIES.md](CAPABILITIES.md) is the detailed target/engine capability
 matrix. [FLAVORS.md](FLAVORS.md) compares the four engines operationally, and
 [SPILLING.md](SPILLING.md) covers register ownership and spilling in depth.
