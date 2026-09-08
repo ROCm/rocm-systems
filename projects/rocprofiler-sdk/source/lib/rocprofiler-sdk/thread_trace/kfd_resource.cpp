@@ -22,8 +22,6 @@
 
 #include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
 
-#include "lib/aqlprofile/core/amd_aql_pm4_ib_packet.h"
-#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
@@ -64,7 +62,6 @@ constexpr size_t   AQL_QUEUE_PACKETS         = 512;
 constexpr size_t   AQL_QUEUE_SIZE            = AQL_PACKET_SIZE * AQL_QUEUE_PACKETS;
 constexpr size_t   SDMA_QUEUE_MIN_SIZE       = 64 * 1024;
 constexpr size_t   SDMA_MAX_COPY_SIZE        = 0x3FFFFFFF;
-constexpr size_t   CP_DMA_MAX_COPY_SIZE      = (1 << 26) - 1;
 constexpr uint32_t SDMA_OP_COPY              = 1;
 constexpr uint32_t SDMA_OP_FENCE             = 5;
 constexpr uint32_t SDMA_OP_GCR               = 17;
@@ -72,9 +69,6 @@ constexpr uint32_t SDMA_SUBOP_USER_GCR       = 1;
 constexpr uint32_t SDMA_MEMORY_SCOPE_SYSTEM  = 3;
 constexpr uint32_t KFD_QUEUE_PRIORITY_NORMAL = 7;
 constexpr uint32_t KFD_QUEUE_PRIORITY_MAX    = 15;
-constexpr uint32_t PM4_OP_INDIRECT_BUFFER    = 0x3F;
-constexpr uint32_t PM4_OP_DMA_DATA           = 0x50;
-constexpr uint32_t PM4_OP_ACQUIRE_MEM        = 0x58;
 
 // Upper bounds on the per-CU wave state, used only when KFD does not report the
 // context-save size. They are deliberately the largest values across supported GPUs
@@ -218,12 +212,6 @@ high32(const void* ptr)
     return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr) >> 32);
 }
 
-uint32_t
-packet3_header(uint32_t opcode, size_t packet_dwords)
-{
-    return (3u << 30) | (opcode << 8) | (static_cast<uint32_t>(packet_dwords - 2) << 16);
-}
-
 uint64_t
 load_acquire(const volatile uint64_t* ptr)
 {
@@ -362,52 +350,6 @@ struct sdma_builder_t
     size_t                 offset{0};
 };
 
-struct cp_dma_builder_t
-{
-    cp_dma_builder_t(uint32_t* storage, size_t storage_capacity)
-    : words{storage}
-    , capacity{storage_capacity}
-    {}
-
-    void append(uint32_t value)
-    {
-        if(offset >= capacity) throw std::runtime_error{"KFD CP DMA command buffer overflow"};
-        words[offset++] = value;
-    }
-
-    void append_acquire()
-    {
-        append(packet3_header(PM4_OP_ACQUIRE_MEM, 8));
-        append(0);
-        append(0);
-        append(0);
-        append(0);
-        append(0);
-        append(4);        // poll interval
-        append(1 << 15);  // GL2 writeback
-    }
-
-    void append_copy(void* dst, const void* src, size_t size, bool last)
-    {
-        if(size == 0 || size > CP_DMA_MAX_COPY_SIZE)
-            throw std::runtime_error{"invalid KFD CP DMA linear-copy size"};
-
-        append(packet3_header(PM4_OP_DMA_DATA, 7));
-        append((3u << 20) | (3u << 29));  // Source and destination addresses use L2.
-        append(low32(src));
-        append(high32(src));
-        append(low32(dst));
-        append(high32(dst));
-        append(static_cast<uint32_t>(size) & 0x3FFFFFFu);
-        if(!last) words[offset - 1] |= (1u << 31);  // Disable write confirmation until last.
-    }
-
-    size_t size_words() const { return offset; }
-
-    uint32_t* words{nullptr};
-    size_t    capacity{0};
-    size_t    offset{0};
-};
 }  // namespace
 
 struct kfd_memory_pool_t::impl
@@ -918,26 +860,13 @@ struct direct_queue_t
 
 struct kfd_aql_queue_t::impl
 {
-    impl(std::shared_ptr<kfd_memory_pool_t> memory, size_t max_copy_size)
+    explicit impl(std::shared_ptr<kfd_memory_pool_t> memory)
     : queue{std::move(memory), KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, AQL_QUEUE_SIZE}
-    , major{gfx_major(queue.memory->gfx_target_version())}
     {
-        if(max_copy_size > 0)
-        {
-            const auto packets = std::max<size_t>(
-                1, (max_copy_size + CP_DMA_MAX_COPY_SIZE - 1) / CP_DMA_MAX_COPY_SIZE);
-            copy_command_capacity = packets * 7 + ((major >= 12) ? 8 : 0);
-            copy_commands         = static_cast<uint32_t*>(queue.memory->allocate(
-                copy_command_capacity * sizeof(uint32_t), kfd_memory_kind_t::host));
-        }
         write_index = load_acquire(queue.wptr);
     }
 
-    ~impl()
-    {
-        ROCP_INFO << "Deleting queue impl";
-        queue.memory->deallocate(copy_commands);
-    }
+    ~impl() { ROCP_INFO << "Deleting queue impl"; }
 
     void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
     {
@@ -965,14 +894,11 @@ struct kfd_aql_queue_t::impl
 
     direct_queue_t queue;
     uint64_t       write_index{0};
-    uint32_t       major{0};
-    uint32_t*      copy_commands{nullptr};
-    size_t         copy_command_capacity{0};
     std::mutex     mutex{};
 };
 
-kfd_aql_queue_t::kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory, size_t max_copy_size)
-: _impl{std::make_unique<impl>(std::move(memory), max_copy_size)}
+kfd_aql_queue_t::kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory)
+: _impl{std::make_unique<impl>(std::move(memory))}
 {}
 
 kfd_aql_queue_t::~kfd_aql_queue_t() { ROCP_INFO << "Deleting queue"; }
@@ -982,50 +908,6 @@ kfd_aql_queue_t::submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t
 {
     auto lock = std::unique_lock{_impl->mutex};
     _impl->submit(packet, completion);
-}
-
-void
-kfd_aql_queue_t::copy(void* dst, const void* src, size_t size, kfd_signal_t& completion)
-{
-    if(size == 0) return;
-
-    auto lock = std::unique_lock{_impl->mutex};
-    if(_impl->copy_commands == nullptr)
-        throw std::runtime_error{"KFD CP DMA copy storage was not configured"};
-
-    auto builder = cp_dma_builder_t{_impl->copy_commands, _impl->copy_command_capacity};
-    if(_impl->major >= 12) builder.append_acquire();
-
-    size_t copied = 0;
-    while(copied < size)
-    {
-        const auto chunk = std::min(size - copied, CP_DMA_MAX_COPY_SIZE);
-        builder.append_copy(static_cast<char*>(dst) + copied,
-                            static_cast<const char*>(src) + copied,
-                            chunk,
-                            copied + chunk == size);
-        copied += chunk;
-    }
-
-    auto packet = amd_aql_pm4_ib_packet_t{};
-    packet.header =
-        static_cast<uint16_t>((HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
-                              (1u << HSA_PACKET_HEADER_BARRIER));
-    packet.pm4_ib_format     = AMD_AQL_PM4_IB_FORMAT;
-    packet.pm4_ib_command[0] = packet3_header(PM4_OP_INDIRECT_BUFFER, 4);
-    packet.pm4_ib_command[1] = low32(_impl->copy_commands) & 0xFFFFFFFCu;
-    packet.pm4_ib_command[2] = high32(_impl->copy_commands);
-    packet.pm4_ib_command[3] = static_cast<uint32_t>(builder.size_words()) | (1u << 23) |
-                               ((_impl->major >= 12 ? 3u : 1u) << 28);
-    packet.dw_count_remain = AMD_AQL_PM4_IB_DW_COUNT_REMAIN;
-
-    static_assert(sizeof(packet) == sizeof(hsa_ext_amd_aql_pm4_packet_t));
-    auto aql_packet = hsa_ext_amd_aql_pm4_packet_t{};
-    std::memcpy(&aql_packet, &packet, sizeof(packet));
-
-    completion.reset();
-    _impl->submit(aql_packet, completion.handle());
-    completion.wait();
 }
 
 namespace
@@ -1142,32 +1024,12 @@ sdma_queue_t::copy(void* dst, const void* src, size_t size, kfd_signal_t& comple
 struct kfd_copy_queue_t::impl
 {
     impl(const std::shared_ptr<kfd_memory_pool_t>& _memory, size_t max_copy_size)
-    : aql_queue{std::make_shared<kfd_aql_queue_t>(_memory, max_copy_size)}
+    : aql_queue{std::make_shared<kfd_aql_queue_t>(_memory)}
     , completion{_memory}
     {
-        if(common::get_env("ROCPROFILER_SQTT_FORCE_CP_DMA", false))
-        {
-            static auto once = std::once_flag{};
-            std::call_once(once, []() {
-                ROCP_INFO << "ROCPROFILER_SQTT_FORCE_CP_DMA is set; using CP DMA for "
-                             "thread-trace copies";
-            });
-            return;
-        }
-
-        try
-        {
-            if(!sdma_extended_copy_supported(_memory->gfx_target_version()))
-                throw std::runtime_error{"extended SDMA copy packets are unavailable"};
-            sdma_queue = std::make_unique<sdma_queue_t>(_memory, max_copy_size);
-        } catch(const std::exception& e)
-        {
-            static auto once = std::once_flag{};
-            std::call_once(once, [&]() {
-                ROCP_WARNING << "SDMA thread-trace resources are unavailable on GPU "
-                             << _memory->gpu_id() << "; falling back to CP DMA: " << e.what();
-            });
-        }
+        if(!sdma_extended_copy_supported(_memory->gfx_target_version()))
+            throw std::runtime_error{"extended SDMA copy packets are unavailable"};
+        sdma_queue = std::make_unique<sdma_queue_t>(_memory, max_copy_size);
     }
 
     std::shared_ptr<kfd_aql_queue_t> aql_queue{};
@@ -1191,10 +1053,7 @@ kfd_copy_queue_t::submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_
 void
 kfd_copy_queue_t::copy(void* dst, const void* src, size_t size)
 {
-    if(_impl->sdma_queue)
-        _impl->sdma_queue->copy(dst, src, size, _impl->completion);
-    else
-        _impl->aql_queue->copy(dst, src, size, _impl->completion);
+    _impl->sdma_queue->copy(dst, src, size, _impl->completion);
 }
 
 }  // namespace thread_trace
