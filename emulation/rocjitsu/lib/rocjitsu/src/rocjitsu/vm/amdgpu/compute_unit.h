@@ -118,7 +118,9 @@ public:
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
-    uint32_t functional_quantum = kFunctionalQuantum; ///< Max instructions per functional slice.
+    /// Maximum CU step() iterations per functional slice. One step can issue
+    /// one instruction for every runnable wavefront resident on the CU.
+    uint32_t functional_quantum = kFunctionalQuantum;
   };
 
   ~ComputeUnitCore() override = default;
@@ -202,7 +204,7 @@ public:
   void set_pool_driven(bool value) { pool_driven_ = value; }
   bool pool_driven() const { return pool_driven_; }
 
-  /// @brief Execute up to one functional quantum of instructions on this CU.
+  /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
     // A request left by direct step() execution must not shorten this quantum.

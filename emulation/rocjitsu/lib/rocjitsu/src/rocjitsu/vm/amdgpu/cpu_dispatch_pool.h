@@ -33,12 +33,17 @@ class CpuDispatchPoolTestAccess;
 /// exactly one thread per run() (no intra-CU parallelism). run() returns when
 /// all CUs have completed their quantum. The output-span overload preserves
 /// each CU's result so its owner can schedule the next quantum independently.
+/// This is host acceleration machinery, not a modeled GPU resource: changing
+/// its width must preserve the observable result of race-free workloads.
 ///
 /// Task hand-out is lock-free: workers and the calling thread claim CUs with a
 /// single atomic fetch_add on @ref next_task_, and signal completion by
 /// decrementing @ref remaining_. The mutex is held only for the wakeup/teardown
 /// condition-variable predicates, never on the per-CU hot path. This keeps
 /// scaling from collapsing into lock contention when many short quanta retire.
+/// A pool may be shared by multiple command processors, but run() currently
+/// serializes their complete submissions because the batch state below is
+/// pool-wide.
 class CpuDispatchPool {
 public:
   explicit CpuDispatchPool(uint32_t threads) : CpuDispatchPool(threads, std::nullopt) {}
@@ -172,6 +177,9 @@ private:
     }
   }
 
+  // TODO: Move task/result/counter/exception state into per-submission objects
+  // and feed one shared worker queue so XCD-local CPs can submit concurrently
+  // while retaining independent join and exception-propagation boundaries.
   std::mutex run_mutex_;
   std::mutex mutex_;
   std::condition_variable_any work_cv_;

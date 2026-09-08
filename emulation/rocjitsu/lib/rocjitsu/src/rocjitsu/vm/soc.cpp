@@ -84,7 +84,6 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
-  apply_dispatch_threads();
 }
 
 void SoC::set_dispatch_threads(uint32_t threads) {
