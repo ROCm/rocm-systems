@@ -389,6 +389,15 @@ TEST_F(IRDeviceTest, B3d_CoopInitLanes_UpperLaneMask) {
              [](int t){ return (t == 63) ? 0 : -1; });
 }
 
+TEST_F(IRDeviceTest, B3e_CoopInitLanes_IgnoresNonexistentLanes) {
+  const uint64_t mask = 0xffffffff00000000ull;
+  const int      sz   = warpSize_ > 32 ? 32 : 0;
+  auto h = launch_coop_r(k_coop_lanes_r, warpSize_, mask);
+  check_coop(h,
+             [sz](int) { return sz; },
+             [](int)   { return -1; });
+}
+
 /* =====================================================================
  * [B4] ncclCoopAnyInitWarpSpan — 1-warp and 2-warp spans
  * rank = threadIdx.x - WARP_SIZE * warp0  (WARP_SIZE == device warpSize)
