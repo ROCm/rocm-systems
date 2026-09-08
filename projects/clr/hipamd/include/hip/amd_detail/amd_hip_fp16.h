@@ -8,6 +8,21 @@
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP16_H
 #define HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP16_H
 
+#ifndef __HIP_TO_CLANG_MEMORY_SCOPE
+#define __HIP_TO_CLANG_MEMORY_SCOPE(hip_scope)                                                     \
+  ((hip_scope) == __HIP_MEMORY_SCOPE_SINGLETHREAD                                                  \
+       ? __MEMORY_SCOPE_SINGLE                                                                     \
+       : (hip_scope) == __HIP_MEMORY_SCOPE_WAVEFRONT                                               \
+             ? __MEMORY_SCOPE_WVFRNT                                                               \
+             : (hip_scope) == __HIP_MEMORY_SCOPE_WORKGROUP                                         \
+                   ? __MEMORY_SCOPE_WRKGRP                                                         \
+                   : (hip_scope) == __HIP_MEMORY_SCOPE_AGENT                                       \
+                         ? __MEMORY_SCOPE_DEVICE                                                   \
+                         : (hip_scope) == __HIP_MEMORY_SCOPE_SYSTEM                                \
+                               ? __MEMORY_SCOPE_SYSTEM                                             \
+                               : __MEMORY_SCOPE_SYSTEM)
+#endif
+
 #if defined(__HIPCC_RTC__)
 #define __HOST_DEVICE__ __device__
 #else
@@ -930,12 +945,10 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   };
   u_hold old_val, new_val;
   old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __HIP_TO_CLANG_MEMORY_SCOPE(__HIP_MEMORY_SCOPE_AGENT));
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_TO_CLANG_MEMORY_SCOPE(__HIP_MEMORY_SCOPE_AGENT)));
   return old_val.h2r;
 #endif
 }
