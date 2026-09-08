@@ -71,9 +71,12 @@ env:
   # concurrent runs safe.
   RCCL_CI_WORKSPACE: '1'
 
+# Only `contents: read` here, which is all build and detect need -- they check
+# out the source and talk to the scheduler, never to the GitHub API. `report` is
+# the one job that writes a comment, and it declares `pull-requests: write` for
+# itself, so that scope never reaches a self-hosted runner executing PR code.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   build:
