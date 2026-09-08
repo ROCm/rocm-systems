@@ -220,7 +220,7 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 // checks derive their per-message caps from it.
 // Footprint = 2 banks * nRanks * (kDdaLLMaxBytes)
 // example: 128 MiB at 16 MiB for 4 ranks
-constexpr size_t kDdaLLMaxBytes = (size_t)(16) * 1024 * 1024;      // 16M
+constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;      // 16M
 
 // Scratch is double buffered under a single epoch counter, so a bank is half of
 // it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
