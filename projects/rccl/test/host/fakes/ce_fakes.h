@@ -14,6 +14,7 @@ extern bool g_ceImplemented;  // UNDRIVEN
 extern bool g_ceAvailable;  // UNDRIVEN
 extern bool g_ceScratchAvailable;  // UNDRIVEN
 extern bool g_hierCeAvailable;  // UNDRIVEN
+extern bool g_ceAlltoAllEligible;  // ncclCeAlltoAllEligible() -- CE-vs-DDA tie-break for AllToAll
 
 void ResetCeFakes();
 

@@ -436,8 +436,18 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclSuccess;
     }
 #endif
-    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
+    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall.
+    //
+    // Yield the DDA fast path when CE will actually service this call. DDA IPC/
+    // fabric dispatch returns before ncclEnqueueCheck(), so without this gate a
+    // DDA-eligible call pre-empts CE even when the user asked for it via
+    // NCCL_CTA_POLICY_ZERO -- CE selection lives downstream in taskAppend(), so it
+    // never gets a chance (AICOMRCCL-2136). ncclCeAlltoAllEligible() is the single
+    // source of truth for "CE will serve this AllToAll", mirroring the
+    // ceAllReduceAllowed guard in rcclAllReduceShouldTakeDdaPath() for AllReduce.
+    const bool ceWillServe = ncclCeAlltoAllEligible(comm, sendbuff, recvbuff, datatype, stream);
+    if (!ceWillServe &&
+        rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
                        kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
@@ -466,6 +476,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
           return ncclSuccess;
         }
       } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        INFO(NCCL_COLL, "AllToAll: taking DDA IPC path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, comm->nRanks * count * ncclTypeSize(datatype));
         NCCLCHECK(ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream));
         return ncclSuccess;
       }

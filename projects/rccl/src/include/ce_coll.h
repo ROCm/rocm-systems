@@ -187,6 +187,13 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// "Will CE (or hierarchical CE) service this AllToAll?" Single source of truth
+// for the CE-vs-DDA tie-break in ncclAlltoAll_impl. Self-contained: does its own
+// window lookup and graph-capture probe from the raw buffers/stream. See the
+// definition in ce_coll.cc for the exact taskAppend() branch it reproduces.
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, const void* sendbuff, void* recvbuff, ncclDataType_t datatype,
+                            cudaStream_t stream);
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);

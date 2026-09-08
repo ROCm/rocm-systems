@@ -166,22 +166,15 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaEligible_DefaultPolicy_TakesDdaIpc) {
 // through to enqueue, where CE services it. Before the fix, DDA IPC pre-empts CE
 // here and this expectation fails -- which is exactly the reported bug.
 TEST_F(CollectivesMicrotest, AlltoAll_CeAvailableAndZeroPolicy_YieldsDdaToCe) {
-  // SKIPPED until the fix lands: this asserts the DESIRED post-fix behaviour and
-  // currently fails on develop, reproducing AICOMRCCL-2136 (DDA IPC pre-empts CE
-  // even when NCCL_CTA_POLICY_ZERO asked for CE). Delete this one line as part of
-  // the ncclAlltoAll_impl fix to arm the guard.
-  GTEST_SKIP() << "AICOMRCCL-2136: un-skip when the DDA-yields-to-CE fix lands";
-
   g_ddaEnabled = true;
-  g_ddaIpcEligible = true;   // DDA IPC would take it (the trigger #8945 enabled)
-  g_ceImplemented = true;    // CE is present...
-  g_ceAvailable = true;      // ...and available for these buffers
+  g_ddaIpcEligible = true;       // DDA IPC would take it (the trigger #8945 enabled)
+  g_ceAlltoAllEligible = true;   // ...but CE will serve this call under CTA_POLICY_ZERO
   comm_->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
 
   callAlltoAll();
 
   EXPECT_FALSE(DdaAlltoAllDispatched())
-      << "NCCL_CTA_POLICY_ZERO + CE available: DDA must yield so CE can service "
+      << "NCCL_CTA_POLICY_ZERO + CE eligible: DDA must yield so CE can service "
          "the AllToAll (AICOMRCCL-2136)";
 }
 

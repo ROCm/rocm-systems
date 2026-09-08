@@ -16,6 +16,7 @@ bool g_ceImplemented = false;
 bool g_ceAvailable = false;
 bool g_ceScratchAvailable = false;
 bool g_hierCeAvailable = false;
+bool g_ceAlltoAllEligible = false;
 
 bool ncclCeImplemented(ncclFunc_t, int, ncclDataType_t) { return g_ceImplemented; }
 bool ncclCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
@@ -27,10 +28,14 @@ bool ncclCeScratchAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, n
 bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
   return g_hierCeAvailable;
 }
+bool ncclCeAlltoAllEligible(struct ncclComm*, const void*, void*, ncclDataType_t, hipStream_t) {
+  return g_ceAlltoAllEligible;
+}
 
 void ResetCeFakes() {
   g_ceImplemented = false;
   g_ceAvailable = false;
   g_ceScratchAvailable = false;
   g_hierCeAvailable = false;
+  g_ceAlltoAllEligible = false;
 }

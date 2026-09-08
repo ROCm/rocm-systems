@@ -16,6 +16,8 @@
 #include "group.h"
 #include "alloc.h"
 #include "ce_fault_inject.h"
+#include "sym_kernels.h"   // ncclGetSymRegType
+#include "strongstream.h" // ncclCudaGetCapturingGraph / ncclCudaGraphValid
 
 #ifdef ENABLE_FAULT_INJECTION
 // Common fault check helper
@@ -317,6 +319,42 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
   if (hasSysmemSegment || capturing) return false;
   return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
+}
+
+// "Will CE (or hierarchical CE) actually service this AllToAll?" -- the single
+// source of truth for the CE-vs-DDA tie-break in ncclAlltoAll_impl
+// (collectives.cc). Self-contained (does its own window lookup + capture probe
+// from the raw buffers/stream) so the DDA-path guard needs only this one symbol.
+//
+// Reproduces taskAppend()'s registered-window CE branch (enqueue.cc): CE runs
+// when NCCL_CTA_POLICY_ZERO is set, the stream is not capturing (CE is
+// graph-unsafe), neither buffer has a sysmem segment, and either the regular or
+// the hierarchical CE path is available for these operands. The force-CE DDA
+// scratch branch (rcclParamForceCe) is deliberately NOT modelled here: it is a
+// separate opt-in that dispatches through DDA scratch anyway, so DDA need not
+// yield for it.
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, const void* sendbuff, void* recvbuff, ncclDataType_t datatype,
+                            cudaStream_t stream) {
+  if (ncclGroupDepth != 0) return false;
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+
+  // CE is graph-unsafe (hipMemcpyBatchAsync + cross-rank memop barrier deadlock
+  // on replay), so it is skipped while the stream is capturing. Mirror that.
+  struct ncclCudaGraph ceGraph;
+  if (ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode) != ncclSuccess) return false;
+  if (ncclCudaGraphValid(ceGraph)) return false;
+
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) return false;
+
+  ncclSymRegType_t winRegType;
+  if (ncclGetSymRegType(sendWin, recvWin, &winRegType) != ncclSuccess) return false;
+
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType) ||
+         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
 }
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
