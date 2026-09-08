@@ -184,7 +184,8 @@ namespace RcclUnitTesting
     // pooled-worker corruption. Timing, not contents: prep rewrites them before use.
     // The cap bounds the cost per buffer; smaller buffers are zeroed whole.
     size_t const cap = 4u << 20;
-    hipError_t errIn = hipSuccess, errOut = hipSuccess;
+    hipError_t errIn  = hipSuccess;
+    hipError_t errOut = hipSuccess;
     // In-place attaches one buffer as an interior alias of the other, so there is a
     // single allocation, owned by the lower address. Equal addresses mean the alias
     // starts at the base (globalRank 0, or the same-pointer case), and then the owner
