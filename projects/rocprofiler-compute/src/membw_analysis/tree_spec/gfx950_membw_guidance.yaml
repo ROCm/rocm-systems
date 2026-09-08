@@ -51,19 +51,19 @@ guidance_templates:
       Measured  : {metric:L2 Back Pressure Indicator}% (threshold: {threshold:stall_pct_high}%)
       Impact    : L2 input buffer stalled -- L2 backpressuring L1
 
-  gl2_mem_bw_read: |
+  gl2_hbm_bw_read: |
     [GL2] HBM read bandwidth bound
       Condition : HBM read credit stall >= {threshold:stall_pct_high}%
       Measured  : {metric:L2 Memory BW Bound - Read Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
       Impact    : L2 stalled waiting for HBM read credits -- memory read bandwidth saturated
 
-  gl2_mem_bw_write: |
+  gl2_hbm_bw_write: |
     [GL2] HBM write bandwidth bound
       Condition : HBM write credit stall >= {threshold:stall_pct_high}%
       Measured  : {metric:L2 Memory BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
       Impact    : L2 stalled waiting for HBM write credits -- memory write bandwidth saturated
 
-  gl2_mem_bw_other: |
+  gl2_hbm_bw_other: |
     [GL2] HBM bandwidth bound (balanced read/write)
       Condition : Combined HBM credit stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant
       Measured  : {metric:L2 Memory BW Bound - Combined Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
@@ -87,19 +87,13 @@ guidance_templates:
       Measured  : {metric:L2 Cache Efficiency}% (threshold: {threshold:cache_hit_low}%)
       Impact    : Workload exceeds L2 cache capacity -- most accesses miss to HBM
 
-  gl2_remote_pressure: |
-    [GL2] Remote access pressure (GMI)
+  gl2_gmi_pressure: |
+    [GL2] GMI pressure
       Condition : GMI credit stall >= {threshold:stall_pct_high}%
       Measured  : {metric:L2 Remote Access Pressure (GMI)}% (threshold: {threshold:stall_pct_high}%)
       Impact    : Remote memory access bottleneck -- multi-GPU or multi-socket traffic saturated
 
-  # --- EA templates (4) ---
-
-  ea_gmi_bw_bound: |
-    [EA] GMI bandwidth bound
-      Condition : GMI credit stall >= {threshold:stall_pct_high}%
-      Measured  : {metric:EA GMI BW Bound - Combined}% (threshold: {threshold:stall_pct_high}%)
-      Impact    : Remote memory path bottleneck -- multi-XCD or multi-socket traffic
+  # --- EA templates (3) ---
 
   ea_io_bw_bound: |
     [EA] IO bandwidth bound
