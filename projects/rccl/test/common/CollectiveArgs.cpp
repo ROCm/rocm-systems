@@ -259,6 +259,15 @@ namespace RcclUnitTesting
     {
       TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
                  hipGetErrorString(scrubErr));
+    if (errIn != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(errIn));
+    }
+    if (errOut != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(errOut));
     }
     return TEST_SUCCESS;
   }
