@@ -115,16 +115,16 @@ The analysis checks three levels of the memory hierarchy:
   backpressure, and shader core pressure (VMEM).
 * **GL2 (L2 cache)**: HBM bandwidth pressure (read, write, or
   balanced), internal resource exhaustion (latency and source FIFOs),
-  cache efficiency, and remote access (GMI).
-* **EA (Efficiency Arbiter)**: HBM bandwidth at the memory controller
-  level, GMI and PCIe path pressure, write backpressure, and atomic
-  contention.
+  cache efficiency, and GMI remote access pressure.
+* **EA (Efficiency Arbiter)**: PCIe/IO path pressure, write
+  backpressure, and HBM atomic contention.
 
 A bottleneck is reported when a stall metric exceeds its threshold
 (typically 10% of busy time). When a parent metric exceeds the
 threshold but no specific child does, a "balanced" or "other" entry
 explains that the pressure is distributed rather than concentrated in
-one path.
+one path. Multiple bottlenecks can appear together when several stall
+metrics exceed threshold simultaneously.
 
 .. note::
 
@@ -153,6 +153,8 @@ For deeper analysis beyond the guided output:
   </conceptual/cdna/l2-cache>` and :doc:`Vector L1 cache
   </conceptual/cdna/vector-l1-cache>` conceptual pages describe the
   cache hierarchy and how data moves through it.
+* **Design document**: `hld-membw-guided-analysis-in-memchart.md <https://github.com/ROCm/rocm-systems/tree/rocprofiler-compute-develop/projects/rocprofiler-compute/docs/design/hld-membw-guided-analysis-in-memchart.md>`_
+  describes the bottleneck tree structure and threshold semantics.
 
 Terminal width
 ==============
@@ -167,12 +169,10 @@ Check your terminal width with:
 
    $ tput cols
 
-Limitations
-===========
+.. note::
 
-* Only AMD Instinct MI350 Series (gfx950) is supported. Other
-  architectures will be added in future releases.
-* Guidance text is in its preliminary stages and may not cover all
-  bottleneck scenarios.
-* The analysis evaluates per-dispatch averages. Bottlenecks that occur
-  in only a subset of dispatches may not be visible.
+   * Only AMD Instinct MI350 Series (gfx950) is supported. Other architectures will be added in future releases.
+   * Guidance text is in its preliminary stages and may not cover all bottleneck scenarios.
+   * The analysis evaluates per-dispatch averages. Bottlenecks that occur in only a subset of dispatches may not be visible.
+   * Guidance output is capped at 5 blocks. Additional bottlenecks beyond the cap are noted but not expanded.
+   * When block 30 counters are missing or incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details.
