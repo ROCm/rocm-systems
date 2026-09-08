@@ -163,54 +163,30 @@ if (ENABLE_DEVICE_API)
             endif()
         endforeach()
     endif()
-    # common.cu (rccl_common) allocates std::vector<ncclDevComm>. If only the
-    # per-test binaries get these -I paths, hip::device's /opt/rocm headers win
-    # and sizeof(ncclDevComm) is smaller than librccl's memset in
-    # ncclDevrCommCreateInternal.
+    # common.cu (rccl_common) must see the same ncclDevComm as librccl. Keep
+    # the install prefix ahead of hip::device's /opt/rocm. Do not add
+    # ${RCCL_SOURCE_DIR}/src/include: it shadows rccl-tests os.h.
     set(_rccl_dev_api_targets rccl_common alltoall_perf all_gather_perf)
     set(_rccl_device_inc_dirs "")
-    # Do not add ${RCCL_SOURCE_DIR}/src/include: it shadows rccl-tests os.h
-    # (ncclTestGetPid vs ncclOsGetPid). Public nccl_device.h lives in the
-    # install prefix, which must still precede hip::device's /opt/rocm.
     if (_rccl_device_inc)
         list(APPEND _rccl_device_inc_dirs "${_rccl_device_inc}")
     endif()
     if (RCCL_SOURCE_DIR)
         list(APPEND _rccl_device_inc_dirs ${RCCL_SOURCE_DIR}/src)
-    endif()
-    function(_rccl_tests_header_has_fabric out_var header)
-        set(${out_var} 0 PARENT_SCOPE)
-        if (EXISTS "${header}")
-            file(READ "${header}" _rccl_types_txt)
-            if (_rccl_types_txt MATCHES "ginFabricPeerScratch")
-                set(${out_var} 1 PARENT_SCOPE)
-            endif()
+        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/algorithms/dda/alltoall/alltoall_dda_fabric_ll.h")
+            message(FATAL_ERROR
+                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} does not contain DDA fabric AllToAll headers")
         endif()
-    endfunction()
-    set(_rccl_src_types "")
-    set(_rccl_inc_types "")
-    if (RCCL_SOURCE_DIR)
-        set(_rccl_src_types "${RCCL_SOURCE_DIR}/src/include/nccl_device/impl/comm__types.h")
-    endif()
-    if (_rccl_device_inc)
-        set(_rccl_inc_types "${_rccl_device_inc}/nccl_device/impl/comm__types.h")
-    endif()
-    _rccl_tests_header_has_fabric(_rccl_src_has_fabric "${_rccl_src_types}")
-    _rccl_tests_header_has_fabric(_rccl_inc_has_fabric "${_rccl_inc_types}")
-    if (_rccl_src_has_fabric AND _rccl_device_inc AND NOT _rccl_inc_has_fabric)
-        message(FATAL_ERROR
-            "RCCL source defines ginFabricPeerScratch on ncclDevComm, but "
-            "${_rccl_inc_types} does not. rccl_common would allocate a smaller "
-            "ncclDevComm than librccl writes in ncclDevrCommCreateInternal.")
+        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/include/gin/gin_fabric_a2a_host.h")
+            message(FATAL_ERROR
+                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} is missing gin_fabric_a2a_host.h")
+        endif()
     endif()
     foreach(_rccl_dev_tgt IN LISTS _rccl_dev_api_targets)
         if (TARGET ${_rccl_dev_tgt})
             foreach(_rccl_dev_inc IN LISTS _rccl_device_inc_dirs)
                 target_include_directories(${_rccl_dev_tgt} BEFORE PRIVATE "${_rccl_dev_inc}")
             endforeach()
-            if (_rccl_src_has_fabric OR _rccl_inc_has_fabric)
-                target_compile_definitions(${_rccl_dev_tgt} PRIVATE RCCL_DEVCOMM_EXPECT_FABRIC_FIELDS)
-            endif()
         endif()
     endforeach()
 endif()

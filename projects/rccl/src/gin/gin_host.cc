@@ -16,8 +16,12 @@
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "rccl_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
+#include "gin/gin_fabric_a2a_host.h"
 #include "compiler.h"
 #include <cmath>
+#include <cstring>
+#include <map>
+#include <mutex>
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
 NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
@@ -30,6 +34,32 @@ const int gpiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 5)};
 // (their createContext ignores it); expose a single version so backendVersion=0.
 const int rocshmemGdaBackendMinVersions[] = {0};
 const int anvilSdmaBackendMinVersions[] = {0};
+
+static std::mutex ginFabricA2ALaneMutex;
+static std::map<void*, ncclGinFabricA2ALane> ginFabricA2ALanes;
+
+static void ginFabricA2ALanePublish(void* ginHandle, ncclGinFabricA2ALane const& lane) {
+  if (ginHandle == nullptr) return;
+  std::lock_guard<std::mutex> lock(ginFabricA2ALaneMutex);
+  ginFabricA2ALanes[ginHandle] = lane;
+}
+
+static void ginFabricA2ALaneErase(void* ginHandle) {
+  if (ginHandle == nullptr) return;
+  std::lock_guard<std::mutex> lock(ginFabricA2ALaneMutex);
+  ginFabricA2ALanes.erase(ginHandle);
+}
+
+extern "C" __attribute__((visibility("default"))) ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm,
+                                                                                         struct ncclGinFabricA2ALane* out) {
+  if (out == nullptr) return ncclInvalidArgument;
+  memset(out, 0, sizeof(*out));
+  if (devComm == nullptr || devComm->ginHandles[0] == nullptr) return ncclSuccess;
+  std::lock_guard<std::mutex> lock(ginFabricA2ALaneMutex);
+  auto it = ginFabricA2ALanes.find(devComm->ginHandles[0]);
+  if (it != ginFabricA2ALanes.end()) *out = it->second;
+  return ncclSuccess;
+}
 
 ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
   if (comm == nullptr || ginType == nullptr) return ncclInternalError;
@@ -344,28 +374,25 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     if (ginStateDevComm->devHandles[n]->needsProxyProgress) ginState->needsProxyProgress = 1;
   }
 
-  devComm->ginFabricSmallMsgEnabled = false;
+  // Fabric LL lane lives off ncclDevComm (host table keyed by ginHandles[0]).
+  // ginAnvilUseFabricMem already requires a single clique; the clique WARN is unreachable.
   if (ginState->ginType == NCCL_GIN_TYPE_ANVIL_SDMA && ginAnvilUseFabricMem(comm)) {
-    if (comm->clique.size != comm->nRanks) {
-      WARN("GIN A2A: refusing fabric small-msg lane: comm spans multiple fabric cliques (nRanks %d clique.size %d)",
-           comm->nRanks, comm->clique.size);
-    } else if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
-               comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
+    ncclGinFabricA2ALane lane{};
+    if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+        comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
       WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
-    } else if (!rcclParamDdaLL()) {
-      devComm->ginFabricSmallMsgEnabled = false;
-    } else {
+    } else if (rcclParamDdaLL()) {
       const size_t llThreshold =
           gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
-      if (llThreshold == 0) {
-        devComm->ginFabricSmallMsgEnabled = false;
-      } else {
-        devComm->ginFabricPeerScratch = (void**)comm->ddaPeerPtrsDev;
-        devComm->ginFabricLLEpoch = comm->ddaLLEpochDev;
-        devComm->ginFabricLLEpochLen = comm->ddaLLEpochLen;
-        devComm->ginFabricScratchBytes = comm->ddaScratchBytes;
-        devComm->ginFabricLLThreshold = llThreshold;
-        devComm->ginFabricSmallMsgEnabled = true;
+      // 0 disables the lane (not "no cap").
+      if (llThreshold != 0) {
+        lane.enabled = 1;
+        lane.peerScratch = (void**)comm->ddaPeerPtrsDev;
+        lane.llEpoch = comm->ddaLLEpochDev;
+        lane.llEpochLen = comm->ddaLLEpochLen;
+        lane.scratchBytes = comm->ddaScratchBytes;
+        lane.llThreshold = llThreshold;
+        ginFabricA2ALanePublish(devComm->ginHandles[0], lane);
         INFO(NCCL_INIT,
              "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
              comm->nRanks, comm->ddaScratchBytes, llThreshold);
@@ -394,6 +421,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
 
 end:
   if (ret != ncclSuccess) {
+    if (devComm) ginFabricA2ALaneErase(devComm->ginHandles[0]);
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginStateDevComm->ginCtx[n]) ginState->ncclGin->destroyContext(ginStateDevComm->ginCtx[n]);
     }
@@ -421,6 +449,8 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
   if (prevDc) prevDc->next = dc->next;
   else ginState->devComms = dc->next;
   lock.unlock();
+
+  ginFabricA2ALaneErase(devComm->ginHandles[0]);
 
   // Free GIN contexts
   for (int n = 0; n < ginState->ginCommCount; n++) {

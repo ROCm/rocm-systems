@@ -14,7 +14,8 @@
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 #include "algorithms/dda/alltoall/alltoall_dda_fabric_ll.h"
 #include "algorithms/dda/device/CollCommon.h"
-#include "nccl_device/gin/anvil_sdma/gin_fabric_a2a.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "include/gin/gin_fabric_a2a_host.h"
 #endif
 #endif
 
@@ -266,10 +267,12 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 using dda::common::kDdaLLMaxBytes;
 using dda::common::kDdaLLA2ASlotStridePkts;
 using dda::common::LLPacket16;
+using dda::common::kDdaMaxNranks;
 using ::bf16;
-using gin::fabric::kDdaMaxNranks;
-using gin::fabric::kDdaLLA2APktsPerBlock;
-using gin::fabric::kDdaLLAgMaxBlocksPerPeer;
+
+// Pinned to nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer and dda_alltoall_fabric_ll.cu.
+constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
+constexpr size_t kDdaLLA2APktsPerBlock = 256;
 
 static size_t AlltoAllGinFabricLLScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLA2ASlotStridePkts * sizeof(LLPacket16);
@@ -284,25 +287,37 @@ static int AlltoAllGinFabricLLBlocksPerPeer(size_t perChunkBytes) {
 }
 
 static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
-  if (!devComm || !devComm->ginFabricSmallMsgEnabled) return false;
-  if (devComm->ginFabricPeerScratch == nullptr || devComm->ginFabricLLEpoch == nullptr) return false;
+  ncclGinFabricA2ALane lane{};
+  if (!devComm || ncclGinQueryFabricA2ALane(devComm, &lane) != ncclSuccess || !lane.enabled) return false;
+  if (lane.peerScratch == nullptr || lane.llEpoch == nullptr) return false;
   if (count == 0) return false;
   if (devComm->nRanks < 2 || devComm->nRanks > kDdaMaxNranks) return false;
   if (type != ncclFloat32 && type != ncclFloat16 && type != ncclBfloat16) return false;
   const size_t perChunkBytes = count * wordSize(type);
   if (perChunkBytes % 16 != 0) return false;
   if (perChunkBytes * 2 > kDdaLLMaxBytes) return false;
-  if (AlltoAllGinFabricLLScratchSize(devComm->nRanks) > devComm->ginFabricScratchBytes) return false;
-  if (devComm->ginFabricLLThreshold > 0 &&
-      (size_t)devComm->nRanks * perChunkBytes > devComm->ginFabricLLThreshold) {
+  if (AlltoAllGinFabricLLScratchSize(devComm->nRanks) > lane.scratchBytes) return false;
+  // 0 disables the lane at gin_host setup; treat 0 as a hard cap if it appears.
+  if ((size_t)devComm->nRanks * perChunkBytes > lane.llThreshold) {
     return false;
   }
   return true;
 }
 
+// Test#5 is still GIN-SDMA AllToAll. On gfx1250+MNNVL+one clique, small messages
+// host-launch the existing fabric DDA LL kernel on the GIN plugin's fabric lane;
+// large messages keep GinAlltoAllKernel (gin.put / SDMA).
+template <typename T, int N>
+static void AlltoAllLaunchFabricLLKernel(T** peers, T* recvPtr, T* sendPtr, size_t perChunkBytes, ncclDevComm* devComm,
+                                         ncclGinFabricA2ALane const& lane, dim3 grid, dim3 block, cudaStream_t stream) {
+  dda::common::ddaAllToAllFabricLL<T, N><<<grid, block, 0, stream>>>(
+      peers, recvPtr, sendPtr, perChunkBytes, devComm->rank, devComm->nRanks, lane.llEpoch, lane.llEpochLen);
+}
+
 template <typename T>
 static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
-                                           size_t count, ncclDevComm* devComm, cudaStream_t stream) {
+                                           size_t count, ncclDevComm* devComm, ncclGinFabricA2ALane const& lane,
+                                           cudaStream_t stream) {
   const size_t perChunkBytes = count * sizeof(T);
   const int blocksPerPeer = AlltoAllGinFabricLLBlocksPerPeer(perChunkBytes);
   dim3 block(256);
@@ -313,24 +328,15 @@ static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, vo
   NCCLCHECK(ncclGetLsaDevicePointer((ncclWindow_t)sendbuff, sendoffset, devComm->lsaRank, &sendPtr));
   NCCLCHECK(ncclGetLsaDevicePointer((ncclWindow_t)recvbuff, recvoffset, devComm->lsaRank, &recvPtr));
 
-  T** peers = reinterpret_cast<T**>(devComm->ginFabricPeerScratch);
-
-  switch (devComm->nRanks) {
-  case 4:
-    dda::common::ddaAllToAllFabricLL<T, 4><<<grid, block, 0, stream>>>(
-        peers, reinterpret_cast<T*>(recvPtr), reinterpret_cast<T*>(sendPtr), perChunkBytes, devComm->rank,
-        devComm->nRanks, devComm->ginFabricLLEpoch, devComm->ginFabricLLEpochLen);
-    break;
-  case 8:
-    dda::common::ddaAllToAllFabricLL<T, 8><<<grid, block, 0, stream>>>(
-        peers, reinterpret_cast<T*>(recvPtr), reinterpret_cast<T*>(sendPtr), perChunkBytes, devComm->rank,
-        devComm->nRanks, devComm->ginFabricLLEpoch, devComm->ginFabricLLEpochLen);
-    break;
-  default:
-    dda::common::ddaAllToAllFabricLL<T, 0><<<grid, block, 0, stream>>>(
-        peers, reinterpret_cast<T*>(recvPtr), reinterpret_cast<T*>(sendPtr), perChunkBytes, devComm->rank,
-        devComm->nRanks, devComm->ginFabricLLEpoch, devComm->ginFabricLLEpochLen);
-    break;
+  T** peers = reinterpret_cast<T**>(lane.peerScratch);
+  T* recvT = reinterpret_cast<T*>(recvPtr);
+  T* sendT = reinterpret_cast<T*>(sendPtr);
+  if (devComm->nRanks == 4) {
+    AlltoAllLaunchFabricLLKernel<T, 4>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
+  } else if (devComm->nRanks == 8) {
+    AlltoAllLaunchFabricLLKernel<T, 8>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
+  } else {
+    AlltoAllLaunchFabricLLKernel<T, 0>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
   }
   CUDACHECK(cudaGetLastError());
   return testSuccess;
@@ -558,13 +564,17 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         }
 #endif
         if (AlltoAllGinFabricLLEligibleHost(devComm, count, type)) {
+          ncclGinFabricA2ALane lane{};
+          NCCLCHECK(ncclGinQueryFabricA2ALane(devComm, &lane));
           if (type == ncclFloat32) {
-            TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
+            TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
                                                     stream));
           } else if (type == ncclFloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, stream));
+            TESTCHECK(AlltoAllLaunchFabricLL<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
+                                                   stream));
           } else if (type == ncclBfloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, stream));
+            TESTCHECK(AlltoAllLaunchFabricLL<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
+                                                   stream));
           } else {
             return testNotImplemented;
           }

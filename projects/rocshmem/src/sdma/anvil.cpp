@@ -155,12 +155,16 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
       hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE,
                            DEFAULT_PRIORITY, engineId, queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
   if (qstatus != HSAKMT_STATUS_SUCCESS) {
-    // gfx1250 reports "No more SDMA queue to allocate for target ID 0 (128 total
-    // queues)" when every GIN dest lands on engine 0 (HIP already holds many).
     LOG_ERROR("hsaKmtCreateQueueExt failed: node=%u engine=%u status=%d", localNodeId, engineId,
               static_cast<int>(qstatus));
-    CHECK_HSAKMT_SUCCESS(hsaKmtUnmapMemoryToGPU(queueBuffer_), "unmap after CreateQueueExt fail");
-    CHECK_HSAKMT_SUCCESS(hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE), "free after CreateQueueExt fail");
+    const HSAKMT_STATUS unmapSt = hsaKmtUnmapMemoryToGPU(queueBuffer_);
+    if (unmapSt != HSAKMT_STATUS_SUCCESS) {
+      LOG_ERROR("unmap after CreateQueueExt fail: status=%d", static_cast<int>(unmapSt));
+    }
+    const HSAKMT_STATUS freeSt = hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE);
+    if (freeSt != HSAKMT_STATUS_SUCCESS) {
+      LOG_ERROR("free after CreateQueueExt fail: status=%d", static_cast<int>(freeSt));
+    }
     queueBuffer_ = nullptr;
     throw std::runtime_error("hsaKmtCreateQueueExt failed");
   }
@@ -436,16 +440,19 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  const uint32_t baseEngine = getSdmaEngineId(srcDeviceId, dstDeviceId);
+  // engineSeed is the HSA preferred copy engine from getSdmaEngineId. The first
+  // try offsets by dstDeviceId so GIN destinations do not all land on engine 0
+  // (KFD per-engine queue cap).
+  const uint32_t engineSeed = getSdmaEngineId(srcDeviceId, dstDeviceId);
   const uint32_t nEng = numSdmaEnginesTotal_ > 0 ? numSdmaEnginesTotal_ : 1;
-  LOG_TRACE("SDMA: Connect from %d to %d with %d channels baseEngine=%u nEng=%u", srcDeviceId,
-            dstDeviceId, numChannels, baseEngine, nEng);
+  LOG_TRACE("SDMA: Connect from %d to %d with %d channels engineSeed=%u nEng=%u", srcDeviceId,
+            dstDeviceId, numChannels, engineSeed, nEng);
   for (int c = 0; c < numChannels; ++c) {
     bool created = false;
     for (uint32_t i = 0; i < nEng; ++i) {
       const uint32_t engineId =
-          nEng > 1 ? (baseEngine + static_cast<uint32_t>(dstDeviceId) + static_cast<uint32_t>(c) + i) % nEng
-                   : baseEngine;
+          nEng > 1 ? (engineSeed + static_cast<uint32_t>(dstDeviceId) + static_cast<uint32_t>(c) + i) % nEng
+                   : engineSeed;
       try {
         createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
         created = true;

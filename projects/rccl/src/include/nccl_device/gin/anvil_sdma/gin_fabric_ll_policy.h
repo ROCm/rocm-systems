@@ -15,6 +15,7 @@
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 #include <cstdlib>
+#include <cerrno>
 #endif
 
 namespace gin {
@@ -30,10 +31,12 @@ inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long l
 
 inline bool parseGinFabricLLThresholdEnv(const char* name, unsigned long long* val) {
   const char* e = getenv(name);
-  if (!e || !e[0] || *e == '-') return false;
+  if (!e || !e[0]) return false;
+  if (*e < '0' || *e > '9') return false;
+  errno = 0;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
-  if (end == e) return false;
+  if (end == e || *end != '\0' || errno == ERANGE) return false;
   *val = v;
   return true;
 }
