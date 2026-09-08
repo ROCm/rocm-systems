@@ -733,12 +733,12 @@ kfd_signal_t::wait() const
 {
     ROCP_TRACE << "Waiting for KFD signal";
     auto t0 = std::chrono::system_clock::now();
-    for(size_t iteration = 0; load_signal_value(_signal) != 0; ++iteration)
+    while(load_signal_value(_signal) != 0)
         std::this_thread::sleep_for(std::chrono::microseconds(1));
 
     std::atomic_thread_fence(std::memory_order_acq_rel);
     auto t1 = std::chrono::system_clock::now();
-    ROCP_TRACE << "KFD signal pass in " << (t1-t0).count() / 1000.0f;
+    ROCP_TRACE << "KFD signal pass in " << (t1 - t0).count() / 1000.0f;
 }
 
 namespace
@@ -927,7 +927,11 @@ struct kfd_aql_queue_t::impl
         write_index = load_acquire(queue.wptr);
     }
 
-    ~impl() { ROCP_INFO << "Deleting queue impl"; queue.memory->deallocate(copy_commands); }
+    ~impl()
+    {
+        ROCP_INFO << "Deleting queue impl";
+        queue.memory->deallocate(copy_commands);
+    }
 
     void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
     {
