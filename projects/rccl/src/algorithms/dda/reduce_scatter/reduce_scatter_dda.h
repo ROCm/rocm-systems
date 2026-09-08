@@ -14,12 +14,17 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc>
+// Templated on a compile-time rank count NRANKS_CT (matching the fabric path):
+//   - NRANKS_CT > 0  : specialized for that clique size; CollCommon's
+//                      reduceScatter folds nRanks to a constant and unrolls.
+//   - NRANKS_CT == 0 : runtime fallback; the rank count comes from nRanks.
+template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                      const T* __restrict__ sendbuff, int selfRank, int nRanks,
+                                      IpcGpuBarrier barrier) {
 
   barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
@@ -30,7 +35,7 @@ __launch_bounds__(512)
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
+  reduceScatter<T, NRANKS_CT, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, nRanks, idxStart, idxEnd, idxStride, 0);
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }

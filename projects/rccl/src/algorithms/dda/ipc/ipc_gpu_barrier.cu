@@ -6,8 +6,8 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include <cassert>
 #include <memory>
+#include <vector>
 
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
@@ -18,47 +18,32 @@
 
 namespace dda::common {
 
-__host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
-  : nBlocks_(nBlocks), flags_(static_cast<FlagType*>(flagsBuf)) {
-  assert(nRanks == NRANKS);
-}
-
-/* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
-  int nRanks, int nBlocks) {
-  assert(nRanks == NRANKS);
-  auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
-  if (flagBuf == nullptr) {
-    ERROR("DeviceMailbox::mallocAndInit: allocation failed");
-    return {nullptr, DeviceMailbox{}};
-  }
-  cudaError_t err = cudaMemset(flagBuf->get(), 0, nRanks * nBlocks * sizeof(FlagType));
-  if (err != cudaSuccess) {
-    WARN("DeviceMailbox::mallocAndInit: cudaMemset failed (%s)", cudaGetErrorString(err));
-    return {nullptr, DeviceMailbox{}};
-  }
-  DeviceMailbox mailbox{nRanks, nBlocks, static_cast<FlagType*>(flagBuf->get())};
-  return {std::move(flagBuf), mailbox};
-}
-
-__host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
-                                      const std::array<DeviceMailbox, NRANKS>& allMailboxes)
-  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes) {
-  assert(nRanks == NRANKS);
-}
-
 /* static */ __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(
   int nRanks, int nBlocks, int selfRank, void* bootstrap) {
-  assert(nRanks == NRANKS);
-  auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
-  auto& selfMboxBuf = selfAlloc.first;
-  auto& selfMbox = selfAlloc.second;
-  if (!selfMboxBuf) {
+  if (nRanks <= 0 || nRanks > kDdaMaxNranks) {
+    WARN("IpcGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)", nRanks, kDdaMaxNranks);
+    return {nullptr, IpcGpuBarrier{}};
+  }
+
+  const size_t flagBytes = static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType);
+
+  // This rank's flag buffer, exported to peers over IPC. Must stay a legacy
+  // fine-grained allocation (DeviceBuffer's default) so cudaIpcGetMemHandle can
+  // export it; the fabric path is the one that needs VMM here.
+  auto selfFlagBuf = std::make_unique<DeviceBuffer>(flagBytes);
+  if (selfFlagBuf == nullptr || selfFlagBuf->get() == nullptr) {
+    ERROR("IpcGpuBarrier::mallocAndInit: flag buffer allocation failed");
+    return {nullptr, IpcGpuBarrier{}};
+  }
+  cudaError_t err = cudaMemset(selfFlagBuf->get(), 0, flagBytes);
+  if (err != cudaSuccess) {
+    WARN("IpcGpuBarrier::mallocAndInit: cudaMemset failed (%s)", cudaGetErrorString(err));
     return {nullptr, IpcGpuBarrier{}};
   }
 
   auto memHandler = std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
 
-  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
+  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfFlagBuf->get());
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
       INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
@@ -73,29 +58,43 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
     return {nullptr, IpcGpuBarrier{}};
   }
 
-  std::array<DeviceMailbox, NRANKS> allMailboxes;
+  // Gather every rank's flag-buffer device pointer.
+  std::vector<FlagType*> hostPeerFlags(nRanks, nullptr);
   for (int i = 0; i < nRanks; i++) {
     if (i == selfRank) {
-      allMailboxes[i] = selfMbox;
-    } else {
-      void* peerPtr = nullptr;
-      result = memHandler->getPeerDeviceMemPtr(i, &peerPtr);
-
-      if (result != ncclSuccess && result != ncclInProgress) {
-        if (ncclDebugNoWarn == 0) {
-          INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
-        }
-        return {nullptr, IpcGpuBarrier{}};
-      }
-      allMailboxes[i] = DeviceMailbox(nRanks, nBlocks, peerPtr);
+      hostPeerFlags[i] = static_cast<FlagType*>(selfFlagBuf->get());
+      continue;
     }
+    void* peerPtr = nullptr;
+    result = memHandler->getPeerDeviceMemPtr(i, &peerPtr);
+    if (result != ncclSuccess && result != ncclInProgress) {
+      if (ncclDebugNoWarn == 0) {
+        INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
+      }
+      return {nullptr, IpcGpuBarrier{}};
+    }
+    hostPeerFlags[i] = static_cast<FlagType*>(peerPtr);
   }
 
-  IpcGpuBarrier barrier(nRanks, nBlocks, selfRank, allMailboxes);
+  // Stage the pointer table into device memory so the barrier can index it.
+  auto peerFlagsDev = std::make_unique<DeviceBuffer>(static_cast<size_t>(nRanks) * sizeof(FlagType*));
+  if (peerFlagsDev == nullptr || peerFlagsDev->get() == nullptr) {
+    ERROR("IpcGpuBarrier::mallocAndInit: peer pointer table allocation failed");
+    return {nullptr, IpcGpuBarrier{}};
+  }
+  err = cudaMemcpy(peerFlagsDev->get(), hostPeerFlags.data(), static_cast<size_t>(nRanks) * sizeof(FlagType*),
+                   cudaMemcpyHostToDevice);
+  if (err != cudaSuccess) {
+    WARN("IpcGpuBarrier::mallocAndInit: cudaMemcpy(table) failed (%s)", cudaGetErrorString(err));
+    return {nullptr, IpcGpuBarrier{}};
+  }
+
+  IpcGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()));
 
   auto resources = std::make_unique<IpcGpuBarrierResources>();
   resources->ipcMemHandler = std::move(memHandler);
-  resources->selfMailboxBuf = std::move(selfMboxBuf);
+  resources->selfFlagBuf = std::move(selfFlagBuf);
+  resources->peerFlagsDev = std::move(peerFlagsDev);
   return {std::move(resources), barrier};
 }
 

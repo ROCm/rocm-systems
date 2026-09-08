@@ -25,7 +25,6 @@ namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
 static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
@@ -54,13 +53,47 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
-    dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  const int nRanks = comm->nRanks;
+  const bool stagingCopyInKernel = dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T));
+
+  INFO(NCCL_COLL, "DDA IPC AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u staging=%d%s", nRanks,
+       count, grid.x, block.x, static_cast<int>(stagingCopyInKernel),
+       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+
+  // Specialize the kernel for common clique sizes (compile-time NRANKS_CT ->
+  // the fully unrolled peer loop), and fall back to the runtime kernel
+  // (NRANKS_CT == 0) for any other size.
+  if (stagingCopyInKernel) {
+    switch (nRanks) {
+    case 4:
+      dda::common::ddaAllToAllIpc<T, 4, false, true><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    case 8:
+      dda::common::ddaAllToAllIpc<T, 8, false, true><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    default:
+      dda::common::ddaAllToAllIpc<T, 0, false, true><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    }
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    switch (nRanks) {
+    case 4:
+      dda::common::ddaAllToAllIpc<T, 4, false, false><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    case 8:
+      dda::common::ddaAllToAllIpc<T, 8, false, false><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    default:
+      dda::common::ddaAllToAllIpc<T, 0, false, false><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    }
   }
   CUDACHECK(cudaGetLastError());
 
@@ -84,7 +117,7 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
+  if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {

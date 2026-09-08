@@ -25,7 +25,6 @@ namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
@@ -54,9 +53,33 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  const int nRanks = comm->nRanks;
+
+  INFO(NCCL_COLL, "DDA IPC ReduceScatter: launching kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s", nRanks,
+       recvcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  dda::common::ddaReduceScatterIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+
+  // Specialize the kernel for common clique sizes (compile-time NRANKS_CT ->
+  // the unrolled CollCommon reduceScatter), and fall back to the runtime kernel
+  // (NRANKS_CT == 0) for any other size.
+  switch (nRanks) {
+  case 4:
+    dda::common::ddaReduceScatterIpc<T, 4, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  case 8:
+    dda::common::ddaReduceScatterIpc<T, 8, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  default:
+    dda::common::ddaReduceScatterIpc<T, 0, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -79,7 +102,7 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
+  if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
   if (op != ncclSum) {

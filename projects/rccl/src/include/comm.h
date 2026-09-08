@@ -989,8 +989,8 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
-  // Heap-allocated per comm (kDdaNranks for IPC, nRanks for fabric), not a fixed
-  // array -- fabric's larger nRanks used to overflow a fixed kDdaNranks array here.
+  // Heap-allocated per comm (nRanks entries for both the IPC and fabric paths),
+  // not a fixed array -- larger nRanks used to overflow a fixed 8-entry array here.
   void** ddaPeerPtrsHost;
 
   uint64_t endMagic;

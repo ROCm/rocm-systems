@@ -21,8 +21,8 @@ struct ncclMemManager;
 
 namespace dda::common {
 
-// Upper bound on the number of ranks the fabric DDA path supports.
-constexpr int kDdaMaxNranks = 72;
+// kDdaMaxNranks (upper bound on ranks for both DDA paths) comes from
+// ipc_gpu_barrier.h, included above for putFlag/waitFlag.
 
 class FabricGpuBarrier;
 

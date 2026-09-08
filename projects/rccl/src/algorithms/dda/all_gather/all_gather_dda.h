@@ -15,12 +15,16 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc>
+// Templated on a compile-time rank count NRANKS_CT (matching the fabric path):
+//   - NRANKS_CT > 0  : specialized for that clique size; CollCommon's allGather
+//                      folds nRanks to a constant and fully unrolls the peer loop.
+//   - NRANKS_CT == 0 : runtime fallback; the rank count comes from nRanks.
+template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllGatherIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                  const T* __restrict__ sendbuff, int selfRank, int nRanks, IpcGpuBarrier barrier) {
 
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -36,7 +40,7 @@ __launch_bounds__(512)
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
+  allGather<T, NRANKS_CT>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, false);
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();

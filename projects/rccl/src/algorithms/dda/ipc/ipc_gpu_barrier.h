@@ -10,7 +10,7 @@
 #pragma once
 
 #include <cuda.h>
-#include <array>
+#include <cstdint>
 #include <memory>
 
 #include "algorithms/dda/device/device_buffer.h"
@@ -42,54 +42,32 @@ __device__ __forceinline__ void waitFlag(uint32_t* addr) {
   while (cas<Sem>(addr, 1, 0) != 1);
 }
 
-constexpr int NRANKS = 8;
-
 } // namespace
 
-class DeviceMailbox {
-public:
-  using FlagType = uint32_t;
-  static __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> mallocAndInit(int nRanks, int nBlocks);
+// Default/baseline clique size for the DDA IPC path: the 8-GPU SPX case, and the
+// size the DDA unit tests build their fake comms around. Neither the barrier nor
+// the kernels are limited to it -- the dispatch gates accept 2..kDdaMaxNranks and
+// specialize the kernels per clique size, falling back to a runtime rank count.
+constexpr int NRANKS = 8;
 
-  DeviceMailbox() = default;
-
-  __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
-
-  __device__ inline void setFlagNoMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
-  }
-
-  __device__ inline void waitFlagNoMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
-  }
-
-  __device__ inline void setFlagWithMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock));
-  }
-
-  __device__ inline void waitFlagWithMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock));
-  }
-
-private:
-  int nBlocks_;
-  FlagType* flags_;
-
-  __device__ inline int getFlagIdx(int rank, int block) {
-    return block * NRANKS + rank;
-  }
-};
+// Upper bound on the number of ranks the DDA IPC and fabric paths support.
+// Lives here rather than in fabric_gpu_barrier.h because that header includes
+// this one (for putFlag/waitFlag), so both paths can share a single definition.
+constexpr int kDdaMaxNranks = 72;
 
 class IpcGpuBarrier;
 
 struct IpcGpuBarrierResources {
   std::unique_ptr<ncclIpcMemHandler> ipcMemHandler;
-  std::unique_ptr<DeviceBuffer> selfMailboxBuf;
+  // This rank's own flag buffer, exported to peers over IPC.
+  std::unique_ptr<DeviceBuffer> selfFlagBuf;
+  // Device-resident array of nRanks flag-buffer pointers (FlagType*[nRanks]).
+  std::unique_ptr<DeviceBuffer> peerFlagsDev;
 };
 
 class IpcGpuBarrier {
 public:
-  using FlagType = DeviceMailbox::FlagType;
+  using FlagType = uint32_t;
   __host__ IpcGpuBarrier() = default;
 
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
@@ -113,18 +91,28 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS) {
-      auto peerRank = threadIdx.x;
+    // Each thread handles one or more peers in a strided loop so the barrier
+    // stays correct when blockDim.x < nRanks_. A small count can launch as few
+    // as 64 threads while a clique may have up to kDdaMaxNranks ranks; with a
+    // single thread per peer, peers with rank >= blockDim.x would never be
+    // signaled or waited on, hanging the barrier. Every rank walks peers in the
+    // same increasing order, so the interleaved signal/wait cannot deadlock.
+    FlagType* selfBuf = peerFlags_[selfRank_];
+    for (int peerRank = threadIdx.x; peerRank < nRanks_; peerRank += blockDim.x) {
+      FlagType* peerBuf = peerFlags_[peerRank];
+
+      // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x);
+        putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
       } else {
-        allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x);
+        putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
       }
 
+      // Wait for the peer's signal in this rank's own buffer.
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x);
+        waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
       } else {
-        allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x);
+        waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
       }
     }
     if constexpr (hasSubsequentMemAccess) {
@@ -135,9 +123,15 @@ public:
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
-  std::array<DeviceMailbox, NRANKS> allMailboxes_;
+  int nRanks_{-1};
+  FlagType** peerFlags_{nullptr};
 
-  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);
+  __host__ IpcGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
+
+  __device__ inline int getFlagIdx(int rank, int block) {
+    return block * nRanks_ + rank;
+  }
 };
 
 } // namespace dda::common

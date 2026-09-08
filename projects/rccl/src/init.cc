@@ -2839,7 +2839,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   if (!job->parent && !job->isGrow) {
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
-    } else if (comm->nNodes == 1 && comm->nRanks == 8) {
+    } else {
+      // Both DDA init paths self-gate (rank count, node count, arch, P2P) and
+      // return ncclSuccess without allocating when the comm does not qualify.
+      // Do not duplicate those conditions here: a stale copy of the rank gate is
+      // what kept DDA IPC off for every clique size other than 8.
       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
     }
   }

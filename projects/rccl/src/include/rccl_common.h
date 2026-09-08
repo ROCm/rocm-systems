@@ -79,7 +79,7 @@ typedef enum {
   RCCL_DDA_FABRIC_LL,   // DDA fabric, LL protocol (small-message fast lane)
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
-  RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
+  RCCL_DDA_IPC,         // DDA IPC (single-node, runtime nRanks)
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 

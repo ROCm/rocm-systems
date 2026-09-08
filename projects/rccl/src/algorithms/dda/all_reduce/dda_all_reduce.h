@@ -14,7 +14,7 @@
 
 struct ncclComm;
 
-// IPC path (single node, fixed kDdaNranks ranks).
+// IPC path (single node, runtime nRanks up to kDdaMaxNranks).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);
 

@@ -16,9 +16,15 @@
 
 #include <cuda_runtime.h>
 
+#include <vector>
+
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_detail::kDdaNranks;
+
+// Smallest clique the DDA IPC path is worth setting up for. Must stay in sync
+// with rcclDdaEnabled()'s `comm->nRanks < 8` early return for gfx942/gfx950,
+// which is the only dispatch route into these kernels.
+constexpr int kDdaIpcMinNranks = 8;
 
 #define HIP_CALL(cmd) \
   do { \
@@ -34,7 +40,12 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   // Skip DDA if:
-  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
+  // - nRanks is outside [kDdaIpcMinNranks, kDdaMaxNranks]. The IPC kernels
+  //   specialize for the common clique sizes and use a runtime rank count
+  //   otherwise, so any size in that range works (e.g. 8 GPUs in SPX, or 16/32/64
+  //   partitions in CPX/DPX). The floor mirrors rcclDdaEnabled()'s `nRanks < 8`
+  //   refusal on gfx942/gfx950: below it, dispatch can never select DDA, so
+  //   allocating the scratch and running the IPC exchange here would be pure waste.
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
@@ -46,10 +57,11 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
-      comm->MNNVL || !ddaArchSupported) {
+  if (comm->nRanks < kDdaIpcMinNranks || comm->nRanks > dda::common::kDdaMaxNranks || comm->nNodes != 1 ||
+      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }
+  const int nRanks = comm->nRanks;
 
   // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
   // comm->isAllCudaP2p is set via ncclTopoCheckP2p which on AMD/HIP returns true
@@ -110,7 +122,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   void* peerDev = nullptr;
-  cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
+  cudaError_t ce = cudaMalloc(&peerDev, nRanks * sizeof(void*));
   if (ce != cudaSuccess) {
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
@@ -118,8 +130,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
+  std::vector<void*> h_ptrs(nRanks, nullptr);
+  for (int i = 0; i < nRanks; ++i) {
     void* p = nullptr;
     res = handler->getPeerDeviceMemPtr(i, &p);
     if (res != ncclSuccess) {
@@ -132,7 +144,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     h_ptrs[i] = p;
   }
 
-  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
+  ce = cudaMemcpy(peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice);
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
@@ -141,7 +153,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  if (ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
+  if (ncclCalloc(&comm->ddaPeerPtrsHost, nRanks) != ncclSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
@@ -149,7 +161,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToHost);
+  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost);
   if (ddaCe != cudaSuccess) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
@@ -161,7 +173,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
@@ -191,8 +203,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
-  INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
-       nBlocksMax);
+  INFO(NCCL_INIT, "ncclDdaIpcCommInit: nRanks=%d, scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",
+       nRanks, bytes, nBlocksMax);
   return ncclSuccess;
 }
 

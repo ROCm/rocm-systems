@@ -25,7 +25,6 @@ namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_detail::kDdaNranks;
 
 // Single source of the launch geometry: grid/block for a byte payload. The
 // kernel is instantiated for int8_t, so `bytes` is the per-block element count.
@@ -59,8 +58,31 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  dda::common::ddaAllGatherIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  const int nRanks = comm->nRanks;
+
+  INFO(NCCL_COLL, "DDA IPC AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks, sendcount,
+       grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+
+  // Specialize the kernel for common clique sizes (compile-time NRANKS_CT -> the
+  // unrolled CollCommon allGather), and fall back to the runtime kernel
+  // (NRANKS_CT == 0) for any other size.
+  switch (nRanks) {
+  case 4:
+    dda::common::ddaAllGatherIpc<T, 4, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  case 8:
+    dda::common::ddaAllGatherIpc<T, 8, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  default:
+    dda::common::ddaAllGatherIpc<T, 0, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+      barrierHost);
+    break;
+  }
 
   CUDACHECK(cudaGetLastError());
 
@@ -84,7 +106,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
+  if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
