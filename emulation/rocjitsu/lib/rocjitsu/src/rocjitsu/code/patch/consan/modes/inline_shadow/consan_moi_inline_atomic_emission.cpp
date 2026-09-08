@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_register_layout.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
@@ -732,7 +733,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   require_emission(append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch),
                    "ConSan MOI inline atomic acquire patch could not load release version");
-  const uint16_t version_before = static_cast<uint16_t>(scratch_vgpr + 20u);
+  const uint16_t version_before = static_cast<uint16_t>(
+      scratch_vgpr + inline_register_layout::AtomicOrdering::release_version_before);
   if (source_slot_claimed)
     sequence.append(instrumentation::build_v_add_u32(temporary_vgpr, scalar_positive_inline_u32(1),
                                                      version_before, arch));
@@ -1022,16 +1024,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
   const uint16_t base = scratch_vgpr;
   const bool aligned_cas_pair = plan.requires_aligned_flat_compare_swap_data_pair;
-  const uint16_t snapshot_address = static_cast<uint16_t>(base + (aligned_cas_pair ? 6u : 5u));
-  const uint16_t count = static_cast<uint16_t>(base + (aligned_cas_pair ? 5u : 7u));
-  const uint16_t flags = static_cast<uint16_t>(base + 8u);
-  const uint16_t owners = static_cast<uint16_t>(base + 9u);
-  const uint16_t epochs = static_cast<uint16_t>(base + 13u);
-  const uint16_t version_before = static_cast<uint16_t>(base + 17u);
-  const uint16_t producer = static_cast<uint16_t>(base + 18u);
-  const uint16_t producer_epoch = static_cast<uint16_t>(base + 19u);
-  const uint16_t temporary = static_cast<uint16_t>(base + 20u);
-  const uint16_t loop_index = static_cast<uint16_t>(base + 21u);
+  using SnapshotLayout = inline_register_layout::AtomicCausalSnapshot;
+  const uint16_t snapshot_address =
+      static_cast<uint16_t>(base + SnapshotLayout::address(aligned_cas_pair));
+  const uint16_t count = static_cast<uint16_t>(base + SnapshotLayout::count(aligned_cas_pair));
+  const uint16_t flags = static_cast<uint16_t>(base + SnapshotLayout::flags);
+  const uint16_t owners = static_cast<uint16_t>(base + SnapshotLayout::owners);
+  const uint16_t epochs = static_cast<uint16_t>(base + SnapshotLayout::epochs);
+  const uint16_t version_before =
+      static_cast<uint16_t>(base + SnapshotLayout::token_version_before);
+  const uint16_t producer = static_cast<uint16_t>(base + SnapshotLayout::producer);
+  const uint16_t producer_epoch = static_cast<uint16_t>(base + SnapshotLayout::producer_epoch);
+  const uint16_t temporary = static_cast<uint16_t>(base + SnapshotLayout::temporary);
+  const uint16_t loop_index = static_cast<uint16_t>(base + SnapshotLayout::loop_index);
   const uint16_t exec_base = plan.exec_save_sgpr;
   const uint16_t narrow_save = exec_base;
   const uint16_t empty_exec = static_cast<uint16_t>(exec_base + 2u);
@@ -1780,7 +1785,6 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const uint16_t temporary_vgpr = static_cast<uint16_t>(scratch_vgpr + 6u);
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
-  const bool claims_release_predecessor = consan_is_capability_arch(arch);
 
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
@@ -1897,7 +1901,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // A language-level ordinary release store starts a new publication: it
     // must reserve and stage metadata before the guest store, but must not
     // inherit an unrelated predecessor's causal frontier.
-    const bool import_claimed_predecessor = claims_release_predecessor && is_rmw;
+    const bool import_claimed_predecessor = is_rmw;
     require_emission(append_inline_versioned_release_transaction(
                          words, bytes, *event_kind, site, address_plan, plan, arch,
                          /*emit_guest_instruction=*/true, import_claimed_predecessor,
@@ -1911,9 +1915,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // AcquireRelease RMWs with the release reservation itself: the claimed odd
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
-  const bool claimed_acquire_release = claims_release_predecessor &&
-                                       *event_kind == ConSanMoiAtomicEventKind::AcquireRelease &&
-                                       !is_compare_exchange;
+  const bool claimed_acquire_release =
+      *event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     require_emission(
         append_inline_versioned_release_transaction(
@@ -1930,8 +1933,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // an acquire could observe the new value while the release slot was still
   // empty. Claim the slot first, execute the CAS once inside that transaction,
   // and restore the prior slot unchanged for dynamically failed comparisons.
-  const bool claimed_compare_exchange_release = claims_release_predecessor && is_compare_exchange &&
-                                                *event_kind != ConSanMoiAtomicEventKind::Acquire;
+  const bool claimed_compare_exchange_release =
+      is_compare_exchange && *event_kind != ConSanMoiAtomicEventKind::Acquire;
   if (claimed_compare_exchange_release) {
     require_emission(
         append_inline_versioned_release_transaction(
@@ -1949,7 +1952,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // acquires cannot use this path: an acquire-only RMW also extends a language
   // release sequence and needs a separate successor-publication contract.
   const bool claimed_read_only_acquire =
-      claims_release_predecessor && !is_rmw && *event_kind == ConSanMoiAtomicEventKind::Acquire;
+      !is_rmw && *event_kind == ConSanMoiAtomicEventKind::Acquire;
   if (claimed_read_only_acquire) {
     require_emission(
         append_inline_versioned_release_transaction(
@@ -1969,7 +1972,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // from the final address pair reserved by address materialization.
   if (*event_kind == ConSanMoiAtomicEventKind::Acquire ||
       *event_kind == ConSanMoiAtomicEventKind::AcquireRelease) {
-    const uint16_t version_before = static_cast<uint16_t>(scratch_vgpr + 20u);
+    const uint16_t version_before = static_cast<uint16_t>(
+        scratch_vgpr + inline_register_layout::AtomicOrdering::release_version_before);
     const uint16_t version_retry_count = static_cast<uint16_t>(plan.exec_save_sgpr + 20u);
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
         kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_register_layout.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
@@ -452,6 +453,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       consan_detail::inline_shadow_transaction_scratch_count(/*has_exec_save=*/true,
                                                              /*track_atomics=*/false) -
       2u;
+  static_assert(diagnostic_tuple_offset ==
+                inline_register_layout::ExactShadow::diagnostic_claim_tuple);
   const uint16_t diagnostic_tuple_candidate =
       static_cast<uint16_t>(plan.scratch_vgpr + diagnostic_tuple_offset);
   const uint16_t slot_vgpr = static_cast<uint16_t>(

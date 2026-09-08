@@ -123,6 +123,8 @@ rj_add_object_library(
     rocjitsu_consan_validation
         consan_final_validation.cpp
         consan_validation_inventory.cpp
+        modes/inline_shadow/consan_moi_inline_shadow_final_validation.cpp
+        modes/supercollider/consan_supercollider_final_validation.cpp
 )
 target_link_libraries(
     rocjitsu_consan_validation
