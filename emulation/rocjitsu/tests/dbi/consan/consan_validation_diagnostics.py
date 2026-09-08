@@ -2,117 +2,24 @@
 
 from __future__ import annotations
 
-import argparse
-from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, replace
-import hashlib
+from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import Path
-import platform
-import random
 import re
-import selectors
-import shlex
 import shutil
-import signal
 import statistics
 import subprocess
-import sys
-import threading
-import time
 
-import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
 from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
-from consan_tensile_support import (
-    TensileValidationPaths,
-    resolve_tensile_validation_paths,
-    tensile_python_environment,
-)
 from consan_validation_catalog import (
-    CONTROLLED_ENV_PREFIX,
-    EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
-    EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT,
-    EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES,
-    EMPIRICAL_DEFAULT_ROUNDS,
-    EMPIRICAL_MAX_INNER_REPETITIONS,
-    EMPIRICAL_MINIMUM_TIMED_MS,
-    FAULT_FAMILY_ENVIRONMENTS,
-    FAULT_FAMILY_SITE_KINDS,
-    HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV,
-    HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV,
-    HSA_TOOL_ENVIRONMENT,
-    LLAMA_BUILD_DIR_ENV,
     LLVM_READELF_ENV,
     MOI_DIAGNOSTIC_KINDS,
     MOI_SHADOW_ACCESS_WRITE,
-    NATIVE_GTEST_TARGETS,
-    NATIVE_GTEST_WORKLOAD_IDS,
-    NATIVE_GTEST_WORKLOAD_OVERRIDES,
-    ORDINARY_FORBIDDEN_ENVIRONMENT,
-    ORDINARY_MOI_RUNTIME_DEFAULTS,
-    PROCESS_OUTPUT_DRAIN_SECONDS,
-    PROCESS_TERMINATION_GRACE_SECONDS,
-    PROFILE_IDS,
-    PROFILES,
-    PROVENANCE_SCHEMA_VERSION,
-    PYTORCH_OVERHEAD_PROCESSES,
-    PYTORCH_PYTHON_ENV,
-    QWEN_BUILD_MANIFEST_SCHEMA_VERSION,
-    QWEN_COMPILE_OPTIONS,
-    QWEN_OVERHEAD_REPETITIONS,
-    RDNA4_MATMUL_DIR_ENV,
-    RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS,
-    SAMPLED_STANDARD_RUNTIME_DEFAULTS,
-    SCHEMA_VERSION,
-    SETTING_CATEGORIES,
-    SHARKTANK_PYTHON_ENV,
-    SINGLE_REPETITION_TARGETS,
-    SOFTWARE_MODEL_ENVIRONMENT,
-    STREAMK_FAULT_FAMILIES,
-    STREAMK_WORKLOAD_IDS,
-    STREAMK_WORKLOAD_SHAPES,
-    TARGET_ENV,
-    TARGET_WORKLOAD_OVERRIDES,
-    TENSILE_PYTHON_ENV,
-    TENSILE_SHARD_TIMING_CANARY_MS,
-    TIMEOUT_SECONDS,
-    TOOLS,
     ValidationError,
-    Workload,
-    WORKLOAD_BY_ID,
-    WORKLOADS,
-    WORKSPACE_ENV,
-    _attention_override,
-    _cdna_gtest_target,
-    _fault_families,
-    _fault_family_environment,
-    _jakub_override,
-    _native_gtest_overrides,
-    _native_gtest_path,
-    _resolved_workload,
-    _single_oracle_override,
-    _streamk_overrides,
-    _target_fault_families,
-    _validate_exact_keys,
-    _validate_tensile_sharding,
-    _validate_workload_manifest,
-    _workload_for_target,
-    _workloads_for_target,
-    Profile,
-    resolved_workload_relative_path,
 )
-from consan_validation_support import (
-    FAULT_RESERVATION_QUALIFIED,
-    RESULT_SCHEMA_VERSION,
-    SITE_KINDS,
-    atomic_write_json,
-    fault_reservation_qualification,
-    git_identity,
-    sha256_file,
-)
+from consan_validation_support import SITE_KINDS, sha256_file
 
 
 _COVERAGE_DUMP_NAME = re.compile(
@@ -1557,4 +1464,3 @@ def _gtest_test_count(log_text: str) -> int | None:
         log_text,
     )
     return int(matches[-1]) if matches else None
-

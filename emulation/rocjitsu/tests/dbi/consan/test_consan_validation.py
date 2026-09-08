@@ -23,7 +23,11 @@ from unittest import mock
 
 import consan_validation as validation
 import consan_validation_catalog as validation_catalog
+import consan_validation_commands as validation_commands
 import consan_validation_diagnostics as validation_diagnostics
+import consan_validation_empirical as validation_empirical
+import consan_validation_execution as validation_execution
+import consan_validation_faults as validation_faults
 import consan_llama_validation as llama_validation
 import consan_rdna4_matmul_validation as rdna4_matmul_validation
 import consan_sharktank_validation as sharktank_validation
@@ -331,12 +335,12 @@ class ConSanValidationTest(unittest.TestCase):
             with (
                 temporary_root() as root,
                 mock.patch.object(
-                    validation,
+                    validation_execution,
                     "PROCESS_TERMINATION_GRACE_SECONDS",
                     0.1,
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_execution,
                     "PROCESS_OUTPUT_DRAIN_SECONDS",
                     0.1,
                 ),
@@ -387,7 +391,7 @@ class ConSanValidationTest(unittest.TestCase):
             for index in range(6)
         ]
         with mock.patch.object(
-            validation, "_run_process", side_effect=fake_run_process
+            validation_execution, "_run_process", side_effect=fake_run_process
         ):
             results = validation._run_process_batch(runs, 3)
         self.assertEqual([result[0] for result in results], list(range(6)))
@@ -409,11 +413,13 @@ class ConSanValidationTest(unittest.TestCase):
             hook = root / "hook.so"
             hook.write_bytes(b"hook")
             with (
-                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(validation_execution, "_hook_path", return_value=hook),
                 mock.patch.object(
-                    validation, "_run_process", side_effect=run_process
+                    validation_execution, "_run_process", side_effect=run_process
                 ),
-                mock.patch.object(validation, "_source_identities", return_value=[]),
+                mock.patch.object(
+                    validation_execution, "_source_identities", return_value=[]
+                ),
             ):
                 result = validation._run_profile(
                     root,
@@ -2860,19 +2866,21 @@ class ConSanValidationTest(unittest.TestCase):
                 hook = root / "hook.so"
                 hook.write_bytes(b"hook")
                 with (
-                    mock.patch.object(validation, "_hook_path", return_value=hook),
                     mock.patch.object(
-                        validation,
+                        validation_execution, "_hook_path", return_value=hook
+                    ),
+                    mock.patch.object(
+                        validation_commands,
                         "_workload_command",
                         return_value=["/bin/true"],
                     ),
                     mock.patch.object(
-                        validation,
+                        validation_execution,
                         "_run_process",
                         return_value=(0, 0.1, output),
                     ),
                     mock.patch.object(
-                        validation,
+                        validation_execution,
                         "_source_identities",
                         return_value=[],
                     ),
@@ -2907,19 +2915,21 @@ class ConSanValidationTest(unittest.TestCase):
                 hook = root / "hook.so"
                 hook.write_bytes(b"hook")
                 with (
-                    mock.patch.object(validation, "_hook_path", return_value=hook),
                     mock.patch.object(
-                        validation,
+                        validation_execution, "_hook_path", return_value=hook
+                    ),
+                    mock.patch.object(
+                        validation_commands,
                         "_workload_command",
                         return_value=["/bin/true"],
                     ),
                     mock.patch.object(
-                        validation,
+                        validation_execution,
                         "_run_process",
                         return_value=(0, 0.1, log),
                     ),
                     mock.patch.object(
-                        validation,
+                        validation_execution,
                         "_source_identities",
                         return_value=[],
                     ),
@@ -2965,33 +2975,37 @@ class ConSanValidationTest(unittest.TestCase):
             workload_input.write_bytes(b"input")
             workload_root = root / "artifacts" / workload.id
             with (
-                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(validation_commands, "_hook_path", return_value=hook),
                 mock.patch.object(
-                    validation, "_input_files", return_value={"input": workload_input}
+                    validation_commands,
+                    "_input_files",
+                    return_value={"input": workload_input},
                 ),
-                mock.patch.object(validation, "_source_identities", return_value=[]),
                 mock.patch.object(
-                    validation,
+                    validation_commands, "_source_identities", return_value=[]
+                ),
+                mock.patch.object(
+                    validation_commands,
                     "_manifest",
                     return_value={"schema_version": 1, "profiles": ("a", "b")},
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_commands,
                     "_machine_identity",
                     return_value={"selected_kfd_nodes": ["1"]},
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_commands,
                     "_runtime_tool_identities",
                     return_value={"rocm-sdk": {"available": True}},
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_commands,
                     "_workload_runtime_identity",
                     return_value={"kind": "pytorch", "python_packages": {}},
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_commands,
                     "_empirical_observation_snapshot",
                     side_effect=(
                         {"schema_version": 1, "captured_at_utc": "first"},
@@ -3092,12 +3106,12 @@ class ConSanValidationTest(unittest.TestCase):
         }
         with (
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_pytorch_python",
                 return_value=Path("/frozen/python"),
             ),
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_command_identity",
                 return_value={
                     "available": True,
@@ -3105,7 +3119,7 @@ class ConSanValidationTest(unittest.TestCase):
                 },
             ) as command_identity,
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_runtime_library_records",
                 return_value={
                     "hip-runtime": {"sha256": "a" * 64},
@@ -3148,7 +3162,7 @@ class ConSanValidationTest(unittest.TestCase):
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
         with (
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_command_identity",
                 return_value={"available": False, "reason": "timed out"},
             ),
@@ -3165,12 +3179,12 @@ class ConSanValidationTest(unittest.TestCase):
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         with (
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_input_files",
                 return_value={"executable": Path("/workspace/d128")},
             ),
             mock.patch.object(
-                validation,
+                validation_commands,
                 "_native_runtime_identity",
                 return_value={
                     "loaded_runtime_libraries": {
@@ -3562,7 +3576,7 @@ class ConSanValidationTest(unittest.TestCase):
             with (
                 mock.patch.object(validation.shutil, "which", return_value=None),
                 mock.patch.object(
-                    validation, "_pytorch_runtime_probe", return_value=runtime
+                    validation_commands, "_pytorch_runtime_probe", return_value=runtime
                 ) as probe,
             ):
                 doctor = validation._doctor(
@@ -4599,7 +4613,7 @@ class ConSanValidationTest(unittest.TestCase):
             llvm_readelf=Path("/toolchain/llvm-readelf"),
         )
         with mock.patch.object(
-            validation,
+            validation_commands,
             "resolve_tensile_validation_paths",
             return_value=resolved,
         ):
@@ -4644,20 +4658,26 @@ class ConSanValidationTest(unittest.TestCase):
                 inputs[label] = path
             inputs["wrapper"].chmod(0o644)
             with (
-                mock.patch.object(validation, "_required_paths", return_value={}),
-                mock.patch.object(validation, "_input_files", return_value=inputs),
                 mock.patch.object(
-                    validation,
+                    validation_commands, "_required_paths", return_value={}
+                ),
+                mock.patch.object(
+                    validation_commands, "_input_files", return_value=inputs
+                ),
+                mock.patch.object(
+                    validation_commands,
                     "_tensile_runtime_probe",
                     return_value={"ok": True},
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_commands,
                     "resolve_tensile_validation_paths",
                     return_value=mock.Mock(tensilelite=root, rocm=root),
                 ),
                 mock.patch.object(
-                    validation, "_tensile_python", return_value=inputs["python"]
+                    validation_commands,
+                    "_tensile_python",
+                    return_value=inputs["python"],
                 ),
                 mock.patch.object(validation.shutil, "which", return_value="/tool"),
             ):
@@ -6163,9 +6183,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(config["target"], "gfx950")
         with (
             mock.patch.object(
-                validation, "_workspace_from_environment", return_value=Path("/workspace")
+                validation_empirical,
+                "_workspace_from_environment",
+                return_value=Path("/workspace"),
             ),
-            mock.patch.object(validation, "_doctor", return_value={"ok": False}),
+            mock.patch.object(
+                validation_empirical, "_doctor", return_value={"ok": False}
+            ),
             self.assertRaisesRegex(
                 validation.ValidationError, "workspace doctor failed"
             ),
@@ -6266,16 +6290,20 @@ class ConSanValidationTest(unittest.TestCase):
             )
             with (
                 mock.patch.object(
-                    validation, "_workspace_from_environment", return_value=root
+                    validation_empirical,
+                    "_workspace_from_environment",
+                    return_value=root,
                 ),
-                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
                 mock.patch.object(
-                    validation,
+                    validation_empirical, "_doctor", return_value={"ok": True}
+                ),
+                mock.patch.object(
+                    validation_empirical,
                     "_write_provenance",
                     return_value=root / "provenance.json",
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_empirical,
                     "_run_or_resume_empirical_row",
                     side_effect=fake_row,
                 ),
@@ -6589,20 +6617,24 @@ class ConSanValidationTest(unittest.TestCase):
             )
             with (
                 mock.patch.object(
-                    validation, "_workspace_from_environment", return_value=root
+                    validation_faults, "_workspace_from_environment", return_value=root
                 ),
-                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
-                mock.patch.object(validation, "_hook_path", return_value=hook),
                 mock.patch.object(
-                    validation,
+                    validation_faults, "_doctor", return_value={"ok": True}
+                ),
+                mock.patch.object(validation_faults, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation_faults,
                     "_write_provenance",
                     return_value=root / "provenance.json",
                 ) as write_provenance,
                 mock.patch.object(
-                    validation, "_fault_workload_command", return_value=["payload"]
+                    validation_faults,
+                    "_fault_workload_command",
+                    return_value=["payload"],
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_faults,
                     "_run_inventory_process",
                     return_value=(
                         0,
@@ -6756,26 +6788,30 @@ class ConSanValidationTest(unittest.TestCase):
             )
             with (
                 mock.patch.object(
-                    validation, "_workspace_from_environment", return_value=root
-                ),
-                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
-                mock.patch.object(validation, "_load_fault", return_value=fault),
-                mock.patch.object(
-                    validation, "_hook_path", return_value=Path("/hook.so")
+                    validation_faults, "_workspace_from_environment", return_value=root
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_faults, "_doctor", return_value={"ok": True}
+                ),
+                mock.patch.object(validation_faults, "_load_fault", return_value=fault),
+                mock.patch.object(
+                    validation_faults, "_hook_path", return_value=Path("/hook.so")
+                ),
+                mock.patch.object(
+                    validation_faults,
                     "_write_provenance",
                     return_value=fault_root / "provenance.json",
                 ),
                 mock.patch.object(
-                    validation, "_fault_workload_command", return_value=["payload"]
+                    validation_faults,
+                    "_fault_workload_command",
+                    return_value=["payload"],
                 ),
                 mock.patch.object(
-                    validation, "_health_smoke_command", return_value=["smoke"]
+                    validation_faults, "_health_smoke_command", return_value=["smoke"]
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_faults,
                     "_fault_trial_environment",
                     return_value=trial_environment,
                 ),
@@ -6860,23 +6896,33 @@ class ConSanValidationTest(unittest.TestCase):
                 args = validation._parse_args(argv)
                 with (
                     mock.patch.object(
-                        validation, "_workspace_from_environment", return_value=root
+                        validation_faults,
+                        "_workspace_from_environment",
+                        return_value=root,
                     ),
-                    mock.patch.object(validation, "_doctor", return_value={"ok": True}),
-                    mock.patch.object(validation, "_load_fault", return_value=fault),
-                    mock.patch.object(validation, "_hook_path", return_value=hook),
                     mock.patch.object(
-                        validation,
+                        validation_faults, "_doctor", return_value={"ok": True}
+                    ),
+                    mock.patch.object(
+                        validation_faults, "_load_fault", return_value=fault
+                    ),
+                    mock.patch.object(
+                        validation_faults, "_hook_path", return_value=hook
+                    ),
+                    mock.patch.object(
+                        validation_faults,
                         "_write_provenance",
                         return_value=root / "provenance.json",
                     ) as write_provenance,
                     mock.patch.object(
-                        validation,
+                        validation_faults,
                         "_fault_workload_command",
                         return_value=["payload"],
                     ),
                     mock.patch.object(
-                        validation, "_health_smoke_command", return_value=["smoke"]
+                        validation_faults,
+                        "_health_smoke_command",
+                        return_value=["smoke"],
                     ),
                     mock.patch.object(
                         validation.shutil, "which", return_value="/bin/rocminfo"
@@ -7197,15 +7243,17 @@ class ConSanValidationTest(unittest.TestCase):
             provenance = root / "provenance.json"
             with (
                 mock.patch.object(
-                    validation, "_workspace_from_environment", return_value=root
-                ),
-                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
-                mock.patch.object(validation, "_load_fault", return_value=fault),
-                mock.patch.object(
-                    validation, "_write_provenance", return_value=provenance
+                    validation_faults, "_workspace_from_environment", return_value=root
                 ),
                 mock.patch.object(
-                    validation,
+                    validation_faults, "_doctor", return_value={"ok": True}
+                ),
+                mock.patch.object(validation_faults, "_load_fault", return_value=fault),
+                mock.patch.object(
+                    validation_faults, "_write_provenance", return_value=provenance
+                ),
+                mock.patch.object(
+                    validation_faults,
                     "_health_smoke_command",
                     return_value=["/bin/true"],
                 ),

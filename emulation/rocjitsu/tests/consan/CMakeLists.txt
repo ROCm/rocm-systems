@@ -1825,6 +1825,15 @@ function(
     set(_validation_registry
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation.py"
     )
+    set(_validation_modules
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_catalog.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_commands.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_diagnostics.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_empirical.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_execution.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_faults.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation_statistics.py"
+    )
     # These scripts generate the CTest rows below at configure time. Make any
     # registry or validation-contract edit regenerate those rows automatically.
     set_property(
@@ -1835,6 +1844,7 @@ function(
                 "${_runner}"
                 "${_suite_registry}"
                 "${_validation_registry}"
+                ${_validation_modules}
     )
     execute_process(
         COMMAND "${_runner}" --list-suites
