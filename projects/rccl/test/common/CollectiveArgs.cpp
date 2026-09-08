@@ -254,11 +254,6 @@ namespace RcclUnitTesting
     // Report, do not fail. TestBedChild wraps this in CHECK_CALL inside its per-collective
     // loop, so returning TEST_FAIL would skip the frees of every later collective in the
     // group and leak them into the next test on a reused pool worker.
-    hipError_t const scrubErr = (errIn != hipSuccess) ? errIn : errOut;
-    if (scrubErr != hipSuccess)
-    {
-      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
-                 hipGetErrorString(scrubErr));
     if (errIn != hipSuccess)
     {
       TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
