@@ -68,7 +68,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint16_t vcc_save_sgpr = 0;
     std::optional<uint16_t> required_vgpr_allocation_count;
     std::optional<uint16_t> selectable_vgpr_bank_mode;
-    std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
+    std::optional<ConSanScalarVccSpill> scalar_vcc_spill;
   };
 
   // The save and restore described by this type bracket one instrumentation
@@ -371,12 +371,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<uint16_t> descriptor_growth;
     if (max_auto_scratch_vgpr && *required_allocation > *max_auto_scratch_vgpr)
       descriptor_growth = *required_allocation;
-    std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
+    std::optional<ConSanScalarVccSpill> scalar_vcc_spill;
     if (spill_vcc_save_to_vgpr) {
-      scalar_vcc_spill = ConSanSuperColliderScalarVccSpill{
+      scalar_vcc_spill = ConSanScalarVccSpill{
           .vcc_save_sgpr = *vcc_save,
           .reservoir_vgpr = static_cast<uint16_t>(scratch_vgpr + probe_scratch_vgprs),
-          .reservoir = ConSanSuperColliderScalarVccReservoir::PackedLanes,
+          .reservoir = ConSanScalarVccReservoir::PackedLanes,
       };
     }
     ++scratchable_candidate_count;
@@ -662,7 +662,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.original_size = site.size();
     planned.info.trampoline_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
-    planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
+    planned.info.scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.required_sgpr_count =
         static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(target));
     if (const auto plan = private_spill_plans.find(&site);

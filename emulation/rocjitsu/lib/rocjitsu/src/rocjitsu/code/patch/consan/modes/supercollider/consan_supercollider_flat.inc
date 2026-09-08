@@ -44,7 +44,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint16_t scratch_vgpr = 0;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     uint16_t vcc_save_sgpr = 0;
-    std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
+    std::optional<ConSanScalarVccSpill> scalar_vcc_spill;
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
   };
@@ -150,15 +150,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           "SuperCollider FLAT lowerer found no encodable scratch or spill plan");
       return;
     }
-    const std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill =
+    const std::optional<ConSanScalarVccSpill> scalar_vcc_spill =
         spill_vcc_save_pair_to_vgprs
-            ? std::optional<ConSanSuperColliderScalarVccSpill>{ConSanSuperColliderScalarVccSpill{
+            ? std::optional<ConSanScalarVccSpill>{ConSanScalarVccSpill{
                   .vcc_save_sgpr = *vcc_save,
                   .reservoir_vgpr = static_cast<uint16_t>(*scratch + instrumentation_scratch_vgprs),
                   .reservoir = dynamic_stack_spill
-                                   ? ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap
-                               : vgpr_spill ? ConSanSuperColliderScalarVccReservoir::PrivateSpill
-                                            : ConSanSuperColliderScalarVccReservoir::PackedLanes,
+                                   ? ConSanScalarVccReservoir::DynamicStackBootstrap
+                               : vgpr_spill ? ConSanScalarVccReservoir::PrivateSpill
+                                            : ConSanScalarVccReservoir::PackedLanes,
               }}
             : std::nullopt;
     ++scratchable_candidate_count;
@@ -334,7 +334,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.physical_id.original_text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
-    planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
+    planned.info.scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     if (candidate.vgpr_spill) {
@@ -477,7 +477,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       if (candidate.dynamic_stack_spill) {
         if (!candidate.scalar_vcc_spill ||
             candidate.scalar_vcc_spill->reservoir !=
-                ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap) {
+                ConSanScalarVccReservoir::DynamicStackBootstrap) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof lost its dynamic scalar spill window");
           return;
@@ -498,7 +498,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       } else {
         const bool spills_scalar_pair = candidate.scalar_vcc_spill.has_value();
         if (spills_scalar_pair && candidate.scalar_vcc_spill->reservoir !=
-                                      ConSanSuperColliderScalarVccReservoir::PrivateSpill) {
+                                      ConSanScalarVccReservoir::PrivateSpill) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof has an invalid scalar spill window");
           return;
@@ -554,7 +554,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     } else if (candidate.scalar_vcc_spill) {
       if (candidate.scalar_vcc_spill->reservoir !=
-          ConSanSuperColliderScalarVccReservoir::PackedLanes) {
+          ConSanScalarVccReservoir::PackedLanes) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof has an invalid fixed-lane scalar spill window");
         return;

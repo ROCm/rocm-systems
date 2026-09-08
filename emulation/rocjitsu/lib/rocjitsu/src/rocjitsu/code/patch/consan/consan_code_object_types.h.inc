@@ -481,7 +481,7 @@ struct ConSanPatchAbiEffects {
   /// SuperCollider-only preservation of a borrowed live scalar VCC-save
   /// range. One optional owns the scalar source, vector reservoir, and exact
   /// preservation strategy; other engines leave it absent.
-  std::optional<ConSanSuperColliderScalarVccSpill> sc_scalar_vcc_spill;
+  std::optional<ConSanScalarVccSpill> scalar_vcc_spill;
   /// Complete vector-register state initialized or consumed by this patch.
   /// The typed lifetime distinguishes persistent state from transient
   /// owner/epoch scratch and prevents an incomplete pair or contradictory

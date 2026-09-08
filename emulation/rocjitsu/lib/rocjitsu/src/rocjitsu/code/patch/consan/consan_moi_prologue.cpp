@@ -20,7 +20,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
-#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -1371,6 +1370,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
                                             const BoundRuntimeResources &resources,
                                             const ConSanMoiOperatingPoint &operating_point,
                                             const MoiObjectModeSemantics &mode_semantics,
+                                            const MoiPrologueModePolicy &mode_policy,
                                             rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
@@ -1569,10 +1569,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
     });
     private_requirements[kernel.descriptor_file_offset] = required_private_bytes;
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
-    if (prologue_workgroup_shadow) {
+    if (prologue_workgroup_shadow && mode_policy.visible_evidence_sgpr)
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(kernel_point));
-    }
+          mode_policy.visible_evidence_sgpr(kernel_point);
     MoiPrivateEpochPrologueEmissionPlan emission{
         .scratch_vgpr = *access_patch->scratch_vgpr,
         .private_state_layout = layout,
@@ -1722,7 +1721,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if (operating_point.automatic_moi_private_epoch) {
     try_apply_private_epoch_prologue_patch(request, resources, operating_point, mode_semantics,
-                                           arch, result);
+                                           mode_policy, arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
@@ -1942,10 +1941,9 @@ void try_apply_owner_epoch_prologue_patch(
       }
     }
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
-    if (prologue_workgroup_shadow) {
+    if (prologue_workgroup_shadow && mode_policy.visible_evidence_sgpr)
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(kernel_point));
-    }
+          mode_policy.visible_evidence_sgpr(kernel_point);
     MoiOwnerEpochPrologueEmissionPlan emission{
         .vgpr_state =
             {

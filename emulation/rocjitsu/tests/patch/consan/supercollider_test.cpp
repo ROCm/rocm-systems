@@ -19,38 +19,38 @@ struct GrowthPolicyFixture {
 };
 
 [[nodiscard]] std::optional<uint16_t> test_sc_vcc_save_sgpr(const ConSanPatchInfo &patch) {
-  return patch.sc_scalar_vcc_spill
-             ? std::optional<uint16_t>{patch.sc_scalar_vcc_spill->vcc_save_sgpr}
+  return patch.scalar_vcc_spill
+             ? std::optional<uint16_t>{patch.scalar_vcc_spill->vcc_save_sgpr}
              : std::nullopt;
 }
 
 [[nodiscard]] std::optional<uint16_t> test_sc_vcc_reservoir_vgpr(const ConSanPatchInfo &patch) {
-  return patch.sc_scalar_vcc_spill
-             ? std::optional<uint16_t>{patch.sc_scalar_vcc_spill->reservoir_vgpr}
+  return patch.scalar_vcc_spill
+             ? std::optional<uint16_t>{patch.scalar_vcc_spill->reservoir_vgpr}
              : std::nullopt;
 }
 
 [[nodiscard]] uint16_t test_sc_vcc_reservoir_count(const ConSanPatchInfo &patch) {
-  return patch.sc_scalar_vcc_spill ? patch.sc_scalar_vcc_spill->reservoir_vgpr_count() : 0u;
+  return patch.scalar_vcc_spill ? patch.scalar_vcc_spill->reservoir_vgpr_count() : 0u;
 }
 
 TEST(ConSan, SuperColliderScalarVccSpillOwnsReservoirStrategy) {
-  ConSanSuperColliderScalarVccSpill spill{
+  ConSanScalarVccSpill spill{
       .vcc_save_sgpr = 10u,
       .reservoir_vgpr = 20u,
-      .reservoir = ConSanSuperColliderScalarVccReservoir::PackedLanes,
+      .reservoir = ConSanScalarVccReservoir::PackedLanes,
   };
   EXPECT_TRUE(spill.is_well_formed());
   EXPECT_EQ(spill.reservoir_vgpr_count(), 1u);
-  spill.reservoir = ConSanSuperColliderScalarVccReservoir::PrivateSpill;
+  spill.reservoir = ConSanScalarVccReservoir::PrivateSpill;
   EXPECT_TRUE(spill.is_well_formed());
   EXPECT_EQ(spill.reservoir_vgpr_count(), 2u);
-  spill.reservoir = ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap;
+  spill.reservoir = ConSanScalarVccReservoir::DynamicStackBootstrap;
   EXPECT_TRUE(spill.is_well_formed());
   EXPECT_EQ(spill.reservoir_vgpr_count(), 4u);
   spill.reservoir_vgpr = 253u;
   EXPECT_FALSE(spill.is_well_formed());
-  spill.reservoir = static_cast<ConSanSuperColliderScalarVccReservoir>(3u);
+  spill.reservoir = static_cast<ConSanScalarVccReservoir>(3u);
   EXPECT_FALSE(spill.is_well_formed());
 }
 
@@ -5930,9 +5930,9 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
 
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
   ConSanTransformArtifacts corrupted = result;
-  ASSERT_TRUE(corrupted.patches.front().sc_scalar_vcc_spill);
-  corrupted.patches.front().sc_scalar_vcc_spill->reservoir =
-      static_cast<ConSanSuperColliderScalarVccReservoir>(3u);
+  ASSERT_TRUE(corrupted.patches.front().scalar_vcc_spill);
+  corrupted.patches.front().scalar_vcc_spill->reservoir =
+      static_cast<ConSanScalarVccReservoir>(3u);
   const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
     return error.find("invalid SuperCollider scalar-VCC spill effect") != std::string::npos;

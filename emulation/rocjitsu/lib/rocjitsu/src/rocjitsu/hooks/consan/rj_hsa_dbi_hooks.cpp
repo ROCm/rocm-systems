@@ -4613,7 +4613,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
       const auto *scalar_vcc_spill =
-          patch.sc_scalar_vcc_spill ? &*patch.sc_scalar_vcc_spill : nullptr;
+          patch.scalar_vcc_spill ? &*patch.scalar_vcc_spill : nullptr;
       const std::string scalar_vcc_spill_vgpr =
           scalar_vcc_spill ? std::to_string(scalar_vcc_spill->reservoir_vgpr) : "-";
       const std::string scalar_vcc_spill_sgpr =

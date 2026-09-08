@@ -37,6 +37,7 @@ struct MoiPrologueModePolicy {
   bool skip_unobserved_barrier_only_initialization = false;
   bool one_based_owner_ids = false;
   bool persistent_state_requires_in_place_entry = false;
+  std::optional<uint16_t> (*visible_evidence_sgpr)(const ConSanMoiOperatingPoint &) = nullptr;
 };
 
 /// Effective mode demand consumed by common resource solving. This deliberately

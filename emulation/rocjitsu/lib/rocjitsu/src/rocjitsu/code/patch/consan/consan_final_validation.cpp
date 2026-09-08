@@ -2759,7 +2759,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     if (patch.moi_vgpr_state && !patch.moi_vgpr_state->is_well_formed()) {
       errors.emplace_back("ConSan final validation found an invalid MOI VGPR-state effect");
     }
-    if (patch.sc_scalar_vcc_spill && !patch.sc_scalar_vcc_spill->is_well_formed()) {
+    if (patch.scalar_vcc_spill && !patch.scalar_vcc_spill->is_well_formed()) {
       errors.emplace_back(
           "ConSan final validation found an invalid SuperCollider scalar-VCC spill effect");
     }

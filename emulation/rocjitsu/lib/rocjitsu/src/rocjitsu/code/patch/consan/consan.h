@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <cstddef>
@@ -34,14 +35,13 @@
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_prologue_effect.h"
 #include "rocjitsu/code/patch/consan/consan_moi_entry_scalar_backup.h"
-#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/consan/consan_program_analysis_encoding.h"
+#include "rocjitsu/code/patch/consan/consan_scalar_vcc_spill.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include "rocjitsu/code/patch/consan/consan_indirect_jump_sgprs.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
-
-#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_scalar_vcc_spill.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_vgpr_state_effect.h.inc"
 

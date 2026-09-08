@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
-
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 

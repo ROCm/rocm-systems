@@ -466,7 +466,7 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         .original_size = patch.original_size,
         .trampoline_size = patch.trampoline_size,
         .scratch_vgpr = patch.scratch_vgpr,
-        .sc_scalar_vcc_spill = patch.sc_scalar_vcc_spill,
+        .scalar_vcc_spill = patch.scalar_vcc_spill,
         .persistent_epoch_private_offset =
             patch.private_state_layout
                 ? std::optional<uint32_t>(patch.private_state_layout->epoch_offset)

@@ -106,6 +106,11 @@ inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state) {
   return static_cast<uint16_t>(*state.exec_save_sgpr + (state.dynamic_stack_spill ? 25u : 24u));
 }
 
+std::optional<uint16_t>
+inline_shadow_prologue_visible_evidence_sgpr(const ConSanMoiOperatingPoint &point) {
+  return inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(point));
+}
+
 bool validate_inline_atomic_exec_save_sgpr(std::optional<uint16_t> exec_save_sgpr,
                                            std::vector<std::string> &errors) {
   if (!exec_save_sgpr) {
@@ -347,6 +352,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
             .skip_unobserved_barrier_only_initialization = true,
             .one_based_owner_ids = true,
             .persistent_state_requires_in_place_entry = true,
+            .visible_evidence_sgpr = inline_shadow_prologue_visible_evidence_sgpr,
         },
     .persistent_state_demand = plan_inline_shadow_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Inline, false, false, 0u},
