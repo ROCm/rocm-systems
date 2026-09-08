@@ -20,6 +20,7 @@ set(TEST_SRC
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
     hipModuleLoadFatBinary.cc
+    test_fatbin_mixed_arch.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -38,6 +39,24 @@ else()
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
 endif()
 add_custom_target(get_function_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
+
+# Deliberately-mismatched fat binary for Unit_FatBin_NoCompatibleCodeObject_*:
+# built for gfx900+gfx906 only (fixed archs, NOT ${OFFLOAD_ARCH_LIST}) so it
+# never matches a modern (non-Vega) runner and drives ExtractFatBinaryUsingCOMGR
+# into its "no compatible code object" path.
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=gfx900 --offload-arch=gfx906 --cuda-device-only
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o fatbin_mismatch_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc)
+  add_custom_target(fatbin_mismatch_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+endif()
 
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
@@ -432,6 +451,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # These are loaded at runtime by tests in the ModuleTest binary.
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
+  add_dependencies(ModuleTest fatbin_mismatch_module)
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)

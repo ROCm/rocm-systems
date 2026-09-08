@@ -314,3 +314,13 @@ module:
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2
     tags: [function]
+  Unit_FatBin_NoCompatibleCodeObject_ReturnsInvalidImage:
+    <<: *level_2
+    # Fixture fatbin_mismatch_module.code is built only on the amd platform.
+    disabled: [nvidia_linux, nvidia_windows]
+    tags: [load]
+  Unit_FatBin_MixedArch_IncompatibleDeviceDoesNotPoisonOthers:
+    <<: *level_2
+    # Compiled-in kernel path; fixture/build support is amd-only.
+    disabled: [nvidia_linux, nvidia_windows]
+    tags: [load]
