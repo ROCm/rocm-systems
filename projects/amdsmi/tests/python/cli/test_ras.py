@@ -90,6 +90,8 @@ class TestRas(TestCliBase):
             self.assertIsNotNone(data, f"Command '{cmd}' produced no output")
             json_data = json.loads(data)
             self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
+            # The folder holds a .cper, so an empty list would skip every check below.
+            self.assertTrue(json_data, f"'{cmd}' emitted an empty JSON list")
             for entry in json_data:
                 self.assertIsInstance(
                     entry,
@@ -106,11 +108,11 @@ class TestRas(TestCliBase):
                 self.assertIn("status", entry)
                 self.assertIn("message", entry)
                 self.assertIn("code", entry)
-                # A file that failed to decode reports a non-success status and
-                # a matching non-zero code (garbage.cper -> UNEXPECTED_DATA).
-                if entry["status"] != "AMDSMI_STATUS_SUCCESS":
-                    self.assertNotEqual(entry["code"], 0)
-                    self.assertTrue(entry["decode_failed"])
+                # Every fixture this folder holds is 64 zero bytes, so each entry
+                # must report the decode failure rather than only those that did.
+                self.assertNotEqual(entry["status"], "AMDSMI_STATUS_SUCCESS")
+                self.assertNotEqual(entry["code"], 0)
+                self.assertTrue(entry["decode_failed"])
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         return
