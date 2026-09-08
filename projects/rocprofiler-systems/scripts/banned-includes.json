@@ -1,0 +1,6 @@
+[
+    {
+        "header": "timemory/utility/filepath.hpp",
+        "hint": "use \"common/path.hpp\" (rocprofsys::path::)"
+    }
+]
