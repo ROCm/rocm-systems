@@ -35,12 +35,11 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
-  # The kernel-count leak guards (src/device/test_generate_kernel_counts.py and
-  # src/device/symmetric/test_generate_symmetric.py) are intentionally NOT
-  # registered as ctest cases here: nothing in RCCL CI runs `ctest`, so an
-  # add_test() would never gate. They run in CI via the CPU-only host-test
-  # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
-  # folded into `run`).
+  # The kernel-count leak guards and the __hip_atomic_* poison probe
+  # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
+  # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
+  # never gate. They run in CI via the CPU-only host-test pipeline instead --
+  # see test/host/run_host_tests.sh (the `guards` phase, folded into `run`).
 
   # CPU-only net_telemetry unit test: net_telemetry.cc depends only on libc and
   # pthread, so this compiles it directly with its own harness (no GPU, no gtest,
