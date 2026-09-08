@@ -3140,7 +3140,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     // Extract the extension
     auto pos_ext = val.find_last_of('.');
-    if(pos_ext + 1 < val.length())
+    if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
         ext = val.substr(pos_ext + 1);
         val = val.substr(0, pos_ext);
@@ -3169,8 +3169,10 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     // If the path is relative, prepend the current working directory
     if(!val.empty() && val.at(0) != '/')
     {
-        auto result = settings::format(fmt::format("{}/{}", getenv("PWD"), val),
-                                       get_config()->get_tag());
+        const auto* pwd    = getenv("PWD");
+        auto        result = settings::format(
+            fmt::format("{}/{}", (pwd != nullptr && pwd[0] != '\0') ? pwd : ".", val),
+            get_config()->get_tag());
         LOG_DEBUG("Path is relative, prepending PWD: '{}'", result);
         return result;
     }
