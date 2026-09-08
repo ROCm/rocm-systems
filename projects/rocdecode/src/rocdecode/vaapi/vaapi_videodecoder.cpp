@@ -696,12 +696,10 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     // D3D12Interop helper; the VA display concern (adapter LUID) is resolved here.
     LUID adapter_luid = {};
     {
-        VaContext& va_ctx = VaContext::GetInstance();
-        for (auto& ctx : va_ctx.va_contexts_) {
-            if (ctx.device_id == decoder_create_info_.device_id) {
-                adapter_luid = ctx.adapter_luid;
-                break;
-            }
+        rocDecStatus luid_status = VaContext::GetInstance().GetAdapterLuid(decoder_create_info_.device_id, &adapter_luid);
+        if (luid_status != ROCDEC_SUCCESS) {
+            FunctionExitLog(g_rocdec_logger);
+            return luid_status;
         }
     }
 
@@ -979,6 +977,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
 
 rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_id) + ", " + RocDecFmtPtr(va_display));
+    std::lock_guard<std::mutex> lock(mutex);
     if (va_ctx_id >= va_contexts_.size()) {
         CriticalLog(g_rocdec_logger, "Invalid VA context Id.");
         *va_display = 0;
@@ -1021,6 +1020,27 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
         return ROCDEC_SUCCESS;
     }
 }
+
+#ifdef _WIN32
+rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id));
+    if (adapter_luid == nullptr) {
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_INVALID_PARAMETER;
+    }
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& ctx : va_contexts_) {
+        if (ctx.device_id == device_id) {
+            *adapter_luid = ctx.adapter_luid;
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_SUCCESS;
+        }
+    }
+    CriticalLog(g_rocdec_logger, "No VA context found for device_id=" + ROCDEC_TOSTR(device_id));
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_INVALID_PARAMETER;
+}
+#endif
 
 rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(dec_cap));

@@ -190,12 +190,12 @@ public:
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
+                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
-                                                  sgpr_count, wavefronts);
+                                                  physical_sgpr_count, wavefronts);
     });
   }
 
@@ -241,6 +241,20 @@ public:
     dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
+    });
+  }
+
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuReadScalarRegister(wf, reg);
+    });
+  }
+
+  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWriteScalarRegister(wf, reg);
     });
   }
 

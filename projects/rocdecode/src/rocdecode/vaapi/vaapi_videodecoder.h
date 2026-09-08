@@ -178,6 +178,9 @@ public:
     rocDecStatus GetVaContext(int device_id, uint32_t *va_ctx_id);
     rocDecStatus GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display);
     rocDecStatus CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap);
+#ifdef _WIN32
+    rocDecStatus GetAdapterLuid(int device_id, LUID *adapter_luid);
+#endif
 
 private:
     std::mutex mutex;

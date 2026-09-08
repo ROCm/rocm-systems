@@ -35,14 +35,13 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -652,9 +651,6 @@ configure_settings(bool _init)
 
     auto _config = *get_config_impl();
 
-    // if using timemory, default to perfetto being off
-    auto _default_perfetto_v = !rocprofsys::get_env<bool>(env_vars::PROFILE, false);
-
     auto _system_backend = rocprofsys::get_env(env_vars::PERFETTO_BACKEND_SYSTEM, false);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::LOG_LEVEL,
@@ -704,8 +700,8 @@ configure_settings(bool _init)
         "parallelism", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
-                              "Enable perfetto backend for tracing", _default_perfetto_v,
-                              "backend", "perfetto");
+                              "Enable perfetto backend for tracing", false, "backend",
+                              "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
                               "[DEPRECATED] The new default option is to use data from "
@@ -719,20 +715,18 @@ configure_settings(bool _init)
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
                               "backend", "perfetto", "deprecated");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend", false,
                               "backend", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_TIMEMORY,
-                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE", false,
                               "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_CAUSAL,
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", false,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", true,
                               "backend", "rocpd");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -1703,6 +1697,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -1715,6 +1710,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
@@ -1759,6 +1755,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -3493,7 +3490,10 @@ tmp_file::touch() const
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
+        if(!path::create_parent_dirs_and_open_ofstream(_ofs, filename))
+        {
+            LOG_ERROR("Failed to create temporary file '{}'", filename);
+        }
     }
 }
 

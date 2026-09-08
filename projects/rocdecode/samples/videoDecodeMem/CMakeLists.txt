@@ -55,9 +55,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 if(NOT WIN32)
   if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
   else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
 endif()
 
@@ -126,6 +126,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR rocprofiler-regi
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodemem.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
     # links the system libva, so both load at runtime. librocdecode already depends
     # on the vendored libva, so force librocdecode to be the FIRST direct dependency
