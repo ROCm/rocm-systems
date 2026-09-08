@@ -61,7 +61,14 @@ jobs:
     name: test (${{ matrix.name }})
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --user 0:0
+      # `--init` gives the container a PID 1 that reaps orphans, as every
+      # real machine has. Without it a process whose parent exits is
+      # reparented to a PID 1 that never calls `wait`, so it stays a
+      # zombie for the life of the job: `/proc/<pid>` remains and
+      # `kill(pid, 0)` still succeeds. Mirage's teardown tests assert a
+      # process tree is *gone* after a reap, and they cannot distinguish
+      # that from a leak.
+      options: --user 0:0 --init
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: ${{ matrix.allow_failure }}

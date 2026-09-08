@@ -4022,19 +4022,22 @@ exit 0
 
     #[test]
     fn purge_fails_when_the_runtime_directory_survives() {
-        use std::os::unix::fs::PermissionsExt as _;
-
         let _lock = mirage_core::paths::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(root.path());
         let runtime = mirage_core::paths::mirage_runtime_dir();
-        // A directory whose contents cannot be unlinked: `chmod 500` on
-        // the parent of a file is enough, and is what a stuck mount or a
-        // root-owned leftover looks like.
-        let stuck = runtime.join("stuck");
-        std::fs::create_dir_all(&stuck).unwrap();
-        std::fs::write(stuck.join("held"), "x").unwrap();
-        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o500)).unwrap();
+        // Something at the runtime path that `remove_dir_all` refuses and
+        // leaves behind: a plain file, which fails with `ENOTDIR`. What a
+        // stuck mount or a root-owned leftover produces is the same thing
+        // as far as purge is concerned — a path that is still there after
+        // the removal, and must not be reported as purged.
+        //
+        // Written with `chmod 500` on a subdirectory this test passed
+        // everywhere but CI, which runs as root in a container: root
+        // ignores the mode bits, the tree comes away, and the test then
+        // fails on a machine where nothing is wrong.
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, "x").unwrap();
 
         // Blocking rather than `#[tokio::test]`: the lock guard above must
         // not be held across an await.
@@ -4044,11 +4047,13 @@ exit 0
             .unwrap()
             .block_on(purge(false, false));
 
-        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
         let survived = runtime.exists();
         mirage_core::paths::clear_test_root();
 
-        assert!(survived, "the test needs a directory purge cannot remove");
+        assert!(
+            survived,
+            "the test needs a runtime path purge cannot remove"
+        );
         // `ExitCode` has no `PartialEq`; its `Debug` is the only thing to
         // compare, and comparing it against a known value rather than a
         // literal string keeps the test independent of how std renders it.
