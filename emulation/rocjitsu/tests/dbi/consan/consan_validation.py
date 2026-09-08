@@ -199,22 +199,6 @@ class Profile:
 
 
 @dataclass(frozen=True)
-class CoverageOutputContract:
-    # No current workload declares this exception. Keep the typed contract and
-    # validation/reporting path available for a future workload only when it
-    # explicitly names a bounded, tracked diagnostic contract. Retired
-    # producer-shaped examples live in consan_validation_test_support.py.
-    profile: str
-    diagnostics: tuple[str, ...]
-    max_diagnostics: int
-    instruction_groups: tuple[tuple[int, ...], ...]
-    code_object_fingerprint: str
-    tracking_issue: str
-    withhold_fault_qualification: bool
-    fault_qualification_withheld_reason: str
-
-
-@dataclass(frozen=True)
 class Workload:
     id: str
     priority: str
@@ -237,7 +221,6 @@ class Workload:
     record_replay_runtime_sample_stride: int | None = None
     sharktank_skip_warmup: bool = False
     run_timeout_seconds: int = TIMEOUT_SECONDS
-    coverage_output_contract: CoverageOutputContract | None = None
     tensile_inner_timeout_seconds: int | None = None
     tensile_expected_numeric_rows: int | None = None
     tensile_exact_problem_size_shards: tuple[
@@ -261,14 +244,6 @@ class Workload:
     device_timing_warmup_iterations: int = 5
     device_timing_calibration_iterations: int | None = None
     device_timing_aggregate_headroom: float = 1.0
-
-
-@dataclass(frozen=True)
-class RetiredWorkloadCoverage:
-    id: str
-    tracking_issue: str
-    coverage_successors: tuple[str, ...]
-    remaining_gap: str
 
 
 PROFILES = {
@@ -325,15 +300,6 @@ MOI_DIAGNOSTIC_KINDS = {
 }
 # Mirrors ConSanMoiShadowAccessKind::Write in consan_moi_abi.h.
 MOI_SHADOW_ACCESS_WRITE = 2
-# The structural parser below currently models Record/Replay output. Do not add
-# another profile until its complete runtime diagnostic surface is parsed and
-# pinned by producer-shaped fixtures.
-COVERAGE_OUTPUT_PROFILE_IDS = ("record-replay",)
-COVERAGE_OUTPUT_DIAGNOSTICS = ("exact-lds-write-write",)
-# Coverage-output exceptions remain deliberately small even though the runtime
-# now sizes replay diagnostic storage from each report's visible record count.
-MAX_COVERAGE_OUTPUT_DIAGNOSTICS = 4
-COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION = 1
 WORKLOADS = (
     Workload(
         id="tensile-sk-mxf8gemm-explicit",
@@ -1322,86 +1288,6 @@ WORKLOADS = (
 
 
 WORKLOAD_BY_ID = {workload.id: workload for workload in WORKLOADS}
-RETIRED_WORKLOAD_COVERAGE = {
-    "gfx1201": (
-        RetiredWorkloadCoverage(
-            id="pytorch-rdna4-sdpa",
-            tracking_issue="bd-1w9.26",
-            coverage_successors=("d128-block", "d128-pressure", "wmma-attention"),
-            remaining_gap="real-framework causal attention",
-        ),
-    ),
-}
-
-
-def _validate_coverage_output_contract(workload: Workload) -> None:
-    contract = workload.coverage_output_contract
-    if contract is None:
-        return
-    if contract.profile not in COVERAGE_OUTPUT_PROFILE_IDS:
-        raise RuntimeError(
-            f"invalid coverage-output profile for {workload.id}: {contract.profile}"
-        )
-    invalid_diagnostics = sorted(
-        set(contract.diagnostics) - set(COVERAGE_OUTPUT_DIAGNOSTICS)
-    )
-    if not contract.diagnostics or invalid_diagnostics:
-        raise RuntimeError(
-            f"invalid coverage-output diagnostics for {workload.id}: "
-            f"{', '.join(invalid_diagnostics) or 'none'}"
-        )
-    if contract.max_diagnostics < 1:
-        raise RuntimeError(
-            f"{workload.id} coverage-output max_diagnostics must be positive"
-        )
-    if contract.max_diagnostics > MAX_COVERAGE_OUTPUT_DIAGNOSTICS:
-        raise RuntimeError(
-            f"{workload.id} coverage-output max_diagnostics exceeds policy limit"
-        )
-    instruction_sites = [
-        instruction for group in contract.instruction_groups for instruction in group
-    ]
-    if (
-        not contract.instruction_groups
-        or any(
-            not group
-            or tuple(sorted(set(group))) != group
-            or any(instruction < 0 for instruction in group)
-            for group in contract.instruction_groups
-        )
-        or len(instruction_sites) != len(set(instruction_sites))
-    ):
-        raise RuntimeError(
-            f"{workload.id} coverage-output instruction_groups are invalid"
-        )
-    if re.fullmatch(r"fnv1a64:[0-9a-f]{16}", contract.code_object_fingerprint) is None:
-        raise RuntimeError(
-            f"{workload.id} coverage-output code_object_fingerprint is invalid"
-        )
-    if not contract.tracking_issue.startswith("bd-"):
-        raise RuntimeError(
-            f"{workload.id} coverage-output contract needs a tracking bead"
-        )
-    if contract.withhold_fault_qualification and not workload.fault_families:
-        raise RuntimeError(
-            f"{workload.id} coverage-output contract must not suppress unrelated "
-            "profile fault qualification"
-        )
-    if (
-        contract.withhold_fault_qualification
-        and not contract.fault_qualification_withheld_reason.strip()
-    ):
-        raise RuntimeError(
-            f"{workload.id} coverage-output contract needs a fault-withholding reason"
-        )
-    if (
-        not contract.withhold_fault_qualification
-        and contract.fault_qualification_withheld_reason
-    ):
-        raise RuntimeError(
-            f"{workload.id} coverage-output contract has an unused "
-            "fault-withholding reason"
-        )
 
 
 def _validate_tensile_sharding(workload: Workload) -> None:
@@ -1497,7 +1383,6 @@ def _validate_tensile_sharding(workload: Workload) -> None:
 
 def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
-        _validate_coverage_output_contract(workload)
         _validate_tensile_sharding(workload)
         if any(
             not name
@@ -1560,25 +1445,6 @@ def _validate_workload_manifest() -> None:
             raise RuntimeError(
                 f"{workload.id} must declare the shared Stream-K fault families"
             )
-    for target, retired_rows in RETIRED_WORKLOAD_COVERAGE.items():
-        for retired in retired_rows:
-            if retired.id in WORKLOAD_BY_ID:
-                raise RuntimeError(f"retired workload remains registered: {retired.id}")
-            if not retired.tracking_issue.startswith("bd-"):
-                raise RuntimeError(
-                    f"retired workload needs a tracking bead: {retired.id}"
-                )
-            for successor_id in retired.coverage_successors:
-                successor = WORKLOAD_BY_ID.get(successor_id)
-                if successor is None or (
-                    successor.targets is not None and target not in successor.targets
-                ):
-                    raise RuntimeError(
-                        f"{target} retired workload has unavailable coverage successor: "
-                        f"{retired.id} -> {successor_id}"
-                    )
-
-
 _validate_workload_manifest()
 
 
@@ -3049,9 +2915,6 @@ def _manifest(target: str) -> dict:
         "workloads": [
             manifest_workload(workload) for workload in _workloads_for_target(target)
         ],
-        "retired_workloads": [
-            asdict(workload) for workload in RETIRED_WORKLOAD_COVERAGE.get(target, ())
-        ],
         "ordinary_forbidden_environment": list(ORDINARY_FORBIDDEN_ENVIRONMENT),
         "timeout_seconds": TIMEOUT_SECONDS,
         "max_gpu_parallelism": 4,
@@ -3141,14 +3004,7 @@ def _run_environment(
 ) -> dict[str, str]:
     if phase not in {"clean", "overhead"}:
         raise ValidationError(f"unsupported validation phase: {phase}")
-    environment = _clean_environment(profile, workload, hook, target, workspace)
-    if _coverage_contract_for_profile(workload, profile):
-        # The contract is a property of this exact workload/profile execution,
-        # so both correctness and paired-overhead rows use the same bounded,
-        # structurally validated diagnostic inventory. Fault qualification is
-        # separately disabled while the exception remains open.
-        environment.pop("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", None)
-    return environment
+    return _clean_environment(profile, workload, hook, target, workspace)
 
 
 def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
@@ -4279,22 +4135,10 @@ class DiagnosticPolicy:
     kind: str = "clean"
     instruction_groups: tuple[tuple[int, ...], ...] = ()
     code_object_fingerprint: str | None = None
-    contract: CoverageOutputContract | None = None
 
     @classmethod
     def clean(cls) -> DiagnosticPolicy:
         return cls(diagnostics=(), max_diagnostics=0)
-
-    @classmethod
-    def from_contract(cls, contract: CoverageOutputContract) -> DiagnosticPolicy:
-        return cls(
-            kind="coverage-output",
-            diagnostics=contract.diagnostics,
-            max_diagnostics=contract.max_diagnostics,
-            instruction_groups=contract.instruction_groups,
-            code_object_fingerprint=contract.code_object_fingerprint,
-            contract=contract,
-        )
 
 
 @dataclass(frozen=True)
@@ -5005,7 +4849,6 @@ def _evaluate_diagnostic_output(
             "code_object_fingerprint": policy.code_object_fingerprint,
             "instruction_groups": [list(group) for group in policy.instruction_groups],
         },
-        "contract": asdict(policy.contract) if policy.contract is not None else None,
         "observed_signatures": sorted(observed_signatures),
         "observed_code_object_fingerprints": sorted(
             {source.code_object_fingerprint for source in output.sources}
@@ -5024,37 +4867,19 @@ def _evaluate_diagnostic_output(
 def _diagnostic_output_summary(
     log_text: str,
     profile: str,
-    contract: CoverageOutputContract | None = None,
 ) -> dict:
     parser = DIAGNOSTIC_OUTPUT_PARSERS.get(profile)
     if parser is None:
         raise ValidationError(
             f"no complete diagnostic-output parser for profile: {profile}"
         )
-    if contract is not None and contract.profile != profile:
-        raise ValidationError(
-            "diagnostic-output contract profile mismatch: "
-            f"run={profile}, contract={contract.profile}"
-        )
     output = parser(log_text)
-    policy = (
-        DiagnosticPolicy.clean()
-        if contract is None
-        else DiagnosticPolicy.from_contract(contract)
-    )
-    return _evaluate_diagnostic_output(output, policy)
-
-
-def _coverage_output_diagnostic_summary(
-    log_text: str, contract: CoverageOutputContract
-) -> dict:
-    return _diagnostic_output_summary(log_text, contract.profile, contract)
+    return _evaluate_diagnostic_output(output, DiagnosticPolicy.clean())
 
 
 def _coverage_summary(
     log_text: str,
     profile: str | None = None,
-    coverage_output_contract: CoverageOutputContract | None = None,
 ) -> dict:
     try:
         evidence = parse_coverage_evidence(log_text)
@@ -5102,14 +4927,8 @@ def _coverage_summary(
         },
         "dynamic_incomplete": verdict.counts["dynamic_incomplete"],
     }
-    if coverage_output_contract is not None or profile in DIAGNOSTIC_OUTPUT_PARSERS:
-        if profile is None:
-            raise ValidationError(
-                "diagnostic-output contract requires an explicit run profile"
-            )
-        diagnostics = _diagnostic_output_summary(
-            log_text, profile, coverage_output_contract
-        )
+    if profile in DIAGNOSTIC_OUTPUT_PARSERS:
+        diagnostics = _diagnostic_output_summary(log_text, profile)
         summary["diagnostics"] = diagnostics
         summary["reasons"].extend(diagnostics["reasons"])
         summary["accepted"] = not summary["reasons"]
@@ -5832,31 +5651,6 @@ def _effective_workload(target: str, workload: Workload) -> Workload:
     )
 
 
-def _coverage_contract_for_profile(
-    workload: Workload, profile: str | None
-) -> CoverageOutputContract | None:
-    contract = workload.coverage_output_contract
-    return contract if contract is not None and contract.profile == profile else None
-
-
-def _fault_qualification_contract_for_profile(
-    workload: Workload, profile: str
-) -> CoverageOutputContract | None:
-    """Return the profile-specific contract that withholds fault qualification."""
-    contract = _coverage_contract_for_profile(workload, profile)
-    return (
-        contract
-        if contract is not None and contract.withhold_fault_qualification
-        else None
-    )
-
-
-def _result_phase(phase: str, profile: str | None, workload: Workload) -> str:
-    if phase == "clean" and _coverage_contract_for_profile(workload, profile):
-        return "coverage-output"
-    return phase
-
-
 def _workload_provenance_path(artifact_root: Path, workload: Workload) -> Path:
     return artifact_root / workload.id / "provenance.json"
 
@@ -5873,198 +5667,9 @@ def _retained_relative_path(row_dir: Path, path: Path) -> str:
     resolved = path.resolve()
     if not resolved.is_relative_to(workload_root):
         raise ValidationError(
-            f"retained coverage-output path escapes workload artifacts: {resolved}"
+            f"retained artifact path escapes workload artifacts: {resolved}"
         )
     return os.path.relpath(resolved, row)
-
-
-def _retained_file_record(row_dir: Path, path: Path) -> dict:
-    if not path.is_file():
-        raise ValidationError(f"missing retained coverage-output file: {path}")
-    return {
-        "path": _retained_relative_path(row_dir, path),
-        "size": path.stat().st_size,
-        "sha256": sha256_file(path),
-    }
-
-
-def _fnv1a64_file(path: Path) -> str:
-    # The runtime reports FNV-1a identities for loaded code objects. SHA-256
-    # remains the integrity hash; this value only joins a retained original to
-    # the diagnostic contract emitted by the runtime.
-    value = 14695981039346656037
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            for byte in chunk:
-                value ^= byte
-                value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
-    return f"fnv1a64:{value:016x}"
-
-
-def _coverage_dump_inventory(row_dir: Path, dump_directories: list[Path]) -> list[dict]:
-    records = []
-    identities = set()
-    for run_index, directory in enumerate(dump_directories):
-        if not directory.is_dir():
-            raise ValidationError(
-                f"missing retained coverage-output code-object directory: {directory}"
-            )
-        for path in sorted(directory.iterdir()):
-            if not path.is_file():
-                raise ValidationError(
-                    f"unexpected entry in coverage-output code-object directory: {path}"
-                )
-            match = _COVERAGE_DUMP_NAME.fullmatch(path.name)
-            if match is None:
-                raise ValidationError(
-                    f"unexpected retained coverage-output code-object name: {path.name}"
-                )
-            identity = (
-                run_index,
-                match.group("dump_id"),
-                match.group("reader"),
-                match.group("kind"),
-            )
-            if identity in identities:
-                raise ValidationError(
-                    f"duplicate retained coverage-output code object: {path.name}"
-                )
-            identities.add(identity)
-            file_record = {
-                **_retained_file_record(row_dir, path),
-                "run": run_index,
-                "dump_id": match.group("dump_id"),
-                "reader": match.group("reader"),
-                "kind": match.group("kind"),
-            }
-            if match.group("kind") == "original":
-                file_record["content_fingerprint"] = _fnv1a64_file(path)
-            records.append(file_record)
-    return records
-
-
-def _coverage_output_artifact_payload(
-    row_dir: Path,
-    log_paths: list[Path],
-    provenance_path: Path,
-) -> dict:
-    dump_directories = [
-        row_dir / f"code-objects-{index}" for index in range(len(log_paths))
-    ]
-    dump_records = _coverage_dump_inventory(row_dir, dump_directories)
-    return {
-        "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-        "command_logs": [_retained_file_record(row_dir, path) for path in log_paths],
-        "workload_provenance": _retained_file_record(row_dir, provenance_path),
-        "code_objects": {
-            "directories": [
-                _retained_relative_path(row_dir, path) for path in dump_directories
-            ],
-            "files": dump_records,
-        },
-    }
-
-
-def _coverage_output_contract_from_document(value: object) -> CoverageOutputContract:
-    if not isinstance(value, dict):
-        raise ValidationError("coverage-output provenance has no diagnostic contract")
-    required = {
-        "profile",
-        "diagnostics",
-        "max_diagnostics",
-        "instruction_groups",
-        "code_object_fingerprint",
-        "tracking_issue",
-        "withhold_fault_qualification",
-        "fault_qualification_withheld_reason",
-    }
-    if set(value) != required:
-        raise ValidationError(
-            "coverage-output provenance has a malformed diagnostic contract"
-        )
-    diagnostics = value["diagnostics"]
-    groups = value["instruction_groups"]
-    if (
-        not isinstance(value["profile"], str)
-        or not isinstance(diagnostics, list)
-        or not diagnostics
-        or any(not isinstance(item, str) for item in diagnostics)
-        or type(value["max_diagnostics"]) is not int
-        or not isinstance(groups, list)
-        or not groups
-        or any(
-            not isinstance(group, list)
-            or not group
-            or any(type(instruction) is not int for instruction in group)
-            for group in groups
-        )
-        or not isinstance(value["code_object_fingerprint"], str)
-        or not isinstance(value["tracking_issue"], str)
-        or type(value["withhold_fault_qualification"]) is not bool
-        or not isinstance(value["fault_qualification_withheld_reason"], str)
-    ):
-        raise ValidationError(
-            "coverage-output provenance has a malformed diagnostic contract"
-        )
-    contract = CoverageOutputContract(
-        profile=value["profile"],
-        diagnostics=tuple(diagnostics),
-        max_diagnostics=value["max_diagnostics"],
-        instruction_groups=tuple(tuple(group) for group in groups),
-        code_object_fingerprint=value["code_object_fingerprint"],
-        tracking_issue=value["tracking_issue"],
-        withhold_fault_qualification=value["withhold_fault_qualification"],
-        fault_qualification_withheld_reason=value[
-            "fault_qualification_withheld_reason"
-        ],
-    )
-    try:
-        _validate_coverage_output_contract(
-            replace(
-                WORKLOADS[0], id="retained-artifact", coverage_output_contract=contract
-            )
-        )
-    except RuntimeError as error:
-        raise ValidationError(str(error)) from error
-    return contract
-
-
-def _coverage_output_contract_from_provenance(
-    provenance: object, result: dict
-) -> CoverageOutputContract:
-    if not isinstance(provenance, dict):
-        raise ValidationError("coverage-output provenance must be an object")
-    if provenance.get("schema_version") != SCHEMA_VERSION:
-        raise ValidationError("coverage-output provenance schema is unsupported")
-    manifest = provenance.get("manifest")
-    if not isinstance(manifest, dict):
-        raise ValidationError("coverage-output provenance has no executable manifest")
-    if manifest.get("schema_version") != SCHEMA_VERSION or manifest.get(
-        "target"
-    ) != result.get("target"):
-        raise ValidationError(
-            "coverage-output provenance manifest identity does not match the result"
-        )
-    workloads = manifest.get("workloads")
-    if not isinstance(workloads, list):
-        raise ValidationError("coverage-output provenance manifest has no workloads")
-    matches = [
-        workload
-        for workload in workloads
-        if isinstance(workload, dict) and workload.get("id") == result.get("workload")
-    ]
-    if len(matches) != 1:
-        raise ValidationError(
-            "coverage-output provenance does not identify exactly one workload"
-        )
-    contract = _coverage_output_contract_from_document(
-        matches[0].get("coverage_output_contract")
-    )
-    if result.get("profile") != contract.profile:
-        raise ValidationError(
-            "coverage-output result profile does not match workload provenance"
-        )
-    return contract
 
 
 def _row_runtime_acceptance(
@@ -6096,435 +5701,6 @@ def _row_runtime_acceptance(
     return returncodes_valid and gtest_valid and coverage_valid
 
 
-def _source_identity_is_complete(source: object) -> bool:
-    if not isinstance(source, dict) or not isinstance(source.get("root"), str):
-        return False
-    head = source.get("head")
-    dirty = source.get("dirty")
-    return (head is None and dirty is None) or (
-        re.fullmatch(r"[0-9a-f]{40,64}", str(head)) is not None and type(dirty) is bool
-    )
-
-
-def _verify_retained_file_record(
-    row_dir: Path, record: object, expected_path: Path, label: str
-) -> list[str]:
-    reasons = []
-    if not isinstance(record, dict):
-        return [f"coverage-output {label} record is malformed"]
-    try:
-        expected_reference = _retained_relative_path(row_dir, expected_path)
-    except ValidationError as error:
-        return [str(error)]
-    if record.get("path") != expected_reference:
-        reasons.append(f"coverage-output {label} path is not relocatable")
-    if type(record.get("size")) is not int or record["size"] < 0:
-        reasons.append(f"coverage-output {label} size is malformed")
-    if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256"))) is None:
-        reasons.append(f"coverage-output {label} hash is malformed")
-    try:
-        if not expected_path.is_file():
-            reasons.append(f"coverage-output {label} is missing")
-        else:
-            if record.get("size") != expected_path.stat().st_size:
-                reasons.append(f"coverage-output {label} size does not match storage")
-            if record.get("sha256") != sha256_file(expected_path):
-                reasons.append(f"coverage-output {label} hash does not match storage")
-    except OSError as error:
-        reasons.append(f"cannot verify coverage-output {label}: {error}")
-    return reasons
-
-
-def _coverage_output_artifact_reasons(
-    row_dir: Path,
-    result: dict,
-    log_paths: list[Path],
-    provenance_path: Path,
-    replayed: list[dict | None],
-    contract: CoverageOutputContract | None,
-) -> list[str]:
-    reasons = []
-    artifacts = result.get("retained_artifacts")
-    if not isinstance(artifacts, dict):
-        return ["coverage-output result predates or lacks retained artifact inventory"]
-    if artifacts.get("schema_version") != COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION:
-        reasons.append("coverage-output retained artifact schema is unsupported")
-    collection_error = artifacts.get("collection_error")
-    if collection_error is not None:
-        if isinstance(collection_error, str):
-            reasons.append(
-                f"coverage-output artifact collection failed: {collection_error}"
-            )
-        else:
-            reasons.append("coverage-output artifact collection error is malformed")
-
-    command_logs = artifacts.get("command_logs")
-    if not isinstance(command_logs, list) or len(command_logs) != len(log_paths):
-        reasons.append("coverage-output retained command-log inventory is malformed")
-    else:
-        for index, (record, path) in enumerate(zip(command_logs, log_paths)):
-            reasons.extend(
-                _verify_retained_file_record(row_dir, record, path, f"run-{index} log")
-            )
-    reasons.extend(
-        _verify_retained_file_record(
-            row_dir,
-            artifacts.get("workload_provenance"),
-            provenance_path,
-            "workload provenance",
-        )
-    )
-
-    code_objects = artifacts.get("code_objects")
-    if not isinstance(code_objects, dict):
-        reasons.append("coverage-output retained code-object inventory is malformed")
-        return reasons
-    dump_directories = [
-        row_dir / f"code-objects-{index}" for index in range(len(log_paths))
-    ]
-    expected_directories = [
-        _retained_relative_path(row_dir, path) for path in dump_directories
-    ]
-    if code_objects.get("directories") != expected_directories:
-        reasons.append("coverage-output code-object directory inventory is malformed")
-    records = code_objects.get("files")
-    if not isinstance(records, list):
-        reasons.append("coverage-output retained code-object files are malformed")
-        return reasons
-
-    actual_paths = set()
-    for run_index, directory in enumerate(dump_directories):
-        try:
-            entries = sorted(directory.iterdir()) if directory.is_dir() else []
-        except OSError as error:
-            reasons.append(
-                f"cannot inspect coverage-output code-object run {run_index}: {error}"
-            )
-            continue
-        if not directory.is_dir():
-            reasons.append(
-                f"coverage-output code-object directory is missing for run {run_index}"
-            )
-            continue
-        files = [path for path in entries if path.is_file()]
-        if len(files) != len(entries):
-            reasons.append(
-                f"coverage-output code-object directory has non-files for run {run_index}"
-            )
-        if not files:
-            reasons.append(
-                f"coverage-output hook retained no code-object dumps for run {run_index}"
-            )
-        actual_paths.update(_retained_relative_path(row_dir, path) for path in files)
-
-    recorded_paths = set()
-    valid_records = []
-    for index, record in enumerate(records):
-        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
-            reasons.append(f"coverage-output code-object record {index} is malformed")
-            continue
-        reference = record["path"]
-        if reference in recorded_paths:
-            reasons.append(
-                f"coverage-output code-object record is duplicated: {reference}"
-            )
-            continue
-        recorded_paths.add(reference)
-        path = (row_dir / reference).resolve()
-        workload_root = row_dir.resolve().parents[1]
-        if not path.is_relative_to(workload_root):
-            reasons.append(
-                f"coverage-output code-object path escapes artifacts: {reference}"
-            )
-            continue
-        match = _COVERAGE_DUMP_NAME.fullmatch(path.name)
-        run = record.get("run")
-        if (
-            match is None
-            or type(run) is not int
-            or run < 0
-            or run >= len(dump_directories)
-            or path.parent != dump_directories[run].resolve()
-            or record.get("dump_id") != (match.group("dump_id") if match else None)
-            or record.get("reader") != (match.group("reader") if match else None)
-            or record.get("kind") != (match.group("kind") if match else None)
-        ):
-            reasons.append(
-                f"coverage-output code-object identity is malformed: {reference}"
-            )
-            continue
-        reasons.extend(
-            _verify_retained_file_record(
-                row_dir, record, path, f"code object {reference}"
-            )
-        )
-        fingerprint = record.get("content_fingerprint")
-        if record["kind"] == "original":
-            if re.fullmatch(r"fnv1a64:[0-9a-f]{16}", str(fingerprint)) is None:
-                reasons.append(
-                    f"coverage-output original fingerprint is malformed: {reference}"
-                )
-        elif fingerprint is not None:
-            reasons.append(
-                f"coverage-output patched object has an unexpected fingerprint: {reference}"
-            )
-        if path.is_file():
-            valid_records.append(record)
-    if recorded_paths != actual_paths:
-        reasons.append(
-            "coverage-output code-object file inventory does not match storage"
-        )
-
-    pairs: dict[tuple[int, str, str], set[str]] = {}
-    for record in valid_records:
-        key = (record["run"], record["dump_id"], record["reader"])
-        pairs.setdefault(key, set()).add(record["kind"])
-    for (run, dump_id, reader), kinds in sorted(pairs.items()):
-        if kinds != {"original", "patched"}:
-            missing = "patched" if kinds == {"original"} else "original"
-            reasons.append(
-                "coverage-output code-object pair is incomplete: "
-                f"run={run}, dump_id={dump_id}, reader={reader}, missing={missing}"
-            )
-
-    if contract is not None:
-        for run_index, coverage in enumerate(replayed):
-            if not isinstance(coverage, dict):
-                continue
-            diagnostics = coverage.get("diagnostics")
-            readers = (
-                diagnostics.get("readers") if isinstance(diagnostics, dict) else None
-            )
-            matching_readers = (
-                {
-                    str(source.get("reader"))
-                    for source in readers.values()
-                    if isinstance(readers, dict)
-                    and isinstance(source, dict)
-                    and type(source.get("reader")) is int
-                    and source.get("code_object_fingerprint")
-                    == contract.code_object_fingerprint
-                }
-                if isinstance(readers, dict)
-                else set()
-            )
-            if not matching_readers:
-                reasons.append(
-                    f"coverage-output run {run_index} has no contracted diagnostic source"
-                )
-                continue
-            for reader in sorted(matching_readers):
-                reader_originals = [
-                    record
-                    for record in valid_records
-                    if record["run"] == run_index
-                    and record["reader"] == reader
-                    and record["kind"] == "original"
-                ]
-                if not reader_originals:
-                    reasons.append(
-                        "coverage-output retained no original object for diagnostic "
-                        f"source: run={run_index}, reader={reader}"
-                    )
-                elif not any(
-                    record.get("content_fingerprint")
-                    == contract.code_object_fingerprint
-                    for record in reader_originals
-                ):
-                    reasons.append(
-                        "coverage-output retained objects do not match the contracted "
-                        f"fingerprint: run={run_index}, reader={reader}"
-                    )
-    return reasons
-
-
-def _derive_coverage_output_verification(
-    result_path: Path, result: dict
-) -> tuple[dict, bool]:
-    reasons = []
-    runtime_accepted = False
-    row_dir = result_path.resolve().parent
-    commands = result.get("commands")
-    coverage_runs = result.get("coverage_runs")
-    if not isinstance(commands, list) or not commands:
-        reasons.append("coverage-output result has no retained commands")
-        commands = []
-    elif any(
-        not isinstance(command, list)
-        or not command
-        or any(not isinstance(argument, str) for argument in command)
-        for command in commands
-    ):
-        reasons.append("coverage-output retained commands are malformed")
-    if not isinstance(coverage_runs, list) or len(coverage_runs) != len(commands):
-        reasons.append("coverage-output command and diagnostic-run counts disagree")
-        coverage_runs = []
-    log_paths = [row_dir / f"run-{index}.log" for index in range(len(commands))]
-    provenance_path = row_dir.parents[1] / "provenance.json"
-
-    provenance = None
-    try:
-        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        reasons.append(f"cannot read coverage-output workload provenance: {error}")
-    if isinstance(provenance, dict):
-        if provenance.get("workload") != result.get("workload"):
-            reasons.append("coverage-output workload provenance mismatch")
-        if provenance.get("target") != result.get("target"):
-            reasons.append("coverage-output target provenance mismatch")
-
-    contract = None
-    try:
-        contract = _coverage_output_contract_from_provenance(provenance, result)
-    except ValidationError as error:
-        reasons.append(str(error))
-
-    replayed: list[dict | None] = [None] * len(commands)
-    if contract is not None and len(coverage_runs) == len(commands):
-        canonical_contract = json.loads(json.dumps(asdict(contract)))
-        for index, (log_path, recorded) in enumerate(zip(log_paths, coverage_runs)):
-            normalized_recorded = (
-                json.loads(json.dumps(recorded)) if isinstance(recorded, dict) else None
-            )
-            diagnostics = (
-                normalized_recorded.get("diagnostics")
-                if isinstance(normalized_recorded, dict)
-                else None
-            )
-            if not isinstance(diagnostics, dict):
-                reasons.append(
-                    f"coverage-output run {index} has a malformed diagnostic summary"
-                )
-                continue
-            if diagnostics.get("contract") != canonical_contract:
-                reasons.append(
-                    f"coverage-output run {index} contract differs from provenance"
-                )
-            try:
-                replay = _coverage_summary(
-                    log_path.read_text(encoding="utf-8", errors="replace"),
-                    profile=contract.profile,
-                    coverage_output_contract=contract,
-                )
-                replay = json.loads(json.dumps(replay))
-            except (
-                OSError,
-                UnicodeError,
-                json.JSONDecodeError,
-                ValidationError,
-                TypeError,
-                ValueError,
-                AttributeError,
-            ) as error:
-                reasons.append(
-                    f"cannot replay coverage-output diagnostics for run {index}: {error}"
-                )
-                continue
-            replayed[index] = replay
-            if replay != normalized_recorded:
-                reasons.append(
-                    f"coverage-output diagnostic decision does not replay for run {index}"
-                )
-    if replayed and all(isinstance(item, dict) for item in replayed):
-        normalized_coverage = json.loads(json.dumps(result.get("coverage")))
-        if normalized_coverage != replayed[-1]:
-            reasons.append(
-                "coverage-output summary does not match the final command log"
-            )
-
-    runtime_accepted = _row_runtime_acceptance(
-        result.get("returncodes"),
-        result.get("gtest_test_counts"),
-        replayed,
-        contract.profile if contract is not None else result.get("profile"),
-        len(commands),
-    )
-    if result.get("coverage_acceptance") is not runtime_accepted:
-        reasons.append("coverage-output runtime acceptance is not reproducible")
-
-    if isinstance(provenance, dict):
-        provenance_files = provenance.get("files")
-        result_files = result.get("files")
-        provenance_hook = (
-            provenance_files.get("hook") if isinstance(provenance_files, dict) else None
-        )
-        hook = result_files.get("hook") if isinstance(result_files, dict) else None
-        hook_matches = (
-            isinstance(hook, dict)
-            and isinstance(provenance_hook, dict)
-            and hook.get("path") == provenance_hook.get("path")
-            and hook.get("sha256") == provenance_hook.get("sha256")
-        )
-        if not hook_matches:
-            reasons.append("coverage-output hook identity mismatch")
-        elif (
-            not isinstance(hook.get("path"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", str(hook.get("sha256"))) is None
-        ):
-            reasons.append("coverage-output hook identity is incomplete")
-        sources = result.get("sources")
-        if sources != provenance.get("sources"):
-            reasons.append("coverage-output source revisions mismatch")
-        if (
-            not isinstance(sources, list)
-            or not sources
-            or any(not _source_identity_is_complete(source) for source in sources)
-        ):
-            reasons.append("coverage-output source revisions are incomplete")
-
-    reasons.extend(
-        _coverage_output_artifact_reasons(
-            row_dir, result, log_paths, provenance_path, replayed, contract
-        )
-    )
-    verification = {
-        "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-        "accepted": not reasons,
-        "reasons": reasons,
-    }
-    return verification, runtime_accepted
-
-
-def verify_coverage_output_result(result_path: Path) -> dict:
-    result_path = result_path.resolve()
-    try:
-        result = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        return {
-            "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-            "accepted": False,
-            "reasons": [str(error)],
-        }
-    if not isinstance(result, dict) or result.get("schema_version") != SCHEMA_VERSION:
-        return {
-            "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-            "accepted": False,
-            "reasons": [
-                f"coverage-output result must use schema version {SCHEMA_VERSION}"
-            ],
-        }
-    if result.get("phase") != "coverage-output":
-        return {
-            "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-            "accepted": False,
-            "reasons": ["result phase is not coverage-output"],
-        }
-    verification, runtime_accepted = _derive_coverage_output_verification(
-        result_path, result
-    )
-    reasons = list(verification["reasons"])
-    if result.get("artifact_verification") != verification:
-        reasons.append("stored coverage-output artifact verification is stale")
-    expected_row_acceptance = runtime_accepted and verification["accepted"]
-    if result.get("accepted") is not expected_row_acceptance:
-        reasons.append("coverage-output final acceptance is not reproducible")
-    return {
-        "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-        "accepted": not reasons,
-        "reasons": reasons,
-    }
-
-
 def _run_profile(
     workspace: Path,
     target: str,
@@ -6546,9 +5722,8 @@ def _run_profile(
     minimum_device_timed_aggregate_ms: float | None = None,
 ) -> dict:
     profile_id = profile or "baseline"
-    result_phase = _result_phase(phase, profile, workload)
     row_dir = row_dir_override or (
-        artifact_root / workload.id / result_phase / (row_label or profile_id)
+        artifact_root / workload.id / phase / (row_label or profile_id)
     )
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
@@ -6574,7 +5749,6 @@ def _run_profile(
         or minimum_device_timed_aggregate_ms <= 0.0
     ):
         raise ValidationError("minimum device timed aggregate must be positive")
-    coverage_contract = _coverage_contract_for_profile(workload, profile)
     logs = []
     commands = []
     recorded_environment = None
@@ -6611,9 +5785,7 @@ def _run_profile(
                 environment[HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV] = str(
                     workload.device_timing_warmup_iterations
                 )
-            if profile is not None and (
-                result_phase == "coverage-output" or retain_code_objects
-            ):
+            if profile is not None and retain_code_objects:
                 dump_dir = row_dir / f"code-objects-{run_index}"
                 dump_dir.mkdir()
                 environment["RJ_CONSAN_DUMP_DIR"] = str(dump_dir.resolve())
@@ -6740,11 +5912,7 @@ def _run_profile(
     coverage_runs = None
     if profile is not None and logs:
         coverage_runs = [
-            _coverage_summary(
-                log,
-                profile=profile,
-                coverage_output_contract=coverage_contract,
-            )
+            _coverage_summary(log, profile=profile)
             for log in logs
         ]
         coverage = coverage_runs[-1]
@@ -6768,7 +5936,7 @@ def _run_profile(
         "schema_version": SCHEMA_VERSION,
         "workload": workload.id,
         "profile": profile_id,
-        "phase": result_phase,
+        "phase": phase,
         "target": target,
         "commands": commands,
         "command_batch": {
@@ -6820,11 +5988,7 @@ def _run_profile(
         "coverage": coverage,
         "coverage_runs": coverage_runs,
         "gtest_test_counts": gtest_test_counts,
-        "accepted": (
-            runtime_accepted and not timing_acceptance_reasons
-            if result_phase != "coverage-output"
-            else False
-        ),
+        "accepted": runtime_accepted and not timing_acceptance_reasons,
         "files": {
             "hook": {
                 "path": str(hook),
@@ -6836,27 +6000,7 @@ def _run_profile(
     }
     if profile is not None and retain_code_objects:
         result["retained_code_objects"] = _retained_code_object_inventory(row_dir)
-    if result_phase == "coverage-output":
-        assert coverage_runs is not None
-        result["coverage_acceptance"] = runtime_accepted
-        try:
-            result["retained_artifacts"] = _coverage_output_artifact_payload(
-                row_dir,
-                [row_dir / f"run-{index}.log" for index in range(len(commands))],
-                provenance_path,
-            )
-        except (OSError, UnicodeError, ValidationError) as error:
-            result["retained_artifacts"] = {
-                "schema_version": COVERAGE_OUTPUT_ARTIFACT_SCHEMA_VERSION,
-                "collection_error": str(error),
-            }
     result_path = row_dir / "result.json"
-    if result_phase == "coverage-output":
-        verification, reproduced_runtime_acceptance = (
-            _derive_coverage_output_verification(result_path, result)
-        )
-        result["artifact_verification"] = verification
-        result["accepted"] = reproduced_runtime_acceptance and verification["accepted"]
     atomic_write_json(result_path, result)
     return result
 
@@ -7429,18 +6573,10 @@ def _run_inventory_process(
 
 
 def _fault_template(target: str, workload: Workload) -> dict:
-    profile_policies = {}
-    for profile in PROFILE_IDS:
-        contract = _fault_qualification_contract_for_profile(workload, profile)
-        profile_policies[profile] = (
-            {
-                "disposition": "not-applicable",
-                "reason": contract.fault_qualification_withheld_reason,
-                "tracking_issue": contract.tracking_issue,
-            }
-            if contract is not None
-            else {"detector": "REVIEW_REQUIRED", "oracle": "any"}
-        )
+    profile_policies = {
+        profile: {"detector": "REVIEW_REQUIRED", "oracle": "any"}
+        for profile in PROFILE_IDS
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "target": target,
@@ -7829,16 +6965,7 @@ def _fault_audit(
         command.append("--allow-oracle-failure")
     expectations = []
     for profile in profiles:
-        contract = _fault_qualification_contract_for_profile(workload, profile)
-        if contract is not None:
-            policy = {
-                "disposition": "not-applicable",
-                "reason": contract.fault_qualification_withheld_reason,
-                "tracking_issue": contract.tracking_issue,
-            }
-            trials = []
-        else:
-            policy, trials = _fault_trials(fault, profile)
+        policy, trials = _fault_trials(fault, profile)
         trial_audits = []
         if policy.get("disposition") != "not-applicable":
             for index, trial in enumerate(trials):
@@ -7937,26 +7064,16 @@ def _explain_contract(
         commands = {}
         for phase in ("clean", "overhead"):
             profile_artifact_roots = {
-                profile: output_root / _result_phase(phase, profile, workload) / profile
+                profile: output_root / phase / profile
                 for profile in profiles
             }
-            result_phases = {
-                _result_phase(phase, profile, workload) for profile in profiles
-            }
             commands[phase] = {
-                "payload_argv": (
-                    _workload_command(
-                        workspace,
-                        target,
-                        workload,
-                        phase,
-                        output_root
-                        / next(iter(result_phases))
-                        / "$PROFILE"
-                        / "benchmark-0.json",
-                    )
-                    if len(result_phases) == 1
-                    else None
+                "payload_argv": _workload_command(
+                    workspace,
+                    target,
+                    workload,
+                    phase,
+                    output_root / phase / "$PROFILE" / "benchmark-0.json",
                 ),
                 "processes": _outer_repetitions(target, phase, workload),
                 "profile_artifact_roots": {
@@ -7992,7 +7109,6 @@ def _explain_contract(
             }
         profile_audits = []
         for profile in profiles:
-            result_phase = _result_phase("clean", profile, workload)
             environment = _run_environment(
                 profile,
                 workload,
@@ -8018,8 +7134,8 @@ def _explain_contract(
                     "id": profile,
                     "flavor": PROFILES[profile].flavor,
                     "engine": PROFILES[profile].engine,
-                    "clean_result_phase": result_phase,
-                    "clean_artifact_root": str(output_root / result_phase / profile),
+                    "clean_result_phase": "clean",
+                    "clean_artifact_root": str(output_root / "clean" / profile),
                     "settings": settings,
                     "implicit_runtime_defaults": runtime_defaults,
                     "usability_exceptions": [
@@ -8159,29 +7275,6 @@ def _explain_contract(
             ],
             "explicit_event_family_overrides": explicit_event_family_overrides,
             "fault_policy_exceptions": fault_policy_exceptions,
-            "fault_qualification_exceptions": [
-                {
-                    "workload": workload["id"],
-                    "profile": workload["coverage_output_contract"]["profile"],
-                    "reason": workload["coverage_output_contract"][
-                        "fault_qualification_withheld_reason"
-                    ],
-                    "tracking_issue": workload["coverage_output_contract"][
-                        "tracking_issue"
-                    ],
-                }
-                for workload in workloads
-                if workload["coverage_output_contract"] is not None
-                and workload["coverage_output_contract"]["withhold_fault_qualification"]
-            ],
-            "coverage_output_contracts": [
-                {
-                    "workload": workload["id"],
-                    "contract": workload["coverage_output_contract"],
-                }
-                for workload in workloads
-                if workload["coverage_output_contract"] is not None
-            ],
         },
         "fault_spec": spec_metadata,
         "workloads": workloads,
@@ -8211,18 +7304,6 @@ def _print_explain(document: dict) -> None:
                 for item in usability["workload_specific_tuning"]
             )
             if usability["workload_specific_tuning"]
-            else "none"
-        )
-    )
-    print(
-        "coverage-output contracts: "
-        + (
-            ", ".join(
-                f"{item['workload']}/{item['contract']['profile']}"
-                f" ({item['contract']['tracking_issue']})"
-                for item in usability["coverage_output_contracts"]
-            )
-            if usability["coverage_output_contracts"]
             else "none"
         )
     )
@@ -8498,26 +7579,6 @@ def _fault(args: argparse.Namespace) -> int:
     summaries = []
     profile_summaries = []
     for profile in profiles:
-        contract = _fault_qualification_contract_for_profile(workload, profile)
-        if contract is not None:
-            row = {
-                "profile": profile,
-                "accepted": True,
-                "disposition": "not-applicable",
-                "reason": contract.fault_qualification_withheld_reason,
-                "tracking_issue": contract.tracking_issue,
-            }
-            summaries.append(row)
-            profile_summaries.append(
-                {
-                    "profile": profile,
-                    "accepted": True,
-                    "disposition": "not-applicable",
-                    "reason": contract.fault_qualification_withheld_reason,
-                    "tracking_issue": contract.tracking_issue,
-                }
-            )
-            continue
         policy, trials = _fault_trials(fault, profile)
         if policy.get("disposition") == "not-applicable":
             row = {
@@ -8778,7 +7839,7 @@ def _load_empirical_row(
         "target": target,
         "workload": workload.id,
         "profile": profile or "baseline",
-        "phase": _result_phase(phase, profile, workload),
+        "phase": phase,
     }
     mismatches = [
         f"{key}={result.get(key)!r}, expected={value!r}"
@@ -9631,14 +8692,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="reuse complete rows and preserve then retry interrupted rows",
     )
 
-    verify_coverage = subparsers.add_parser(
-        "verify-coverage-output",
-        help="replay and verify one retained coverage-output result",
-    )
-    verify_coverage.add_argument(
-        "--result", type=Path, required=True, help="path to the retained result.json"
-    )
-
     inventory = subparsers.add_parser(
         "inventory", help="record target-specific fault sites without mutation"
     )
@@ -9731,10 +8784,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        if args.command == "verify-coverage-output":
-            result = verify_coverage_output_result(args.result)
-            print(json.dumps(result, indent=2, sort_keys=True))
-            return 0 if result["accepted"] else 1
         selection = _resolve_workload_selection(args, allow_all=True)
         target = selection.target
         # Reject cheap target/input mismatches before requiring a configured

@@ -602,14 +602,12 @@ An instrumented clean row is accepted only when:
 - ConSan reports an applicable code object and no dynamic-incomplete result;
 - every supported access, barrier, atomic, and fence site is patched;
 - every `clean` row emits no unexpected MOI diagnostic and no forbidden
-  overflow; a workload/profile pair with a `coverage_output_contract` is
-  emitted under the distinct `coverage-output` phase instead; and
+  overflow; and
 - every repeated process satisfies the same coverage gate.
 
 Every Record/Replay process also carries a structured
-`coverage.diagnostics` verdict in `result.json`, including the selected clean
-or coverage-output policy, normalized reader summaries, and normalized
-diagnostic records. Before applying workload policy, the validator requires
+`coverage.diagnostics` verdict in `result.json`, including the clean policy,
+normalized reader summaries, and normalized diagnostic records. The validator requires
 the producer's pre-replay report, replay summary, and diagnostic-detail
 identities to agree. It also checks code-object identity across those records,
 contiguous retained diagnostic indices, the fixed replay-detail capacity,
@@ -624,13 +622,8 @@ explicit skip reason.
 The Record/Replay log parser classifies object-independent diagnostic
 signatures into a normalized model of records, counts, source fingerprints,
 and structural reasons. Replay-only capacity, metadata, provenance, and
-producer-degradation checks stay inside that profile parser. One mechanical
-policy evaluator then applies either the ordinary zero-output contract or an
-explicitly declared coverage-output contract. Workload-specific maximum
-counts, allowed signatures, code-object fingerprints, and instruction groups
-remain policy data; they are not embedded in the log grammar. No Sampled or
-Inline Shadow coverage-output contract is admitted until that profile has a
-complete producer parser and producer-shaped fixtures.
+producer-degradation checks stay inside that profile parser. The policy
+evaluator applies the ordinary zero-output clean contract.
 
 `coverage.diagnostics` is an additive validation artifact introduced under
 top-level result schema version 2. Its nested representation is descriptive
@@ -645,35 +638,11 @@ settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
 
-The Qwen-vocabulary top-k Record/Replay row is a strict clean gate. Its former
-diagnostic exception was retired after `bd-1w9.6.5` classified the rocPRIM
-same-range write/write reports as a ConSan identity-model false positive.
-Automatic banked replay had read RDNA launch TTMPs at arbitrary access probes;
-separate physical workgroups could therefore be recorded under the same
-workgroup tuple and their distinct LDS instances compared. Automatic banked
-Record/Replay now captures the exact 32-bit
+The Qwen-vocabulary top-k Record/Replay row is a strict clean gate. Automatic
+banked Record/Replay captures the exact 32-bit
 `(workgroup_x, workgroup_y, workgroup_z)` tuple at kernel entry and publishes
 those stable components from persistent state. This path no longer inherits
 Inline Shadow's compact-key dimensional bounds.
-
-Three retirement runs on physical gfx1201 of the same
-`fnv1a64:3833562345afa454` object passed the exact sorted value/index oracle,
-patched 418,292/418,292 accesses and 50,458/50,458 barriers, and completed
-replay with zero diagnostics or incomplete state. Artifacts:
-`consan-validation-gfx1201-topk-workgroup-key-final-run1-20260727` and
-`consan-validation-gfx1201-topk-workgroup-key-final-run2-20260727`, followed
-by the strict-clean
-`consan-validation-gfx1201-topk-workgroup-key-final-strict-20260727`.
-After review strengthened the representation from a packed key to the exact
-x/y/z tuple, the current-source hook repeated the strict result in 76.36
-seconds. Its log exposes the selected persistent tuple as
-`rr_workgroup_vgprs=x/y/z`; artifact
-`consan-validation-gfx1201-topk-exact-tuple-strict-20260727`, hook SHA-256
-`43a13035f925ddb4486bfdeb55e2ce2b39d2bac08f38a5d188aeb7d1019d1446`.
-The row no longer has a `coverage_output_contract`, and Record/Replay fault
-qualification is no longer withheld. The generic coverage-output parser and
-its producer-shaped regression fixtures remain available for future explicitly
-declared contracts.
 
 The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
 declares 120 seconds because its complete Record/Replay transform patches
@@ -686,48 +655,12 @@ manifest bound; it is not four iterations sharing one deadline.
 
 Campaign consumers must enumerate the manifest's workload/profile pairs and
 use `explain --json` `profile_artifact_roots` (or the persisted `phase` field)
-to locate each result. A pair missing from both `clean` and `coverage-output`
-is an incomplete campaign, not an omitted row. When one phase contains a
-profile-specific redirect, `payload_argv_by_profile` is authoritative and the
-single `payload_argv` template is null. Each result references the shared
+to locate each result. A missing `clean` pair is an incomplete campaign, not
+an omitted row. Each result references the shared
 `$ARTIFACT_ROOT/<workload>/provenance.json`, rather than a provenance file
 under the requested phase. Reusing that workload root is accepted only when
 the hook, workload inputs, source identities, and manifest match byte for byte;
 drift fails instead of silently relabeling existing results.
-
-Coverage-output rows have an additional retained-artifact gate. Collection
-automatically writes each process log and its original/patched code-object
-dumps below the row, records their sizes and SHA-256 hashes, and references the
-shared workload provenance through the relative
-`retained_artifacts.workload_provenance.path` record. The top-level
-`provenance` value remains the absolute execution-time path for compatibility;
-the verifier uses the retained relative record so the workload artifact tree
-can be relocated. Before `accepted` can be true, the gate reparses every command
-log using the contract from the retained executable manifest, reproduces the
-coverage and diagnostic decision, checks the hook identity and source revisions
-against workload provenance, and verifies that the contracted diagnostic reader
-has a fingerprint-matched original/patched dump pair. Missing files, redirected
-storage outside the workload artifact tree, stale hashes, incomplete dump pairs,
-or a malformed retained contract reject the row. The pre-artifact runtime
-decision remains available as `coverage_acceptance`; the final `accepted` value
-also requires `artifact_verification.accepted`.
-
-The gate deliberately retains raw code objects and diagnostic offsets without
-making disassembly tooling part of collection acceptance. Reviewers can perform
-target-aware instruction analysis from the retained originals without turning a
-missing or mismatched local LLVM installation into a qualification failure.
-
-Recheck a retained or relocated row without configuring a validation target or
-workspace:
-
-```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  verify-coverage-output \
-  --result "$ARTIFACT_ROOT/<workload>/coverage-output/<profile>/result.json"
-```
-
-The command exits zero only when the retained decision is self-contained and
-replayable. It does not rerun the GPU workload.
 
 ## Correct-workload overhead
 
@@ -748,15 +681,6 @@ and the maximum mode ratio used for the support-table cell:
 ```text
 slowdown = instrumented median / paired baseline median
 ```
-
-When a workload/profile pair declares a `coverage_output_contract`, its
-instrumented overhead process uses that same structural diagnostic gate. The
-result phase remains `overhead`; consumers distinguish this relaxed diagnostic
-gate from ordinary overhead through the embedded `coverage_output_contract`
-metadata. The baseline processes remain uninstrumented. This keeps a
-nondeterministic but bounded report from becoming a raw runtime failure without
-accepting output outside the declared count, signature, provenance, and site
-bounds.
 
 The active `gfx950` and `gfx1250` campaigns use one benchmark repetition per
 process for Qwen, Sharktank, PyTorch, and Tensile.  These results qualify the
