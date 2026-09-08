@@ -79,17 +79,23 @@ namespace RcclUnitTesting
       {
         CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
         this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
+        this->inPlaceOwner      = InPlaceOwnerId::Input;
+        this->inPlaceOwnedBytes = this->numInputBytesAllocated;
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
         this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
+        this->inPlaceOwner      = InPlaceOwnerId::Output;
+        this->inPlaceOwnedBytes = this->numOutputBytesAllocated;
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
         this->outputGpu.Attach(this->inputGpu.ptr);
+        this->inPlaceOwner      = InPlaceOwnerId::Input;
+        this->inPlaceOwnedBytes = numBytes;
       }
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
@@ -98,6 +104,9 @@ namespace RcclUnitTesting
       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+      // Cleared explicitly, not left to the default: AllocateMem can run again on the same object.
+      this->inPlaceOwner      = InPlaceOwnerId::None;
+      this->inPlaceOwnedBytes = 0;
     }
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
@@ -185,20 +194,20 @@ namespace RcclUnitTesting
     // tracks the effect, so no mechanism is claimed here; just zero what was allocated.
     hipError_t errIn  = hipSuccess;
     hipError_t errOut = hipSuccess;
-    // In-place attaches one buffer as an interior alias of the other, so there is a
-    // single allocation, owned by the lower address. Equal addresses mean the alias
-    // starts at the base (globalRank 0, or the same-pointer case), and then the owner
-    // is whichever side records the longer length.
+    // In-place attaches one buffer as an interior alias of the other, so there is a single
+    // allocation; AllocateMem recorded which side owns it, and the other side must not be freed.
     if (this->inPlace)
     {
-      bool const   same   = this->inputGpu.ptr == this->outputGpu.ptr;
-      bool const   inOwns = this->inputGpu.ptr < this->outputGpu.ptr;
-      void* const  own    = (same || inOwns) ? this->inputGpu.ptr : this->outputGpu.ptr;
-      size_t const bytes  = same ? std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated)
-                                 : (inOwns ? this->numInputBytesAllocated : this->numOutputBytesAllocated);
-      if (own && bytes)
+      // No recorded owner means we cannot tell which side is the alias, so touch neither:
+      // guessing risks freeing an interior pointer, which is worse than leaking.
+      if (this->inPlaceOwner != InPlaceOwnerId::None)
       {
-        errIn = hipMemset(own, 0, bytes);
+        PtrUnion& owner = (this->inPlaceOwner == InPlaceOwnerId::Output) ? this->outputGpu : this->inputGpu;
+        if (owner.ptr && this->inPlaceOwnedBytes)
+        {
+          errIn = hipMemset(owner.ptr, 0, this->inPlaceOwnedBytes);
+        }
+        owner.FreeGpuMem(this->userRegistered);
       }
     }
     else
@@ -213,15 +222,7 @@ namespace RcclUnitTesting
       }
     }
 
-    // If in-place, either only inputGpu or outputGpu was allocated
-    if (this->inPlace)
-    {
-      if (this->funcType == ncclCollGather)
-        this->outputGpu.FreeGpuMem();
-      else
-        this->inputGpu.FreeGpuMem(this->userRegistered);
-    }
-    else
+    if (!this->inPlace)
     {
       this->inputGpu.FreeGpuMem(this->userRegistered);
       this->outputGpu.FreeGpuMem(this->userRegistered);
