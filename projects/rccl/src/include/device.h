@@ -854,8 +854,10 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
 // Arch each unroll factor's device functions were compiled for, or nullptr when
-// the unroll is built for every arch. A multi-arch build generates all unrolls,
-// so this is what distinguishes "built" from "usable on the running GPU".
+// the unroll carries no arch restriction. nullptr is also emitted for unrolls
+// that were not generated at all, so always test ncclDevFuncUnrollGenerated
+// first. A multi-arch build generates all unrolls, so together these two tables
+// are what distinguish "built" from "usable on the running GPU".
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

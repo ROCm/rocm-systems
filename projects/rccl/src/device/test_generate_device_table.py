@@ -42,6 +42,11 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
+def _read_generated(tmpdir, name):
+    with open(os.path.join(tmpdir, name)) as f:
+        return f.read()
+
+
 def _generate(tmpdir, ifc="OFF"):
     """Run generate.py into tmpdir and return the device_table.h contents."""
     # argv: gensrc, IFC, (unused), local_gpu_only, rocshmem, ONLY_FUNCS
@@ -52,8 +57,7 @@ def _generate(tmpdir, ifc="OFF"):
         capture_output=True,
         text=True,
     )
-    with open(os.path.join(tmpdir, "device_table.h")) as f:
-        return f.read()
+    return _read_generated(tmpdir, "device_table.h")
 
 
 class DeviceTableGenerationTest(unittest.TestCase):
@@ -63,6 +67,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
             raise unittest.SkipTest("generate.py not found next to test")
         cls._dir = tempfile.mkdtemp(prefix="rccl_devtable_")
         cls.header = _generate(cls._dir)
+        cls.host_table = _read_generated(cls._dir, "host_table.cpp")
 
     def test_forward_declarations_are_plain(self):
         # noinline is applied only by DEFINE_ncclDevFunc (common.h), gated on
@@ -199,6 +204,120 @@ class DeviceTableGenerationTest(unittest.TestCase):
             any(re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_(?:8|16|32)", s) for s in decls),
             "legacy LL SendRecv (reg=0) missing for unrolls 8/16/32",
         )
+
+    # ---- unroll arch restriction (host/device agreement) ---------------------
+    # commSetUnrollFactor rejects an RCCL_UNROLL_FACTOR whose device functions were
+    # not compiled for the running GPU, using ncclDevFuncUnrollArch[] emitted into
+    # host_table.cpp. That table is a claim about device_table.h, and nothing else
+    # checks the two agree: if it silently went all-nullptr the runtime check would
+    # degrade to the arch-blind behaviour that dispatched into an empty table and
+    # trapped. These tests hold host and device sides in lockstep.
+
+    _ARCH_MACRO = re.compile(r"__(gfx\w+)__")
+
+    def _unroll_table(self, name, value_pattern):
+        """Parse a `<name>[NCCL_NUM_UNROLLS]` initializer into {unroll: raw value}."""
+        block = re.search(
+            r"%s\[NCCL_NUM_UNROLLS\] = \{\n(.*?)\n\};" % re.escape(name),
+            self.host_table,
+            re.S,
+        )
+        self.assertIsNotNone(block, "%s[] not emitted into host_table.cpp" % name)
+        entries = re.findall(
+            r"^\s*(%s), // unroll (\d+)$" % value_pattern, block.group(1), re.M
+        )
+        self.assertTrue(entries, "no %s[] entries parsed" % name)
+        return {unroll: value for value, unroll in entries}
+
+    def _entry_guards(self, unroll):
+        """Enclosing #if condition of each real slot in ncclDevFuncTable_<unroll>[].
+
+        None for a slot that is not guarded. Returns None if the unroll has no table
+        (not generated in this configuration).
+        """
+        block = re.search(
+            r"ncclDevFuncTable_%s\[\] = \{\n(.*?)\n\};" % unroll, self.header, re.S
+        )
+        if block is None:
+            return None
+        guards, current, in_else = [], None, False
+        for line in block.group(1).splitlines():
+            if line.startswith("#if"):
+                current, in_else = line[len("#if"):].strip(), False
+            elif line.startswith("#else"):
+                in_else = True
+            elif line.startswith("#endif"):
+                current, in_else = None, False
+            elif "ncclDevFunc_" in line and not in_else:
+                guards.append(current)
+        return guards
+
+    def _restricted_arch(self, unroll):
+        """The single arch ncclDevFuncTable_<unroll>[] is compiled for, else None.
+
+        An unroll is restricted only when *every* slot names the same lone arch. The
+        base unrolls fail this two ways: their SIMPLE slots are unguarded, and their
+        LL128 slots name several archs.
+        """
+        guards = self._entry_guards(unroll)
+        if not guards:
+            return None
+        archs = set()
+        for guard in guards:
+            if guard is None:
+                return None
+            slot = set(self._ARCH_MACRO.findall(guard))
+            if len(slot) != 1:
+                return None
+            archs |= slot
+        return archs.pop() if len(archs) == 1 else None
+
+    def test_unroll_arch_matches_device_table_guards(self):
+        arch_table = self._unroll_table(
+            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
+        )
+        checked = 0
+        for unroll, declared in arch_table.items():
+            if self._entry_guards(unroll) is None:
+                continue  # unroll not generated in this configuration
+            restricted = self._restricted_arch(unroll)
+            expected = '"%s"' % restricted if restricted else "nullptr"
+            self.assertEqual(
+                expected,
+                declared,
+                "ncclDevFuncUnrollArch[unroll %s] is %s but ncclDevFuncTable_%s[] is %s"
+                % (
+                    unroll,
+                    declared,
+                    unroll,
+                    "compiled for %s only" % restricted
+                    if restricted
+                    else "built for every arch",
+                ),
+            )
+            checked += 1
+        self.assertTrue(checked, "no unroll tables were cross-checked")
+
+    def test_unroll_arch_flags_the_single_arch_unrolls(self):
+        # The cross-check above passes trivially if generate.py ever stops restricting
+        # any unroll. A multi-arch build must still single out the unrolls that only
+        # one arch compiles, or there is nothing for the runtime check to catch.
+        arch_table = self._unroll_table(
+            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
+        )
+        self.assertTrue(
+            any(value != "nullptr" for value in arch_table.values()),
+            "no unroll factor is arch-restricted; ncclDevFuncUnrollArch[] is all nullptr",
+        )
+
+    def test_unroll_arch_covers_same_unrolls_as_generated(self):
+        # rccl_wrap.cc indexes both tables with the same enum, so a missing or
+        # short ncclDevFuncUnrollArch[] would read out of bounds.
+        generated = self._unroll_table("ncclDevFuncUnrollGenerated", r"true|false")
+        arch_table = self._unroll_table(
+            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
+        )
+        self.assertEqual(sorted(generated), sorted(arch_table))
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.

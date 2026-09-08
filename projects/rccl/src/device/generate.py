@@ -15,6 +15,21 @@ all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
 all_unrolls   = ["1", "2", "4", "8", "16", "32"]
+# Unroll factors whose device functions are compiled for one arch only. This is the
+# single source of truth for that restriction: it drives get_arch_guard(), the
+# specialized_files.txt guard the device linker filters on, the local_unroll set for
+# a local-arch build, and the ncclDevFuncUnrollArch[] table the host reads at runtime.
+# On any other arch these tables are all-nullptr, so accepting the unroll would trap
+# on the device.
+unroll_arch_requirement = {
+  "8":  "gfx1250",
+  "16": "gfx1250",
+  "32": "gfx1250",
+}
+
+def unrolls_requiring_arch(arch):
+  return [u for u in all_unrolls if unroll_arch_requirement.get(u) == arch]
+
 # User-buffer registration mode (compile-time UserRegMode template parameter):
 #   "0" = runtime / not-applicable (single kernel, current behavior)
 #   "1" = registered user buffer   (LL128 Direct path bypasses cache)
@@ -266,8 +281,9 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
-      # 32 is the default (commSetUnrollFactor).
-      return (["8", "16", "32"], all_pipelines)
+      # 32 is the default (commSetUnrollFactor). These are exactly the unrolls
+      # get_arch_guard() restricts to gfx1250, so take them from that one table.
+      return (unrolls_requiring_arch("gfx1250"), all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -412,16 +428,6 @@ def custom_sort_key(fn: Fn):
         local_pipeline.index(fn.pipeline),
         all_regs.index(fn.reg)
     )
-
-# Unroll factors whose device functions are compiled for one arch only. The host
-# needs the same information at runtime (commSetUnrollFactor): on any other arch
-# these tables are all-nullptr, so accepting the unroll would trap on the device.
-# Emitted into host_table.cpp as ncclDevFuncUnrollArch[].
-unroll_arch_requirement = {
-  "8":  "gfx1250",
-  "16": "gfx1250",
-  "32": "gfx1250",
-}
 
 def get_arch_guard(fn):
   cond = None
@@ -633,7 +639,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   # it dispatches into an all-nullptr table and traps on the device.
   out("\n")
   out("// Arch required by each unroll factor's device functions, or nullptr when\n")
-  out("// the unroll is built for every arch. Mirrors get_arch_guard().\n")
+  out("// the unroll is built for every arch. Mirrors unroll_arch_requirement.\n")
   out("char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {\n")
   for u in all_unrolls:
     arch = unroll_arch_requirement.get(u)
@@ -781,8 +787,12 @@ specialized_filelist.sort(key=_compile_cost_key)
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, fn in specialized_filelist:
-    if fn.unroll in ("8", "16", "32"):
-      cmake_guard = "defined(__gfx1250__)"
+    # cmake/DeviceLinker.cmake drops a .cpp from a GPU target when this predicate is
+    # false, so it has to stay in step with the #if get_arch_guard() emits. Derive the
+    # arch test from the same table; the ENABLE_LL128 term is additional, since these
+    # files are not compiled at all in a build without LL128.
+    if fn.unroll in unroll_arch_requirement:
+      cmake_guard = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
       if fn.proto == "LL128":
         cmake_guard += " && defined(ENABLE_LL128)"
     else:
