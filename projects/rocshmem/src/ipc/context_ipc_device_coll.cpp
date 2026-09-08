@@ -89,7 +89,7 @@ __device__ void IPCContext::internal_atomic_barrier(int pe, int PE_start,
 
 __device__ void IPCContext::internal_sync(int pe, int PE_start, int stride,
                                           int PE_size, int64_t *pSync) {
-  if (PE_size < 64) {
+  if (PE_size <= ROCSHMEM_BARRIER_SYNC_SIZE) {
     internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
   } else {
     internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
@@ -99,7 +99,7 @@ __device__ void IPCContext::internal_sync(int pe, int PE_start, int stride,
 __device__ void IPCContext::internal_sync_wave(int pe, int PE_start, int stride,
                                                int PE_size, int64_t *pSync) {
   if (is_thread_zero_in_wave()) {
-    if (PE_size < 64) {
+    if (PE_size <= ROCSHMEM_BARRIER_SYNC_SIZE) {
       internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
     } else {
       internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
@@ -112,7 +112,7 @@ __device__ void IPCContext::internal_sync_wg(int pe, int PE_start, int stride,
                                              int PE_size, int64_t *pSync) {
   __syncthreads();
   if (is_thread_zero_in_block()) {
-    if (PE_size < 64) {
+    if (PE_size <= ROCSHMEM_BARRIER_SYNC_SIZE) {
       internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
     } else {
       internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
