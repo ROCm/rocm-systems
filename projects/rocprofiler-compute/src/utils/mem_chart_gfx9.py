@@ -344,7 +344,11 @@ def _collect_stall_rows(
     membw: Optional[MemBwAnalysisResult],
     level: str,
 ) -> list[CachePanelRow]:
-    """Extract active bottleneck rows for a memory level."""
+    """Extract active bottleneck rows for a memory level.
+
+    No per-level cap -- all active leaves are shown. Consider capping
+    if busy kernels produce too many rows in a single panel.
+    """
     if membw is None:
         return []
     rows: list[CachePanelRow] = []
