@@ -17,13 +17,15 @@ using amdsmi::test::kVerbose;
 // negative test is unsafe on CPU hardware and is intentionally omitted.
 
 // ---- amdsmi_get_cpu_handles ----
-TEST_F(CpuIntegration, GetCpuHandles_NullCount) {
+TEST(CpuIntegration, GetCpuHandles_NullCount) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_handles", "count=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_handles(nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetCpuHandles_CountThenFill) {
+TEST(CpuIntegration, GetCpuHandles_CountThenFill) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t count = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_handles", "query count", kVerbose);
@@ -43,13 +45,15 @@ TEST_F(CpuIntegration, GetCpuHandles_CountThenFill) {
 }
 
 // ---- amdsmi_get_cpucore_handles ----
-TEST_F(CpuIntegration, GetCpuCoreHandles_NullCount) {
+TEST(CpuIntegration, GetCpuCoreHandles_NullCount) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpucore_handles", "count=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpucore_handles(nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetCpuCoreHandles_CountThenFill) {
+TEST(CpuIntegration, GetCpuCoreHandles_CountThenFill) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t count = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpucore_handles", "query count", kVerbose);
@@ -69,13 +73,15 @@ TEST_F(CpuIntegration, GetCpuCoreHandles_CountThenFill) {
 }
 
 // ---- amdsmi_get_cpu_freq_range (output guarded) ----
-TEST_F(CpuIntegration, GetCpuFreqRange_NullOutput) {
+TEST(CpuIntegration, GetCpuFreqRange_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_freq_range", "fmax/fmin=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_freq_range(nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetCpuFreqRange_Valid) {
+TEST(CpuIntegration, GetCpuFreqRange_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t fmax = 0, fmin = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_freq_range", "query", kVerbose);
@@ -87,7 +93,8 @@ TEST_F(CpuIntegration, GetCpuFreqRange_Valid) {
 }
 
 // ---- no-handle identity APIs (impl lacks null-output guard; valid only) ----
-TEST_F(CpuIntegration, GetCpuSocketCount_Valid) {
+TEST(CpuIntegration, GetCpuSocketCount_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t count = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_count", "query", kVerbose);
@@ -97,7 +104,8 @@ TEST_F(CpuIntegration, GetCpuSocketCount_Valid) {
   AMDSMI_EXPECT_STATUS(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
 }
-TEST_F(CpuIntegration, GetThreadsPerCore_Valid) {
+TEST(CpuIntegration, GetThreadsPerCore_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t tpc = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_threads_per_core", "query", kVerbose);
@@ -107,7 +115,8 @@ TEST_F(CpuIntegration, GetThreadsPerCore_Valid) {
   AMDSMI_EXPECT_STATUS(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
 }
-TEST_F(CpuIntegration, GetCpuFamily_Valid) {
+TEST(CpuIntegration, GetCpuFamily_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t family = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_family", "query", kVerbose);
@@ -117,7 +126,8 @@ TEST_F(CpuIntegration, GetCpuFamily_Valid) {
   AMDSMI_EXPECT_STATUS(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
 }
-TEST_F(CpuIntegration, GetCpuModel_Valid) {
+TEST(CpuIntegration, GetCpuModel_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t model = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_model", "query", kVerbose);
@@ -127,7 +137,8 @@ TEST_F(CpuIntegration, GetCpuModel_Valid) {
   AMDSMI_EXPECT_STATUS(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
 }
-TEST_F(CpuIntegration, GetCpuCoresPerSocket_Valid) {
+TEST(CpuIntegration, GetCpuCoresPerSocket_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   uint32_t sock_count = 0;
   amdsmi_status_t sc = amdsmi_get_cpu_socket_count(&sock_count);
@@ -144,7 +155,8 @@ TEST_F(CpuIntegration, GetCpuCoresPerSocket_Valid) {
 }
 
 // ---- amdsmi_get_esmi_err_msg (string lookup) ----
-TEST_F(CpuIntegration, GetEsmiErrMsg_Valid) {
+TEST(CpuIntegration, GetEsmiErrMsg_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   if (!cpu_supported()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_esmi_err_msg");
   static constexpr amdsmi_status_t kStatuses[] = {

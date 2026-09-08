@@ -24,12 +24,20 @@
 namespace {
 
 // ---------------------------------------------------------------------------
-// Suite fixture: opens KFD and enumerates GPU nodes at suite startup.
+// Opens KFD and enumerates GPU nodes once for the process.
 // Live tests call RequireGpu() to skip when no WSL GPU is present.
 // ---------------------------------------------------------------------------
-class WslFunctionalReadOnly : public ::testing::Test {
- protected:
-  static void SetUpTestSuite() {
+bool wsl_present_ = false;
+bool kfd_opened_ = false;
+bool gpu_ok_ = false;
+uint32_t node_id_ = 0;
+
+// hsaKmtReleaseSystemProperties() clears the snapshot the rocdxg_smi_* calls
+// read, so teardown has to wait for the end of the run rather than the end of
+// a test.
+class WslEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override {
     struct stat st{};
     if (stat("/dev/dxg", &st) != 0) return;  // not WSL2
     wsl_present_ = true;
@@ -55,34 +63,27 @@ class WslFunctionalReadOnly : public ::testing::Test {
     }
     // Do NOT call hsaKmtReleaseSystemProperties here — it clears the internal
     // wdevices_ snapshot that rocdxg_smi_* functions need for the process lifetime.
-    // It is called in TearDownTestSuite instead.
+    // It is called in TearDown() instead.
   }
 
-  static void TearDownTestSuite() {
+  void TearDown() override {
     if (kfd_opened_) {
       hsaKmtReleaseSystemProperties();
       hsaKmtCloseKFD();
     }
   }
+};
 
-  // Call at the start of live tests that require an actual WSL GPU.
-  // Uses GTEST_SKIP_ directly so the macro's `return` exits the test body.
+// Call at the start of live tests that require an actual WSL GPU.
+// Uses GTEST_SKIP_ directly so the macro's `return` exits the test body.
 #define RequireGpu()                                                                          \
   do {                                                                                        \
     if (!wsl_present_) GTEST_SKIP() << "No /dev/dxg — not running under WSL2";                \
     if (!gpu_ok_) GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)"; \
   } while (0)
 
-  static bool wsl_present_;
-  static bool kfd_opened_;
-  static bool gpu_ok_;
-  static uint32_t node_id_;
-};
-
-bool WslFunctionalReadOnly::wsl_present_ = false;
-bool WslFunctionalReadOnly::kfd_opened_ = false;
-bool WslFunctionalReadOnly::gpu_ok_ = false;
-uint32_t WslFunctionalReadOnly::node_id_ = 0;
+[[maybe_unused]] const ::testing::Environment* const kWslEnvironment =
+    ::testing::AddGlobalTestEnvironment(new WslEnvironment);
 
 }  // namespace
 
@@ -90,36 +91,36 @@ uint32_t WslFunctionalReadOnly::node_id_ = 0;
 // Null-pointer rejection — no /dev/dxg required
 // ============================================================================
 
-TEST_F(WslFunctionalReadOnly, NullPowerInfoReturnsInval) {
+TEST(WslFunctionalReadOnly, NullPowerInfoReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_power_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullTemperatureReturnsInval) {
+TEST(WslFunctionalReadOnly, NullTemperatureReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_temperature(0, 0, 0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullClockInfoReturnsInval) {
+TEST(WslFunctionalReadOnly, NullClockInfoReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_clock_info(0, 0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullPcieInfoReturnsInval) {
+TEST(WslFunctionalReadOnly, NullPcieInfoReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_pcie_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullDeviceInfoReturnsInval) {
+TEST(WslFunctionalReadOnly, NullDeviceInfoReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_device_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullGpuMetricsInfoReturnsInval) {
+TEST(WslFunctionalReadOnly, NullGpuMetricsInfoReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_gpu_metrics_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST_F(WslFunctionalReadOnly, NullDeviceCountReturnsInval) {
+TEST(WslFunctionalReadOnly, NullDeviceCountReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_device_count(nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
 // Unsupported sensor types must not crash and must return NOT_SUPPORTED or INVAL.
-TEST_F(WslFunctionalReadOnly, TemperatureUnsupportedMetric) {
+TEST(WslFunctionalReadOnly, TemperatureUnsupportedMetric) {
   int64_t temp = 0;
   HSAKMT_STATUS r = rocdxg_smi_get_temperature(0, 0, /*metric=*/99, &temp);
   EXPECT_TRUE(r == HSAKMT_STATUS_NOT_SUPPORTED || r == HSAKMT_STATUS_INVALID_NODE_UNIT ||
@@ -127,7 +128,7 @@ TEST_F(WslFunctionalReadOnly, TemperatureUnsupportedMetric) {
       << "unexpected status: " << r;
 }
 
-TEST_F(WslFunctionalReadOnly, ClockInfoUnsupportedType) {
+TEST(WslFunctionalReadOnly, ClockInfoUnsupportedType) {
   rocdxg_smi_clock_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_clock_info(0, 99, &info);
   EXPECT_TRUE(r == HSAKMT_STATUS_NOT_SUPPORTED || r == HSAKMT_STATUS_INVALID_NODE_UNIT ||
@@ -139,14 +140,14 @@ TEST_F(WslFunctionalReadOnly, ClockInfoUnsupportedType) {
 // Live queries — require a WSL GPU (skipped otherwise)
 // ============================================================================
 
-TEST_F(WslFunctionalReadOnly, LiveDeviceCountNonZero) {
+TEST(WslFunctionalReadOnly, LiveDeviceCountNonZero) {
   RequireGpu();
   uint32_t count = 0;
   ASSERT_EQ(rocdxg_smi_get_device_count(&count), HSAKMT_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 }
 
-TEST_F(WslFunctionalReadOnly, LiveDeviceInfoPopulated) {
+TEST(WslFunctionalReadOnly, LiveDeviceInfoPopulated) {
   RequireGpu();
   rocdxg_smi_device_info_t info{};
   ASSERT_EQ(rocdxg_smi_get_device_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
@@ -168,7 +169,7 @@ TEST_F(WslFunctionalReadOnly, LiveDeviceInfoPopulated) {
   EXPECT_GT(info.vram.vram_size_mb, 0u);
 }
 
-TEST_F(WslFunctionalReadOnly, LiveVramUsageWithinTotal) {
+TEST(WslFunctionalReadOnly, LiveVramUsageWithinTotal) {
   RequireGpu();
   rocdxg_smi_vram_usage_t usage{};
   ASSERT_EQ(rocdxg_smi_get_vram_usage(node_id_, &usage), HSAKMT_STATUS_SUCCESS);
@@ -176,7 +177,7 @@ TEST_F(WslFunctionalReadOnly, LiveVramUsageWithinTotal) {
   EXPECT_LE(usage.vram_used_mb, usage.vram_total_mb);
 }
 
-TEST_F(WslFunctionalReadOnly, LivePowerInfoSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LivePowerInfoSuccessOrNotSupported) {
   RequireGpu();
   rocdxg_smi_power_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_power_info(node_id_, &info);
@@ -188,7 +189,7 @@ TEST_F(WslFunctionalReadOnly, LivePowerInfoSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LiveTemperatureEdgeSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LiveTemperatureEdgeSuccessOrNotSupported) {
   RequireGpu();
   int64_t temp = -1;
   HSAKMT_STATUS r = rocdxg_smi_get_temperature(node_id_,
@@ -203,7 +204,7 @@ TEST_F(WslFunctionalReadOnly, LiveTemperatureEdgeSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LiveClockInfoGfxSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LiveClockInfoGfxSuccessOrNotSupported) {
   RequireGpu();
   rocdxg_smi_clock_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_clock_info(node_id_, /*GFX=*/0, &info);
@@ -215,7 +216,7 @@ TEST_F(WslFunctionalReadOnly, LiveClockInfoGfxSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LiveClockInfoMemSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LiveClockInfoMemSuccessOrNotSupported) {
   RequireGpu();
   rocdxg_smi_clock_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_clock_info(node_id_, /*MEM=*/4, &info);
@@ -226,7 +227,7 @@ TEST_F(WslFunctionalReadOnly, LiveClockInfoMemSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LivePcieInfoSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LivePcieInfoSuccessOrNotSupported) {
   RequireGpu();
   rocdxg_smi_pcie_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_pcie_info(node_id_, &info);
@@ -240,7 +241,7 @@ TEST_F(WslFunctionalReadOnly, LivePcieInfoSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LiveDeviceInfoDriverAndVbiosFields) {
+TEST(WslFunctionalReadOnly, LiveDeviceInfoDriverAndVbiosFields) {
   RequireGpu();
   rocdxg_smi_device_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_device_info(node_id_, &info);
@@ -254,7 +255,7 @@ TEST_F(WslFunctionalReadOnly, LiveDeviceInfoDriverAndVbiosFields) {
   }
 }
 
-TEST_F(WslFunctionalReadOnly, LiveGpuMetricsInfoSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LiveGpuMetricsInfoSuccessOrNotSupported) {
   RequireGpu();
   rocdxg_smi_gpu_metrics_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_gpu_metrics_info(node_id_, &info);
@@ -264,7 +265,7 @@ TEST_F(WslFunctionalReadOnly, LiveGpuMetricsInfoSuccessOrNotSupported) {
   // corresponding PMLog sensor is unavailable, which is valid.
 }
 
-TEST_F(WslFunctionalReadOnly, LiveProcessEnumSuccessOrNotSupported) {
+TEST(WslFunctionalReadOnly, LiveProcessEnumSuccessOrNotSupported) {
   RequireGpu();
   uint32_t count = 0;
   HSAKMT_STATUS r = rocdxg_smi_enum_processes(node_id_, &count, nullptr);

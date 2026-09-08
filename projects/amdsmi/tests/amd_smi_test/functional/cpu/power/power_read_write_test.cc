@@ -15,7 +15,8 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_pwr_efficiency_mode / amdsmi_set_cpu_pwr_efficiency_mode.
 // amdsmi_get_cpu_sdps_limit / amdsmi_set_cpu_sdps_limit.
 // amdsmi_set_cpu_socket_boostlimit (no socket getter; reads back per core).
-TEST_F(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_socket_power_cap");
@@ -56,7 +57,8 @@ TEST_F(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_pwr_efficiency_mode");
@@ -101,7 +103,8 @@ TEST_F(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_sdps_limit");
@@ -140,7 +143,8 @@ TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
 // There is no socket-level boostlimit getter; the per-core getter reports the
 // limit a socket write enforces, and attributing the enumerated cores to a
 // socket is only unambiguous when the host has exactly one.
-TEST_F(CpuFunctionalReadWrite, SocketBoostlimit_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, SocketBoostlimit_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   if (cpus().size() != 1 || cpu_cores().empty())

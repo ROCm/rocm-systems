@@ -20,7 +20,8 @@ static constexpr amdsmi_event_type_t kEvent = AMDSMI_EVNT_XGMI_0_NOP_TX;
 // ---------------- full counter lifecycle: create -> start -> read -> stop -> destroy
 // ---------------- Perf counters only monitor (no device-config change) and destroy() releases
 // exactly what create() allocated, so this is not gated behind the mutation flag.
-TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
+TEST(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "counter lifecycle returns AMDSMI_STATUS_UNEXPECTED_SIZE; root cause unknown, "
          "under investigation";

@@ -10,13 +10,15 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_get_npm_info (node handle) ----------------
-TEST_F(GpuIntegration, GetNpmInfo_NullOutput) {
+TEST(GpuIntegration, GetNpmInfo_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_npm_info", "node=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_npm_info(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetNpmInfo_InvalidHandle) {
+TEST(GpuIntegration, GetNpmInfo_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_npm_info_t info;
   memset(&info, 0, sizeof(info));
   DISPLAY_AMDSMI_API("amdsmi_get_npm_info", "handle=invalid", kVerbose);
@@ -25,7 +27,8 @@ TEST_F(GpuIntegration, GetNpmInfo_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetNpmInfo_Node) {
+TEST(GpuIntegration, GetNpmInfo_Node) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_npm_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   // NPM is node-scoped: it needs a node handle, and amdsmi_get_node_handle only

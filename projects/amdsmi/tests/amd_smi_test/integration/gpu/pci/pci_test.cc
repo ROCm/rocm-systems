@@ -10,13 +10,15 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_get_gpu_pci_bandwidth ----------------
-TEST_F(GpuIntegration, GetPciBandwidth_NullOutput) {
+TEST(GpuIntegration, GetPciBandwidth_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_pci_bandwidth(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetPciBandwidth_InvalidHandle) {
+TEST(GpuIntegration, GetPciBandwidth_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_pcie_bandwidth_t bw;
   memset(&bw, 0, sizeof(bw));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "handle=invalid", kVerbose);
@@ -25,7 +27,8 @@ TEST_F(GpuIntegration, GetPciBandwidth_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetPciBandwidth_AllGpus) {
+TEST(GpuIntegration, GetPciBandwidth_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_pcie_bandwidth returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
          "unknown, under investigation";
@@ -45,13 +48,15 @@ TEST_F(GpuIntegration, GetPciBandwidth_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_bdf_id ----------------
-TEST_F(GpuIntegration, GetBdfId_NullOutput) {
+TEST(GpuIntegration, GetBdfId_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_bdf_id", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_bdf_id(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetBdfId_InvalidHandle) {
+TEST(GpuIntegration, GetBdfId_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t bdfid = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_bdf_id", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_bdf_id(kInvalidHandle, &bdfid);
@@ -59,7 +64,8 @@ TEST_F(GpuIntegration, GetBdfId_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetBdfId_AllGpus) {
+TEST(GpuIntegration, GetBdfId_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_bdf_id");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -74,7 +80,8 @@ TEST_F(GpuIntegration, GetBdfId_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_pci_throughput ----------------
-TEST_F(GpuIntegration, GetPciThroughput_NullOutput) {
+TEST(GpuIntegration, GetPciThroughput_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "GetPciThroughput_NullOutput fails with Successful return, expected AMDSMI_STATUS_INVAL";
 
@@ -84,7 +91,8 @@ TEST_F(GpuIntegration, GetPciThroughput_NullOutput) {
                         AMDSMI_STATUS_ARG_PTR_NULL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetPciThroughput_InvalidHandle) {
+TEST(GpuIntegration, GetPciThroughput_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t sent = 0, received = 0, max_pkt = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_pci_throughput(kInvalidHandle, &sent, &received, &max_pkt);
@@ -92,7 +100,8 @@ TEST_F(GpuIntegration, GetPciThroughput_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetPciThroughput_AllGpus) {
+TEST(GpuIntegration, GetPciThroughput_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_pci_throughput");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -107,14 +116,16 @@ TEST_F(GpuIntegration, GetPciThroughput_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_pci_replay_counter ----------------
-TEST_F(GpuIntegration, GetPciReplayCounter_NullOutput) {
+TEST(GpuIntegration, GetPciReplayCounter_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_pci_replay_counter(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_ARG_PTR_NULL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetPciReplayCounter_InvalidHandle) {
+TEST(GpuIntegration, GetPciReplayCounter_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t counter = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_pci_replay_counter(kInvalidHandle, &counter);
@@ -122,7 +133,8 @@ TEST_F(GpuIntegration, GetPciReplayCounter_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetPciReplayCounter_AllGpus) {
+TEST(GpuIntegration, GetPciReplayCounter_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_pci_replay_counter");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -137,7 +149,8 @@ TEST_F(GpuIntegration, GetPciReplayCounter_AllGpus) {
 }
 
 // ---------------- amdsmi_set_gpu_pci_bandwidth ----------------
-TEST_F(GpuIntegration, SetPciBandwidth_InvalidHandle) {
+TEST(GpuIntegration, SetPciBandwidth_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_pci_bandwidth(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -145,13 +158,15 @@ TEST_F(GpuIntegration, SetPciBandwidth_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 // ---------------- amdsmi_get_pcie_info ----------------
-TEST_F(GpuIntegration, GetPcieInfo_NullOutput) {
+TEST(GpuIntegration, GetPcieInfo_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_pcie_info", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_pcie_info(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetPcieInfo_InvalidHandle) {
+TEST(GpuIntegration, GetPcieInfo_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_pcie_info_t info;
   memset(&info, 0, sizeof(info));
   DISPLAY_AMDSMI_API("amdsmi_get_pcie_info", "handle=invalid", kVerbose);
@@ -160,7 +175,8 @@ TEST_F(GpuIntegration, GetPcieInfo_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetPcieInfo_AllGpus) {
+TEST(GpuIntegration, GetPcieInfo_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_pcie_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
          "under investigation";

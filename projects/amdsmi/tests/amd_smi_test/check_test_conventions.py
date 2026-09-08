@@ -49,7 +49,7 @@ SUITE_RE = re.compile(
 )
 
 # The only GTest registration macro allowed; see _check_test_macros for why.
-REQUIRED_TEST_MACRO = "TEST_F"
+REQUIRED_TEST_MACRO = "TEST"
 
 # Captures the macro and suite of any GTest registration, e.g. TEST_F(Suite, Name).
 _TEST_MACRO_RE = re.compile(
@@ -107,9 +107,9 @@ def _suites_in(path: Path) -> list[str]:
 
 def _bad_macro(path: Path, macro: str, suite: str) -> str:
     return (
-        f"{_rel(path)}: {macro}({suite}, …) must use {REQUIRED_TEST_MACRO} — without the "
-        f"suite fixture the test runs with no amdsmi_init/enumeration, and GTest aborts "
-        f"a suite that mixes {macro} with {REQUIRED_TEST_MACRO}"
+        f"{_rel(path)}: {macro}({suite}, …) must use {REQUIRED_TEST_MACRO}() — GTest aborts "
+        f"a suite that mixes {macro} with {REQUIRED_TEST_MACRO}, and the tiers no longer "
+        f"declare fixtures; open the body with AMDSMI_API_TEST_SCOPE() instead"
     )
 
 
@@ -167,17 +167,35 @@ def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> It
 
 
 def _check_test_macros(path: Path) -> Iterator[str]:
-    """Every test must register with ``TEST_F``.
+    """Every test must register with ``TEST``.
 
-    The suite fixtures in ``api_test_framework.h`` own the amdsmi_init, device
-    enumeration and shutdown each test depends on, so a fixture-less ``TEST()``
-    would run against an uninitialized library. GTest also rejects a suite whose
-    tests do not all share one fixture class, so a single stray ``TEST()`` aborts
-    the whole suite at runtime.
+    GTest rejects a suite whose tests do not all share one fixture class, so a
+    single stray ``TEST_F()`` aborts the whole suite at runtime. Init and device
+    enumeration come from ``AMDSMI_API_TEST_SCOPE()`` in the body instead of a
+    fixture; ``_check_api_scope`` enforces that.
     """
     for macro, suite in _tests_in(path):
         if macro != REQUIRED_TEST_MACRO:
             yield _bad_macro(path, macro, suite)
+
+
+def _check_api_scope(tier: str, path: Path) -> Iterator[str]:
+    """Integration tests must open with ``AMDSMI_API_TEST_SCOPE()``.
+
+    It acquires the device inventory and skips when amdsmi_init failed. Without
+    it the body runs against an uninitialized library and every call reports
+    NOT_INIT instead of skipping once.
+    """
+    if tier != "integration":
+        return
+    text = _strip_comments(path.read_text(errors="replace"))
+    for match in _TEST_MACRO_RE.finditer(text):
+        body = text[match.end() : match.end() + 400]
+        if "AMDSMI_API_TEST_SCOPE()" not in body:
+            yield (
+                f"{_rel(path)}: TEST({match.group(2)}, …) must open with "
+                f"AMDSMI_API_TEST_SCOPE() — without it the test runs uninitialized"
+            )
 
 
 def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]:
@@ -202,7 +220,7 @@ def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]
 
 
 def _main_cc_tests() -> Iterator[tuple[str, str]]:
-    """Yield ``(suite, body)`` for each TEST_F() block in main.cc.
+    """Yield ``(suite, body)`` for each TEST() block in main.cc.
 
     Comments are stripped first (so disabled/example tests are ignored), and
     ``body`` spans from the macro to the start of the next TEST.
@@ -295,6 +313,7 @@ def collect_violations() -> list[str]:
         violations += _check_layout_and_naming(tier, component, path)
         violations += _check_test_macros(path)
         violations += _check_suites(tier, component, path)
+        violations += _check_api_scope(tier, path)
     violations += _check_test_macros(TEST_ROOT / "main.cc")
     violations += _check_main_cc()
     violations += _check_main_cc_component_match()

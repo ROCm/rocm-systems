@@ -15,7 +15,8 @@ using amdsmi::test::kVerbose;
 // The shared framework already holds an init open for the duration of the
 // fixture. Adding one init here bumps the refcount; the paired shut_down below
 // returns it to the pre-test value, so no dangling init is left behind.
-TEST_F(SystemIntegration, InitShutDown_Balanced) {
+TEST(SystemIntegration, InitShutDown_Balanced) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_init", "flags=AMDSMI_INIT_ALL_PROCESSORS", kVerbose);
   amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_ALL_PROCESSORS);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
@@ -34,13 +35,15 @@ TEST_F(SystemIntegration, InitShutDown_Balanced) {
 }
 
 // ---- amdsmi_get_lib_version : invalid params first ----
-TEST_F(SystemIntegration, GetLibVersion_NullOutput) {
+TEST(SystemIntegration, GetLibVersion_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "version=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_lib_version(nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, GetLibVersion_Valid) {
+TEST(SystemIntegration, GetLibVersion_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_version_t version;
   memset(&version, 0, sizeof(version));
   DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "valid out", kVerbose);
@@ -52,13 +55,15 @@ TEST_F(SystemIntegration, GetLibVersion_Valid) {
 }
 
 // ---- amdsmi_status_code_to_string : invalid params first ----
-TEST_F(SystemIntegration, StatusCodeToString_NullOutput) {
+TEST(SystemIntegration, StatusCodeToString_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, StatusCodeToString_AllCodes) {
+TEST(SystemIntegration, StatusCodeToString_AllCodes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_status_code_to_string");
   static constexpr amdsmi_status_t kCodes[] = {AMDSMI_STATUS_SUCCESS,
                                                AMDSMI_STATUS_INVAL,

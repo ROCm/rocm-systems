@@ -17,7 +17,8 @@ using amdsmi::test::kVerbose;
 // CPU hardware.
 
 // ---- amdsmi_get_cpu_hsmp_driver_version ----
-TEST_F(CpuIntegration, GetHsmpDriverVersion_InvalidHandle) {
+TEST(CpuIntegration, GetHsmpDriverVersion_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_hsmp_driver_version_t ver;
   memset(&ver, 0, sizeof(ver));
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_hsmp_driver_version", "handle=invalid", kVerbose);
@@ -26,7 +27,8 @@ TEST_F(CpuIntegration, GetHsmpDriverVersion_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetHsmpDriverVersion_AllCpus) {
+TEST(CpuIntegration, GetHsmpDriverVersion_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_hsmp_driver_version");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -42,7 +44,8 @@ TEST_F(CpuIntegration, GetHsmpDriverVersion_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_smu_fw_version ----
-TEST_F(CpuIntegration, GetSmuFwVersion_InvalidHandle) {
+TEST(CpuIntegration, GetSmuFwVersion_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_smu_fw_version_t fw;
   memset(&fw, 0, sizeof(fw));
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_smu_fw_version", "handle=invalid", kVerbose);
@@ -51,7 +54,8 @@ TEST_F(CpuIntegration, GetSmuFwVersion_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSmuFwVersion_AllCpus) {
+TEST(CpuIntegration, GetSmuFwVersion_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_smu_fw_version");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -67,7 +71,8 @@ TEST_F(CpuIntegration, GetSmuFwVersion_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_hsmp_proto_ver ----
-TEST_F(CpuIntegration, GetHsmpProtoVer_InvalidHandle) {
+TEST(CpuIntegration, GetHsmpProtoVer_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t proto = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_hsmp_proto_ver", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_hsmp_proto_ver(kInvalidHandle, &proto);
@@ -75,7 +80,8 @@ TEST_F(CpuIntegration, GetHsmpProtoVer_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetHsmpProtoVer_AllCpus) {
+TEST(CpuIntegration, GetHsmpProtoVer_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_hsmp_proto_ver");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -90,7 +96,8 @@ TEST_F(CpuIntegration, GetHsmpProtoVer_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_model_name ----
-TEST_F(CpuIntegration, GetCpuModelName_InvalidHandle) {
+TEST(CpuIntegration, GetCpuModelName_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_cpu_info_t info;
   memset(&info, 0, sizeof(info));
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_model_name", "handle=invalid", kVerbose);
@@ -99,7 +106,8 @@ TEST_F(CpuIntegration, GetCpuModelName_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCpuModelName_AllCpus) {
+TEST(CpuIntegration, GetCpuModelName_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_model_name");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -115,7 +123,8 @@ TEST_F(CpuIntegration, GetCpuModelName_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_prochot_status ----
-TEST_F(CpuIntegration, GetProchotStatus_InvalidHandle) {
+TEST(CpuIntegration, GetProchotStatus_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t prochot = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_prochot_status", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_prochot_status(kInvalidHandle, &prochot);
@@ -123,7 +132,8 @@ TEST_F(CpuIntegration, GetProchotStatus_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetProchotStatus_AllCpus) {
+TEST(CpuIntegration, GetProchotStatus_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_prochot_status");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -138,7 +148,8 @@ TEST_F(CpuIntegration, GetProchotStatus_AllCpus) {
 }
 
 // ---- amdsmi_first_online_core_on_cpu_socket ----
-TEST_F(CpuIntegration, FirstOnlineCore_InvalidHandle) {
+TEST(CpuIntegration, FirstOnlineCore_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t core_ind = 0;
   DISPLAY_AMDSMI_API("amdsmi_first_online_core_on_cpu_socket", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_first_online_core_on_cpu_socket(kInvalidHandle, &core_ind);
@@ -146,7 +157,8 @@ TEST_F(CpuIntegration, FirstOnlineCore_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, FirstOnlineCore_AllCpus) {
+TEST(CpuIntegration, FirstOnlineCore_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_first_online_core_on_cpu_socket");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -162,14 +174,16 @@ TEST_F(CpuIntegration, FirstOnlineCore_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_enabled_commands (outputs guarded) ----
-TEST_F(CpuIntegration, GetEnabledCommands_NullOutput) {
+TEST(CpuIntegration, GetEnabledCommands_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t m0 = 0, m1 = 0, m2 = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_enabled_commands", "r_mask=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_enabled_commands(any_cpu(), nullptr, &m0, &m1, &m2);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetEnabledCommands_InvalidHandle) {
+TEST(CpuIntegration, GetEnabledCommands_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   bool r_mask = false;
   uint32_t m0 = 0, m1 = 0, m2 = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_enabled_commands", "handle=invalid", kVerbose);
@@ -178,7 +192,8 @@ TEST_F(CpuIntegration, GetEnabledCommands_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetEnabledCommands_AllCpus) {
+TEST(CpuIntegration, GetEnabledCommands_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_enabled_commands");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -197,14 +212,16 @@ TEST_F(CpuIntegration, GetEnabledCommands_AllCpus) {
 static constexpr amdsmi_affinity_scope_t kAffinityScopes[] = {AMDSMI_AFFINITY_SCOPE_NODE,
                                                               AMDSMI_AFFINITY_SCOPE_SOCKET};
 
-TEST_F(CpuIntegration, GetAffinityWithScope_NullOutput) {
+TEST(CpuIntegration, GetAffinityWithScope_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_affinity_with_scope", "cpu_set=nullptr", kVerbose);
   amdsmi_status_t err =
       amdsmi_get_cpu_affinity_with_scope(any_cpu(), 8, nullptr, AMDSMI_AFFINITY_SCOPE_NODE);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetAffinityWithScope_InvalidHandle) {
+TEST(CpuIntegration, GetAffinityWithScope_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t cpu_set[8];
   memset(cpu_set, 0, sizeof(cpu_set));
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_affinity_with_scope", "handle=invalid", kVerbose);
@@ -214,7 +231,8 @@ TEST_F(CpuIntegration, GetAffinityWithScope_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetAffinityWithScope_AllCpusAllScopes) {
+TEST(CpuIntegration, GetAffinityWithScope_AllCpusAllScopes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_affinity_with_scope");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i)

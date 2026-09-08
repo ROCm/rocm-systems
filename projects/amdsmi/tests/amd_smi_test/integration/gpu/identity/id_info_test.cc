@@ -10,13 +10,15 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_get_gpu_device_bdf ----------------
-TEST_F(GpuIntegration, GetDeviceBdf_NullOutput) {
+TEST(GpuIntegration, GetDeviceBdf_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_bdf", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_device_bdf(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetDeviceBdf_InvalidHandle) {
+TEST(GpuIntegration, GetDeviceBdf_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_bdf_t bdf;
   memset(&bdf, 0, sizeof(bdf));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_bdf", "handle=invalid", kVerbose);
@@ -25,7 +27,8 @@ TEST_F(GpuIntegration, GetDeviceBdf_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetDeviceBdf_AllGpus) {
+TEST(GpuIntegration, GetDeviceBdf_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_device_bdf");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -41,14 +44,16 @@ TEST_F(GpuIntegration, GetDeviceBdf_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_device_uuid ----------------
-TEST_F(GpuIntegration, GetDeviceUuid_NullOutput) {
+TEST(GpuIntegration, GetDeviceUuid_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   unsigned int len = 256;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_uuid", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_device_uuid(any_gpu(), &len, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetDeviceUuid_InvalidHandle) {
+TEST(GpuIntegration, GetDeviceUuid_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   unsigned int len = 256;
   char uuid[256];
   memset(uuid, 0, sizeof(uuid));
@@ -58,7 +63,8 @@ TEST_F(GpuIntegration, GetDeviceUuid_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetDeviceUuid_AllGpus) {
+TEST(GpuIntegration, GetDeviceUuid_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_device_uuid");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -75,14 +81,16 @@ TEST_F(GpuIntegration, GetDeviceUuid_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_device_cuid ----------------
-TEST_F(GpuIntegration, GetDeviceCuid_NullOutput) {
+TEST(GpuIntegration, GetDeviceCuid_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   unsigned int len = 256;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_cuid", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_device_cuid(any_gpu(), &len, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetDeviceCuid_InvalidHandle) {
+TEST(GpuIntegration, GetDeviceCuid_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   unsigned int len = 256;
   char cuid[256];
   memset(cuid, 0, sizeof(cuid));
@@ -92,7 +100,8 @@ TEST_F(GpuIntegration, GetDeviceCuid_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetDeviceCuid_AllGpus) {
+TEST(GpuIntegration, GetDeviceCuid_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_device_cuid");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -113,13 +122,15 @@ AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(GetEnumerationInfo, amdsmi_get_gpu_enumerat
                                      amdsmi_enumeration_info_t)
 
 // ---------------- amdsmi_get_gpu_virtualization_mode ----------------
-TEST_F(GpuIntegration, GetVirtualizationMode_NullOutput) {
+TEST(GpuIntegration, GetVirtualizationMode_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_virtualization_mode(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetVirtualizationMode_InvalidHandle) {
+TEST(GpuIntegration, GetVirtualizationMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_virtualization_mode_t mode;
   memset(&mode, 0, sizeof(mode));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "handle=invalid", kVerbose);
@@ -128,7 +139,8 @@ TEST_F(GpuIntegration, GetVirtualizationMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetVirtualizationMode_AllGpus) {
+TEST(GpuIntegration, GetVirtualizationMode_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_virtualization_mode");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -144,13 +156,15 @@ TEST_F(GpuIntegration, GetVirtualizationMode_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_id ----------------
-TEST_F(GpuIntegration, GetGpuId_NullOutput) {
+TEST(GpuIntegration, GetGpuId_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_id(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetGpuId_InvalidHandle) {
+TEST(GpuIntegration, GetGpuId_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint16_t id = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_id(kInvalidHandle, &id);
@@ -158,7 +172,8 @@ TEST_F(GpuIntegration, GetGpuId_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetGpuId_AllGpus) {
+TEST(GpuIntegration, GetGpuId_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_id");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -173,13 +188,15 @@ TEST_F(GpuIntegration, GetGpuId_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_revision ----------------
-TEST_F(GpuIntegration, GetRevision_NullOutput) {
+TEST(GpuIntegration, GetRevision_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_revision", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_revision(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetRevision_InvalidHandle) {
+TEST(GpuIntegration, GetRevision_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint16_t rev = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_revision", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_revision(kInvalidHandle, &rev);
@@ -187,7 +204,8 @@ TEST_F(GpuIntegration, GetRevision_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetRevision_AllGpus) {
+TEST(GpuIntegration, GetRevision_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_revision");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -208,13 +226,15 @@ AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetVendorName, amdsmi_get_gpu_vendor_name, 
 AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetVramVendor, amdsmi_get_gpu_vram_vendor, 256);
 
 // ---------------- amdsmi_get_gpu_subsystem_id ----------------
-TEST_F(GpuIntegration, GetSubsystemId_NullOutput) {
+TEST(GpuIntegration, GetSubsystemId_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_id", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_subsystem_id(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetSubsystemId_InvalidHandle) {
+TEST(GpuIntegration, GetSubsystemId_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint16_t id = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_id", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_subsystem_id(kInvalidHandle, &id);
@@ -222,7 +242,8 @@ TEST_F(GpuIntegration, GetSubsystemId_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetSubsystemId_AllGpus) {
+TEST(GpuIntegration, GetSubsystemId_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_subsystem_id");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -240,13 +261,15 @@ TEST_F(GpuIntegration, GetSubsystemId_AllGpus) {
 AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetSubsystemName, amdsmi_get_gpu_subsystem_name, 256);
 
 // ---------------- amdsmi_get_gpu_xcd_counter ----------------
-TEST_F(GpuIntegration, GetXcdCounter_NullOutput) {
+TEST(GpuIntegration, GetXcdCounter_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_xcd_counter(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetXcdCounter_InvalidHandle) {
+TEST(GpuIntegration, GetXcdCounter_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint16_t xcd = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_xcd_counter(kInvalidHandle, &xcd);
@@ -254,7 +277,8 @@ TEST_F(GpuIntegration, GetXcdCounter_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetXcdCounter_AllGpus) {
+TEST(GpuIntegration, GetXcdCounter_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_gpu_xcd_counter returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
          "unknown, under investigation";

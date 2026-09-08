@@ -10,13 +10,15 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_get_gpu_compute_partition (char) ----------------
-TEST_F(GpuIntegration, GetComputePartition_NullOutput) {
+TEST(GpuIntegration, GetComputePartition_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_partition", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_compute_partition(any_gpu(), nullptr, 64);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetComputePartition_InvalidHandle) {
+TEST(GpuIntegration, GetComputePartition_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   char buf[64];
   memset(buf, 0, sizeof(buf));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_partition", "handle=invalid", kVerbose);
@@ -25,7 +27,8 @@ TEST_F(GpuIntegration, GetComputePartition_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetComputePartition_AllGpus) {
+TEST(GpuIntegration, GetComputePartition_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_compute_partition");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -41,13 +44,15 @@ TEST_F(GpuIntegration, GetComputePartition_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_memory_partition (char) ----------------
-TEST_F(GpuIntegration, GetMemoryPartition_NullOutput) {
+TEST(GpuIntegration, GetMemoryPartition_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_partition(any_gpu(), nullptr, 64);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetMemoryPartition_InvalidHandle) {
+TEST(GpuIntegration, GetMemoryPartition_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   char buf[64];
   memset(buf, 0, sizeof(buf));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "handle=invalid", kVerbose);
@@ -56,7 +61,8 @@ TEST_F(GpuIntegration, GetMemoryPartition_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetMemoryPartition_AllGpus) {
+TEST(GpuIntegration, GetMemoryPartition_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_memory_partition");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -72,14 +78,16 @@ TEST_F(GpuIntegration, GetMemoryPartition_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_compute_partition_mem_alloc_mode ----------------
-TEST_F(GpuIntegration, GetComputePartitionMemAllocMode_NullOutput) {
+TEST(GpuIntegration, GetComputePartitionMemAllocMode_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_partition_mem_alloc_mode", "gpu=0 out=nullptr",
                      kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_compute_partition_mem_alloc_mode(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetComputePartitionMemAllocMode_InvalidHandle) {
+TEST(GpuIntegration, GetComputePartitionMemAllocMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_compute_partition_mem_alloc_mode_t mode;
   memset(&mode, 0, sizeof(mode));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_partition_mem_alloc_mode", "handle=invalid", kVerbose);
@@ -88,7 +96,8 @@ TEST_F(GpuIntegration, GetComputePartitionMemAllocMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetComputePartitionMemAllocMode_AllGpus) {
+TEST(GpuIntegration, GetComputePartitionMemAllocMode_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_compute_partition_mem_alloc_mode");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -105,14 +114,16 @@ TEST_F(GpuIntegration, GetComputePartitionMemAllocMode_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_accelerator_partition_mem_alloc_mode ----------------
-TEST_F(GpuIntegration, GetAcceleratorPartitionMemAllocMode_NullOutput) {
+TEST(GpuIntegration, GetAcceleratorPartitionMemAllocMode_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode", "gpu=0 out=nullptr",
                      kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionMemAllocMode_InvalidHandle) {
+TEST(GpuIntegration, GetAcceleratorPartitionMemAllocMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_accelerator_partition_mem_alloc_mode_t mode;
   memset(&mode, 0, sizeof(mode));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode", "handle=invalid",
@@ -122,7 +133,8 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionMemAllocMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionMemAllocMode_AllGpus) {
+TEST(GpuIntegration, GetAcceleratorPartitionMemAllocMode_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_accelerator_partition_mem_alloc_mode");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -139,13 +151,15 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionMemAllocMode_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_memory_partition_config ----------------
-TEST_F(GpuIntegration, GetMemoryPartitionConfig_NullOutput) {
+TEST(GpuIntegration, GetMemoryPartitionConfig_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_partition_config(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetMemoryPartitionConfig_InvalidHandle) {
+TEST(GpuIntegration, GetMemoryPartitionConfig_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_memory_partition_config_t config;
   memset(&config, 0, sizeof(config));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "handle=invalid", kVerbose);
@@ -154,7 +168,8 @@ TEST_F(GpuIntegration, GetMemoryPartitionConfig_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetMemoryPartitionConfig_AllGpus) {
+TEST(GpuIntegration, GetMemoryPartitionConfig_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_memory_partition_config");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -171,7 +186,8 @@ TEST_F(GpuIntegration, GetMemoryPartitionConfig_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_accelerator_partition_profile_config ----------------
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_NullOutput) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfileConfig_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile_config", "gpu=0 out=nullptr",
                      kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_accelerator_partition_profile_config(any_gpu(), nullptr);
@@ -179,7 +195,8 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_NullOutput) {
                         AMDSMI_STATUS_ARG_PTR_NULL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_InvalidHandle) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfileConfig_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_accelerator_partition_profile_config_t cfg;
   memset(&cfg, 0, sizeof(cfg));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile_config", "handle=invalid",
@@ -189,7 +206,8 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_AllGpus) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfileConfig_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_accelerator_partition_profile_config");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -206,13 +224,15 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionProfileConfig_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_accelerator_partition_profile ----------------
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfile_NullOutput) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfile_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_accelerator_partition_profile(any_gpu(), nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfile_InvalidHandle) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfile_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_accelerator_partition_profile_t profile;
   memset(&profile, 0, sizeof(profile));
   uint32_t partition_id = 0;
@@ -223,7 +243,8 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionProfile_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetAcceleratorPartitionProfile_AllGpus) {
+TEST(GpuIntegration, GetAcceleratorPartitionProfile_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_accelerator_partition_profile");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -242,7 +263,8 @@ TEST_F(GpuIntegration, GetAcceleratorPartitionProfile_AllGpus) {
 }
 
 // ---- mem_alloc_mode setters (invalid input only; valid-input cases are in functional/) ----
-TEST_F(GpuIntegration, SetComputePartitionMemAllocMode_InvalidHandle) {
+TEST(GpuIntegration, SetComputePartitionMemAllocMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition_mem_alloc_mode", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_compute_partition_mem_alloc_mode(
       kInvalidHandle, AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING);
@@ -250,7 +272,8 @@ TEST_F(GpuIntegration, SetComputePartitionMemAllocMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, SetAcceleratorPartitionMemAllocMode_InvalidHandle) {
+TEST(GpuIntegration, SetAcceleratorPartitionMemAllocMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_mem_alloc_mode", "handle=invalid",
                      kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
@@ -263,7 +286,8 @@ TEST_F(GpuIntegration, SetAcceleratorPartitionMemAllocMode_InvalidHandle) {
 // ---------------- A successful repartition would reconfigure a live device shared with other
 // processes, so the valid-handle path is intentionally driven with a sentinel/
 // invalid selector that the driver rejects; only the call contract is validated.
-TEST_F(GpuIntegration, SetComputePartition_InvalidHandle) {
+TEST(GpuIntegration, SetComputePartition_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition", "handle=invalid", kVerbose);
   amdsmi_status_t err =
       amdsmi_set_gpu_compute_partition(kInvalidHandle, AMDSMI_COMPUTE_PARTITION_SPX);
@@ -271,7 +295,8 @@ TEST_F(GpuIntegration, SetComputePartition_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, SetMemoryPartition_InvalidHandle) {
+TEST(GpuIntegration, SetMemoryPartition_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition", "handle=invalid", kVerbose);
   amdsmi_status_t err =
       amdsmi_set_gpu_memory_partition(kInvalidHandle, AMDSMI_MEMORY_PARTITION_NPS1);
@@ -279,7 +304,8 @@ TEST_F(GpuIntegration, SetMemoryPartition_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, SetMemoryPartitionMode_InvalidHandle) {
+TEST(GpuIntegration, SetMemoryPartitionMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "handle=invalid", kVerbose);
   amdsmi_status_t err =
       amdsmi_set_gpu_memory_partition_mode(kInvalidHandle, AMDSMI_MEMORY_PARTITION_NPS1);
@@ -287,7 +313,8 @@ TEST_F(GpuIntegration, SetMemoryPartitionMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, SetAcceleratorPartitionProfile_InvalidHandle) {
+TEST(GpuIntegration, SetAcceleratorPartitionProfile_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_profile", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_accelerator_partition_profile(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,

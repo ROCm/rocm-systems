@@ -40,9 +40,9 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` on a plain fixture · Python: `unittest` |
-| **Integration** | `integration/` | Yes — needs a live library and device | C++: `TEST_F()` on `ApiTest` · Python: `unittest` |
-| **Functional** | `functional/` | Yes — runs against a live device | C++: `TEST_F()` on `SelfManagedApiTest`, or the legacy `TestBase` lifecycle · Python: `unittest` |
+| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST()` · Python: `unittest` |
+| **Integration** | `integration/` | Yes — needs a live library and device | C++: `TEST()` + `AMDSMI_API_TEST_SCOPE()` · Python: `unittest` |
+| **Functional** | `functional/` | Yes — runs against a live device | C++: `TEST()`, or the legacy `TestBase` lifecycle · Python: `unittest` |
 
 The **integration** tier owns the public `amdsmi.h` API surface: every API's
 invalid-input cases (null pointer, invalid handle), and every **getter** driven
@@ -88,7 +88,7 @@ tests/amd_smi_test/
 ├── amdsmitst.exclude                # Global ASIC blacklist for --gtest_filter
 ├── detect_asic_filter.sh            # ASIC detection and per-ASIC exclusion
 │
-├── api_test_framework.h              # Shared fixtures, status helpers, getter macros
+├── api_test_framework.h              # Test scope, status helpers, getter macros
 │
 ├── unit/                            # No hardware required; no amdsmi_init
 │   ├── gpu/
@@ -216,10 +216,15 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 **Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; unit tests
 declare no class of their own.
 
-**Every test registers with `TEST_F(Suite, Name)`** — never the fixture-less `TEST()`. The suite
-fixtures in `api_test_framework.h` own the `amdsmi_init`, device enumeration and shutdown that
-each test depends on; the device-free `*Unit` fixtures live in `unit_fixtures.h`. Mixing `TEST()` into a suite that uses `TEST_F()` still compiles, but GTest
-then fails every `TEST()` case in that suite at runtime. `check_test_conventions.py` enforces this.
+**Every test registers with `TEST(Suite, Name)`** — never `TEST_F()`. Suite names are plain
+labels, not fixture classes. Mixing `TEST_F()` into a suite that uses `TEST()` still compiles, but
+GTest then fails every case in that suite at runtime.
+
+Integration tests open the body with `AMDSMI_API_TEST_SCOPE()`, which acquires the shared device
+inventory for the test and skips when `amdsmi_init` failed. It replaces what the suite fixture used
+to do in `SetUpTestSuite`/`SetUp`, so the inventory is now acquired per test rather than per suite.
+Unit tests need no scope; functional tests take one only when they touch the inventory.
+`check_test_conventions.py` enforces both rules.
 
 **GTest suites registered in `main.cc` follow the `<Component><Type>[<Operation>]` scheme**:
 

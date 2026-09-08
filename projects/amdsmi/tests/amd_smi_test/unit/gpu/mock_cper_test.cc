@@ -23,7 +23,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_cper.h"
-#include "unit_fixtures.h"
 
 #ifndef AMDSMI_TEST_MOCK_DIR
 #error "AMDSMI_TEST_MOCK_DIR must be defined by the build"
@@ -88,7 +87,7 @@ std::vector<amdsmi_cper_sev_t> ReadMock(const char* name, uint32_t severity_mask
 }  // namespace
 
 // Five non-fatal corrected records parse to five entries, all severity 2.
-TEST_F(GpuUnit, CperMockCorrectedRecords) {
+TEST(GpuUnit, CperMockCorrectedRecords) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
@@ -104,7 +103,7 @@ TEST_F(GpuUnit, CperMockCorrectedRecords) {
 }
 
 // A single non-fatal uncorrected record parses to one entry, severity 0.
-TEST_F(GpuUnit, CperMockUncorrectedRecord) {
+TEST(GpuUnit, CperMockUncorrectedRecord) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_uncorrected.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -116,7 +115,7 @@ TEST_F(GpuUnit, CperMockUncorrectedRecord) {
 }
 
 // A single fatal record parses to one entry, severity 1.
-TEST_F(GpuUnit, CperMockFatalRecord) {
+TEST(GpuUnit, CperMockFatalRecord) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_fatal.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -129,7 +128,7 @@ TEST_F(GpuUnit, CperMockFatalRecord) {
 
 // The mixed ring (5 corrected + 1 uncorrected + 1 fatal) parses to seven
 // entries under a full severity mask.
-TEST_F(GpuUnit, CperMockMixedFullMask) {
+TEST(GpuUnit, CperMockMixedFullMask) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_mixed.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -154,7 +153,7 @@ TEST_F(GpuUnit, CperMockMixedFullMask) {
 
 // The severity_mask filters the mixed ring: each single-severity mask yields
 // only the matching records.
-TEST_F(GpuUnit, CperMockSeverityMaskFilter) {
+TEST(GpuUnit, CperMockSeverityMaskFilter) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
 
@@ -183,7 +182,7 @@ TEST_F(GpuUnit, CperMockSeverityMaskFilter) {
 }
 
 // A zero severity_mask rejects every record: SUCCESS with no entries.
-TEST_F(GpuUnit, CperMockSeverityMaskRejectAll) {
+TEST(GpuUnit, CperMockSeverityMaskRejectAll) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 99;
   uint64_t buf_size = 99;

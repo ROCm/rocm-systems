@@ -17,7 +17,8 @@ using amdsmi::test::kVerbose;
 // arbitrary limit.
 
 // ---- amdsmi_get_cpu_core_boostlimit (handle guarded only, core handle) ----
-TEST_F(CpuIntegration, GetCoreBoostlimit_InvalidHandle) {
+TEST(CpuIntegration, GetCoreBoostlimit_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t boost = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_core_boostlimit", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_core_boostlimit(kInvalidHandle, &boost);
@@ -25,7 +26,8 @@ TEST_F(CpuIntegration, GetCoreBoostlimit_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCoreBoostlimit_AllCores) {
+TEST(CpuIntegration, GetCoreBoostlimit_AllCores) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_core_boostlimit");
   if (cpu_cores().empty()) GTEST_SKIP() << "No CPU cores";
   for (size_t i = 0; i < cpu_cores().size(); ++i) {
@@ -41,7 +43,8 @@ TEST_F(CpuIntegration, GetCoreBoostlimit_AllCores) {
 
 // ---- amdsmi_set_cpu_core_boostlimit (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetCoreBoostlimit_InvalidHandle) {
+TEST(CpuIntegration, SetCoreBoostlimit_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_core_boostlimit", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_core_boostlimit(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -50,7 +53,8 @@ TEST_F(CpuIntegration, SetCoreBoostlimit_InvalidHandle) {
 }
 // ---- amdsmi_set_cpu_socket_boostlimit (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetSocketBoostlimit_InvalidHandle) {
+TEST(CpuIntegration, SetSocketBoostlimit_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_boostlimit", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_socket_boostlimit(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,

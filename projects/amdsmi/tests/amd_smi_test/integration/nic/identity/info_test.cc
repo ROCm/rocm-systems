@@ -14,7 +14,8 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_nic_processor_handles(socket, uint32_t* count, handles*)
 // =====================================================================
 
-TEST_F(NicIntegration, GetNicProcessorHandles_NullCount) {
+TEST(NicIntegration, GetNicProcessorHandles_NullCount) {
+  AMDSMI_API_TEST_SCOPE();
   if (sockets().empty()) GTEST_SKIP() << "No sockets";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_processor_handles", "socket=0 count=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_nic_processor_handles(sockets()[0], nullptr, nullptr);
@@ -22,7 +23,8 @@ TEST_F(NicIntegration, GetNicProcessorHandles_NullCount) {
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 
-TEST_F(NicIntegration, GetNicProcessorHandles_InvalidHandle) {
+TEST(NicIntegration, GetNicProcessorHandles_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t count = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_nic_processor_handles", "socket=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_nic_processor_handles(nullptr, &count, nullptr);
@@ -31,7 +33,8 @@ TEST_F(NicIntegration, GetNicProcessorHandles_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
-TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
+TEST(NicIntegration, GetNicProcessorHandles_AllSockets) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_nic_processor_handles");
   if (sockets().empty()) GTEST_SKIP() << "No sockets";
   for (size_t i = 0; i < sockets().size(); ++i) {
@@ -58,14 +61,16 @@ TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
 // amdsmi_get_nic_device_bdf(handle, amdsmi_bdf_t* bdf)
 // =====================================================================
 
-TEST_F(NicIntegration, GetNicDeviceBdf_NullOutput) {
+TEST(NicIntegration, GetNicDeviceBdf_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "nic=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_nic_device_bdf(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 
-TEST_F(NicIntegration, GetNicDeviceBdf_InvalidHandle) {
+TEST(NicIntegration, GetNicDeviceBdf_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_bdf_t bdf;
   memset(&bdf, 0, sizeof(bdf));
   DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "handle=invalid", kVerbose);
@@ -75,7 +80,8 @@ TEST_F(NicIntegration, GetNicDeviceBdf_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
-TEST_F(NicIntegration, GetNicDeviceBdf_AllNics) {
+TEST(NicIntegration, GetNicDeviceBdf_AllNics) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_nic_device_bdf");
   if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   for (size_t i = 0; i < nics().size(); ++i) {
@@ -137,8 +143,8 @@ AMDSMI_INTEGRATION_NIC_STRUCT_GETTER(GetNicRdmaDevInfo, amdsmi_get_nic_rdma_dev_
 
 AMDSMI_INTEGRATION_NIC_STRUCT_GETTER(GetNicFwInfo, amdsmi_get_nic_fw_info, amdsmi_nic_fw_info_t);
 
-TEST_F(NicIntegration, DeviceBdf_InvalidHandle) {
-  RequireInit();
+TEST(NicIntegration, DeviceBdf_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_bdf_t bdf;
   memset(&bdf, 0, sizeof(bdf));
   DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "handle=invalid", kVerbose);
@@ -148,14 +154,16 @@ TEST_F(NicIntegration, DeviceBdf_InvalidHandle) {
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
-TEST_F(NicIntegration, AsicInfo_NullOutput) {
+TEST(NicIntegration, AsicInfo_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_nic_asic_info", "nic=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_nic_asic_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 
-TEST_F(NicIntegration, DeviceBdf_Stable) {
+TEST(NicIntegration, DeviceBdf_Stable) {
+  AMDSMI_API_TEST_SCOPE();
   if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   amdsmi::test::StatusCollector col("amdsmi_get_nic_device_bdf");
   for (size_t i = 0; i < nics().size(); ++i) {

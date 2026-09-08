@@ -10,7 +10,8 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_process_isolation / amdsmi_set_gpu_process_isolation.
-TEST_F(GpuFunctionalReadWrite, ProcessIsolation_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, ProcessIsolation_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_process_isolation");

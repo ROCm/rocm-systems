@@ -14,13 +14,15 @@ AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(GetFabricInfo, amdsmi_get_gpu_fabric_info,
                                      amdsmi_fabric_info_t)
 
 // ---------------- amdsmi_get_fabric_telemetry_data ----------------
-TEST_F(GpuIntegration, GetFabricTelemetryData_NullOutput) {
+TEST(GpuIntegration, GetFabricTelemetryData_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_fabric_telemetry_data", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_fabric_telemetry_data(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetFabricTelemetryData_InvalidHandle) {
+TEST(GpuIntegration, GetFabricTelemetryData_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_fabric_telemetry_t telemetry;
   memset(&telemetry, 0, sizeof(telemetry));
   DISPLAY_AMDSMI_API("amdsmi_get_fabric_telemetry_data", "handle=invalid", kVerbose);
@@ -29,7 +31,8 @@ TEST_F(GpuIntegration, GetFabricTelemetryData_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetFabricTelemetryData_AllGpus) {
+TEST(GpuIntegration, GetFabricTelemetryData_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_fabric_telemetry_data");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -45,13 +48,15 @@ TEST_F(GpuIntegration, GetFabricTelemetryData_AllGpus) {
 }
 
 // ---------------- amdsmi_alloc_fabric_telemetry / free ----------------
-TEST_F(GpuIntegration, AllocFabricTelemetry_NullOutput) {
+TEST(GpuIntegration, AllocFabricTelemetry_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_alloc_fabric_telemetry(any_gpu(), 0, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, AllocFabricTelemetry_InvalidHandle) {
+TEST(GpuIntegration, AllocFabricTelemetry_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_fabric_telemetry_t* telemetry = nullptr;
   DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_alloc_fabric_telemetry(kInvalidHandle, 0, &telemetry);
@@ -59,7 +64,8 @@ TEST_F(GpuIntegration, AllocFabricTelemetry_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, AllocFreeFabricTelemetry_AllGpus) {
+TEST(GpuIntegration, AllocFreeFabricTelemetry_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_alloc_fabric_telemetry");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -84,7 +90,8 @@ TEST_F(GpuIntegration, AllocFreeFabricTelemetry_AllGpus) {
 }
 
 // ---------------- amdsmi_free_fabric_telemetry (invalid) ----------------
-TEST_F(GpuIntegration, FreeFabricTelemetry_NullOutput) {
+TEST(GpuIntegration, FreeFabricTelemetry_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "telemetry=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_free_fabric_telemetry(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -93,14 +100,16 @@ TEST_F(GpuIntegration, FreeFabricTelemetry_NullOutput) {
 }
 
 // ---------------- amdsmi_fabric_telem_id_to_string (no handle) ----------------
-TEST_F(GpuIntegration, FabricTelemIdToString_NullOutput) {
+TEST(GpuIntegration, FabricTelemIdToString_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(0, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
-TEST_F(GpuIntegration, FabricTelemIdToString_Valid) {
+TEST(GpuIntegration, FabricTelemIdToString_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   const char* name = nullptr;
   DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "telem_id=0", kVerbose);
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(0, &name);

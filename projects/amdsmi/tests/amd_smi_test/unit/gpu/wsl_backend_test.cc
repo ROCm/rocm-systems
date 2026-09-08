@@ -18,18 +18,17 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_wsl_device.h"
-#include "unit_fixtures.h"
 
 using amd::smi::AMDSmiProcessor;
 using amd::smi::AMDSmiSocket;
 using amd::smi::WSLGPUBackend;
 
 // IsActive() is false before any TryPopulate() call.
-TEST_F(GpuUnit, InactiveByDefault) { EXPECT_FALSE(WSLGPUBackend::IsActive()); }
+TEST(GpuUnit, InactiveByDefault) { EXPECT_FALSE(WSLGPUBackend::IsActive()); }
 
 // TryPopulate() on a machine without /dev/dxg returns NOT_SUPPORTED.
 // Skipped on real WSL machines where /dev/dxg is present.
-TEST_F(GpuUnit, TryPopulateWithoutDxg) {
+TEST(GpuUnit, TryPopulateWithoutDxg) {
   if (access("/dev/dxg", F_OK) == 0) {
     GTEST_SKIP() << "/dev/dxg present — skipped on WSL machines";
   }

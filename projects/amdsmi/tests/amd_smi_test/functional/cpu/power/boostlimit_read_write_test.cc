@@ -14,7 +14,8 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_core_floor_freq_limit / amdsmi_set_cpu_core_floor_freq_limit.
 // amdsmi_get_cpu_floor_freq_limit / amdsmi_set_cpu_floor_freq_limit.
 // MSR floor-frequency limit setters (no getter).
-TEST_F(CpuFunctionalReadWrite, CoreBoostlimit_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, CoreBoostlimit_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty()) GTEST_SKIP() << "No CPU cores";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_core_boostlimit");
@@ -51,7 +52,8 @@ TEST_F(CpuFunctionalReadWrite, CoreBoostlimit_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty() && cpus().empty()) GTEST_SKIP() << "No CPU processors or cores";
   // A floor of 0 clears the limit, so alternating with the socket minimum gives a
@@ -133,7 +135,8 @@ TEST_F(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
 // set cannot be read first and put back. Writing 0 clears it to the documented
 // default; on a tuned host that discards their setting. known_failures.md lists
 // this under "Setters with no getter to restore from".
-TEST_F(CpuFunctionalReadWrite, MsrFloorFreqLimit_Set) {
+TEST(CpuFunctionalReadWrite, MsrFloorFreqLimit_Set) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty() && cpus().empty()) GTEST_SKIP() << "No CPU processors or cores";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_msr_floor_freq_limits");

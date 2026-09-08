@@ -10,7 +10,8 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_power_cap_info / amdsmi_set_power_cap.
-TEST_F(GpuFunctionalReadWrite, PowerCap_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, PowerCap_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_power_cap");
@@ -58,7 +59,8 @@ TEST_F(GpuFunctionalReadWrite, PowerCap_SetVerifyRestore) {
 }
 
 // amdsmi_get_gpu_power_profile_presets / amdsmi_set_gpu_power_profile.
-TEST_F(GpuFunctionalReadWrite, PowerProfile_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, PowerProfile_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_power_profile");

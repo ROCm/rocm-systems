@@ -11,7 +11,8 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_cpu_dimm_sb_reg / amdsmi_set_cpu_dimm_sb_reg.
-TEST_F(CpuFunctionalReadWrite, DimmSbReg_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, DimmSbReg_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_dimm_sb_reg");

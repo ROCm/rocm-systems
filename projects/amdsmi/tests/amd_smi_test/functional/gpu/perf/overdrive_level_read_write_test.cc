@@ -11,7 +11,8 @@ using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_overdrive_level / amdsmi_set_gpu_overdrive_level.
 // ---- store -> change -> verify changed -> restore -> verify restored ----
-TEST_F(GpuFunctionalReadWrite, OverdriveLevel_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, OverdriveLevel_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_overdrive_level");

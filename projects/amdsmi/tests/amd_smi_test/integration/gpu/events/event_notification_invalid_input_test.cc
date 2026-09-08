@@ -25,8 +25,8 @@ static uint64_t AllEventsMask() {
   return mask;
 }
 
-TEST_F(GpuIntegration, InitEventNotification_InvalidHandle) {
-  RequireInit();
+TEST(GpuIntegration, InitEventNotification_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_init_gpu_event_notification(kInvalidHandle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -34,8 +34,8 @@ TEST_F(GpuIntegration, InitEventNotification_InvalidHandle) {
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
-TEST_F(GpuIntegration, SetEventMask_InvalidHandle) {
-  RequireInit();
+TEST(GpuIntegration, SetEventMask_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_event_notification_mask(kInvalidHandle, AllEventsMask());
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -43,8 +43,8 @@ TEST_F(GpuIntegration, SetEventMask_InvalidHandle) {
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
-TEST_F(GpuIntegration, GetEventNotification_NullCount) {
-  RequireInit();
+TEST(GpuIntegration, GetEventNotification_NullCount) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_evt_notification_data_t data[4];
   memset(data, 0, sizeof(data));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "num_elem=nullptr", kVerbose);

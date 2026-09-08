@@ -26,7 +26,8 @@ static uint64_t AllEventsMask() {
 // ---------------- full init -> set-mask -> collect -> stop workflow ----------------
 // init/set/stop allocate and mutate per-device event-notification state, so the
 // flow is gated with the shared mutation gate.
-TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
+TEST(GpuFunctionalReadWrite, EventNotification_Workflow) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
 

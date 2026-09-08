@@ -15,12 +15,11 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "guarded_buffer.h"
-#include "unit_fixtures.h"
 
 using amd::smi::CopyBounded;
 using amdsmi_test::GuardedBuffer;
 
-TEST_F(SystemUnit, BoundedCopyShortStringCopiedWhole) {
+TEST(SystemUnit, BoundedCopyShortStringCopiedWhole) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   const std::string src = "/usr/bin/rocm-smi";
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src), src.length());
@@ -28,7 +27,7 @@ TEST_F(SystemUnit, BoundedCopyShortStringCopiedWhole) {
   EXPECT_TRUE(gb.CanariesIntact());
 }
 
-TEST_F(SystemUnit, BoundedCopyExactlyCapacityMinusOneFits) {
+TEST(SystemUnit, BoundedCopyExactlyCapacityMinusOneFits) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   const std::string src(AMDSMI_MAX_STRING_LENGTH - 1, 'p');
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src), src.length());
@@ -38,7 +37,7 @@ TEST_F(SystemUnit, BoundedCopyExactlyCapacityMinusOneFits) {
 }
 
 // The exact length at which the old strncpy() stopped terminating.
-TEST_F(SystemUnit, BoundedCopyExactlyCapacityIsTerminated) {
+TEST(SystemUnit, BoundedCopyExactlyCapacityIsTerminated) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   const std::string src(AMDSMI_MAX_STRING_LENGTH, 'q');
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src),
@@ -48,7 +47,7 @@ TEST_F(SystemUnit, BoundedCopyExactlyCapacityIsTerminated) {
 }
 
 // A PATH_MAX-scale readlink() result, the realistic production trigger.
-TEST_F(SystemUnit, BoundedCopyPathMaxSizedSourceIsTerminated) {
+TEST(SystemUnit, BoundedCopyPathMaxSizedSourceIsTerminated) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   const std::string src = "/" + std::string(4095, 'd');
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src),
@@ -57,14 +56,14 @@ TEST_F(SystemUnit, BoundedCopyPathMaxSizedSourceIsTerminated) {
   EXPECT_TRUE(gb.CanariesIntact());
 }
 
-TEST_F(SystemUnit, BoundedCopyEmptySourceYieldsEmptyString) {
+TEST(SystemUnit, BoundedCopyEmptySourceYieldsEmptyString) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), ""), 0u);
   EXPECT_EQ(gb.buf[0], '\0');
   EXPECT_TRUE(gb.CanariesIntact());
 }
 
-TEST_F(SystemUnit, BoundedCopyZeroCapacityWritesNothing) {
+TEST(SystemUnit, BoundedCopyZeroCapacityWritesNothing) {
   GuardedBuffer<1> gb;
   EXPECT_EQ(CopyBounded(gb.buf, 0, "anything"), 0u);
   EXPECT_TRUE(gb.CanariesIntact());
@@ -72,7 +71,7 @@ TEST_F(SystemUnit, BoundedCopyZeroCapacityWritesNothing) {
 
 // Embedded NUL bytes must not shorten the copy: the source is a std::string,
 // so its length, not the first NUL, bounds the write.
-TEST_F(SystemUnit, BoundedCopyEmbeddedNulDoesNotShortenTheCopy) {
+TEST(SystemUnit, BoundedCopyEmbeddedNulDoesNotShortenTheCopy) {
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
   const std::string src = std::string("abc") + '\0' + "def";
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src), 7u);

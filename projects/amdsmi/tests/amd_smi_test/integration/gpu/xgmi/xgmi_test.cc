@@ -10,14 +10,16 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_gpu_xgmi_error_status ----------------
-TEST_F(GpuIntegration, XgmiErrorStatus_NullOutput) {
+TEST(GpuIntegration, XgmiErrorStatus_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_gpu_xgmi_error_status(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_ARG_PTR_NULL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, XgmiErrorStatus_InvalidHandle) {
+TEST(GpuIntegration, XgmiErrorStatus_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_xgmi_status_t status;
   memset(&status, 0, sizeof(status));
   DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "handle=invalid", kVerbose);
@@ -26,7 +28,8 @@ TEST_F(GpuIntegration, XgmiErrorStatus_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, XgmiErrorStatus_AllGpus) {
+TEST(GpuIntegration, XgmiErrorStatus_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   // amdsmi.h reserves AMDSMI_STATUS_INVAL for a null status pointer, but the call
   // returns it for valid arguments on every GPU. See known_failures.md.
   AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_gpu_xgmi_error_status returns INVAL for valid arguments";
@@ -48,7 +51,8 @@ TEST_F(GpuIntegration, XgmiErrorStatus_AllGpus) {
 AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(GetXgmiInfo, amdsmi_get_xgmi_info, amdsmi_xgmi_info_t)
 
 // ---------------- amdsmi_get_minmax_bandwidth_between_processors ----------------
-TEST_F(GpuIntegration, MinMaxBandwidth_NullOutput) {
+TEST(GpuIntegration, MinMaxBandwidth_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t min_bw = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_minmax_bandwidth_between_processors", "out=nullptr", kVerbose);
   amdsmi_status_t err =
@@ -56,7 +60,8 @@ TEST_F(GpuIntegration, MinMaxBandwidth_NullOutput) {
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, MinMaxBandwidth_InvalidHandle) {
+TEST(GpuIntegration, MinMaxBandwidth_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t min_bw = 0, max_bw = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_minmax_bandwidth_between_processors", "src=invalid", kVerbose);
   amdsmi_status_t err =
@@ -65,7 +70,8 @@ TEST_F(GpuIntegration, MinMaxBandwidth_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, MinMaxBandwidth_AllPairs) {
+TEST(GpuIntegration, MinMaxBandwidth_AllPairs) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_minmax_bandwidth_between_processors");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i)
@@ -88,7 +94,8 @@ TEST_F(GpuIntegration, MinMaxBandwidth_AllPairs) {
 
 // ---- amdsmi_get_minmax_bandwidth_between_processors : src and dst the same ----
 
-TEST_F(GpuIntegration, MinMaxBandwidth_SameProcessor) {
+TEST(GpuIntegration, MinMaxBandwidth_SameProcessor) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t min_bw = 0, max_bw = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_minmax_bandwidth_between_processors", "src=dst", kVerbose);
   amdsmi_status_t err =
@@ -98,13 +105,15 @@ TEST_F(GpuIntegration, MinMaxBandwidth_SameProcessor) {
 }
 
 // ---------------- amdsmi_is_P2P_accessible ----------------
-TEST_F(GpuIntegration, IsP2PAccessible_NullOutput) {
+TEST(GpuIntegration, IsP2PAccessible_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_is_P2P_accessible(any_gpu(), any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, IsP2PAccessible_InvalidHandle) {
+TEST(GpuIntegration, IsP2PAccessible_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   bool accessible = false;
   DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible", "src=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_is_P2P_accessible(kInvalidHandle, any_gpu(), &accessible);
@@ -112,7 +121,8 @@ TEST_F(GpuIntegration, IsP2PAccessible_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, IsP2PAccessible_AllPairs) {
+TEST(GpuIntegration, IsP2PAccessible_AllPairs) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_is_P2P_accessible");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i)
@@ -130,7 +140,8 @@ TEST_F(GpuIntegration, IsP2PAccessible_AllPairs) {
 }
 
 // ---------------- amdsmi_reset_gpu_xgmi_error (action) ----------------
-TEST_F(GpuIntegration, ResetXgmiError_InvalidHandle) {
+TEST(GpuIntegration, ResetXgmiError_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_reset_gpu_xgmi_error", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_reset_gpu_xgmi_error(kInvalidHandle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,

@@ -97,68 +97,68 @@ static void RunGenericTest(TestBase* test) {
 }
 
 // TEST ENTRY TEMPLATE:
-// TEST_F(<Component><Type><Operation>, <Feature><Case>) {
+// TEST(<Component><Type><Operation>, <Feature><Case>) {
 //  <Test Implementation class> <test_obj>;
 //
 //  // Copy and modify implementation of RunGenericTest() if you need to deviate
 //  // from the standard pattern implemented there.
 //  RunGenericTest(&<test_obj>);
 // }
-TEST_F(GpuFunctionalReadOnly, TestVersionRead) {
+TEST(GpuFunctionalReadOnly, TestVersionRead) {
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, FanRead) {
+TEST(GpuFunctionalReadOnly, FanRead) {
   TestFanRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, FanReadWrite) {
+TEST(GpuFunctionalReadWrite, FanReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestFanReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TempRead) {
+TEST(GpuFunctionalReadOnly, TempRead) {
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_temp_metric returns AMDSMI_STATUS_UNEXPECTED_DATA in TempRead; "
          "root cause unknown, under investigation";
   TestTempRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, VoltRead) {
+TEST(GpuFunctionalReadOnly, VoltRead) {
   TestVoltRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestVoltCurvRead) {
+TEST(GpuFunctionalReadOnly, TestVoltCurvRead) {
   TestVoltCurvRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestPerfLevelRead) {
+TEST(GpuFunctionalReadOnly, TestPerfLevelRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPerfLevelReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPerfLevelReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (amd::smi::is_vm_guest()) GTEST_SKIP() << "device write skipped; not available to a VM guest";
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestOverdriveRead) {
+TEST(GpuFunctionalReadOnly, TestOverdriveRead) {
   TestOverdriveRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestOverdriveReadWrite) {
+TEST(GpuFunctionalReadWrite, TestOverdriveReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestOverdriveReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestFrequenciesRead) {
+TEST(GpuFunctionalReadOnly, TestFrequenciesRead) {
   AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
                                  "TestFrequenciesRead; root cause unknown, under investigation";
   TestFrequenciesRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestFrequenciesReadWrite) {
+TEST(GpuFunctionalReadWrite, TestFrequenciesReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_set_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
@@ -166,98 +166,98 @@ TEST_F(GpuFunctionalReadWrite, TestFrequenciesReadWrite) {
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestClockLimitReadWrite) {
+TEST(GpuFunctionalReadWrite, TestClockLimitReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestClockLimitReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPciReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPciReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (amd::smi::is_vm_guest()) GTEST_SKIP() << "device write skipped; not available to a VM guest";
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(SystemFunctionalReadOnly, TestSysInfoRead) {
+TEST(SystemFunctionalReadOnly, TestSysInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestGPUBusyRead) {
+TEST(GpuFunctionalReadOnly, TestGPUBusyRead) {
   TestGPUBusyRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestPowerRead) {
+TEST(GpuFunctionalReadOnly, TestPowerRead) {
   // Skip on non-DXG VMs (KVM, etc.); WSL/DXG has a backend for power cap.
   if (amd::smi::is_vm_guest() && access("/dev/dxg", F_OK) != 0) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPowerReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPowerReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (amd::smi::is_vm_guest()) GTEST_SKIP() << "device write skipped; not available to a VM guest";
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (amd::smi::is_vm_guest()) GTEST_SKIP() << "device write skipped; not available to a VM guest";
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestErrCntRead) {
+TEST(GpuFunctionalReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestMemUtilRead) {
+TEST(GpuFunctionalReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestIdInfoRead) {
+TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestDeviceCuidRead) {
+TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
   TestDeviceCuidRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestProcInfoRead) {
+TEST(GpuFunctionalReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadOnly, TestProcessListRead) {
+TEST(GpuFunctionalReadOnly, TestProcessListRead) {
   TestProcessListRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(SystemFunctionalReadOnly, TestHWTopologyRead) {
+TEST(SystemFunctionalReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestGpuMetricsRead) {
+TEST(GpuFunctionalReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
+TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestMetricsCounterRead) {
+TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestPerfDeterminism) {
+TEST(GpuFunctionalReadWrite, TestPerfDeterminism) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadWrite, TestXGMIReadWrite) {
+TEST(GpuFunctionalReadWrite, TestXGMIReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "xgmi error injection not available; skipped until synthetic xgmi errors "
@@ -265,12 +265,12 @@ TEST_F(GpuFunctionalReadWrite, TestXGMIReadWrite) {
   TestXGMIReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST_F(GpuFunctionalReadOnly, TestMemPageInfoRead) {
+TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(SystemFunctionalReadOnly, TestMutualExclusion) {
+TEST(SystemFunctionalReadOnly, TestMutualExclusion) {
   // Cross-process device mutex doesn't apply to the DXG backend on WSL.
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
@@ -282,47 +282,47 @@ TEST_F(SystemFunctionalReadOnly, TestMutualExclusion) {
   RunCustomTestEpilog(&tst);
 }
 
-TEST_F(GpuFunctionalReadWrite, TestComputePartitionReadWrite) {
+TEST(GpuFunctionalReadWrite, TestComputePartitionReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+TEST(GpuFunctionalReadWrite, TestComputePartitionMemAllocModeReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestComputePartitionMemAllocModeReadWrite tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadWrite, TestMemoryPartitionReadWrite) {
+TEST(GpuFunctionalReadWrite, TestMemoryPartitionReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestMemoryPartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadWrite, TestEvtNotifReadWrite) {
+TEST(GpuFunctionalReadWrite, TestEvtNotifReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadOnly, TestGPUCacheRead) {
+TEST(GpuFunctionalReadOnly, TestGPUCacheRead) {
   TestGPUCacheRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(GpuFunctionalReadWrite, TestMemoryReadWrite) {
+TEST(GpuFunctionalReadWrite, TestMemoryReadWrite) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(SystemFunctionalReadOnly, TestKfdAtforkRead) {
+TEST(SystemFunctionalReadOnly, TestKfdAtforkRead) {
   TestKfdAtforkRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(IfoeFunctionalReadOnly, TestFabricRead) {
+TEST(IfoeFunctionalReadOnly, TestFabricRead) {
   // Fabric/UALoE sysfs is not available on WSL.
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: UALoE/fabric sysfs not available on DXG backend";
@@ -330,19 +330,19 @@ TEST_F(IfoeFunctionalReadOnly, TestFabricRead) {
   RunGenericTest(&tst);
 }
 
-TEST_F(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
+TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
   TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(IfoeFunctionalReadOnly, TestTrayInfoRead) {
+TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
   TestTrayInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST_F(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
+TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   // Cross-process device mutex doesn't apply to the DXG backend on WSL.
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
@@ -354,7 +354,7 @@ TEST_F(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   RunCustomTestEpilog(&tst);
 }
 
-TEST_F(SystemFunctionalReadOnly, TestConcurrentInit) {
+TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   // Asserts an over-shutdown yields AMDSMI_STATUS_INIT_ERROR, but amdsmi_shut_down()
   // returns SUCCESS once the init refcount is already zero. See known_failures.md.
   AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_shut_down() does not report INIT_ERROR on over-shutdown";

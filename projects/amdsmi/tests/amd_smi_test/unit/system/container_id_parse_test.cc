@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "container_id_test_util.h"
-#include "unit_fixtures.h"
 
 using amdsmi_test::ExtractIdString;
 using amdsmi_test::ExtractOciIdString;
@@ -30,7 +29,7 @@ struct ParseCase {
 // One row per runtime + host-OS cgroup format seen in ROCm deployments.
 // The kubernetes/containerd rows expect "" from the prefix scan, whose prefix
 // set names only LXC and Docker; ExtractOciContainerId covers them, below.
-TEST_F(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
+TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
   const std::string kDocker64 = amdsmi_test::kDocker64;
   const std::string k8s_line =
       "12:pids:/kubepods.slice/kubepods-besteffort.slice/"
@@ -58,7 +57,7 @@ TEST_F(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
 // The original unanchored find("docker") matched inside "/not-docker-evil/", so
 // a prefix now has to sit at a cgroup path-component boundary: '/' (or
 // start-of-line) immediately before it.
-TEST_F(SystemUnit, ContainerIdAnchorBoundaryRules) {
+TEST(SystemUnit, ContainerIdAnchorBoundaryRules) {
   const std::vector<ParseCase> cases = {
       {"0::/not-docker/evil", "docker/", "", "'-' before docker -> rejected"},
       {"0::xdocker/id", "docker/", "", "'x' precedes docker -> rejected"},
@@ -77,7 +76,7 @@ TEST_F(SystemUnit, ContainerIdAnchorBoundaryRules) {
 // Cases where there is no match to make. The arithmetic hazard is find()
 // returning npos: adding strlen(prefix) to it must not underflow into an
 // in-range offset, and a prefix at the very end must not be read past.
-TEST_F(SystemUnit, ContainerIdEdgeCaseInvariants) {
+TEST(SystemUnit, ContainerIdEdgeCaseInvariants) {
   const std::vector<ParseCase> cases = {
       {"0::/kubepods/besteffort/abc", "docker/", "",
        "prefix not found, no integer underflow (docker)"},
@@ -102,7 +101,7 @@ TEST_F(SystemUnit, ContainerIdEdgeCaseInvariants) {
 // form is what `docker inspect`, the Docker Engine API and the CRI services
 // accept. Rows cover both cgroup drivers (systemd, cgroupfs) and both
 // hierarchies (a unified "0::" line and a v1 controller line).
-TEST_F(SystemUnit, ContainerIdHandlesOciRuntimeCgroupFormats) {
+TEST(SystemUnit, ContainerIdHandlesOciRuntimeCgroupFormats) {
   const std::string id = amdsmi_test::kDocker64;
   const std::string pod_systemd =
       "kubepods-burstable-pod3f5e1c2a_9b7d_4c3e_8a11_0d2b4c6e8f90.slice";
@@ -135,7 +134,7 @@ TEST_F(SystemUnit, ContainerIdHandlesOciRuntimeCgroupFormats) {
 // The SHA-256 match is anchored the same way the named-type match is: the run
 // must be a whole cgroup path component (possibly after a runtime prefix), of
 // exactly 64 lowercase hex digits. Anything else is not an OCI container ID.
-TEST_F(SystemUnit, ContainerIdOciAnchorAndLengthRules) {
+TEST(SystemUnit, ContainerIdOciAnchorAndLengthRules) {
   const std::string id = amdsmi_test::kDocker64;
   const std::vector<ParseCase> cases = {
       {"0::/kubepods.slice/kubepods-burstable-pod3f5e1c2a_9b7d_4c3e_8a11_0d2b4c6e8f90.slice", "",

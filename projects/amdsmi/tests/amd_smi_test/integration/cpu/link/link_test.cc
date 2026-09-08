@@ -22,7 +22,8 @@ constexpr uint8_t kNbioIds[] = {0, 1, 2, 3};
 }  // namespace
 
 // ---- amdsmi_set_cpu_xgmi_width (invalid input only; valid-input cases are in functional/) ----
-TEST_F(CpuIntegration, SetXgmiWidth_InvalidHandle) {
+TEST(CpuIntegration, SetXgmiWidth_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_xgmi_width", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_xgmi_width(kInvalidHandle, 0, 2);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -32,7 +33,8 @@ TEST_F(CpuIntegration, SetXgmiWidth_InvalidHandle) {
 
 // ---- amdsmi_set_cpu_gmi3_link_width_range (invalid input only; valid-input cases are in
 // functional/) ----
-TEST_F(CpuIntegration, SetGmi3LinkWidthRange_InvalidHandle) {
+TEST(CpuIntegration, SetGmi3LinkWidthRange_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_gmi3_link_width_range", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_gmi3_link_width_range(kInvalidHandle, 0, 2);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -41,14 +43,16 @@ TEST_F(CpuIntegration, SetGmi3LinkWidthRange_InvalidHandle) {
 }
 
 // ---- amdsmi_cpu_apb_enable (invalid input only; valid-input cases are in functional/) ----
-TEST_F(CpuIntegration, ApbEnable_InvalidHandle) {
+TEST(CpuIntegration, ApbEnable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_cpu_apb_enable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_cpu_apb_enable(kInvalidHandle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, ApbDisable_InvalidHandle) {
+TEST(CpuIntegration, ApbDisable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_cpu_apb_disable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_cpu_apb_disable(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -58,7 +62,8 @@ TEST_F(CpuIntegration, ApbDisable_InvalidHandle) {
 
 // ---- amdsmi_set_cpu_socket_lclk_dpm_level (invalid input only; valid-input cases are in
 // functional/) ----
-TEST_F(CpuIntegration, SetSocketLclkDpmLevel_InvalidHandle) {
+TEST(CpuIntegration, SetSocketLclkDpmLevel_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_lclk_dpm_level", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_socket_lclk_dpm_level(kInvalidHandle, 0, 0, 1);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -67,7 +72,8 @@ TEST_F(CpuIntegration, SetSocketLclkDpmLevel_InvalidHandle) {
 }
 
 // ---- amdsmi_get_cpu_socket_lclk_dpm_level (handle guarded only) ----
-TEST_F(CpuIntegration, GetSocketLclkDpmLevel_InvalidHandle) {
+TEST(CpuIntegration, GetSocketLclkDpmLevel_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_dpm_level_t nbio;
   memset(&nbio, 0, sizeof(nbio));
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_lclk_dpm_level", "handle=invalid", kVerbose);
@@ -76,7 +82,8 @@ TEST_F(CpuIntegration, GetSocketLclkDpmLevel_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketLclkDpmLevel_AllCpusAllNbio) {
+TEST(CpuIntegration, GetSocketLclkDpmLevel_AllCpusAllNbio) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_lclk_dpm_level");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i)
@@ -96,7 +103,8 @@ TEST_F(CpuIntegration, GetSocketLclkDpmLevel_AllCpusAllNbio) {
 
 // ---- amdsmi_set_cpu_pcie_link_rate (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetPcieLinkRate_InvalidHandle) {
+TEST(CpuIntegration, SetPcieLinkRate_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint8_t prev_mode = 0;
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_pcie_link_rate", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_pcie_link_rate(kInvalidHandle, 0, &prev_mode);
@@ -107,7 +115,8 @@ TEST_F(CpuIntegration, SetPcieLinkRate_InvalidHandle) {
 
 // ---- amdsmi_set_cpu_df_pstate_range (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetDfPstateRange_InvalidHandle) {
+TEST(CpuIntegration, SetDfPstateRange_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_df_pstate_range", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_df_pstate_range(kInvalidHandle, 0, 2);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -117,7 +126,8 @@ TEST_F(CpuIntegration, SetDfPstateRange_InvalidHandle) {
 
 // ---- amdsmi_set_cpu_xgmi_pstate_range (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetXgmiPstateRange_InvalidHandle) {
+TEST(CpuIntegration, SetXgmiPstateRange_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_xgmi_pstate_range", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_xgmi_pstate_range(kInvalidHandle, 0, 2);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -126,14 +136,16 @@ TEST_F(CpuIntegration, SetXgmiPstateRange_InvalidHandle) {
 }
 
 // ---- amdsmi_get_cpu_xgmi_pstate_range (outputs guarded) ----
-TEST_F(CpuIntegration, GetXgmiPstateRange_NullOutput) {
+TEST(CpuIntegration, GetXgmiPstateRange_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   uint8_t max_pstate = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_xgmi_pstate_range", "min_pstate=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_xgmi_pstate_range(any_cpu(), nullptr, &max_pstate);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetXgmiPstateRange_InvalidHandle) {
+TEST(CpuIntegration, GetXgmiPstateRange_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint8_t min_pstate = 0, max_pstate = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_xgmi_pstate_range", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_xgmi_pstate_range(kInvalidHandle, &min_pstate, &max_pstate);
@@ -141,7 +153,8 @@ TEST_F(CpuIntegration, GetXgmiPstateRange_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetXgmiPstateRange_AllCpus) {
+TEST(CpuIntegration, GetXgmiPstateRange_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_xgmi_pstate_range");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -156,13 +169,15 @@ TEST_F(CpuIntegration, GetXgmiPstateRange_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_pc6_enable (output guarded) ----
-TEST_F(CpuIntegration, GetPc6Enable_NullOutput) {
+TEST(CpuIntegration, GetPc6Enable_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_pc6_enable", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_pc6_enable(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetPc6Enable_InvalidHandle) {
+TEST(CpuIntegration, GetPc6Enable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint8_t enabled = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_pc6_enable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_pc6_enable(kInvalidHandle, &enabled);
@@ -170,7 +185,8 @@ TEST_F(CpuIntegration, GetPc6Enable_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetPc6Enable_AllCpus) {
+TEST(CpuIntegration, GetPc6Enable_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_pc6_enable");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -185,7 +201,8 @@ TEST_F(CpuIntegration, GetPc6Enable_AllCpus) {
 }
 
 // ---- amdsmi_set_cpu_pc6_enable (invalid input only; valid-input cases are in functional/) ----
-TEST_F(CpuIntegration, SetPc6Enable_InvalidHandle) {
+TEST(CpuIntegration, SetPc6Enable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_pc6_enable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_pc6_enable(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -193,13 +210,15 @@ TEST_F(CpuIntegration, SetPc6Enable_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 // ---- amdsmi_get_cpu_cc6_enable (output guarded) ----
-TEST_F(CpuIntegration, GetCc6Enable_NullOutput) {
+TEST(CpuIntegration, GetCc6Enable_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_cc6_enable", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_cc6_enable(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetCc6Enable_InvalidHandle) {
+TEST(CpuIntegration, GetCc6Enable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint8_t enabled = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_cc6_enable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_cc6_enable(kInvalidHandle, &enabled);
@@ -207,7 +226,8 @@ TEST_F(CpuIntegration, GetCc6Enable_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCc6Enable_AllCpus) {
+TEST(CpuIntegration, GetCc6Enable_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_cc6_enable");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -222,7 +242,8 @@ TEST_F(CpuIntegration, GetCc6Enable_AllCpus) {
 }
 
 // ---- amdsmi_set_cpu_cc6_enable (invalid input only; valid-input cases are in functional/) ----
-TEST_F(CpuIntegration, SetCc6Enable_InvalidHandle) {
+TEST(CpuIntegration, SetCc6Enable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_cc6_enable", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_cc6_enable(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -230,7 +251,8 @@ TEST_F(CpuIntegration, SetCc6Enable_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 // ---- amdsmi_get_cpu_current_io_bandwidth (handle guarded only; loops bw type) ----
-TEST_F(CpuIntegration, GetCurrentIoBandwidth_InvalidHandle) {
+TEST(CpuIntegration, GetCurrentIoBandwidth_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_link_id_bw_type_t link;
   memset(&link, 0, sizeof(link));
   char lname[] = "G0";
@@ -243,7 +265,8 @@ TEST_F(CpuIntegration, GetCurrentIoBandwidth_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCurrentIoBandwidth_AllCpusAllBwTypes) {
+TEST(CpuIntegration, GetCurrentIoBandwidth_AllCpusAllBwTypes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_current_io_bandwidth");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i)
@@ -267,7 +290,8 @@ TEST_F(CpuIntegration, GetCurrentIoBandwidth_AllCpusAllBwTypes) {
 }
 
 // ---- amdsmi_get_cpu_current_xgmi_bw (handle guarded only; loops bw type) ----
-TEST_F(CpuIntegration, GetCurrentXgmiBw_InvalidHandle) {
+TEST(CpuIntegration, GetCurrentXgmiBw_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_link_id_bw_type_t link;
   memset(&link, 0, sizeof(link));
   char lname[] = "P0";
@@ -280,7 +304,8 @@ TEST_F(CpuIntegration, GetCurrentXgmiBw_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCurrentXgmiBw_AllCpusAllBwTypes) {
+TEST(CpuIntegration, GetCurrentXgmiBw_AllCpusAllBwTypes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_current_xgmi_bw");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i)

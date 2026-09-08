@@ -27,13 +27,15 @@ constexpr amdsmi_link_type_t kNearestUnsupportedLinkTypes[] = {AMDSMI_LINK_TYPE_
 
 // ---- amdsmi_get_gpu_topo_numa_affinity : invalid params first ----
 
-TEST_F(SystemIntegration, GetGpuTopoNumaAffinity_NullOutput) {
+TEST(SystemIntegration, GetGpuTopoNumaAffinity_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "numa_node=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_topo_numa_affinity(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, GetGpuTopoNumaAffinity_InvalidHandle) {
+TEST(SystemIntegration, GetGpuTopoNumaAffinity_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   int32_t numa_node = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_topo_numa_affinity(kInvalidHandle, &numa_node);
@@ -41,7 +43,8 @@ TEST_F(SystemIntegration, GetGpuTopoNumaAffinity_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, GetGpuTopoNumaAffinity_AllGpus) {
+TEST(SystemIntegration, GetGpuTopoNumaAffinity_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_topo_numa_affinity");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -57,13 +60,15 @@ TEST_F(SystemIntegration, GetGpuTopoNumaAffinity_AllGpus) {
 
 // ---- amdsmi_get_gpu_xgmi_link_status : invalid params first ----
 
-TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_NullOutput) {
+TEST(SystemIntegration, GetGpuXgmiLinkStatus_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_xgmi_link_status", "link_status=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_xgmi_link_status(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_InvalidHandle) {
+TEST(SystemIntegration, GetGpuXgmiLinkStatus_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_xgmi_link_status_t link_status;
   memset(&link_status, 0, sizeof(link_status));
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_xgmi_link_status", "handle=invalid", kVerbose);
@@ -72,7 +77,8 @@ TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_AllGpus) {
+TEST(SystemIntegration, GetGpuXgmiLinkStatus_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_xgmi_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
          "under investigation";
@@ -93,13 +99,15 @@ TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_AllGpus) {
 
 // ---- amdsmi_get_link_metrics : invalid params first ----
 
-TEST_F(SystemIntegration, GetLinkMetrics_NullOutput) {
+TEST(SystemIntegration, GetLinkMetrics_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_link_metrics", "link_metrics=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_link_metrics(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, GetLinkMetrics_InvalidHandle) {
+TEST(SystemIntegration, GetLinkMetrics_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_link_metrics_t link_metrics;
   memset(&link_metrics, 0, sizeof(link_metrics));
   DISPLAY_AMDSMI_API("amdsmi_get_link_metrics", "handle=invalid", kVerbose);
@@ -108,7 +116,8 @@ TEST_F(SystemIntegration, GetLinkMetrics_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, GetLinkMetrics_AllGpus) {
+TEST(SystemIntegration, GetLinkMetrics_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_link_metrics returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
          "unknown, under investigation";
@@ -129,13 +138,15 @@ TEST_F(SystemIntegration, GetLinkMetrics_AllGpus) {
 
 // ---- amdsmi_topo_get_numa_node_number : invalid params first ----
 
-TEST_F(SystemIntegration, TopoGetNumaNodeNumber_NullOutput) {
+TEST(SystemIntegration, TopoGetNumaNodeNumber_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_numa_node_number(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, TopoGetNumaNodeNumber_InvalidHandle) {
+TEST(SystemIntegration, TopoGetNumaNodeNumber_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t numa_node = 0;
   DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_numa_node_number(kInvalidHandle, &numa_node);
@@ -143,7 +154,8 @@ TEST_F(SystemIntegration, TopoGetNumaNodeNumber_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, TopoGetNumaNodeNumber_AllGpus) {
+TEST(SystemIntegration, TopoGetNumaNodeNumber_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_topo_get_numa_node_number");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -159,13 +171,15 @@ TEST_F(SystemIntegration, TopoGetNumaNodeNumber_AllGpus) {
 
 // ---- amdsmi_topo_get_link_weight : invalid params first ----
 
-TEST_F(SystemIntegration, TopoGetLinkWeight_NullOutput) {
+TEST(SystemIntegration, TopoGetLinkWeight_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight", "weight=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_link_weight(any_gpu(), any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, TopoGetLinkWeight_InvalidHandle) {
+TEST(SystemIntegration, TopoGetLinkWeight_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t weight = 0;
   DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_link_weight(kInvalidHandle, kInvalidHandle, &weight);
@@ -173,7 +187,8 @@ TEST_F(SystemIntegration, TopoGetLinkWeight_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, TopoGetLinkWeight_AllGpuPairs) {
+TEST(SystemIntegration, TopoGetLinkWeight_AllGpuPairs) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_topo_get_link_weight");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t s = 0; s < gpus().size(); ++s) {
@@ -192,14 +207,16 @@ TEST_F(SystemIntegration, TopoGetLinkWeight_AllGpuPairs) {
 
 // ---- amdsmi_topo_get_link_type : invalid params first ----
 
-TEST_F(SystemIntegration, TopoGetLinkType_NullOutput) {
+TEST(SystemIntegration, TopoGetLinkType_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t hops = 0;
   DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "type=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_link_type(any_gpu(), any_gpu(), &hops, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, TopoGetLinkType_InvalidHandle) {
+TEST(SystemIntegration, TopoGetLinkType_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t hops = 0;
   amdsmi_link_type_t type = AMDSMI_LINK_TYPE_UNKNOWN;
   DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "handle=invalid", kVerbose);
@@ -208,7 +225,8 @@ TEST_F(SystemIntegration, TopoGetLinkType_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, TopoGetLinkType_AllGpuPairs) {
+TEST(SystemIntegration, TopoGetLinkType_AllGpuPairs) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_topo_get_link_type");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t s = 0; s < gpus().size(); ++s) {
@@ -228,13 +246,15 @@ TEST_F(SystemIntegration, TopoGetLinkType_AllGpuPairs) {
 
 // ---- amdsmi_get_link_topology_nearest : invalid params first ----
 
-TEST_F(SystemIntegration, GetLinkTopologyNearest_NullOutput) {
+TEST(SystemIntegration, GetLinkTopologyNearest_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "topology_nearest_info=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_link_topology_nearest(any_gpu(), AMDSMI_LINK_TYPE_XGMI, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, GetLinkTopologyNearest_InvalidHandle) {
+TEST(SystemIntegration, GetLinkTopologyNearest_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_link_topology_nearest returns SUCCESS for an "
                                  "invalid handle; proper return should be AMDSMI_STATUS_INVAL";
   amdsmi_topology_nearest_t info;
@@ -245,7 +265,8 @@ TEST_F(SystemIntegration, GetLinkTopologyNearest_InvalidHandle) {
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, GetLinkTopologyNearest_AllGpusAllLinkTypes) {
+TEST(SystemIntegration, GetLinkTopologyNearest_AllGpusAllLinkTypes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_link_topology_nearest");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -265,7 +286,8 @@ TEST_F(SystemIntegration, GetLinkTopologyNearest_AllGpusAllLinkTypes) {
 
 // ---- amdsmi_get_link_topology_nearest : link_type outside the accepted range ----
 
-TEST_F(SystemIntegration, GetLinkTopologyNearest_LinkTypeOutOfRange) {
+TEST(SystemIntegration, GetLinkTopologyNearest_LinkTypeOutOfRange) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_link_topology_nearest");
   for (auto lt : kNearestUnsupportedLinkTypes) {
     amdsmi_topology_nearest_t topology_nearest_info;
@@ -281,14 +303,16 @@ TEST_F(SystemIntegration, GetLinkTopologyNearest_LinkTypeOutOfRange) {
 
 // ---- amdsmi_topo_get_p2p_status : invalid params first ----
 
-TEST_F(SystemIntegration, TopoGetP2pStatus_NullOutput) {
+TEST(SystemIntegration, TopoGetP2pStatus_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_link_type_t type = AMDSMI_LINK_TYPE_UNKNOWN;
   DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status", "cap=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_topo_get_p2p_status(any_gpu(), any_gpu(), &type, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(SystemIntegration, TopoGetP2pStatus_InvalidHandle) {
+TEST(SystemIntegration, TopoGetP2pStatus_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_link_type_t type = AMDSMI_LINK_TYPE_UNKNOWN;
   amdsmi_p2p_capability_t cap;
   memset(&cap, 0, sizeof(cap));
@@ -298,7 +322,8 @@ TEST_F(SystemIntegration, TopoGetP2pStatus_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, TopoGetP2pStatus_AllGpuPairs) {
+TEST(SystemIntegration, TopoGetP2pStatus_AllGpuPairs) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_topo_get_p2p_status");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t s = 0; s < gpus().size(); ++s) {
@@ -320,14 +345,16 @@ TEST_F(SystemIntegration, TopoGetP2pStatus_AllGpuPairs) {
 
 // ---- amdsmi_init_gpu_event_notification : invalid handle first ----
 
-TEST_F(SystemIntegration, InitGpuEventNotification_InvalidHandle) {
+TEST(SystemIntegration, InitGpuEventNotification_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_init_gpu_event_notification(kInvalidHandle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(SystemIntegration, InitGpuEventNotification_AllGpus) {
+TEST(SystemIntegration, InitGpuEventNotification_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_init_gpu_event_notification");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {

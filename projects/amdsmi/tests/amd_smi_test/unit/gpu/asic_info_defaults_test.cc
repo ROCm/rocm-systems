@@ -12,7 +12,6 @@
 #include <string>
 
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "unit_fixtures.h"
 
 namespace {
 
@@ -23,7 +22,7 @@ amdsmi_asic_info_t DefaultsFromGarbage() {
   return info;
 }
 
-TEST_F(GpuUnit, AsicInfoDefaultsMarkScalarsNotSupported) {
+TEST(GpuUnit, AsicInfoDefaultsMarkScalarsNotSupported) {
   const amdsmi_asic_info_t info = DefaultsFromGarbage();
   const auto u32_max = std::numeric_limits<uint32_t>::max();
 
@@ -40,7 +39,7 @@ TEST_F(GpuUnit, AsicInfoDefaultsMarkScalarsNotSupported) {
   EXPECT_EQ(info.target_graphics_version, std::numeric_limits<uint64_t>::max());
 }
 
-TEST_F(GpuUnit, AsicInfoDefaultsClearStringsAndReserved) {
+TEST(GpuUnit, AsicInfoDefaultsClearStringsAndReserved) {
   const amdsmi_asic_info_t info = DefaultsFromGarbage();
 
   EXPECT_STREQ(info.market_name, "");

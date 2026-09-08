@@ -13,11 +13,10 @@
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "container_id_test_util.h"
 #include "guarded_buffer.h"
-#include "unit_fixtures.h"
 
 using amdsmi_test::GuardedBuffer;
 
-TEST_F(SystemUnit, ContainerIdFullDockerIdIsNullTerminated) {
+TEST(SystemUnit, ContainerIdFullDockerIdIsNullTerminated) {
   constexpr size_t kIdLen = sizeof(amdsmi_test::kDocker64) - 1;
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
@@ -30,7 +29,7 @@ TEST_F(SystemUnit, ContainerIdFullDockerIdIsNullTerminated) {
 
 // An ID longer than the destination is a truncation hazard: the caller cannot
 // tell a clipped prefix from a complete ID, so the parser reports no ID.
-TEST_F(SystemUnit, ContainerIdExceedingCapacityIsRejected) {
+TEST(SystemUnit, ContainerIdExceedingCapacityIsRejected) {
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<16> gb;
   size_t n = amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf));
@@ -40,7 +39,7 @@ TEST_F(SystemUnit, ContainerIdExceedingCapacityIsRejected) {
 }
 
 // The accept/reject boundary sits exactly at out_cap - 1.
-TEST_F(SystemUnit, ContainerIdCapacityBoundaryIsExact) {
+TEST(SystemUnit, ContainerIdCapacityBoundaryIsExact) {
   const std::string id(15, 'a');
   const std::string line = "0::/docker/" + id;
   {
@@ -56,7 +55,7 @@ TEST_F(SystemUnit, ContainerIdCapacityBoundaryIsExact) {
   }
 }
 
-TEST_F(SystemUnit, ContainerIdOverlongInputLeavesCanariesIntact) {
+TEST(SystemUnit, ContainerIdOverlongInputLeavesCanariesIntact) {
   std::string line = "0::/docker/";
   line.append(1024, 'z');
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
@@ -66,7 +65,7 @@ TEST_F(SystemUnit, ContainerIdOverlongInputLeavesCanariesIntact) {
 
 // Same refusal-over-truncation contract for the OCI extractor: a 64-char ID
 // needs 65 bytes, and a caller that offers fewer gets "no ID", never a prefix.
-TEST_F(SystemUnit, ContainerIdOciCapacityBoundaryIsExact) {
+TEST(SystemUnit, ContainerIdOciCapacityBoundaryIsExact) {
   const std::string line =
       std::string("0::/system.slice/docker-") + amdsmi_test::kDocker64 + ".scope";
   {
@@ -89,7 +88,7 @@ TEST_F(SystemUnit, ContainerIdOciCapacityBoundaryIsExact) {
   }
 }
 
-TEST_F(SystemUnit, ContainerIdZeroCapacityBufferIsNotWritten) {
+TEST(SystemUnit, ContainerIdZeroCapacityBufferIsNotWritten) {
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<1> gb;
   EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker/", gb.buf, 0), 0u);

@@ -14,13 +14,15 @@ static constexpr amdsmi_memory_type_t kMemTypes[] = {AMDSMI_MEM_TYPE_VRAM, AMDSM
                                                      AMDSMI_MEM_TYPE_GTT};
 
 // ---------------- amdsmi_get_gpu_memory_total (enum) ----------------
-TEST_F(GpuIntegration, GetMemoryTotal_NullOutput) {
+TEST(GpuIntegration, GetMemoryTotal_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_total", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_total(any_gpu(), AMDSMI_MEM_TYPE_VRAM, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetMemoryTotal_InvalidHandle) {
+TEST(GpuIntegration, GetMemoryTotal_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t total = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_total", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_total(kInvalidHandle, AMDSMI_MEM_TYPE_VRAM, &total);
@@ -28,7 +30,8 @@ TEST_F(GpuIntegration, GetMemoryTotal_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetMemoryTotal_AllGpusAllTypes) {
+TEST(GpuIntegration, GetMemoryTotal_AllGpusAllTypes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_memory_total");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i)
@@ -45,13 +48,15 @@ TEST_F(GpuIntegration, GetMemoryTotal_AllGpusAllTypes) {
 }
 
 // ---------------- amdsmi_get_gpu_memory_usage (enum) ----------------
-TEST_F(GpuIntegration, GetMemoryUsage_NullOutput) {
+TEST(GpuIntegration, GetMemoryUsage_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_usage", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_usage(any_gpu(), AMDSMI_MEM_TYPE_VRAM, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetMemoryUsage_InvalidHandle) {
+TEST(GpuIntegration, GetMemoryUsage_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t used = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_usage", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_usage(kInvalidHandle, AMDSMI_MEM_TYPE_VRAM, &used);
@@ -59,7 +64,8 @@ TEST_F(GpuIntegration, GetMemoryUsage_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetMemoryUsage_AllGpusAllTypes) {
+TEST(GpuIntegration, GetMemoryUsage_AllGpusAllTypes) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_memory_usage");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i)
@@ -79,13 +85,15 @@ TEST_F(GpuIntegration, GetMemoryUsage_AllGpusAllTypes) {
 AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(GetVramUsage, amdsmi_get_gpu_vram_usage, amdsmi_vram_usage_t)
 
 // ---------------- amdsmi_get_gpu_bad_page_info ----------------
-TEST_F(GpuIntegration, GetBadPageInfo_NullNumPages) {
+TEST(GpuIntegration, GetBadPageInfo_NullNumPages) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_info", "gpu=0 num_pages=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_bad_page_info(any_gpu(), nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetBadPageInfo_InvalidHandle) {
+TEST(GpuIntegration, GetBadPageInfo_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t num = 16;
   amdsmi_retired_page_record_t recs[16];
   memset(recs, 0, sizeof(recs));
@@ -95,7 +103,8 @@ TEST_F(GpuIntegration, GetBadPageInfo_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetBadPageInfo_AllGpus) {
+TEST(GpuIntegration, GetBadPageInfo_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_bad_page_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -119,13 +128,15 @@ TEST_F(GpuIntegration, GetBadPageInfo_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_bad_page_threshold ----------------
-TEST_F(GpuIntegration, GetBadPageThreshold_NullOutput) {
+TEST(GpuIntegration, GetBadPageThreshold_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_threshold", "gpu=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_bad_page_threshold(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetBadPageThreshold_InvalidHandle) {
+TEST(GpuIntegration, GetBadPageThreshold_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t threshold = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_threshold", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_bad_page_threshold(kInvalidHandle, &threshold);
@@ -133,7 +144,8 @@ TEST_F(GpuIntegration, GetBadPageThreshold_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetBadPageThreshold_AllGpus) {
+TEST(GpuIntegration, GetBadPageThreshold_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_bad_page_threshold");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -148,14 +160,16 @@ TEST_F(GpuIntegration, GetBadPageThreshold_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_memory_reserved_pages ----------------
-TEST_F(GpuIntegration, GetMemoryReservedPages_NullNumPages) {
+TEST(GpuIntegration, GetMemoryReservedPages_NullNumPages) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=0 num_pages=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_memory_reserved_pages(any_gpu(), nullptr, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_ARG_PTR_NULL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(GpuIntegration, GetMemoryReservedPages_InvalidHandle) {
+TEST(GpuIntegration, GetMemoryReservedPages_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t num = 16;
   amdsmi_retired_page_record_t recs[16];
   memset(recs, 0, sizeof(recs));
@@ -165,7 +179,8 @@ TEST_F(GpuIntegration, GetMemoryReservedPages_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(GpuIntegration, GetMemoryReservedPages_AllGpus) {
+TEST(GpuIntegration, GetMemoryReservedPages_AllGpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_memory_reserved_pages");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
@@ -191,14 +206,16 @@ AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(GetUmaCarveoutInfo, amdsmi_get_gpu_uma_carv
                                      amdsmi_uma_carveout_info_t)
 
 // ---------------- amdsmi_get_ttm_info (no handle) ----------------
-TEST_F(GpuIntegration, GetTtmInfo_NullOutput) {
+TEST(GpuIntegration, GetTtmInfo_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_ttm_info", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_ttm_info(nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
-TEST_F(GpuIntegration, GetTtmInfo_Valid) {
+TEST(GpuIntegration, GetTtmInfo_Valid) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_ttm_info_t info;
   memset(&info, 0, sizeof(info));
   DISPLAY_AMDSMI_API("amdsmi_get_ttm_info", "valid", kVerbose);
@@ -210,7 +227,8 @@ TEST_F(GpuIntegration, GetTtmInfo_Valid) {
 }
 
 // ---------------- amdsmi_set_gpu_uma_carveout (SET) ----------------
-TEST_F(GpuIntegration, SetUmaCarveout_InvalidHandle) {
+TEST(GpuIntegration, SetUmaCarveout_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_uma_carveout", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_gpu_uma_carveout(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -218,7 +236,8 @@ TEST_F(GpuIntegration, SetUmaCarveout_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 // ---------------- amdsmi_clean_gpu_local_data (action) ----------------
-TEST_F(GpuIntegration, CleanLocalData_InvalidHandle) {
+TEST(GpuIntegration, CleanLocalData_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_clean_gpu_local_data", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_clean_gpu_local_data(kInvalidHandle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,

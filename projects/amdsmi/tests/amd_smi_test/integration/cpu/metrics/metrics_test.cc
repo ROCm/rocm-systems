@@ -15,7 +15,8 @@ using amdsmi::test::kVerbose;
 // invalid-handle test.
 
 // ---- amdsmi_get_hsmp_metrics_table_version (handle guarded only) ----
-TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_InvalidHandle) {
+TEST(CpuIntegration, GetHsmpMetricsTableVersion_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t version = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_hsmp_metrics_table_version", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_hsmp_metrics_table_version(kInvalidHandle, &version);
@@ -23,7 +24,8 @@ TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_AllCpus) {
+TEST(CpuIntegration, GetHsmpMetricsTableVersion_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_hsmp_metrics_table_version");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -39,7 +41,8 @@ TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_AllCpus) {
 }
 
 // ---- amdsmi_get_hsmp_metrics_table (handle guarded only) ----
-TEST_F(CpuIntegration, GetHsmpMetricsTable_InvalidHandle) {
+TEST(CpuIntegration, GetHsmpMetricsTable_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi_hsmp_metrics_table_t table;
   memset(&table, 0, sizeof(table));
   DISPLAY_AMDSMI_API("amdsmi_get_hsmp_metrics_table", "handle=invalid", kVerbose);
@@ -48,7 +51,8 @@ TEST_F(CpuIntegration, GetHsmpMetricsTable_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetHsmpMetricsTable_AllCpus) {
+TEST(CpuIntegration, GetHsmpMetricsTable_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_hsmp_metrics_table");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {

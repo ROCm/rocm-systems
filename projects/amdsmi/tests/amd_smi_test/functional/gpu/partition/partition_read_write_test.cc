@@ -31,7 +31,8 @@ amdsmi_compute_partition_type_t CompStrToEnum(const std::string& s) {
 }  // namespace
 
 // amdsmi_get_gpu_memory_partition / amdsmi_set_gpu_memory_partition.
-TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_memory_partition");
@@ -101,7 +102,8 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
 }
 
 // amdsmi_get_gpu_compute_partition / amdsmi_set_gpu_compute_partition.
-TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_compute_partition");

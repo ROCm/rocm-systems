@@ -332,98 +332,61 @@ class StatusCollector {
   std::vector<std::string> failures_;
 };
 
-// Fixture base for the suites that drive the live AMD SMI C API. The shared
-// inventory is acquired once per suite rather than once per test: the only test
-// that cares about the init refcount balances its own extra init/shut_down pair.
-class ApiTest : public ::testing::Test {
+// A TEST() body has no per-suite hook, so the shared inventory is held for the
+// life of one test. Releasing with the test also restores the zero refcount a
+// self-managed test needs to own its own init sequence.
+class ApiScope {
  public:
-  static void SetUpTestSuite() { AcquireSharedInventory(); }
-  static void TearDownTestSuite() { ReleaseSharedInventory(); }
+  ApiScope() { AcquireSharedInventory(); }
+  ~ApiScope() { ReleaseSharedInventory(); }
+  ApiScope(const ApiScope&) = delete;
+  ApiScope& operator=(const ApiScope&) = delete;
 
- protected:
-  // On a host where amdsmi_init() failed -- no amdgpu driver, for instance --
-  // every call would otherwise return AMDSMI_STATUS_NOT_INIT and each test
-  // would report that same failure. Skip instead, and let the init test report
-  // the real cause once. Only suites that acquired the shared inventory are
-  // gated, so a self-managed test still owns its own init sequence.
-  void SetUp() override {
-    if (SharedInventoryRefs() > 0 && !SharedInventory().initialized())
-      GTEST_SKIP() << "AMD SMI could not initialize on this host";
-  }
-
-  void TearDown() override {
-    if (!test_scoped_ref_) return;
-    ReleaseSharedInventory();
-    test_scoped_ref_ = false;
-  }
-
-  // Acquire for a suite whose SetUpTestSuite deliberately does not, so a test
-  // that owns its own amdsmi_init sequence is never initialized behind its back.
-  void RequireInit() {
-    if (SharedInventoryRefs() > 0) return;
-    AcquireSharedInventory();
-    test_scoped_ref_ = true;
-  }
-
-  DeviceInventory& devices() {
-    RequireInit();
-    return SharedInventory();
-  }
-
-  bool initialized() { return devices().initialized(); }
-  bool cpu_supported() { return devices().cpu_supported(); }
-  const std::vector<amdsmi_socket_handle>& sockets() { return devices().sockets(); }
-  const std::vector<amdsmi_processor_handle>& gpus() { return devices().gpus(); }
-  const std::vector<amdsmi_processor_handle>& cpus() { return devices().cpus(); }
-  const std::vector<amdsmi_processor_handle>& cpu_cores() { return devices().cpu_cores(); }
-  const std::vector<amdsmi_processor_handle>& nics() { return devices().nics(); }
-
-  // Handle for a negative test that needs to reach an API's argument check on a
-  // host that has no such processor. Argument validation does not depend on the
-  // device, so falling back to the invalid-handle sentinel keeps invalid-input
-  // cases running everywhere instead of skipping them.
-  amdsmi_processor_handle any_gpu() { return gpus().empty() ? kInvalidHandle : gpus()[0]; }
-  amdsmi_processor_handle any_cpu() { return cpus().empty() ? kInvalidHandle : cpus()[0]; }
-  amdsmi_processor_handle any_cpu_core() {
-    return cpu_cores().empty() ? kInvalidHandle : cpu_cores()[0];
-  }
-  amdsmi_processor_handle any_nic() { return nics().empty() ? kInvalidHandle : nics()[0]; }
-
- private:
-  bool test_scoped_ref_ = false;
-};
-
-// Base for suites shared with tests that own their amdsmi_init()/shut_down()
-// sequence (the mutual-exclusion and cross-process cases in main.cc). Devices
-// are acquired only if the test actually asks for them.
-class SelfManagedApiTest : public ApiTest {
- public:
-  static void SetUpTestSuite() {}
-  static void TearDownTestSuite() {}
+  bool initialized() const { return SharedInventory().initialized(); }
 };
 
 }  // namespace test
 }  // namespace amdsmi
 
-// A TEST_F() suite name is its fixture class name. The three tiers are:
+// Suite names carry the tier:
 //
 //   <Component>Unit          no device and no amdsmi_init -- pure logic and
-//                            static data; declared in unit_fixtures.h
+//                            static data
 //   <Component>Integration   every API's invalid-input cases, plus getters
 //                            driven with valid input and checked for valid output
 //   <Component>Functional*   setters, and APIs that need setup from another API
 //
-class GpuIntegration : public amdsmi::test::ApiTest {};
-class CpuIntegration : public amdsmi::test::ApiTest {};
-class NicIntegration : public amdsmi::test::ApiTest {};
-class SystemIntegration : public amdsmi::test::ApiTest {};
 
-class GpuFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
-class GpuFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
-class CpuFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
-class NicFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
-class SystemFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
-class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
+// The inventory accessors the fixture used to provide as protected members.
+inline amdsmi::test::DeviceInventory& devices() { return amdsmi::test::SharedInventory(); }
+inline bool initialized() { return devices().initialized(); }
+inline bool cpu_supported() { return devices().cpu_supported(); }
+inline const std::vector<amdsmi_socket_handle>& sockets() { return devices().sockets(); }
+inline const std::vector<amdsmi_processor_handle>& gpus() { return devices().gpus(); }
+inline const std::vector<amdsmi_processor_handle>& cpus() { return devices().cpus(); }
+inline const std::vector<amdsmi_processor_handle>& cpu_cores() { return devices().cpu_cores(); }
+inline const std::vector<amdsmi_processor_handle>& nics() { return devices().nics(); }
+
+inline amdsmi_processor_handle any_gpu() {
+  return gpus().empty() ? amdsmi::test::kInvalidHandle : gpus()[0];
+}
+inline amdsmi_processor_handle any_cpu() {
+  return cpus().empty() ? amdsmi::test::kInvalidHandle : cpus()[0];
+}
+inline amdsmi_processor_handle any_cpu_core() {
+  return cpu_cores().empty() ? amdsmi::test::kInvalidHandle : cpu_cores()[0];
+}
+inline amdsmi_processor_handle any_nic() {
+  return nics().empty() ? amdsmi::test::kInvalidHandle : nics()[0];
+}
+
+// Opens a test that drives the live API. Replaces the fixture's
+// SetUpTestSuite/SetUp pair.
+#define AMDSMI_API_TEST_SCOPE()                           \
+  amdsmi::test::ApiScope amdsmi_api_scope_;               \
+  if (!amdsmi_api_scope_.initialized())                   \
+  GTEST_SKIP() << "AMD SMI could not initialize on this " \
+                  "host"
 
 // Assert an API returned the status it SHOULD for a null pointer argument.
 // A feature-absent status is tolerated because an unimplemented or unsupported
@@ -491,13 +454,15 @@ class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
 // use the same generator as GPU ones. Use the long form only where an API needs
 // different inputs.
 #define AMDSMI_INTEGRATION_STRUCT_GETTER(FIXTURE, HANDLES, LABEL, TESTBASE, APINAME, STRUCT)       \
-  TEST_F(FIXTURE, TESTBASE##_NullOutput) {                                                         \
+  TEST(FIXTURE, TESTBASE##_NullOutput) {                                                           \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     DISPLAY_AMDSMI_API(#APINAME, "out=nullptr", ::amdsmi::test::kVerbose);                         \
     amdsmi_status_t err = APINAME(AMDSMI_ANY_HANDLE(HANDLES), nullptr);                            \
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_NULL_ARG(err);                                                                   \
   }                                                                                                \
-  TEST_F(FIXTURE, TESTBASE##_InvalidHandle) {                                                      \
+  TEST(FIXTURE, TESTBASE##_InvalidHandle) {                                                        \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     STRUCT info;                                                                                   \
     ::amdsmi::test::PoisonOutput(&info, sizeof(info));                                             \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
@@ -505,7 +470,8 @@ class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
-  TEST_F(FIXTURE, TESTBASE##_All##LABEL) {                                                         \
+  TEST(FIXTURE, TESTBASE##_All##LABEL) {                                                           \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
     if (HANDLES().empty()) GTEST_SKIP() << "No " #LABEL " processors";                             \
     for (size_t i = 0; i < HANDLES().size(); ++i) {                                                \
@@ -534,13 +500,15 @@ class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
 // SUCCESS path checks the buffer holds a real string, not just that the call
 // reported success.
 #define AMDSMI_INTEGRATION_BUFFER_GETTER(FIXTURE, HANDLES, LABEL, TESTBASE, APINAME, BUFSIZE)      \
-  TEST_F(FIXTURE, TESTBASE##_NullOutput) {                                                         \
+  TEST(FIXTURE, TESTBASE##_NullOutput) {                                                           \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     DISPLAY_AMDSMI_API(#APINAME, "out=nullptr", ::amdsmi::test::kVerbose);                         \
     amdsmi_status_t err = APINAME(AMDSMI_ANY_HANDLE(HANDLES), nullptr, BUFSIZE);                   \
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_NULL_ARG(err);                                                                   \
   }                                                                                                \
-  TEST_F(FIXTURE, TESTBASE##_InvalidHandle) {                                                      \
+  TEST(FIXTURE, TESTBASE##_InvalidHandle) {                                                        \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     char buf[BUFSIZE];                                                                             \
     memset(buf, 0, sizeof(buf));                                                                   \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
@@ -548,7 +516,8 @@ class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
-  TEST_F(FIXTURE, TESTBASE##_All##LABEL) {                                                         \
+  TEST(FIXTURE, TESTBASE##_All##LABEL) {                                                           \
+    AMDSMI_API_TEST_SCOPE();                                                                       \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
     if (HANDLES().empty()) GTEST_SKIP() << "No " #LABEL " processors";                             \
     for (size_t i = 0; i < HANDLES().size(); ++i) {                                                \

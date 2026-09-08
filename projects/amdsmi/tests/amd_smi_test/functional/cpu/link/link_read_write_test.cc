@@ -17,7 +17,8 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_xgmi_pstate_range / amdsmi_set_cpu_xgmi_pstate_range.
 // amdsmi_get_cpu_socket_lclk_dpm_level / amdsmi_set_cpu_socket_lclk_dpm_level.
 // Link/pstate setters with no getter.
-TEST_F(CpuFunctionalReadWrite, Pc6Enable_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, Pc6Enable_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_pc6_enable");
@@ -53,7 +54,8 @@ TEST_F(CpuFunctionalReadWrite, Pc6Enable_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, Cc6Enable_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, Cc6Enable_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_cc6_enable");
@@ -89,7 +91,8 @@ TEST_F(CpuFunctionalReadWrite, Cc6Enable_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, RailIsofreqPolicy_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, RailIsofreqPolicy_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_rail_isofreq_policy");
@@ -126,7 +129,8 @@ TEST_F(CpuFunctionalReadWrite, RailIsofreqPolicy_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, DfcCtrl_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, DfcCtrl_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_dfc_ctrl");
@@ -162,7 +166,8 @@ TEST_F(CpuFunctionalReadWrite, DfcCtrl_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, XgmiPstateRange_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, XgmiPstateRange_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_xgmi_pstate_range");
@@ -213,7 +218,8 @@ TEST_F(CpuFunctionalReadWrite, XgmiPstateRange_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-TEST_F(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
+TEST(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_socket_lclk_dpm_level");
@@ -281,7 +287,8 @@ TEST_F(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
 // documented range afterwards -- a best-effort mitigation, not a restore, so
 // this test leaves those two ranges at the documented default rather than at
 // whatever the operator had configured. known_failures.md records that.
-TEST_F(CpuFunctionalReadWrite, LinkSetters_Set) {
+TEST(CpuFunctionalReadWrite, LinkSetters_Set) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_cpu_link_setters");

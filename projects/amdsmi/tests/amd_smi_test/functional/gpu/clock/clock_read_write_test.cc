@@ -10,7 +10,8 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_clk_freq / amdsmi_set_clk_freq (frequency-level mask).
-TEST_F(GpuFunctionalReadWrite, ClkFreq_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, ClkFreq_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_set_clk_freq reports success but leaves the clock on its previous level";
@@ -80,7 +81,8 @@ TEST_F(GpuFunctionalReadWrite, ClkFreq_SetVerifyRestore) {
 }
 
 // amdsmi_get_gpu_pci_bandwidth / amdsmi_set_gpu_pci_bandwidth (bandwidth mask).
-TEST_F(GpuFunctionalReadWrite, PciBandwidth_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, PciBandwidth_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_pci_bandwidth");

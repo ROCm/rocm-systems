@@ -16,13 +16,15 @@ using amdsmi::test::kVerbose;
 // dereference the output on success, so those omit the null-output test.
 
 // ---- amdsmi_get_cpu_socket_power (output guarded) ----
-TEST_F(CpuIntegration, GetSocketPower_NullOutput) {
+TEST(CpuIntegration, GetSocketPower_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetSocketPower_InvalidHandle) {
+TEST(CpuIntegration, GetSocketPower_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t power = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power(kInvalidHandle, &power);
@@ -30,7 +32,8 @@ TEST_F(CpuIntegration, GetSocketPower_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketPower_AllCpus) {
+TEST(CpuIntegration, GetSocketPower_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_power");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -45,13 +48,15 @@ TEST_F(CpuIntegration, GetSocketPower_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_socket_power_cap (output guarded) ----
-TEST_F(CpuIntegration, GetSocketPowerCap_NullOutput) {
+TEST(CpuIntegration, GetSocketPowerCap_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power_cap", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power_cap(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetSocketPowerCap_InvalidHandle) {
+TEST(CpuIntegration, GetSocketPowerCap_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t cap = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power_cap", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power_cap(kInvalidHandle, &cap);
@@ -59,7 +64,8 @@ TEST_F(CpuIntegration, GetSocketPowerCap_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketPowerCap_AllCpus) {
+TEST(CpuIntegration, GetSocketPowerCap_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_power_cap");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -74,13 +80,15 @@ TEST_F(CpuIntegration, GetSocketPowerCap_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_socket_power_cap_max (output guarded) ----
-TEST_F(CpuIntegration, GetSocketPowerCapMax_NullOutput) {
+TEST(CpuIntegration, GetSocketPowerCapMax_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power_cap_max", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power_cap_max(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetSocketPowerCapMax_InvalidHandle) {
+TEST(CpuIntegration, GetSocketPowerCapMax_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t cap_max = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_power_cap_max", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_power_cap_max(kInvalidHandle, &cap_max);
@@ -88,7 +96,8 @@ TEST_F(CpuIntegration, GetSocketPowerCapMax_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketPowerCapMax_AllCpus) {
+TEST(CpuIntegration, GetSocketPowerCapMax_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_power_cap_max");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -103,7 +112,8 @@ TEST_F(CpuIntegration, GetSocketPowerCapMax_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_pwr_svi_telemetry_all_rails (handle guarded only) ----
-TEST_F(CpuIntegration, GetPwrSviTelemetryAllRails_InvalidHandle) {
+TEST(CpuIntegration, GetPwrSviTelemetryAllRails_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t power = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_pwr_svi_telemetry_all_rails", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_pwr_svi_telemetry_all_rails(kInvalidHandle, &power);
@@ -111,7 +121,8 @@ TEST_F(CpuIntegration, GetPwrSviTelemetryAllRails_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetPwrSviTelemetryAllRails_AllCpus) {
+TEST(CpuIntegration, GetPwrSviTelemetryAllRails_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_pwr_svi_telemetry_all_rails");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -127,7 +138,8 @@ TEST_F(CpuIntegration, GetPwrSviTelemetryAllRails_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_pwr_efficiency_mode (handle guarded only) ----
-TEST_F(CpuIntegration, GetPwrEfficiencyMode_InvalidHandle) {
+TEST(CpuIntegration, GetPwrEfficiencyMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t mode = 0, util = 0, ppt = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_pwr_efficiency_mode", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_pwr_efficiency_mode(kInvalidHandle, &mode, &util, &ppt);
@@ -135,7 +147,8 @@ TEST_F(CpuIntegration, GetPwrEfficiencyMode_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetPwrEfficiencyMode_AllCpus) {
+TEST(CpuIntegration, GetPwrEfficiencyMode_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_pwr_efficiency_mode");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -150,7 +163,8 @@ TEST_F(CpuIntegration, GetPwrEfficiencyMode_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_socket_energy (handle guarded only) ----
-TEST_F(CpuIntegration, GetSocketEnergy_InvalidHandle) {
+TEST(CpuIntegration, GetSocketEnergy_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t energy = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_energy", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_energy(kInvalidHandle, &energy);
@@ -158,7 +172,8 @@ TEST_F(CpuIntegration, GetSocketEnergy_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketEnergy_AllCpus) {
+TEST(CpuIntegration, GetSocketEnergy_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_energy");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -173,7 +188,8 @@ TEST_F(CpuIntegration, GetSocketEnergy_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_socket_c0_residency (handle guarded only) ----
-TEST_F(CpuIntegration, GetSocketC0Residency_InvalidHandle) {
+TEST(CpuIntegration, GetSocketC0Residency_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t residency = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_c0_residency", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_socket_c0_residency(kInvalidHandle, &residency);
@@ -181,7 +197,8 @@ TEST_F(CpuIntegration, GetSocketC0Residency_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetSocketC0Residency_AllCpus) {
+TEST(CpuIntegration, GetSocketC0Residency_AllCpus) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_c0_residency");
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
@@ -196,13 +213,15 @@ TEST_F(CpuIntegration, GetSocketC0Residency_AllCpus) {
 }
 
 // ---- amdsmi_get_cpu_core_ccd_power (output guarded, core handle) ----
-TEST_F(CpuIntegration, GetCoreCcdPower_NullOutput) {
+TEST(CpuIntegration, GetCoreCcdPower_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_core_ccd_power", "out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_core_ccd_power(any_cpu_core(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, GetCoreCcdPower_InvalidHandle) {
+TEST(CpuIntegration, GetCoreCcdPower_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t power = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_core_ccd_power", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_core_ccd_power(kInvalidHandle, &power);
@@ -210,7 +229,8 @@ TEST_F(CpuIntegration, GetCoreCcdPower_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCoreCcdPower_AllCores) {
+TEST(CpuIntegration, GetCoreCcdPower_AllCores) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_core_ccd_power");
   if (cpu_cores().empty()) GTEST_SKIP() << "No CPU cores";
   for (size_t i = 0; i < cpu_cores().size(); ++i) {
@@ -225,7 +245,8 @@ TEST_F(CpuIntegration, GetCoreCcdPower_AllCores) {
 }
 
 // ---- amdsmi_get_cpu_core_energy (handle guarded only, core handle) ----
-TEST_F(CpuIntegration, GetCoreEnergy_InvalidHandle) {
+TEST(CpuIntegration, GetCoreEnergy_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint64_t energy = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_core_energy", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_get_cpu_core_energy(kInvalidHandle, &energy);
@@ -233,7 +254,8 @@ TEST_F(CpuIntegration, GetCoreEnergy_InvalidHandle) {
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
-TEST_F(CpuIntegration, GetCoreEnergy_AllCores) {
+TEST(CpuIntegration, GetCoreEnergy_AllCores) {
+  AMDSMI_API_TEST_SCOPE();
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_core_energy");
   if (cpu_cores().empty()) GTEST_SKIP() << "No CPU cores";
   for (size_t i = 0; i < cpu_cores().size(); ++i) {
@@ -249,7 +271,8 @@ TEST_F(CpuIntegration, GetCoreEnergy_AllCores) {
 
 // ---- amdsmi_set_cpu_socket_power_cap (invalid input only; valid-input cases are in functional/)
 // ----
-TEST_F(CpuIntegration, SetSocketPowerCap_InvalidHandle) {
+TEST(CpuIntegration, SetSocketPowerCap_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_power_cap", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_socket_power_cap(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
@@ -258,14 +281,16 @@ TEST_F(CpuIntegration, SetSocketPowerCap_InvalidHandle) {
 }
 // ---- amdsmi_set_cpu_pwr_efficiency_mode (invalid input only; valid-input cases are in
 // functional/) ----
-TEST_F(CpuIntegration, SetPwrEfficiencyMode_NullOutput) {
+TEST(CpuIntegration, SetPwrEfficiencyMode_NullOutput) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t ppt = 0;
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_pwr_efficiency_mode", "utilization=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_pwr_efficiency_mode(any_cpu(), 0, nullptr, &ppt);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
-TEST_F(CpuIntegration, SetPwrEfficiencyMode_InvalidHandle) {
+TEST(CpuIntegration, SetPwrEfficiencyMode_InvalidHandle) {
+  AMDSMI_API_TEST_SCOPE();
   uint32_t util = 0, ppt = 0;
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_pwr_efficiency_mode", "handle=invalid", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_pwr_efficiency_mode(kInvalidHandle, 0, &util, &ppt);

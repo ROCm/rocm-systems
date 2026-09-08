@@ -10,7 +10,8 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_uma_carveout_info / amdsmi_set_gpu_uma_carveout (option index).
-TEST_F(GpuFunctionalReadWrite, UmaCarveout_SetVerifyRestore) {
+TEST(GpuFunctionalReadWrite, UmaCarveout_SetVerifyRestore) {
+  AMDSMI_API_TEST_SCOPE();
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_uma_carveout");
