@@ -70,10 +70,22 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
+  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
+  // PM4 path.
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
+           " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           (uint64_t)dxg_runtime->use_pm4_);
+           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -1054,16 +1066,14 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
-  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
-  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
-  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
+  // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
+  GpuMemory* queue_memory = queue->GetAmdQueueMemory();
   D3DKMT_HANDLE resource = 0;
   bool is_aql = false;
-  if (compute_queue != nullptr && IsAqlSupported()) {
-    auto queue_memory = compute_queue->GetAmdQueueMemory();
+  if (queue_memory != nullptr) {
     resource = queue_memory->KmtHandle();
-    is_aql = true;
+    is_aql = IsAqlSupported();
   }
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),

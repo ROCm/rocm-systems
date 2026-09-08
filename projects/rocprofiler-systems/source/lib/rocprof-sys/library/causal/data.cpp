@@ -698,11 +698,13 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(tim::filepath::open(_ofs, ofname))
+        if(path::create_parent_dirs_and_open_ofstream(_ofs, ofname))
         {
             if(_verbose >= 0)
+            {
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
+            }
             save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }

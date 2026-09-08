@@ -4,11 +4,13 @@
 #include "library/coverage.hpp"
 #include "api.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
@@ -212,24 +214,17 @@ post_process()
     {
         auto          _fname = tim::settings::compose_output_filename("coverage", ".txt");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             for(auto& itr : _coverage_data)
             {
-                // if(get_debug() && get_verbose() >= 2)
-                if(true)
-                {
-                    auto _addr = fmt::format("0x{:x}", itr.address);
-                    ofs << std::setw(8) << itr.count << "  " << std::setw(8) << _addr
-                        << "  " << itr.source << "\n";
-                }
-                else
-                {
-                    ofs << std::setw(8) << itr.count << "  " << itr.source << "\n";
-                }
+                auto addr = fmt::format("0x{:x}", itr.address);
+                ofs << fmt::format("{:>8}  {:>8}  {}\n", itr.count, addr, itr.source);
             }
         }
         else
@@ -258,11 +253,13 @@ post_process()
         }
         auto _fname = tim::settings::compose_output_filename("coverage", ".json");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             ofs << oss.str() << "\n";
         }
         else

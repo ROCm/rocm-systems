@@ -49,8 +49,26 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
+#ifdef __HIP_DEVICE_COMPILE__
+#if defined(__gfx1250__) && \
+  __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
+  __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && \
+  !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 1
+// #pragma message "RCCL Cooperative Atomic Builtins Enabled on GFX1250"
+#else
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
+// #pragma message "RCCL Cooperative Atomic Builtins Disabled"
+#endif
+#else
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
+#endif
+
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
+
+typedef __attribute__((__vector_size__(4 * sizeof(int)))) int v4i;
+typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
