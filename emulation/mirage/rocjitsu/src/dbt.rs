@@ -163,6 +163,13 @@ impl RocjitsuDbt {
         def: &ProfileDef,
         env_lookup: &impl EnvLookup,
     ) -> std::result::Result<(), String> {
+        // The DBT backend reads only its typed topology and options; it
+        // synthesises no rocjitsu simulation config, so it has nowhere
+        // to forward `EmulatorDef::extra` — the passthrough belongs to
+        // the regular `rocjitsu` backend alone. An unrecognised field
+        // under this emulator is a mistake, and this is the last layer
+        // that can still say which document it is in.
+        def.emulator.reject_extra("rocjitsu-dbt")?;
         // Resolving the guest gfx version exercises the same topology +
         // agent reference resolution the run path needs, so any error
         // here is exactly what would otherwise surface at run time.
@@ -691,6 +698,31 @@ mod tests {
             .validate_profile_with(&profile, &empty_env())
             .unwrap_err();
         assert!(err.contains("not a translatable"), "unexpected: {err}");
+    }
+
+    /// The DBT backend synthesises no rocjitsu config, so it has
+    /// nowhere to forward a passthrough field — and the shared
+    /// `EmulatorDef` no longer rejects one on its behalf.
+    #[test]
+    fn an_unknown_field_under_the_emulator_is_refused_at_import() {
+        let profile: ProfileDef = serde_json::from_value(serde_json::json!({
+            "name": "p",
+            "emulator": {
+                "emulator": "rocjitsu-dbt",
+                "topology": "t",
+                "max_ticks": 5
+            }
+        }))
+        .unwrap();
+        let message = RocjitsuDbt
+            .validate_profile_with(&profile, &empty_env())
+            .unwrap_err();
+        assert!(message.contains("\"max_ticks\""), "{message}");
+        assert!(message.contains("rocjitsu-dbt"), "{message}");
+        // Refused before the topology reference is followed, so the
+        // stray key is what the user is told about — not the "t" that
+        // this profile was never going to resolve either.
+        assert!(!message.contains("\"t\""), "{message}");
     }
 
     #[test]

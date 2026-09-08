@@ -4,6 +4,14 @@
 //! passed through to the backend. Agent fields are retained recursively.
 //! Mirage-owned container and system-topology controls still reject unknown
 //! fields because they cannot be delegated to the emulator.
+//!
+//! Delegating is not the same as accepting, and this layer cannot tell
+//! the two apart: [`EmulatorDef::extra`] is one map on a definition
+//! shared by every backend, but only `rocjitsu` merges it into a
+//! configuration. A backend with nowhere to forward these keys refuses
+//! them from its own `validate_profile`, which the CLI and the daemon
+//! both run before a profile is written — see
+//! [`EmulatorDef::reject_extra`].
 
 use serde::{Deserialize, Serialize};
 

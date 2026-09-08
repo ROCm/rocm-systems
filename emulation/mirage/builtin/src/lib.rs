@@ -218,6 +218,13 @@ fn repair_sdma_queue_count<T: Serialize>(
     else {
         return Ok(());
     };
+    // An omitted engine count reads as zero rather than as rocjitsu's
+    // schema default of 2, so an agent that names neither field is left
+    // exactly as the user has it. Nothing is lost by that: the rocjitsu
+    // backend settles the same pair when it synthesises the config, and
+    // a document that says nothing about SDMA is not one this repair
+    // has a value for — it exists for a stored agent whose engine count
+    // an older mirage wrote and whose queue count it did not.
     let engines = device
         .get("num_sdma_engines")
         .and_then(serde_json::Value::as_u64)

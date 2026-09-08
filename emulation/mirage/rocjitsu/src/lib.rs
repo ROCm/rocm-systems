@@ -787,22 +787,106 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
             "profile's RocJITsu configuration is missing field {path}; RocJITsu schema defaults apply"
         );
     }
+    // After the omission report, so that report still describes the
+    // document rather than the repair below.
+    settle_sdma_pair(&mut sim)?;
     // Carry the profile's plugin selection into the synthesised rocjitsu
     // config so the interposer (local path) and the per-node daemon both
     // enable them through the rocjitsu plugin loader. `def.plugins` maps a
     // plugin name to its argument object — exactly the shape rocjitsu's
-    // `plugins` config section expects. Only emit the key when a plugin is
-    // actually selected so a plugin-free profile still produces a clean,
-    // minimal config (and the near-zero-overhead no-plugin path).
-    if !def.plugins.is_empty()
-        && let serde_json::Value::Object(map) = &mut sim
-    {
-        map.insert("plugins".to_string(), plugins_to_json(&def.plugins));
+    // `plugins` config section expects.
+    //
+    // The profile decides, and it decides both ways: an agent imported
+    // from a whole rocjitsu config carries that config's root `plugins`
+    // through `AgentDef::extra` and into the merge above, so a selection
+    // that is only ever *written* when nonempty leaves the agent's own
+    // plugins standing for a profile that selects none. Container runs
+    // would then differ from local ones as well, because the libraries
+    // bind-mounted into a node container come from `def.plugins` alone
+    // (see `injection_def`) — the interposer would be told to load a
+    // plugin whose shared object is not in the container. So the key is
+    // removed when the selection is empty, which also keeps a
+    // plugin-free profile on rocjitsu's near-zero-overhead path.
+    if let serde_json::Value::Object(map) = &mut sim {
+        if def.plugins.is_empty() {
+            map.remove("plugins");
+        } else {
+            map.insert("plugins".to_string(), plugins_to_json(&def.plugins));
+        }
     }
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
     Ok(SimConfig::Synthesised(bytes))
+}
+
+/// rocjitsu's schema default for `KfdDeviceInfo.num_sdma_engines`.
+///
+/// Together with [`SDMA_QUEUE_DEFAULT`] this is the pair a `device`
+/// object that names neither field gets, and rocjitsu's config loader
+/// rejects it (`config/config_common.h`): the queue count was appended
+/// to the table after the engine count, so it could not be given a
+/// nonzero default without moving field IDs, which leaves the
+/// *defaults themselves* incoherent.
+const SDMA_ENGINE_DEFAULT: u64 = 2;
+
+/// rocjitsu's schema default for
+/// `KfdDeviceInfo.num_sdma_queues_per_engine`. See
+/// [`SDMA_ENGINE_DEFAULT`].
+const SDMA_QUEUE_DEFAULT: u64 = 0;
+
+/// Keep the synthesised config's SDMA pair one rocjitsu will load.
+///
+/// A `device` object that names neither field is not making a claim
+/// about SDMA at all — but leaving both out hands rocjitsu the
+/// incoherent default pair above and the run dies during config load,
+/// before anything the user can see. Mirage used to serialize every
+/// field of the agent whether the document mentioned it or not, so such
+/// an agent arrived carrying `num_sdma_engines: 0` and emulated a GPU
+/// with no SDMA; that is still the machine it describes, so say so
+/// explicitly rather than let a preserved omission change it.
+///
+/// A document that names *one* of the two is making a claim, and the
+/// claim is incoherent. There is no value mirage could pick that is not
+/// an invention about the device, so it is refused here — at profile
+/// validation, via [`check_config`], where the document can still be
+/// edited — rather than at run time from inside the emulator.
+fn settle_sdma_pair(sim: &mut serde_json::Value) -> Result<()> {
+    // No `device` object: rocjitsu leaves the whole KFD identity
+    // defaulted and `kfd_device_from_fb` returns before the check.
+    let Some(device) = sim
+        .pointer_mut("/vm/gpu/device")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let field = |key: &str| device.get(key).and_then(serde_json::Value::as_u64);
+    let engines = field("num_sdma_engines");
+    let queues = field("num_sdma_queues_per_engine");
+    if engines.unwrap_or(SDMA_ENGINE_DEFAULT) == 0 || queues.unwrap_or(SDMA_QUEUE_DEFAULT) != 0 {
+        return Ok(());
+    }
+    if engines.is_none() && queues.is_none() {
+        device.insert("num_sdma_engines".into(), 0.into());
+        tracing::warn!(
+            "profile's RocJITsu configuration names neither \
+             vm.gpu.device.num_sdma_engines nor \
+             vm.gpu.device.num_sdma_queues_per_engine; emulating a GPU with no \
+             SDMA engines, since RocJITsu's own defaults for the two do not \
+             describe a usable device"
+        );
+        return Ok(());
+    }
+    Err(MirageError::Other(format!(
+        "profile's RocJITsu configuration has vm.gpu.device.num_sdma_engines = {} \
+         and vm.gpu.device.num_sdma_queues_per_engine = {}, which RocJITsu refuses \
+         to load: engines with nowhere to queue to. Give the agent a nonzero \
+         num_sdma_queues_per_engine, or set num_sdma_engines to 0 to emulate a GPU \
+         with no SDMA. Values not written in the document are RocJITsu's schema \
+         defaults, {SDMA_ENGINE_DEFAULT} and {SDMA_QUEUE_DEFAULT}.",
+        engines.unwrap_or(SDMA_ENGINE_DEFAULT),
+        queues.unwrap_or(SDMA_QUEUE_DEFAULT),
+    )))
 }
 
 fn merge_config(base: &mut serde_json::Value, overrides: serde_json::Value) {
@@ -1235,6 +1319,118 @@ mod tests {
             original["vm"]["gpu"]["device"]
         );
         assert_eq!(config["future_option"], original["future_option"]);
+    }
+
+    /// A def whose agent is the parsed `document`, so the agent keeps
+    /// the record of what the document left out — which is the whole
+    /// point of these cases and is *not* what a struct literal gives.
+    fn def_with_agent(document: serde_json::Value) -> EmulatorDef {
+        let mut def = def_with_gpus(1);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(serde_json::from_value(document).unwrap());
+        }
+        def
+    }
+
+    fn synthesised(def: &EmulatorDef) -> serde_json::Value {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = kmd_config(def, tmp.path()).unwrap();
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    /// RocJITsu's two SDMA schema defaults do not describe a device it
+    /// will load — 2 engines, 0 queues each — so an agent that mentions
+    /// neither field cannot simply be forwarded with both omitted.
+    #[test]
+    fn an_agent_silent_about_sdma_still_produces_a_loadable_config() {
+        let def = def_with_agent(serde_json::json!({
+            "vm": {"arch": "cdna4", "gpu": {"device": {"drm_render_minor": 128}}},
+            "topology": {"root": {"name": "soc", "type": "soc"}}
+        }));
+        let device = &synthesised(&def)["vm"]["gpu"]["device"];
+        // No SDMA, which is the machine mirage emulated for this
+        // document before omissions were preserved.
+        assert_eq!(device["num_sdma_engines"], 0);
+        // And nothing else the document left out was filled in.
+        assert!(device.get("num_sdma_queues_per_engine").is_none());
+        assert!(device.get("simd_count").is_none());
+        assert_eq!(device["drm_render_minor"], 128);
+    }
+
+    /// Half a claim is refused rather than completed: mirage has no
+    /// honest queue count to invent, and no engine count either.
+    #[test]
+    fn a_half_specified_sdma_pair_is_refused_at_validation() {
+        for device in [
+            serde_json::json!({"num_sdma_engines": 4}),
+            serde_json::json!({"num_sdma_queues_per_engine": 0}),
+            serde_json::json!({"num_sdma_engines": 4, "num_sdma_queues_per_engine": 0}),
+        ] {
+            let def = def_with_agent(serde_json::json!({
+                "vm": {"arch": "cdna4", "gpu": {"device": device}},
+                "topology": {"root": {"name": "soc", "type": "soc"}}
+            }));
+            let message = check_config(&def).unwrap_err().to_string();
+            assert!(message.contains("num_sdma_queues_per_engine"), "{message}");
+            assert!(message.contains("num_sdma_engines"), "{message}");
+        }
+    }
+
+    /// A coherent pair, and an explicit `num_sdma_engines: 0`, are the
+    /// document's to make and are passed through untouched.
+    #[test]
+    fn a_coherent_sdma_pair_is_left_alone() {
+        for device in [
+            serde_json::json!({"num_sdma_engines": 4, "num_sdma_queues_per_engine": 8}),
+            serde_json::json!({"num_sdma_engines": 0}),
+            serde_json::json!({"num_sdma_queues_per_engine": 8}),
+        ] {
+            let def = def_with_agent(serde_json::json!({
+                "vm": {"arch": "cdna4", "gpu": {"device": device.clone()}},
+                "topology": {"root": {"name": "soc", "type": "soc"}}
+            }));
+            assert_eq!(synthesised(&def)["vm"]["gpu"]["device"], device);
+        }
+    }
+
+    /// An agent imported from a whole rocjitsu config carries that
+    /// config's root `plugins`. The profile is what decides which
+    /// plugins a session runs, in both directions.
+    #[test]
+    fn a_profiles_plugin_selection_outranks_an_agents() {
+        let agent = serde_json::json!({
+            "vm": {"arch": "cdna4", "gpu": {"device": {"num_sdma_engines": 0}}},
+            "topology": {"root": {"name": "soc", "type": "soc"}},
+            "plugins": {"race": {}}
+        });
+        let empty = def_with_agent(agent.clone());
+        assert!(synthesised(&empty).get("plugins").is_none());
+
+        let mut selected = def_with_agent(agent);
+        selected.plugins = PluginsDef::from([("logging".to_string(), SimpleMap::new())]);
+        assert_eq!(
+            synthesised(&selected)["plugins"],
+            serde_json::json!({"logging": {}})
+        );
+
+        // The config and the libraries bind-mounted into a node
+        // container are then the same selection, so a containerised run
+        // enables what a local one does. `def.plugins` is the only
+        // input to the mount list (see `injection_def`), which is what
+        // the assertions above have just made authoritative.
+        let tmp = tempfile::tempdir().unwrap();
+        let preload = tmp.path().join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+        std::fs::write(tmp.path().join("librocjitsu_plugin_race.so"), b"").unwrap();
+        std::fs::write(tmp.path().join("librocjitsu_plugin_logging.so"), b"").unwrap();
+        assert!(enabled_plugin_libs(&preload, &empty.plugins).is_empty());
+        assert_eq!(
+            enabled_plugin_libs(&preload, &selected.plugins)
+                .iter()
+                .filter_map(|path| path.file_name()?.to_str())
+                .collect::<Vec<_>>(),
+            vec!["librocjitsu_plugin_logging.so"]
+        );
     }
 
     #[test]
