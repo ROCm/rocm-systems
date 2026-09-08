@@ -337,7 +337,7 @@ void debugEvent(void* eHandle, const char* tag) {
 }
 
 // CE event print functions
-static int ceCollId = 0;
+static __thread int ceCollId;
 static void printCeCollEvent(FILE* fh, struct ceColl* event) {
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"%s\", \"cat\": \"CE_COLL\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"count\": %lu, \"datatype\": \"%s\", \"strategy\": \"%s\", \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
@@ -359,7 +359,7 @@ static void printCeCollEvent(FILE* fh, struct ceColl* event) {
           event->base.func, ceCollId++, getpid(), 1, event->base.stopTs);
 }
 
-static int ceSyncId = 0;
+static __thread int ceSyncId;
 static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
   const char* syncTypeStr = event->isComplete ? "Complete" : "Ready";
   const char* strategy = (event->parent && event->parent->syncStrategy) ? event->parent->syncStrategy : "unknown";
@@ -374,7 +374,7 @@ static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
           ceSyncId++, getpid(), 1, event->base.stopTs);
 }
 
-static int ceBatchId = 0;
+static __thread int ceBatchId;
 static void printCeBatchEvent(FILE* fh, struct ceBatch* event) {
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"CeBatch\", \"cat\": \"CE_BATCH\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"numOps\": %d, \"totalBytes\": %lu, \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
