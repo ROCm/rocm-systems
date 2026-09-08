@@ -306,7 +306,6 @@ producer_loop(
                          0,
                          current_ts,
                          end_ts);
-        current_ts = end_ts;
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path

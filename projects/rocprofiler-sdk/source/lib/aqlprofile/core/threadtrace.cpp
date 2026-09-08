@@ -298,6 +298,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
     MemoryManager::RegisterManager(memorymgr);
 
     auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
+    // The allocation callback returns uninitialized storage; initialize clocks before GPU writes.
     for(size_t i = 0; i < se_number_total; ++i)
     {
         control_ptr[i].gpu_clock_start  = 0;
