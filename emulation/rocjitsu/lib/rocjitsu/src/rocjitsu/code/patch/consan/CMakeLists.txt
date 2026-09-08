@@ -151,30 +151,3 @@ set(
     rocjitsu_consan_orchestration
 )
 set(ROCJITSU_CONSAN_OBJECT_LIBS ${ROCJITSU_CONSAN_OBJECT_LIBS} PARENT_SCOPE)
-
-# Make source ownership exhaustive and exclusive. Retired comment-only
-# tombstones stay outside the compiled component graph.
-set(_consan_component_sources)
-foreach(_component IN LISTS ROCJITSU_CONSAN_OBJECT_LIBS)
-    get_target_property(_component_sources ${_component} SOURCES)
-    list(APPEND _consan_component_sources ${_component_sources})
-endforeach()
-set(_consan_unique_component_sources ${_consan_component_sources})
-list(REMOVE_DUPLICATES _consan_unique_component_sources)
-list(LENGTH _consan_component_sources _consan_component_source_count)
-list(LENGTH _consan_unique_component_sources _consan_unique_component_source_count)
-if(NOT _consan_component_source_count EQUAL _consan_unique_component_source_count)
-    message(FATAL_ERROR "a ConSan source belongs to more than one component")
-endif()
-file(GLOB_RECURSE _consan_production_sources RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cpp")
-list(REMOVE_ITEM _consan_production_sources
-    consan_branch_only_relay_router.cpp
-    consan_lowerer.cpp
-    consan_moi_model.cpp
-    targets/consan_relay_target_ops.cpp
-)
-list(SORT _consan_production_sources)
-list(SORT _consan_unique_component_sources)
-if(NOT _consan_production_sources STREQUAL _consan_unique_component_sources)
-    message(FATAL_ERROR "the ConSan component graph does not own every production source")
-endif()

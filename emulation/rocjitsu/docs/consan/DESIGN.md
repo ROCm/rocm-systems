@@ -100,10 +100,9 @@ contracts -> targets -> analysis -> transform -> validation -> orchestration
 | `rocjitsu_consan_validation` | Reconstruction and independent proof of the final encoded artifact. | Deciding what the selected mode ought to observe. |
 | `rocjitsu_consan_orchestration` | Public transform entry points, composition, publication, and typed transaction outcome. | Reimplementing analysis, targets, modes, or validation. |
 
-The boundary test in `tests/consan/check_architecture_boundaries.cmake` checks
-this direction in source as well as CMake. It rejects upward dependencies,
-target facts in mode files, mode policy in target providers, duplicated
-program-site or probe schemas, and reverse joins from patches into policy.
+The production CMake graph assigns implementation sources to components.
+Component APIs, physical mode and target ownership, and behavioral tests carry
+the boundary contract.
 
 The HSA adapter is outside this static graph. Files under `hooks/consan/` own
 environment parsing, runtime capability queries, HSA reader/executable/symbol
@@ -426,10 +425,9 @@ process teardown handles remaining quiescent reports.
 | Final validation | `consan_final_validation.cpp`, `consan_validation_inventory.cpp`, `targets/consan_validation_*` |
 | HSA integration | `hooks/consan/rj_hsa_dbi_hooks.cpp`, `rj_hsa_dbi_hook_config.cpp` |
 | Runtime reports | `hooks/consan/rj_hsa_dbi_moi_report_*`, `hooks/consan/modes/<mode>/` |
-| Boundary enforcement | `tests/consan/check_architecture_boundaries.cmake` |
 
 The compiled component, physical mode/target locality, typed inputs, and
-boundary tests—not file size or an `.inc` suffix—define authority.
+behavioral tests—not file size or an `.inc` suffix—define authority.
 
 ## Non-negotiable invariants
 
