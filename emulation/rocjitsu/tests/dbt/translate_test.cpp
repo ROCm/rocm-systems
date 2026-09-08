@@ -10,6 +10,8 @@
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
 /// verify correctness on real DBT host GPUs.
 
+#include "../amdgpu_elf_test_support.h"
+#include "../elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -50,8 +52,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "support/elf_test_support.h"
-#include "support/translate_test_support.h"
 #include "util/data_types.h"
 
 #include "rocjitsu/base/rj_compiler.h"

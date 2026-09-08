@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file translate_test_support.cpp
-/// @brief Shared fixture implementations for CPU-only DBT translation tests.
+/// @file amdgpu_elf_test_support.cpp
+/// @brief Shared AMDGPU ELF fixture implementations for CPU-only code-object tests.
 
-#include "translate_test_support.h"
+#include "amdgpu_elf_test_support.h"
 #include "decode_test_util.h"
 
 #include "elf_test_support.h"

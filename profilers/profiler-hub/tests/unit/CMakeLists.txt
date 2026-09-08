@@ -63,8 +63,6 @@ target_include_directories(
     PRIVATE ${SQL_SCHEMA_BINARY_DIR}
 )
 
-target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_17)
-
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()

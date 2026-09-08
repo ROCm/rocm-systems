@@ -216,6 +216,18 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
     }
     std::cout << "\t**Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
               << asic_info.rev_id << std::endl;
+    if (checkIfMaxValue(asic_info.chip_rev_id)) {
+      std::cout << "\t**Chip Revision ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**Chip Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << asic_info.chip_rev_id << std::endl;
+    }
+    if (checkIfMaxValue(asic_info.external_rev_id)) {
+      std::cout << "\t**External Revision ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**External Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << asic_info.external_rev_id << std::endl;
+    }
     if (checkIfMaxValue(asic_info.subvendor_id)) {
       std::cout << "\t**Subvendor ID: N/A" << std::endl;
     } else {

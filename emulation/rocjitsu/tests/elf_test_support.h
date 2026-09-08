@@ -4,7 +4,7 @@
 #pragma once
 
 /// @file elf_test_support.h
-/// @brief Small, bounds-checked helpers shared by DBT ELF integration tests.
+/// @brief Small, bounds-checked helpers shared by ELF integration tests.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"

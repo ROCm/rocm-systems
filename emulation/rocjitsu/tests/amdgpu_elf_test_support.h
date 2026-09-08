@@ -3,8 +3,8 @@
 
 #pragma once
 
-/// @file translate_test_support.h
-/// @brief Shared fixtures for CPU-only DBT translation tests.
+/// @file amdgpu_elf_test_support.h
+/// @brief Shared AMDGPU ELF fixtures for CPU-only code-object tests.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_elf.h"
