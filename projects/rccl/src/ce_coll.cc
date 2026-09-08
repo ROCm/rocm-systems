@@ -321,40 +321,49 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
 }
 
-// "Will CE (or hierarchical CE) actually service this AllToAll?" -- the single
-// source of truth for the CE-vs-DDA tie-break in ncclAlltoAll_impl
-// (collectives.cc). Self-contained (does its own window lookup + capture probe
-// from the raw buffers/stream) so the DDA-path guard needs only this one symbol.
+// Core CE-vs-kernel predicate for AllToAll, on inputs the caller already has:
+// "given these windows / capture state, will CE (or hierarchical CE) service
+// this AllToAll?" This is EXACTLY taskAppend()'s registered-window CE branch
+// (enqueue.cc): NCCL_CTA_POLICY_ZERO set, not graph-capturing (CE is
+// graph-unsafe), no sysmem segment, and the regular or hierarchical CE path
+// available for these operands. taskAppend calls this so its CE decision and the
+// ncclAlltoAll_impl DDA-yield guard cannot drift; the buffer-level wrapper below
+// backs the collectives.cc call site that does not yet have these locals.
 //
-// Reproduces taskAppend()'s registered-window CE branch (enqueue.cc): CE runs
-// when NCCL_CTA_POLICY_ZERO is set, the stream is not capturing (CE is
-// graph-unsafe), neither buffer has a sysmem segment, and either the regular or
-// the hierarchical CE path is available for these operands. The force-CE DDA
-// scratch branch (rcclParamForceCe) is deliberately NOT modelled here: it is a
-// separate opt-in that dispatches through DDA scratch anyway, so DDA need not
-// yield for it.
+// No ncclGroupDepth check: taskAppend, the authority this reproduces, imposes
+// none for plain AllToAll (unlike ncclCeAlltoAllvEligible, whose own path opens
+// an internal group). The force-CE DDA-scratch branch (rcclParamForceCe) is
+// deliberately excluded -- a separate opt-in that dispatches through DDA scratch
+// anyway, so DDA need not yield for it.
+bool ncclCeAlltoAllServes(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                          bool hasSysmemSegment, bool ceCapturing) {
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+  if (hasSysmemSegment || ceCapturing) return false;
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType) ||
+         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+}
+
+// Buffer-level wrapper for the CE-vs-DDA tie-break in ncclAlltoAll_impl
+// (collectives.cc), which reaches this point with only the raw buffers/stream in
+// hand. Does the window lookup and graph-capture probe, then defers the actual
+// decision to ncclCeAlltoAllServes() so both call sites share one predicate.
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, const void* sendbuff, void* recvbuff, ncclDataType_t datatype,
                             cudaStream_t stream) {
-  if (ncclGroupDepth != 0) return false;
-  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
-
-  // CE is graph-unsafe (hipMemcpyBatchAsync + cross-rank memop barrier deadlock
-  // on replay), so it is skipped while the stream is capturing. Mirror that.
   struct ncclCudaGraph ceGraph;
   if (ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode) != ncclSuccess) return false;
-  if (ncclCudaGraphValid(ceGraph)) return false;
+  const bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &sendWin);
   ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) return false;
+  const bool hasSysmemSegment =
+    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
   ncclSymRegType_t winRegType;
   if (ncclGetSymRegType(sendWin, recvWin, &winRegType) != ncclSuccess) return false;
 
-  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType) ||
-         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+  return ncclCeAlltoAllServes(comm, datatype, winRegType, hasSysmemSegment, ceCapturing);
 }
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,

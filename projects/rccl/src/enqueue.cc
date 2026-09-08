@@ -3924,8 +3924,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
-      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
-                  !hasSysmemSegment) ||
+        // For AllToAll, route the CE decision through ncclCeAlltoAllServes() --
+        // the same predicate ncclAlltoAll_impl's DDA-yield guard uses -- so the two
+        // cannot drift. It is exactly this branch's condition specialized to
+        // AllToAll: (CTAPolicy & ZERO) && (ceAvailable || hierCeAvailable) &&
+        // !hasSysmemSegment (ceArSymRegistered is AllReduce-only). Other CE-capable
+        // collectives keep the inline condition.
+      } else if ((info->coll == ncclFuncAlltoAll
+                    ? ncclCeAlltoAllServes(comm, info->datatype, winRegType, hasSysmemSegment, ceCapturing)
+                    : ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
+                       !hasSysmemSegment)) ||
                  ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
