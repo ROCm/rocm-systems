@@ -140,6 +140,9 @@ set(SRC_FILES
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   algorithms/gin/gin_alltoall.h
+  algorithms/gin/gin_all_reduce.h
+  algorithms/gin/gin_all_reduce_policy.h
+  algorithms/gin/sdma/all_reduce_gin_sdma.h 
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -522,6 +525,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
   )
 endif()
 
@@ -817,6 +821,7 @@ if(ENABLE_DEVICE_LINKER)
   # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
@@ -1082,6 +1087,20 @@ if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-unused-private-field)
   target_compile_options(rccl PRIVATE -Wno-null-conversion)
   target_compile_options(rccl PRIVATE -Wno-missing-braces)
+endif()
+
+## Add SQTT instrumentation support if enabled
+if(SQTT_ENABLED)
+  # Check if SQTT markers are already in source code
+  execute_process(
+    COMMAND grep -q "PRIM_SIMPLE_WAIT_PEER" "${CMAKE_CURRENT_SOURCE_DIR}/device/prims_simple.h"
+    RESULT_VARIABLE MARKERS_PRESENT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+
+  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
 endif()
 
 ## Set RCCL compile and linker options for unit tests and code coverage
