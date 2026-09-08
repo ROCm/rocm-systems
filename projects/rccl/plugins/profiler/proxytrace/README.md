@@ -13,10 +13,12 @@ make
 ```
 
 Requires a C++17 compiler and ROCm (`ROCM_PATH`, default `/opt/rocm`). The
-standalone Makefile does not depend on a configured RCCL CMake build: plugin
-ABI headers live in `nccl/` next to the source, and `proxy_trace.cc` is
-compiled from this directory. Minimal extra types live in
-`proxytrace_plugin_shim.h`.
+standalone Makefile does not depend on a configured RCCL CMake build, only on
+the source tree: the profiler ABI headers are read directly from
+`src/include/plugin` so they cannot drift from the interface RCCL implements,
+and `proxy_trace.cc` is compiled from this directory. `nccl/os.h` supplies the
+one typedef those headers need without pulling in RCCL internals, and minimal
+log and error types live in `proxytrace_plugin_shim.h`.
 
 Output: `librccl-profiler-proxytrace.so`
 

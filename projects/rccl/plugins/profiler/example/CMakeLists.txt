@@ -1,3 +1,19 @@
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(rccl-profiler-example LANGUAGES CXX)
+    set(PROFILER_EXAMPLE_STANDALONE ON)
+    # No parent project to resolve the ROCm location in a standalone build.
+    if(NOT ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH $ENV{ROCM_PATH})
+        else()
+            set(ROCM_PATH /opt/rocm)
+        endif()
+    endif()
+else()
+    set(PROFILER_EXAMPLE_STANDALONE OFF)
+endif()
+
 find_program(hipify-perl_executable hipify-perl HINTS ${ROCM_PATH}/bin)
 if(NOT hipify-perl_executable)
     message(FATAL_ERROR "hipify-perl not found")
@@ -53,8 +69,13 @@ set_target_properties(nccl-profiler-example PROPERTIES
     OUTPUT_NAME "rccl-profiler-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
 )
+
+if(NOT PROFILER_EXAMPLE_STANDALONE)
+    set_target_properties(nccl-profiler-example PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
+    )
+endif()
 
 add_custom_target(clean-profiler-lib
     COMMAND ${CMAKE_COMMAND} -E remove -f ${CMAKE_BINARY_DIR}/test/unit/plugins/librccl-profiler-example.so

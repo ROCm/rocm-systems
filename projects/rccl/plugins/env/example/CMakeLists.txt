@@ -7,6 +7,14 @@
 # See LICENSE.txt for more license information
 #
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(rccl-env-example LANGUAGES C)
+    set(ENV_EXAMPLE_STANDALONE ON)
+else()
+    set(ENV_EXAMPLE_STANDALONE OFF)
+endif()
+
 set(SRC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/plugin.c
 )
@@ -24,5 +32,10 @@ set_target_properties(nccl-env-example PROPERTIES
     OUTPUT_NAME "rccl-env-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
 )
+
+if(NOT ENV_EXAMPLE_STANDALONE)
+    set_target_properties(nccl-env-example PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
+    )
+endif()

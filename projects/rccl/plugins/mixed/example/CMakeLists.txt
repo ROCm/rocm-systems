@@ -22,9 +22,9 @@ set(SRC_FILES
 # Create shared library
 add_library(nccl-mixed-example SHARED ${SRC_FILES})
 
-# Set include directories
 target_include_directories(nccl-mixed-example PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/nccl
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../net/example/nccl
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner/example/nccl
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

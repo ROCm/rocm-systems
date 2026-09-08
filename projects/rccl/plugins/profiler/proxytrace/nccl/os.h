@@ -5,24 +5,17 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-/* Minimal os.h for plugin standalone builds: only ncclPid_t is needed by
- * the profiler headers. The full RCCL os.h pulls in nccl.h and many
- * RCCL-internal APIs that plugins cannot use. */
+/* The profiler ABI headers in src/include/plugin need only ncclPid_t from
+ * os.h. */
 
 #ifndef NCCL_OS_H_
 #define NCCL_OS_H_
 
 #if defined(NCCL_OS_WINDOWS)
-#include "os/windows.h"
-#elif defined(NCCL_OS_LINUX)
-#include "os/linux.h"
+typedef unsigned long ncclPid_t;
 #else
-/* Default: assume Linux */
-#include "os/linux.h"
-#endif
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
+#include <sys/types.h>
+typedef pid_t ncclPid_t;
 #endif
 
 #endif

@@ -1,3 +1,11 @@
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(rccl-tuner-example LANGUAGES C)
+    set(TUNER_EXAMPLE_STANDALONE ON)
+else()
+    set(TUNER_EXAMPLE_STANDALONE OFF)
+endif()
+
 # Find all C source files in current directory
 set(SRC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/plugin.c
@@ -16,8 +24,13 @@ set_target_properties(nccl-tuner-example PROPERTIES
     OUTPUT_NAME "rccl-tuner-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
 )
+
+if(NOT TUNER_EXAMPLE_STANDALONE)
+    set_target_properties(nccl-tuner-example PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
+    )
+endif()
 
 # Add custom target for clean (equivalent to Makefile clean target)
 add_custom_target(clean-tuner-lib
