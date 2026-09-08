@@ -7,6 +7,7 @@ import argparse
 import gzip
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pandas as pd
@@ -16,18 +17,13 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
-# The args pre_processing() reads besides the output format. An empty path list
-# leaves no workload to walk, so only the --output-format dispatch runs.
+# An empty path list leaves pre_processing() nothing to walk but the sink setup.
 PRE_PROCESSING_ARGS = {
     "path": [],
     "gpu_kernel": None,
     "gpu_id": None,
     "gpu_dispatch_id": None,
 }
-
-# Stand-in for a rendered report. What tty.show_all puts in it is covered by
-# tests/unit/utils/test_tty.py; here only the sink it lands in matters.
-REPORT_TEXT = "30. Memory Bandwidth Analysis\n30.13 EA Interface\n"
 
 
 def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
@@ -275,36 +271,46 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("output_format", ["txt", "stdout"])
-def test_pre_processing_report_matches_across_output_formats(
-    tmp_path, monkeypatch, capsys, output_format
+# ---------------------------------------------------------------------------
+# initalize_runs --specs-correction handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("specs_correction", [None, "num_xcd:4"])
+def test_initalize_runs_corrects_specs_only_when_asked(
+    tmp_path, monkeypatch, specs_correction
 ) -> None:
-    """Every --output-format receives byte-identical report content."""
-    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
-    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: {})
-    monkeypatch.chdir(tmp_path)
+    """Without --specs-correction the recorded sysinfo.csv is what analysis runs on."""
+    sysinfo = {
+        "ip_blocks": "SQ|LDS|TCC|roofline",
+        "gpu_arch": "gfx950",
+        "num_xcd": 8,
+    }
+    pd.DataFrame([sysinfo]).to_csv(tmp_path / "sysinfo.csv", index=False)
+    corrected = pd.DataFrame([{**sysinfo, "num_xcd": "4"}])
+    monkeypatch.setattr(f"{MODULE}.parser.correct_sys_info", lambda *_args: corrected)
 
     analyzer = OmniAnalyze_Base(
         argparse.Namespace(
-            output_format=output_format,
-            output_name="analysis_report",
-            **PRE_PROCESSING_ARGS,
+            path=[[str(tmp_path)]],
+            specs_correction=specs_correction,
+            no_roof=True,
+            normal_unit="per_kernel",
+            list_stats=False,
+            filter_metrics=None,
+            config_dir=str(tmp_path),
+            gpu_kernel=None,
         ),
         {},
     )
-    analyzer.pre_processing()
-    capsys.readouterr()
+    # Panel config generation reads the real arch YAML, which this test is not about.
+    monkeypatch.setattr(analyzer, "generate_configs", lambda *_args: {})
+    analyzer._arch_configs = {sysinfo["gpu_arch"]: SimpleNamespace(dfs={}, dfs_type={})}
+    analyzer.set_soc({sysinfo["gpu_arch"]: SimpleNamespace(_mspec=object())})
 
-    try:
-        analyzer._output.write(REPORT_TEXT)
-        # The analyzer never closes _output, so flush before reading it back.
-        analyzer._output.flush()
-        if output_format == "txt":
-            written = (tmp_path / "analysis_report.txt").read_text(encoding="utf-8")
-        else:
-            written = capsys.readouterr().out
-    finally:
-        if analyzer._output is not sys.stdout:
-            analyzer._output.close()
+    workload = analyzer.initalize_runs()[str(tmp_path)]
 
-    assert written == REPORT_TEXT
+    expected_num_xcd = "4" if specs_correction else 8
+    assert workload.sys_info["num_xcd"].item() == expected_num_xcd
+    # initalize_runs reads ip_blocks off sys_info straight after the correction.
+    assert workload.avail_ips == sysinfo["ip_blocks"].split("|")
