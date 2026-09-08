@@ -21,8 +21,9 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// Event lifecycle:
 ///   1. allocateEventId() — registers a new event (ACTIVE).
-///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE after all of
-///      the event's wait-counter obligations have completed.
+///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE after a wait or
+///      ordered counter-capacity backpressure satisfies all of the event's
+///      wait-counter obligations.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
 ///      marks RETIRED (for LDS events, called at s_barrier via
 ///      flushBarrierPendingEvents).
@@ -37,7 +38,7 @@ class RaceDetector {
 
 public:
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler);
+               std::function<void(RaceViolation)> raceHandler, CounterCapacities);
 
   /// Allocate an event using the counter and ordering implied by its type.
   EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
