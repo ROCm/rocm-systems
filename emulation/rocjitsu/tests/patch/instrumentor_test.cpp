@@ -1913,6 +1913,79 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
+// Two sites naming one symbol with different counts were verified against
+// different conventions, so they must not share a ProbeCallable. Checks the
+// registry split; the values themselves are not materialized yet.
+TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    if (anchor != 0)
+      pt.probe_args = {0xAAAAAAAAu};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 2);
+}
+
+// An inline nop has nowhere to put arguments.
+TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  AmdGpuCodeObject obj(target.data(), target.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_args = {1u};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("probe_args"), std::string::npos) << result.errors.front();
+}
+
+// More arguments than the ABI has registers for. Rejected before the count is
+// narrowed to uint8_t, which would wrap a large request into a small in-range
+// one.
+TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(kMaxProbeArgVgprs + 1, 0u);
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("the limit is"), std::string::npos) << result.errors.front();
+}
+
 // Two anchors calling the SAME (probe_obj, symbol) share a single copied body:
 // the body is emitted once and both trampolines target that one copy. Locks in
 // the resolve_probe_index dedup so a regression that copies per site is caught.

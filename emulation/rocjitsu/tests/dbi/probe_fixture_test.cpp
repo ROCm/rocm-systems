@@ -86,7 +86,8 @@ TEST(ProbeFixture, NopProbeBuildsCallable) {
   const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
   ASSERT_TRUE(resolved.has_value()) << err;
 
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_nop_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
@@ -104,7 +105,8 @@ TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
   std::string err;
   const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
   ASSERT_TRUE(resolved.has_value()) << err;
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
 
   const auto summary = build_probe_clobber_summary(*callable, &err);

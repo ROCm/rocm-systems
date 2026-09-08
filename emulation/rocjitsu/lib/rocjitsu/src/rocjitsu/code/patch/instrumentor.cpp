@@ -326,6 +326,12 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                       "(a probe call) or both be empty (the inline nop)");
     return std::nullopt;
   }
+  // The inline nop has nowhere to put arguments. Rejected rather than ignored,
+  // so a caller that meant to request a probe call finds out.
+  if (pt.probe_obj == nullptr && !pt.probe_args.empty()) {
+    fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
+    return std::nullopt;
+  }
   // TODO: consume force_full_exec when EXEC policy management is implemented
   if (pt.force_full_exec) {
     fail("InstrumentationPoint::force_full_exec must be false temporarily");
@@ -712,16 +718,32 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects and symbols together in probe_keys (object, symbol).
-  std::vector<std::pair<const AmdGpuCodeObject *, std::string>> probe_keys;
+  // Store probe objects, symbols, and declared argument counts together in
+  // probe_keys. The count is part of the convention the body was verified
+  // against, so two sites calling one probe with different counts get distinct
+  // ProbeCallables. The argument values stay per-site and are not in the key.
+  struct ProbeKey {
+    const AmdGpuCodeObject *obj;
+    std::string symbol;
+    size_t num_args;
+  };
+  std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
   // If the probe is new, then resolve it and get probe info; add it to
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].first == pt.probe_obj && probe_keys[i].second == pt.probe_symbol)
+      if (probe_keys[i].obj == pt.probe_obj && probe_keys[i].symbol == pt.probe_symbol &&
+          probe_keys[i].num_args == pt.probe_args.size())
         return i;
+    }
+    // Bounded before the narrowing cast below, which would wrap a large count
+    // into a small in-range one.
+    if (pt.probe_args.size() > kMaxProbeArgVgprs) {
+      perr = "probe '" + pt.probe_symbol + "' was given " + std::to_string(pt.probe_args.size()) +
+             " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
+      return std::nullopt;
     }
     const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
     if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
@@ -732,7 +754,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
     if (!sym)
       return std::nullopt;
-    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
+    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_,
+                                         static_cast<uint8_t>(pt.probe_args.size()), &perr);
     if (!callable)
       return std::nullopt;
     // Inputs the probe reads that its convention does not supply. Typically a
@@ -745,11 +768,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return std::nullopt;
     if (!live_ins->none()) {
       perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
-             " before defining it, and the calling convention does not supply it";
+             " before defining it, and its ABI (" + std::to_string(pt.probe_args.size()) +
+             " argument dwords) does not supply it";
       return std::nullopt;
     }
     out.probes.push_back(std::move(*callable));
-    probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, pt.probe_args.size()});
     return out.probes.size() - 1;
   };
 

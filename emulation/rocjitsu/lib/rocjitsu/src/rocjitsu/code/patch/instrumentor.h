@@ -98,6 +98,12 @@ struct InstrumentationPoint {
   // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
+  // Immediate argument dwords to hand the probe, one per VGPR from the ABI's
+  // arg_vgpr_base. The size is the declared argument count and is part of what
+  // the probe body is verified against, so two sites calling one probe with
+  // different counts do not share a ProbeCallable. Empty means a probe called
+  // with no arguments. Only meaningful alongside probe_obj / probe_symbol.
+  std::vector<uint32_t> probe_args;
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
