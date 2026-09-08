@@ -46,6 +46,7 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
