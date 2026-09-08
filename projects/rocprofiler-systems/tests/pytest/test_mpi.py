@@ -101,7 +101,7 @@ class TestMPI(RocprofsysTest):
             r"Enabling MPI support\.\.\.",
         ]
         BINARY_REWRITE_FAIL_REGEX = [
-            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto|pftrace)"
+            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+\.(json|txt|proto|pftrace)"
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
 
