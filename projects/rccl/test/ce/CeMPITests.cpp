@@ -15,6 +15,9 @@
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
 
+// For RCCL_CE_HIER_SELECTED_TAG, so the assertion cannot drift from the emitter.
+#include "ce_coll.h"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <string>
@@ -40,6 +43,9 @@ constexpr int    kMinRanks8       = 8;
 constexpr int    kStressIters     = 20;     // back-to-back iterations for stress test
 constexpr int    kInterleavedIters = 10;    // iterations for CE+SM interleaved stress test
 constexpr int    kScaleOutIters   = 3;      // repeated RMA sequence reuse in hierarchical tests
+// 68 MiB per rank/peer crosses the 64 MiB hierarchical chunk size, exercising the
+// multi-chunk plan and the per-chunk scratch release.
+constexpr size_t kChunkBoundaryCount = (68ull * 1024 * 1024) / sizeof(float);
 } // namespace CeMPITestConstants
 
 using namespace CeMPITestConstants;
@@ -125,24 +131,43 @@ protected:
         }
     }
 
-    bool isScaleOutTopology() const
+    // Ranks sharing this rank's node. Also the LSA team size on a topology where
+    // the scale-up domain is one node, which is what the scale-out cases require.
+    int localRankCount() const
     {
         MPI_Comm localComm = MPI_COMM_NULL;
         if(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0,
                                MPI_INFO_NULL, &localComm) != MPI_SUCCESS)
-            return false;
+            return 0;
 
-        int worldSize = 0;
         int localSize = 0;
+        MPI_Comm_size(localComm, &localSize);
+        MPI_Comm_free(&localComm);
+        return localSize;
+    }
+
+    bool isScaleOutTopology() const
+    {
+        int worldSize = 0;
+        int localSize = localRankCount();
         int minLocalSize = 0;
         int maxLocalSize = 0;
+        if(localSize == 0) return false;
         MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
-        MPI_Comm_size(localComm, &localSize);
         MPI_Allreduce(&localSize, &minLocalSize, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         MPI_Allreduce(&localSize, &maxLocalSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        MPI_Comm_free(&localComm);
 
         return worldSize > maxLocalSize && minLocalSize >= 2;
+    }
+
+    // MPI topology alone does not imply hierarchical CE is reachable: it also needs
+    // symmetric memory, which on a multi-node communicator requires a GIN backend.
+    // Distinguish "this machine cannot do it" (skip) from "prerequisites are present
+    // but the path was not taken" (fail), so a stack without GIN/RMA does not report
+    // a red for behaving correctly.
+    bool scaleOutPrerequisitesMet() const
+    {
+        return readAllLogs().find("Symmetric memory is not supported") == std::string::npos;
     }
 
     void assertHierarchicalCEPathTaken(int rank, const char* context)
@@ -153,7 +178,7 @@ protected:
         const std::string log = readAllLogs();
         if(rank == 0)
         {
-            EXPECT_NE(log.find("[Hierarchical CE]"), std::string::npos)
+            EXPECT_NE(log.find(RCCL_CE_HIER_SELECTED_TAG), std::string::npos)
                 << context
                 << ": hierarchical CE selection marker absent from rank 0 log";
         }
@@ -305,7 +330,7 @@ class CeMPI_AllGather : public CeMPITest
 {
 protected:
     void runAllGather(int minRanks, size_t count, const char* testId,
-                      bool requireScaleOut = false)
+                      bool requireScaleOut = false, int scaleOutIters = kScaleOutIters)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
@@ -314,15 +339,20 @@ protected:
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
+        if(requireScaleOut && !scaleOutPrerequisitesMet())
+            GTEST_SKIP() << "Symmetric memory unavailable on this communicator; "
+                            "hierarchical CE needs a GIN backend";
+
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
         ncclCommCount(getActiveCommunicator(), &nRanks);
 
         SymBuf sendSym, recvSym;
         ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
-        ASSERT_EQ(ncclSuccess, allocSymBuf(count * nRanks * sizeof(float), recvSym));
+        ASSERT_EQ(ncclSuccess,
+                  allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym));
 
-        const int iterations = requireScaleOut ? kScaleOutIters : 1;
+        const int iterations = requireScaleOut ? scaleOutIters : 1;
         for(int iter = 0; iter < iterations; ++iter)
         {
             const int epoch = iter * nRanks;
@@ -338,7 +368,7 @@ protected:
             ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
             ASSERT_TRUE(verifyBufferData<float>(
-                recvSym.ptr, count * nRanks,
+                recvSym.ptr, count * static_cast<size_t>(nRanks),
                 [count, epoch](size_t i) {
                     return static_cast<float>(epoch + i / count + 1);
                 }))
@@ -347,10 +377,13 @@ protected:
         }
 
         assertCEPathTaken(testId);
+        // CE batch numOps is per LSA destination, which is the node-local rank count
+        // on the scale-out path and the whole communicator otherwise.
+        const int batchPeers = requireScaleOut ? localRankCount() : nRanks;
         if(requireScaleOut)
             assertHierarchicalCEPathTaken(rank, testId);
-        // numOps = nRanks (one copy per rank including self); chunkBytes = count * sizeof(float)
-        assertCEBatchPath(ceExpectIntraBatchSync(nRanks, count * sizeof(float)), testId);
+        // numOps = batchPeers (one copy per destination); chunkBytes = count * sizeof(float)
+        assertCEBatchPath(ceExpectIntraBatchSync(batchPeers, count * sizeof(float)), testId);
     }
 };
 
@@ -367,6 +400,12 @@ TEST_F(CeMPI_AllGather, MultiNodeHierarchical)
 {
     runAllGather(kMinRanks4, kSmallCount, "CeMPI_AllGather/MultiNodeHierarchical", true);
 }
+// CE-MPI-AG-06: 68 MiB per rank crosses the 64 MiB hierarchical chunk boundary.
+TEST_F(CeMPI_AllGather, MultiNodeHierarchicalChunkBoundary)
+{
+    runAllGather(kMinRanks4, kChunkBoundaryCount,
+                 "CeMPI_AllGather/MultiNodeHierarchicalChunkBoundary", true, 1);
+}
 
 // ===========================================================================
 // CeMPI_AlltoAll – ncclAlltoAll CE correctness + log verification
@@ -377,7 +416,7 @@ class CeMPI_AlltoAll : public CeMPITest
 protected:
     // count is per-rank-per-destination; total send/recv buffer = count * nRanks.
     void runAlltoAll(int minRanks, size_t count, const char* testId,
-                     bool requireScaleOut = false)
+                     bool requireScaleOut = false, int scaleOutIters = kScaleOutIters)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
@@ -385,6 +424,10 @@ protected:
             GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        if(requireScaleOut && !scaleOutPrerequisitesMet())
+            GTEST_SKIP() << "Symmetric memory unavailable on this communicator; "
+                            "hierarchical CE needs a GIN backend";
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -396,35 +439,44 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), recvSym));
 
-        const int iterations = requireScaleOut ? kScaleOutIters : 1;
+        const int iterations = requireScaleOut ? scaleOutIters : 1;
         for(int iter = 0; iter < iterations; ++iter)
         {
             const int epoch = iter * nRanks;
+            // Value depends on both endpoints: sender s writes epoch + s*nRanks + j + 1
+            // into the slice bound for rank j. A wrong source slice therefore changes the
+            // received bytes, which a sender-only pattern could not detect.
             ASSERT_EQ(
                 hipSuccess,
                 initializeBufferWithPattern<float>(
                     sendSym.ptr, totalElem,
-                    [rank, epoch](size_t) { return static_cast<float>(epoch + rank + 1); }));
+                    [rank, nRanks, count, epoch](size_t i) {
+                        return static_cast<float>(epoch + rank * nRanks + i / count + 1);
+                    }));
 
             ASSERT_EQ(ncclSuccess,
                       ncclAlltoAll(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
                                    getActiveCommunicator(), getActiveStream()));
             ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
+            // Slice s of the result is what rank s sent to us, i.e. epoch + s*nRanks + rank + 1.
             ASSERT_TRUE(verifyBufferData<float>(
                 recvSym.ptr, totalElem,
-                [count, epoch](size_t i) {
-                    return static_cast<float>(epoch + i / count + 1);
+                [count, nRanks, rank, epoch](size_t i) {
+                    return static_cast<float>(epoch + (i / count) * nRanks + rank + 1);
                 }))
                 << "Rank " << rank << ": AlltoAll data verification failed at iteration "
                 << iter;
         }
 
         assertCEPathTaken(testId);
+        // CE batch numOps is per LSA destination, which is the node-local rank count
+        // on the scale-out path and the whole communicator otherwise.
+        const int batchPeers = requireScaleOut ? localRankCount() : nRanks;
         if(requireScaleOut)
             assertHierarchicalCEPathTaken(rank, testId);
-        // numOps = nRanks (one per destination rank); chunkBytes = count * sizeof(float)
-        assertCEBatchPath(ceExpectIntraBatchSync(nRanks, count * sizeof(float)), testId);
+        // numOps = batchPeers (one per destination); chunkBytes = count * sizeof(float)
+        assertCEBatchPath(ceExpectIntraBatchSync(batchPeers, count * sizeof(float)), testId);
     }
 };
 
@@ -440,6 +492,12 @@ TEST_F(CeMPI_AlltoAll, ThreeRanks) { runAlltoAll(3,          kSmallCount,  "CeMP
 TEST_F(CeMPI_AlltoAll, MultiNodeHierarchical)
 {
     runAlltoAll(kMinRanks4, kSmallCount, "CeMPI_AlltoAll/MultiNodeHierarchical", true);
+}
+// CE-MPI-A2A-06: 68 MiB per peer crosses the 64 MiB hierarchical chunk boundary.
+TEST_F(CeMPI_AlltoAll, MultiNodeHierarchicalChunkBoundary)
+{
+    runAlltoAll(kMinRanks4, kChunkBoundaryCount,
+                "CeMPI_AlltoAll/MultiNodeHierarchicalChunkBoundary", true, 1);
 }
 
 // ===========================================================================

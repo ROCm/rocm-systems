@@ -2072,8 +2072,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
 
         if (comm->rank == 0) {
           if (!ncclDevrIsOneLsaTeam(comm)) {
-            INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
-                 task->count * ncclTypeSize(task->datatype));
+            INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE",
+                 ncclFuncToString(task->func), task->count * ncclTypeSize(task->datatype));
           } else {
             const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
             INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
@@ -3857,8 +3857,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
       }
 
-      // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
-      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      // Window registration type and CE eligibility, hoisted above the CE-init trigger below,
+      // which now consults hierCeAvailable. ceAllReduceFits is the size gate for CE AllReduce
+      // without symmetric registration: ceARTmpBuf holds at most NCCL_CE_AR_MAX_MSG_BYTES.
       bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));

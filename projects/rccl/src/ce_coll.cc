@@ -142,7 +142,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.ceSyncWin = (struct ncclDevrWindow*)ceWinDevHost->winHost;
 
   comm->ceColl.baseUCSymReadyOffset = 0;
-  comm->ceColl.baseUCSymComplOffset = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16);
+  comm->ceColl.baseUCSymComplOffset = ceDevBaseSize / 2;
   comm->ceColl.baseUCSymReadyPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymReadyOffset;
   comm->ceColl.baseUCSymComplPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymComplOffset;
   comm->ceColl.ceSeqNum = 0;
@@ -174,7 +174,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // CE AllReduce staging buffer (double-buffered scatter staging, no scratch):
   //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
-  if (rcclParamCeAllReduce()) {
+  // CE AllReduce is LSA-local only, so skip the staging buffer on communicators
+  // that reach ncclCeInit solely for the hierarchical path.
+  if (rcclParamCeAllReduce() && ncclDevrIsOneLsaTeam(comm)) {
     NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                   ret, fail_ar);
@@ -564,7 +566,9 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // fixed-value barrier can be replayed.
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
     size_t resetIdx = 0;
-    for (int i = 0; i < comm->nRanks; i++) {
+    // The flag arrays and batchParams are both sized from the LSA team, so the
+    // reset must walk lsaSize, not nRanks.
+    for (int i = 0; i < lsaSize; i++) {
       batchParams[resetIdx] = {};
       batchParams[resetIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
       batchParams[resetIdx].writeValue.address =
@@ -2018,10 +2022,11 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
-  // Hierarchical path: inter-node RMA plus intra-node CE. Keyed on LSA coverage
-  // rather than node count, so a multi-clique single-NVL-domain comm whose LSA
-  // spans every rank still takes the LSA-local path below.
-  if (!ncclDevrIsOneLsaTeam(comm)) {
+  // Hierarchical path: inter-node RMA plus intra-node CE. This predicate must
+  // match the one ncclHierCeAvailable admitted the task under, otherwise a
+  // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
+  // dispatched here without the RMA prerequisites having been checked.
+  if (comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm)) {
     switch (args->func) {
     case ncclFuncAllGather:
       NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
@@ -2124,7 +2129,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
 
   if (comm->rank == 0) {
     if (!ncclDevrIsOneLsaTeam(comm)) {
-      INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
+      INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype));
     } else {
       const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";

@@ -18,6 +18,10 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
+// Selection marker for the hierarchical CE path. Defined once because the
+// scale-out MPI tests assert on this exact text.
+#define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
+
 // Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
 // and the reduced output goes to the user recvbuff)
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)

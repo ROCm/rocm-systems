@@ -110,6 +110,17 @@ protected:
             GTEST_SKIP() << "Need >= " << n << " MPI ranks";
     }
 
+    // Skip if the LSA team has fewer than n ranks. Assertions scoped to the LSA
+    // domain must guard on it: 2 nodes x 1 rank gives nRanks=2 but lsaSize=1,
+    // which would otherwise satisfy requireMinRanks(2) and then assert on an
+    // empty batch.
+    void requireMinLsaRanks(int n)
+    {
+        if(ceComm->devrState.lsaSize < n)
+            GTEST_SKIP() << "Need >= " << n << " ranks in the LSA team, have "
+                         << ceComm->devrState.lsaSize;
+    }
+
     // Allocate a batch, call ncclPrepUCSync once, and return both for inspection.
     struct PrepSyncResult
     {
@@ -361,6 +372,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
+    requireMinLsaRanks(2);
     const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
     EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
@@ -371,6 +383,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
+    requireMinLsaRanks(2);
     const int lsaRank = ceComm->devrState.lsaSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
@@ -448,6 +461,27 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
                           << " expected=" << errExp << " got=" << errAct;
         }
     }
+}
+
+// BATCH-01: ncclCeFreeBatchOpsParams is idempotent. Hierarchical AllGather frees
+// per-chunk scratch inside its chunk loop and once more at function exit, both on
+// the same object, so a release that does not clear the pointers double-frees.
+// Single-node, so this pins the invariant wherever the suite runs.
+TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
+{
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, 4), ncclSuccess);
+    ASSERT_NE(params.srcs, nullptr);
+
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
+    EXPECT_EQ(params.dsts, nullptr);
+    EXPECT_EQ(params.sizes, nullptr);
+    EXPECT_EQ(params.numOps, 0);
+
+    // Must not double-free.
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
 }
 
 // ===========================================================================
