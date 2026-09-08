@@ -158,7 +158,18 @@ The target process must have ``ROCP_TOOL_ATTACH=1`` set, or be using a version o
    OR
    cmake /path/to/rocprofiler-register -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON
 
-When attachment is enabled, it takes precedence over an implicitly discovered ``rocprofiler_configure`` symbol. This allows framework libraries to expose dormant profiler entry points without preventing the attachment listener from starting. An explicit startup profiling request through ``ROCP_TOOL_LIBRARIES``, ``ROCPROFILER_REGISTER_LIBRARY``, ``ROCPROFILER_REGISTER_FORCE_LOAD=1``, or an ``LD_PRELOAD`` library that directly exports ``rocprofiler_configure`` takes precedence and disables attachment initialization. A warning identifies which choice prevented the other mode from initializing.
+When attachment is enabled, it takes precedence over an implicitly discovered
+``rocprofiler_configure`` symbol. This allows framework libraries to expose
+dormant profiler entry points without preventing the attachment listener from
+starting.
+
+Explicit startup profiling takes precedence over attachment. It is selected by
+``ROCPROFILER_REGISTER_FORCE_LOAD=1`` or by an ``LD_PRELOAD`` library that
+directly exports ``rocprofiler_configure``. ``ROCP_TOOL_LIBRARIES`` and
+``ROCPROFILER_REGISTER_LIBRARY`` also select startup profiling by default, but
+``ROCPROFILER_REGISTER_FORCE_LOAD=0`` prevents those two variables from
+triggering startup loading. A warning indicates which mode was selected when
+startup profiling and attachment conflict.
 
 Tool library configuration
 ---------------------------
