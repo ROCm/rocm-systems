@@ -255,6 +255,14 @@ in the following table.
         | ``0`` (default on older ROCm versions): Disable registration of user
           buffers.
 
+    * - | ``NCCL_LEGACY_CUDA_REGISTER``
+        | Controls registration of legacy buffers allocated by ``hipMalloc`` and
+          related memory allocators. Registering legacy buffers can cause implicit
+          synchronization, which is unsafe and can cause a hang. Prefer
+          VMM-allocated buffers when buffer registration is required.
+      - | ``0``: Disable legacy buffer registration (default).
+        | ``1``: Enable legacy buffer registration.
+
     * - | ``NCCL_GRAPH_MIXING_SUPPORT``
         | Enables support for multiple outstanding RCCL calls from parallel HIP
           graphs, or from a HIP graph and non-captured RCCL calls. When disabled,
