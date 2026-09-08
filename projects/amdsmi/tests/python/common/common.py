@@ -472,8 +472,10 @@ def build_type_lists():
         if member.name in ["UNKNOWN"]:
             cond = FAIL
         elif member.name in ["NPS1", "NPS2", "NPS4", "NPS8"]:
-            # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
-            # BTW - no asic supports NPS8...
+            # Hardware-dependent for every mode:
+            # - NOT_SUPPORTED: when the partition sysfs is absent (or write permissions denied)
+            # - INVAL: when the driver rejects the mode
+            # No asic supports NPS8.
             cond = [
                 amdsmi.AmdSmiStatus.SUCCESS,
                 amdsmi.AmdSmiStatus.INVAL,
