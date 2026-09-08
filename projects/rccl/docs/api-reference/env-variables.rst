@@ -481,6 +481,12 @@ in the following table.
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
 
+    * - | ``NCCL_TOPO_FILE``
+        | Specifies an XML file to load before RCCL detects the system topology.
+          By default, RCCL loads
+          ``/var/run/nvidia-topologyd/virtualTopology.xml`` when it is present.
+      - | Path to an accessible XML file describing part or all of the topology.
+
     * - | ``NCCL_IGNORE_NET_MISMATCH``
         | Controls what happens when ranks report a different number of local
           network (NET) devices during communicator initialization. RCCL gathers
