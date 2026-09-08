@@ -8,10 +8,10 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from membw.debug import log_evaluation_summary, log_evaluation_trace
-from membw.guidance import render_guidance_blocks
-from membw.metric_extract import extract_membw_metrics
-from membw.models import (
+from membw_analysis.debug import log_evaluation_summary, log_evaluation_trace
+from membw_analysis.guidance import render_guidance_blocks
+from membw_analysis.metric_extract import extract_membw_metrics
+from membw_analysis.models import (
     MEMBW_TABLE_IDS,
     BottleneckNode,
     MemBwAnalysisResult,
@@ -20,7 +20,7 @@ from membw.models import (
     SupportingMetric,
     TreeSpec,
 )
-from membw.tree_spec import collect_metric_keys, load_tree_spec, tree_spec_path
+from membw_analysis.tree_spec import collect_metric_keys, load_tree_spec, tree_spec_path
 from utils.logger import console_warning
 
 _OPS: dict[str, Callable[[float, float], bool]] = {
@@ -169,6 +169,8 @@ def _evaluate_node(
     if state == "active" and node.children:
         children = _evaluate_siblings(node.children, parent_supporting=supporting)
     elif node.children:
+        # Design choice: inactive parent suppresses children without
+        # evaluating their metrics (low aggregate → subtree not actionable).
         children = tuple(_make_inactive_subtree(child) for child in node.children)
     else:
         children = ()

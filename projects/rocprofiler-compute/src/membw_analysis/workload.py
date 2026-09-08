@@ -9,9 +9,9 @@ from typing import Optional
 import pandas as pd
 
 import config
-from membw.metric_extract import MetricExtractionResult, extract_membw_metrics
-from membw.models import MEMBW_TABLE_IDS
-from membw.tree_spec import collect_metric_keys, load_tree_spec
+from membw_analysis.metric_extract import MetricExtractionResult, extract_membw_metrics
+from membw_analysis.models import MEMBW_TABLE_IDS
+from membw_analysis.tree_spec import collect_metric_keys, load_tree_spec
 from utils import file_io, schema
 from utils.logger import console_log, console_warning
 from utils.metrics.evaluation_pipeline import eval_metric

@@ -12,8 +12,8 @@ import logging
 
 import pytest
 
-from membw.engine import evaluate_membw_tree
-from membw.models import NodeSpec, TreeSpec
+from membw_analysis.engine import evaluate_membw_tree
+from membw_analysis.models import NodeSpec, TreeSpec
 
 
 def make_tree_spec(nodes, thresholds=None, templates=None):

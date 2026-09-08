@@ -9,7 +9,7 @@ from typing import Optional
 
 import pandas as pd
 
-from membw.models import MEMBW_TABLE_IDS
+from membw_analysis.models import MEMBW_TABLE_IDS
 
 _METRIC_COL = "Metric"
 _VALUE_COL = "Avg"

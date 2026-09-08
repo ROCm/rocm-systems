@@ -16,12 +16,14 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
-TREE_SPEC_DIR = PROJECT_ROOT / "src" / "membw" / "tree_spec"
-
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from membw.models import MEMBW_TABLE_IDS  # noqa: E402
-from membw.tree_spec import collect_metric_keys, load_tree_spec  # noqa: E402
+from membw_analysis.models import MEMBW_TABLE_IDS  # noqa: E402
+from membw_analysis.tree_spec import (  # noqa: E402
+    collect_metric_keys,
+    load_tree_spec,
+    membw_analysis_dir,
+)
 from utils.utils_common import canonical_config_arch  # noqa: E402
 
 
@@ -57,7 +59,7 @@ def validate() -> list[str]:
     """Run validation across all tree spec files. Return error messages."""
     errors: list[str] = []
 
-    for spec_path in sorted(TREE_SPEC_DIR.glob("*_membw_tree_spec.yaml")):
+    for spec_path in sorted(membw_analysis_dir().glob("*_membw_tree_spec.yaml")):
         arch = spec_path.stem.replace("_membw_tree_spec", "")
         try:
             tree_spec = load_tree_spec(arch)

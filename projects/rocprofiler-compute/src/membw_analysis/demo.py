@@ -8,9 +8,9 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from membw.engine import evaluate_membw_tree
-from membw.tree_spec import load_tree_spec
-from membw.workload import load_membw_metrics
+from membw_analysis.engine import evaluate_membw_tree
+from membw_analysis.tree_spec import load_tree_spec
+from membw_analysis.workload import load_membw_metrics
 
 UTCL1_HBM_WORKLOAD: dict[str, Optional[float]] = {
     "L1 Cache - TA stalled by TCP (aggregated)": 22.4,
@@ -27,9 +27,6 @@ UTCL1_HBM_WORKLOAD: dict[str, Optional[float]] = {
     "L2 Internal Resource Pressure - Source FIFO": 1.0,
     "L2 Cache Efficiency": 80.0,
     "L2 Remote Access Pressure (GMI)": 0.5,
-    "EA HBM BW Bound - Combined": 14.0,
-    "EA HBM BW Bound - Read Credit Pressure": 11.0,
-    "EA HBM BW Bound - Write Credit Pressure": 3.0,
     "EA GMI BW Bound - Combined": 0.1,
     "EA IO BW Bound - Combined": 0.0,
     "EA Write Backpressure": 1.0,

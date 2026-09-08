@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from membw.models import NodeSpec, TreeSpec
+from membw_analysis.models import NodeSpec, TreeSpec
 from utils.logger import console_error
 from utils.utils_common import load_yaml
 
@@ -17,8 +17,8 @@ from utils.utils_common import load_yaml
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
-# Populated in membw guided analysis Phase B;
-# the evaluator rejects specs whose hash is absent.
+# Structural edits (add/remove/reorder nodes) change the hash and
+# require updating it here. Threshold-only edits are safe.
 _KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
 
 
@@ -31,7 +31,7 @@ def load_tree_spec(arch: str) -> TreeSpec:
     if not isinstance(raw, dict):
         console_error("membw", f"Tree spec must be a YAML mapping: {spec_path}")
 
-    guidance_path = _guidance_path(arch)
+    guidance_path = membw_analysis_dir() / f"{arch}_membw_guidance.yaml"
     guidance_templates: dict[str, str] = {}
     if guidance_path.exists():
         guidance_raw = load_yaml(guidance_path)
@@ -54,24 +54,14 @@ def collect_metric_keys(spec: TreeSpec) -> frozenset[str]:
 # --- Private helpers ---
 
 
+def membw_analysis_dir() -> Path:
+    """Return the base directory for membw analysis tree spec files."""
+    return config.rocprof_compute_home / "membw_analysis" / "tree_spec"
+
+
 def tree_spec_path(arch: str) -> Path:
     """Return the path to the tree spec YAML for an architecture."""
-    return (
-        config.rocprof_compute_home
-        / "membw"
-        / "tree_spec"
-        / f"{arch}_membw_tree_spec.yaml"
-    )
-
-
-def _guidance_path(arch: str) -> Path:
-    """Return the path to the guidance YAML for an architecture."""
-    return (
-        config.rocprof_compute_home
-        / "membw"
-        / "tree_spec"
-        / f"{arch}_membw_guidance.yaml"
-    )
+    return membw_analysis_dir() / f"{arch}_membw_tree_spec.yaml"
 
 
 def _parse_tree_spec(

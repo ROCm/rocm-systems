@@ -154,36 +154,6 @@ nodes:
   # Source metrics: Table 3018 (EA Bottleneck Detection Indicators)
   # in 3000_mem_bw.yaml
 
-  ea_hbm_bw_bound:
-    level: EA
-    metric: "EA HBM BW Bound - Combined"
-    op: gte
-    threshold: stall_pct_high
-    label: "EA HBM stall"
-    children:
-
-      ea_hbm_read:
-        metric: "EA HBM BW Bound - Read Credit Pressure"
-        op: gte
-        threshold: stall_pct_high
-        label: "EA rd stall"
-        guidance_id: ea_hbm_read
-
-      ea_hbm_write:
-        metric: "EA HBM BW Bound - Write Credit Pressure"
-        op: gte
-        threshold: stall_pct_high
-        label: "EA wr stall"
-        guidance_id: ea_hbm_write
-
-      ea_hbm_other:
-        requires_parent: true
-        requires_siblings_false:
-          - ea_hbm_read
-          - ea_hbm_write
-        label: "EA HBM balanced"
-        guidance_id: ea_hbm_other
-
   ea_gmi_bw_bound:
     level: EA
     metric: "EA GMI BW Bound - Combined"
