@@ -13,6 +13,40 @@
 
 namespace rocjitsu::test {
 
+/// Common issue-capacity probes. Target suites instantiate these with their
+/// architectural counter capacities and keep target-specific expectations.
+template <int YoungerLoads> __global__ void vmcnt_capacity_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float producer, younger, result;
+  asm volatile("global_load_dword %[producer], %[address], off\n"
+               ".rept %c[younger_loads]\n"
+               "global_load_dword %[younger], %[address], off\n"
+               ".endr\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+               : [address] "v"(&src[tid]), [younger_loads] "n"(YoungerLoads)
+               : "memory");
+  dst[tid] = result;
+}
+
+template <int YoungerReads> __global__ void lgkmcnt_capacity_kernel(int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, result;
+  asm volatile("ds_read_b32 %[producer], %[address]\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 %[younger], %[address]\n"
+               ".endr\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+               : [address] "v"(tid * 4), [younger_reads] "n"(YoungerReads)
+               : "memory");
+  dst[tid] = result;
+}
+
 class RaceTestBase : public ::testing::Test {
 protected:
   template <typename T> T *alloc(int count) {
