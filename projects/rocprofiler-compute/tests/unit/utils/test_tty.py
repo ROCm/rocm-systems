@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from membw.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import strip_ansi
 from utils.tty import (
     _render_membw_guidance,

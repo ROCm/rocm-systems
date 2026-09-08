@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from membw.models import MemBwAnalysisResult
+from membw_analysis.models import MemBwAnalysisResult
 
 
 @dataclass

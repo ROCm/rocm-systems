@@ -11,7 +11,7 @@ import common
 import pytest
 import yaml
 
-from membw.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from utils import mem_chart_gfx9
 from utils.mem_chart_common import strip_ansi
 
@@ -403,14 +403,14 @@ class TestMembwAnnotations:
 
     def test_stall_prefix_present_without_color(self):
         ea = make_node(
-            "ea_hbm_read",
-            "EA HBM read",
+            "ea_gmi_bw_bound",
+            "EA GMI stall",
             "EA",
             "active",
             value=15.0,
         )
         output = render_gfx950_with_membw(make_result(nodes=(ea,)))
-        assert "[!] EA HBM read" in output
+        assert "[!] EA GMI stall" in output
 
     def test_legend_includes_stall_when_active(self):
         gl2 = make_node(

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from membw.engine import run_membw_analysis
+from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
