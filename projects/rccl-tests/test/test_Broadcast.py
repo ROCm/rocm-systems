@@ -527,7 +527,9 @@ def test_BroadcastGinSdma4GiBHangGuard(request):
 # Offline parsing guards: no GIN hardware required. These pin the regression where
 # _DATA_FAIL_RE matched the "#wrong" column header and made the connectivity retry
 # unreachable, and where scientific-notation timings broke the row regex.
-def test_bcast_row_regex_accepts_scientific_notation():
+# Named into `-k GinSdma` (rccl-gin-bcast-pytest) because run-gin-ci.sh expands
+# pytest args unquoted, so a filter with a space in it is not available.
+def test_BroadcastGinSdmaRowRegexAcceptsScientificNotation():
     line = (
         "  134217728  134217728  int32  none  0"
         "  1.23e+02  1.00e+02  1.00e+02  0"
@@ -537,7 +539,7 @@ def test_bcast_row_regex_accepts_scientific_notation():
     assert rows == [(134217728, 0, "0", "0")]
 
 
-def test_bcast_data_failed_ignores_column_header():
+def test_BroadcastGinSdmaDataFailedIgnoresColumnHeader():
     header = (
         "#       size         count      type   redop    root"
         "     time   algbw   busbw  #wrong"
@@ -545,7 +547,7 @@ def test_bcast_data_failed_ignores_column_header():
     assert not _data_failed(header)
 
 
-def test_bcast_data_failed_detects_nonzero_wrong():
+def test_BroadcastGinSdmaDataFailedDetectsNonzeroWrong():
     line = (
         "  1048576  1048576  int32  none  0"
         "  12.34  1.00  1.00  1"
@@ -554,7 +556,7 @@ def test_bcast_data_failed_detects_nonzero_wrong():
     assert _data_failed(line)
 
 
-def test_bcast_data_failed_treats_na_as_unchecked_not_failed():
+def test_BroadcastGinSdmaDataFailedTreatsNaAsUncheckedNotFailed():
     line = (
         "  1048576  1048576  int32  none  0"
         "  12.34  1.00  1.00  N/A"
@@ -579,8 +581,6 @@ def _clean_bcast_output(tier):
 # These four need no GPU, but they carry GinSdma in the name on purpose: the CI
 # job runs `-k GinSdma` (rccl-gin-bcast-pytest in gin-tests.json), and the runner
 # expands its args unquoted, so a filter with a space in it is not available.
-# Naming them into the existing filter is what gets them collected -- the
-# snake_case guards above are, for the same reason, run by nothing in CI today.
 def test_BroadcastGinSdmaTierGuardLineIsNotAResultsRow():
     """The tier line shares stdout with the table it must not corrupt."""
     assert _bcast_rows("#[bcast-tier] scatter-allgather") == []
