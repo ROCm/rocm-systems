@@ -136,6 +136,11 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
     # A column holding both integers and missing values is inferred as float64,
     # which cannot hold a 64-bit mask exactly. UInt64 keeps every bit.
     df["exec_mask"] = pd.array([row["exec_mask"] for row in rows], dtype="UInt64")
+    # When wave_cnt is always None, pandas leaves the column as object dtype,
+    # and np.minimum on an object-dtype NaN silently replaces it with the
+    # scalar bound (100.0) instead of preserving NaN. Float64 keeps the type
+    # nullable and lets the ufunc propagate it correctly.
+    df["wave_cnt"] = df["wave_cnt"].astype("Float64")
     return df
 
 
@@ -210,10 +215,20 @@ def aggregate_pc_sample_records(
     aggregated["active_thread_percent"] = np.minimum(
         active_thread_percent, MAX_ACTIVE_THREAD_PERCENT
     )
-    aggregated["wave_occupancy_percent"] = np.minimum(
+    wave_occupancy_percent = np.minimum(
         aggregated["wave_occupancy_percent"] / max_waves_per_cu * 100,
         MAX_WAVE_OCCUPANCY_PERCENT,
     )
+    # np.minimum on an object-dtype NaN silently replaces it with the bound
+    # (100.0) because the underlying Python comparison nan < 100.0 is False.
+    # Active thread percent is already Float64 from _count_set_bits; wave
+    # occupancy comes from the mean of a nullable column whose raw dtype
+    # depends on the input, so force both to a nullable float type so that
+    # NaN stays NaN through the cap.
+    aggregated["wave_occupancy_percent"] = wave_occupancy_percent.astype("Float64")
+    aggregated["active_thread_percent"] = aggregated[
+        "active_thread_percent"
+    ].astype("Float64")
     return aggregated
 
 
