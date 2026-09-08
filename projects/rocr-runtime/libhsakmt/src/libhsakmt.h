@@ -288,6 +288,9 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
 extern "C" {
 #endif
 
+uint32_t hsakmt_get_num_waves(HsaNodeProperties *node, uint32_t gfxv,
+			    uint32_t cu_num);
+
 int hsakmt_safe_env_to_int(const char* envvar, int default_val);
 
 #ifdef __cplusplus
