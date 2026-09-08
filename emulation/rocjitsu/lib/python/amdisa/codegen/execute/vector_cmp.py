@@ -14,8 +14,12 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
-def _write_explicit_lane_mask(dst: str, value: str) -> list[str]:
+def _write_explicit_lane_mask(
+    dst: str, value: str, result_writer: str | None = None
+) -> list[str]:
     """Emit a write to an explicit SGPR lane-mask destination."""
+    if result_writer is not None:
+        return [f'  {result_writer}({value});']
     return [f'  amdgpu::write_wave_mask_scalar({dst}, wf, {value});']
 
 
@@ -27,6 +31,7 @@ def gen_vector_cmp_class(
     cmpx_writes_vcc: bool = False,
     is_vop3: bool = False,
     has_abs: bool = False,
+    result_writer: str | None = None,
 ) -> str:
     """Generate V_CMP_CLASS / V_CMPX_CLASS body."""
     L = []
@@ -164,9 +169,12 @@ def gen_vector_cmp_class(
     if is_cmpx:
         if cmpx_writes_vcc:
             L.append('  wf.set_vcc_mask(result);')
-        L.append('  wf.set_exec(result);')
+        if result_writer is not None:
+            L.append(f'  {result_writer}(result);')
+        else:
+            L.append('  wf.set_exec(result);')
     elif dst:
-        L.extend(_write_explicit_lane_mask(dst[0], 'vcc'))
+        L.extend(_write_explicit_lane_mask(dst[0], 'vcc', result_writer))
     else:
         L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
@@ -384,6 +392,7 @@ def gen_vector_cmpx(
     is_vop3: bool = False,
     dst: list[str] | None = None,
     has_abs: bool = False,
+    result_writer: str | None = None,
 ) -> str:
     """Generate vector compare-and-write-EXEC body.
 
@@ -413,7 +422,10 @@ def gen_vector_cmpx(
             L.extend(_write_explicit_lane_mask(dst[0], 'result'))
         else:
             L.append('  wf.set_vcc_mask(result);')
-    L.append('  wf.set_exec(result);')
+    if result_writer is not None:
+        L.append(f'  {result_writer}(result);')
+    else:
+        L.append('  wf.set_exec(result);')
     return '\n'.join(L)
 
 

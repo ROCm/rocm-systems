@@ -174,8 +174,8 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 // packs traffic into, so rcclGetCollImplInfo reports the channels that actually run
 // rather than the tuning cap. Mirrors the native-kernel packer (channelId=0,
 // currentTraffic=0): for one coll, 1+nMid+(cellsHi!=0) reduces to divUp(cells,cellsPerChannel).
-rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count,
-                                         ncclDataType_t datatype, int protocol, int nMaxChannels) {
+rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
+                                         int protocol, int nMaxChannels) {
   if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
   constexpr size_t MinTrafficPerChannel = 16 << 10;
   size_t elementSize = ncclTypeSize(datatype);
@@ -497,7 +497,8 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
       int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
       int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
-      int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag, task->pipeline, regMode);
+      int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
+                             task->pipeline, regMode);
       if (id >= 0) task->devFuncId = id;
     }
 
@@ -1088,8 +1089,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       }
 #endif
       INFO(NCCL_TUNING, "%s: %ld Bytes -> Algo %s proto %s channel{Lo..Hi}={%d..%d}", ncclFuncToString(task->func),
-           task->count * ncclTypeSize(task->datatype), algoStr,
-           ncclProtoToString(task->protocol), chLo, chHi);
+           task->count * ncclTypeSize(task->datatype), algoStr, ncclProtoToString(task->protocol), chLo, chHi);
 
       if (task->isCollnet) {
         TRACE(NCCL_COLL,
@@ -1227,9 +1227,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     available on network connections.
   //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
 #if defined(ENABLE_LL128)
-  bool useLL128SendRecv = comm->allocP2pNetLLBuffers &&
-                          comm->topo->ll128Enabled &&
-                          (comm->cudaArch == 940 || comm->cudaArch == 950);
+  bool useLL128SendRecv =
+    comm->allocP2pNetLLBuffers && comm->topo->ll128Enabled && (comm->cudaArch == 940 || comm->cudaArch == 950);
 #else
   bool useLL128SendRecv = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
 #endif
@@ -1304,11 +1303,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
     protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
 
-    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO) can confirm the latency protocol
-    // was actually chosen rather than silently falling back to SIMPLE.
+    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=COLL) can confirm
+    // the latency protocol was actually chosen rather than silently falling back to SIMPLE.
     if (bytes[dir] != -1)
-      INFO(NCCL_INIT, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d",
-           ncclProtoStr[protocol[dir]], dir ? "send" : "recv", (long)bytes[dir], nChannels[dir]);
+      INFO(NCCL_COLL, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d", ncclProtoStr[protocol[dir]],
+           dir ? "send" : "recv", (long)bytes[dir], nChannels[dir]);
 
     stepSize[dir] = comm->buffSizes[protocol[dir]] / NCCL_STEPS;
     if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = comm->p2pChunkSize;
@@ -1986,6 +1985,10 @@ static void persistentDestructor(void* plans_) {
 NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0);
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 
+// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
+// sentinel. See ncclComm::lastStreamTag.
+static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
+
 namespace {
 enum ncclImplicitOrder {
   ncclImplicitOrderNone,
@@ -2132,15 +2135,11 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
       // userStream[0] waits on deviceStream
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
-      // Stream changed from last call. The new launchStream has no implicit edge to the
-      // previous kernel's completion; install a direct event-based dependency on doneEvent.
-      // Record lazily here on lastStream — HIP's per-stream FIFO guarantees the record
-      // sequences after the prior cuLaunchKernel — then wait on it from launchStream.
-      // Recording only on detected stream change (instead of after every ncclLaunchKernel)
-      // avoids a per-launch HIP runtime cost. Bypasses deviceStream, which the fast path
-      // leaves stale by skipping Finish-side advance.
-      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, comm->lastStream), result, failure);
+    } else if (comm->lastStreamTag != 0 &&
+               comm->lastStreamTag != ncclStreamTag(launchStream)) {
+      // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
+      // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
+      // Don't record it here — that stream may already be destroyed (ROCM-29677).
       CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
@@ -2251,14 +2250,21 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // Sizes are work-items (grid*block), not blocks. Passing doneEvent as stopEvent fuses the record into the
+    // dispatch, so no separate hipEventRecord. Fast path only: graph capture never binds a fused stopEvent.
+    CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
+                                           block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
+                                           /*stopEvent=*/comm->doneEvent, /*flags=*/0),
+                  ret, do_return);
+#else
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                extra),
                 ret, do_return);
-    // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
-    // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
-    // still required so the next call's ncclLaunchPrepare can detect that change.
-    comm->lastStream = launchStream;
-    comm->lastStreamValid = true;
+    // Record while launchStream is guaranteed live; bookkeeping after, so a failed record leaves no false claim.
+    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+    comm->lastStreamTag = ncclStreamTag(launchStream);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2348,10 +2354,14 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
               ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
-  // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.
-  comm->lastStream = launchStream;
-  comm->lastStreamValid = true;
+  // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
+  // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#else
+  CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+  comm->lastStreamTag = ncclStreamTag(launchStream);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
@@ -3429,7 +3439,8 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
 
   if (info->coll == ncclFuncBroadcast && ncclParamAllgathervEnable() && !comm->ccEnable) {
     // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
-    struct ncclTaskBcast* t = ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
+    struct ncclTaskBcast* t =
+      ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
     t->func = ncclFuncAllGatherV;
     t->sendbuff = info->sendbuff;
     t->recvbuff = info->recvbuff;
@@ -3448,49 +3459,48 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     ncclIntruQueueEnqueue(&planner->peers[info->root].bcastQueue, t);
     planner->nTasksBcast += 1;
     comm->opCount++;
-  }
-  else {
-  struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
-  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
-  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
-  // never sees garbage in eDescr->coll.nChannels.
-  t->nChannels = 0;
-  t->func = info->coll;
-  t->sendbuff = info->sendbuff;
-  t->recvbuff = info->recvbuff;
-  t->count = info->count;
-  t->root = info->root;
-  t->datatype = info->datatype;
+  } else {
+    struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+    // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+    // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+    // never sees garbage in eDescr->coll.nChannels.
+    t->nChannels = 0;
+    t->func = info->coll;
+    t->sendbuff = info->sendbuff;
+    t->recvbuff = info->recvbuff;
+    t->count = info->count;
+    t->root = info->root;
+    t->datatype = info->datatype;
 
 #ifdef ENABLE_ROCSHMEM
-  if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
-    size_t nSizes = 4 * comm->nRanks;
-    CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
-    ncclCommPushCudaFree(comm, t->sizes);
-    memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
-  }
+    if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
+      size_t nSizes = 4 * comm->nRanks;
+      CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
+      ncclCommPushCudaFree(comm, t->sizes);
+      memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
+    }
 #endif
 
-  size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot ||
-      t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
-    t->count *= elementSize;
-    t->datatype = ncclInt8;
-    elementSize = 1;
-  }
-  t->trafficBytes = t->count * elementSize * ncclFuncTrafficPerByte(t->func, comm->nRanks);
-  t->opHost = info->op;
-  t->opDev = opDev; // C++ struct assignment
-  t->chunkSteps = info->chunkSteps;
-  t->sliceSteps = info->sliceSteps;
-  t->eActivationMask = ncclProfilerApiState.eActivationMask;
-  t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
-  t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
-  t->opCount = comm->opCount;
-  t->acc = info->acc;
+    size_t elementSize = ncclTypeSize(t->datatype);
+    if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot ||
+        t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
+      t->count *= elementSize;
+      t->datatype = ncclInt8;
+      elementSize = 1;
+    }
+    t->trafficBytes = t->count * elementSize * ncclFuncTrafficPerByte(t->func, comm->nRanks);
+    t->opHost = info->op;
+    t->opDev = opDev; // C++ struct assignment
+    t->chunkSteps = info->chunkSteps;
+    t->sliceSteps = info->sliceSteps;
+    t->eActivationMask = ncclProfilerApiState.eActivationMask;
+    t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
+    t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
+    t->opCount = comm->opCount;
+    t->acc = info->acc;
 
-  planner->nTasksColl += 1;
-  ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
+    planner->nTasksColl += 1;
+    ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
   }
   ncclProfilerStopCollApiEvent();
   return ncclSuccess;
@@ -3865,7 +3875,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       // Hierarchical CE (sync feature) rides the same symmetric-window ceCollTaskAppend
       // path; keep it graph-capture-safe by gating on !ceCapturing like ceAvailable.
-      bool hierCeAvailable = !ceCapturing && ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      bool hierCeAvailable =
+        !ceCapturing && ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
@@ -3913,7 +3924,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
-      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
+      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
+                  !hasSysmemSegment) ||
                  ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,

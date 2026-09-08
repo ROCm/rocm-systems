@@ -52,8 +52,8 @@ private:
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
   std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
-  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStorage simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const override;
@@ -87,9 +87,9 @@ private:
     void (Operand::*write_scalar64)(amdgpu::Wavefront &, uint64_t) const = nullptr;
     std::optional<uint32_t> (Operand::*simd_vgpr_base)(const amdgpu::Wavefront &) const = nullptr;
     std::optional<uint32_t> (Operand::*simd_vgpr_base_mut)(amdgpu::Wavefront &) const = nullptr;
-    const amdgpu::VgprStorage *(Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const =
+    amdgpu::ConstVgprStorage (Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const =
         nullptr;
-    amdgpu::VgprStorage *(Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;
+    amdgpu::VgprStorage (Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;
     amdgpu::ConstVgprStoragePair64 (Operand::*simd_vgpr_storage64)(
         const amdgpu::Wavefront &) const = nullptr;
     amdgpu::VgprStoragePair64 (Operand::*simd_vgpr_storage64_mut)(amdgpu::Wavefront &) const =
@@ -118,8 +118,8 @@ private:
   void write_scalar64_exec(amdgpu::Wavefront &, uint64_t) const;
   std::optional<uint32_t> simd_vgpr_base_exec(const amdgpu::Wavefront &) const;
   std::optional<uint32_t> simd_vgpr_base_mut_exec(amdgpu::Wavefront &) const;
-  const amdgpu::VgprStorage *simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;
-  amdgpu::VgprStorage *simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;
+  amdgpu::VgprStorage simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_exec(const amdgpu::Wavefront &) const;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_exec(amdgpu::Wavefront &) const;
   void simd_notify_read_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;

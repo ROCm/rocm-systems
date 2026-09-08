@@ -31,6 +31,7 @@
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -239,6 +240,39 @@ TEST(Vop3Fp64SimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3Fp64SimdCorrectness, OmodHonorsOutputDenormAndIeeeMode) {
+  ForceScalarGuard gate_guard;
+  struct ModeCase {
+    uint32_t mode;
+    double expected;
+  };
+  constexpr std::array<ModeCase, 3> kModes = {{
+      {0u, 2.0},
+      {1u << 7, 1.0},
+      {amdgpu::Wavefront::IEEE_BIT, 1.0},
+  }};
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &mode_case : kModes) {
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.wf->set_mode_raw(mode_case.mode);
+      uint32_t words[2] = {};
+      vop3_encode(/*v_add_f64=*/640, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258,
+                  /*abs=*/0, /*neg=*/0, /*omod=*/1, /*clamp=*/0, words);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+
+      const auto out = fx.run(inst.get(), /*rot=*/2, /*exec=*/~0ULL);
+
+      EXPECT_EQ(out[0], std::bit_cast<uint64_t>(mode_case.expected))
+          << "force_scalar=" << force_scalar << " mode=" << mode_case.mode;
+    }
+  }
 }
 
 } // namespace

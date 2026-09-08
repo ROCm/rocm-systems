@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "ScopedHook.h"
 #include "fakes/p2p_fakes.h"
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
@@ -23,18 +24,11 @@
 // to see them, and the shim below would land too late.
 #include "alloc.h"
 
-// Same pattern for param.h: pull it in now so we can #undef NCCL_PARAM and
-// replace it with a redirector that routes every generated ncclParamXxx()
-// through g_loadParam on every call (no caching). Without this,
-// ncclParamLegacyCudaRegister() and friends would cache their default on
-// first call -- which means tests can't flip them between cases. The
-// redirected body matches the real NCCL_PARAM signature
-// (`int64_t ncclParam<name>()`) but skips the cache and uninitialized
-// machinery entirely.
-#include "param.h"
-#undef NCCL_PARAM
-#define NCCL_PARAM(name, env, deftVal) \
-    int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
+// NCCL_PARAM redirector (shared with init-test.cc): routes every generated
+// ncclParamXxx() through g_loadParam on each call so tests can flip a param's
+// value between cases (without this, ncclParamLegacyCudaRegister() and friends
+// would cache their default on first call). See param_redirect.h.
+#include "fakes/param_redirect.h"
 
 // Macro shim: replace the header-only function templates ncclCudaCallocAsync
 // and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
@@ -116,72 +110,6 @@ protected:
 
 namespace {
 
-// ScopedHook -- RAII wrapper around a controllable seam (any of the
-// std::function<...> hooks declared in fakes/p2p_fakes.h).
-//
-// Three jobs in one type:
-//   1. Installs the test's behaviour on construction.
-//   2. Counts calls automatically (.calls), so tests don't hand-roll a
-//      separate `int xCalls = 0; ++xCalls` per hook.
-//   3. Restores the previous behaviour on destruction. This means tests
-//      don't have to inherit the fixture or rely on ResetP2pFakes() to
-//      avoid contaminating each other -- the hook's lifetime ends with
-//      the ScopedHook local, before the captured stack locals die.
-//
-// Usage (CTAD picks up the signature from the hook variable):
-//   ScopedHook memGet(g_hipMemGetAddressRange,
-//       [&](hipDeviceptr_t* pb, std::size_t* ps, hipDeviceptr_t) {
-//           if (pb) *pb = ...;
-//           return hipSuccess;
-//       });
-//   ...
-//   EXPECT_EQ(memGet.calls, 1);
-//
-// Non-movable + non-copyable because the installed lambda captures `this`
-// to bump the counter.
-template <typename FnSig>
-class ScopedHook;
-
-template <typename R, typename... Args>
-class ScopedHook<R(Args...)> {
-public:
-    template <typename Callable>
-    ScopedHook(std::function<R(Args...)>& slot, Callable fn)
-        : slot_(slot), saved_(std::move(slot))
-    {
-        slot_ = [this, fn = std::move(fn)](Args... args) -> R {
-            ++calls;
-            return fn(std::forward<Args>(args)...);
-        };
-    }
-    ~ScopedHook() { slot_ = std::move(saved_); }
-
-    ScopedHook(const ScopedHook&)            = delete;
-    ScopedHook& operator=(const ScopedHook&) = delete;
-    ScopedHook(ScopedHook&&)                 = delete;
-    ScopedHook& operator=(ScopedHook&&)      = delete;
-
-    int calls = 0;
-private:
-    std::function<R(Args...)>& slot_;
-    std::function<R(Args...)>  saved_;
-};
-
-// CTAD: deduce R(Args...) from the std::function<R(Args...)>& argument so
-// call sites don't have to spell out the signature.
-template <typename R, typename... Args, typename Callable>
-ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
-
-// RegRecordCleaner -- RAII guard that frees the allocations
-// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
-//
-//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
-//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
-//
-// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
-// ncclCudaCallocAsync default registers it there), so this guard
-// deliberately doesn't touch it.
-//
 // MakeHeapIpcInfo -- allocate a zeroed ncclIpcRegInfo the same way
 // ipcRegisterBuffer's fresh-registration arm does (ncclCalloc == malloc +
 // memset)
@@ -196,8 +124,15 @@ inline ncclIpcRegInfo* MakeHeapIpcInfo(int peerRank, uintptr_t rmtRegAddr,
     return info;
 }
 
-// RegRecordCleaner -- RAII guard that owns and frees the heap allocations a
-// ncclReg accumulates
+// RegRecordCleaner -- RAII guard that frees the allocations
+// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
+//
+//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
+//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
+//
+// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
+// ncclCudaCallocAsync default registers it there), so this guard
+// deliberately doesn't touch it.
 struct RegRecordCleaner {
     ncclReg& reg;
     explicit RegRecordCleaner(ncclReg& r) : reg(r) {}

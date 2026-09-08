@@ -29,12 +29,6 @@
 #include <string>
 #include <vector>
 
-#define HIPRTC_CHECK(expr)                                                    \
-  do {                                                                        \
-    hiprtcResult _r = (expr);                                                 \
-    REQUIRE(_r == HIPRTC_SUCCESS);                                            \
-  } while (0)
-
 // ---------------------------------------------------------------------------
 // Workload parameters
 // ---------------------------------------------------------------------------
@@ -622,7 +616,7 @@ TEST_CASE("Unit_HRR_AllApis_Direct", "[.][hrr-direct]") {
   // =========================================================================
   {
     int supportsImages = 0;
-    hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0);
+    HIP_CHECK(hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0));
     if (supportsImages) {
       HIP_ARRAY_DESCRIPTOR desc1d{};
       desc1d.Width       = static_cast<size_t>(N);
@@ -1583,8 +1577,8 @@ TEST_CASE("Unit_HRR_Occupancy_Direct", "[.][hrr-direct]") {
 TEST_CASE("Unit_HRR_HostAliases_Direct", "[.][hrr-direct]") {
   // Drain any GPU errors left by earlier tests; this test mixes array + 3D
   // alloc with regular device memory — on Windows the driver needs a clean slate.
-  hipDeviceSynchronize();
-  hipGetLastError();
+  (void)hipDeviceSynchronize();
+  (void)hipGetLastError();
   HIP_CHECK(hipSetDevice(0));
   constexpr int N = 256;
   constexpr size_t SZ = N * sizeof(int);
@@ -1655,8 +1649,8 @@ TEST_CASE("Unit_HRR_HostAliases_Direct", "[.][hrr-direct]") {
 
   // D2H blob (value = 8)
   // Drain any pending GPU errors from earlier tests before D2H.
-  hipDeviceSynchronize();
-  hipGetLastError();
+  (void)hipDeviceSynchronize();
+  (void)hipGetLastError();
   int* d = nullptr; int* h = new int[N]();
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2456,7 +2450,7 @@ TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
   // Requires image support — skip on GPUs that don't support texture arrays.
   {
     int supportsImages = 0;
-    hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0);
+    HIP_CHECK(hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0));
     if (supportsImages) {
       hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
       hipArray_t arr = nullptr;
@@ -3660,8 +3654,8 @@ TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
   HIP_CHECK(hipStreamCreate(&s));
 
   // Drain any pending GPU errors from earlier tests before the <<<>>> launch.
-  hipDeviceSynchronize();
-  hipGetLastError();
+  (void)hipDeviceSynchronize();
+  (void)hipGetLastError();
 
   int blocks = (N + 255) / 256;
   // Triple-chevron launch — goes through __hipPushCallConfiguration + hipLaunchByPtr

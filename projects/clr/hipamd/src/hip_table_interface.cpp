@@ -1321,6 +1321,11 @@ hipError_t hipInit(unsigned int flags) {
   return hip::GetHipDispatchTable()->hipInit_fn(flags);
   CATCH;
 }
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipInitDevice_fn(device, deviceFlags, flags);
+  CATCH;
+}
 hipError_t hipIpcCloseMemHandle(void* devPtr) {
   TRY;
   return hip::GetHipDispatchTable()->hipIpcCloseMemHandle_fn(devPtr);

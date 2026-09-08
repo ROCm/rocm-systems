@@ -64,7 +64,7 @@ typedef enum {
 // space. Values extend the native NCCL_ALGO_* range so a single integer (and a
 // single rcclGetAlgoName() lookup) can name any backend RCCL might run. These
 // are not just "algorithms" in the ring/tree sense — they include full backends
-// (Symmetric, CE, DDA). See struct rcclCollDecision.
+// (Symmetric, CE, DDA, GIN-SDMA). See struct rcclCollDecision.
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
@@ -80,6 +80,7 @@ typedef enum {
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
   RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
+  RCCL_GIN_SDMA,        // GIN-SDMA AllReduce (scaleup LSA/GIN)
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -153,7 +154,7 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          ncclDataType_t dataType, ncclRedOp_t op, const void* sendbuff, void* recvbuff, int graphCapturing, int* algo,
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
-// priority chain (symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
+// priority chain (GIN-SDMA -> symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
 // -> kernel) and returns the decision.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
@@ -196,8 +197,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
-                        const void* acc);
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -242,8 +242,8 @@ constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 // Returns true when the DDA fast path should be attempted for a collective.
 // Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
 // the user-configurable RCCL_DDA_THRESHOLD env var.
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
-                    size_t gfx950Default = 0, size_t gfx1250Default = 0);
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0,
+                    size_t gfx1250Default = 0);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);

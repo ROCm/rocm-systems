@@ -537,3 +537,16 @@ To suspend or resume several communicators together, wrap the calls in
    NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclGroupEnd());
 
+   // ... later, the matching resume ...
+
+   NCCLCHECK(ncclGroupStart());
+   NCCLCHECK(ncclCommResume(commA));
+   NCCLCHECK(ncclCommResume(commB));
+   NCCLCHECK(ncclGroupEnd());
+
+.. note::
+
+   When a single process owns one communicator per device through
+   ``ncclCommInitAll``, ``ncclCommSuspend`` and ``ncclCommResume`` need to be
+   wrapped around a group API.
+

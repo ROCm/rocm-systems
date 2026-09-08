@@ -13,6 +13,9 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_lo_hi,
     gen_pk_binop,
     gen_pk_binop_f32,
+    gen_pk_fmac_vop2,
+    gen_pk_fmac_vop3,
+    gen_pk_lshl_add_u64,
     gen_pk_ternary,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
@@ -25,6 +28,123 @@ def test_dot4_iu8_uses_operand_signedness_modifiers():
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
     assert 'static_cast<int8_t>(raw_a)' in cpp
     assert 'static_cast<int8_t>(raw_b)' in cpp
+    assert 'int64_t sum' in cpp
+    assert 'std::numeric_limits<int32_t>::min()' in cpp
+    assert 'std::numeric_limits<int32_t>::max()' in cpp
+
+
+def test_dot2_integer_clamp_uses_widened_signed_and_unsigned_ranges():
+    signed = gen_dot2(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'dot2_i32_i16',
+        ('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+    unsigned = gen_dot2(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'dot2_u32_u16',
+        ('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert 'int64_t result' in signed
+    assert 'std::numeric_limits<int32_t>::min()' in signed
+    assert 'std::numeric_limits<int32_t>::max()' in signed
+    assert 'uint64_t result' in unsigned
+    assert 'std::numeric_limits<uint32_t>::max()' in unsigned
+
+
+def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
+    cpp = gen_pk_fmac_vop2(['vdst'], ['src0', 'vsrc1'])
+
+    assert 'read_lane(vdst, lane)' in cpp
+    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
+    assert 'wf.fp_round_mode_f16_f64()' in cpp
+    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+    assert ', 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf))' in cpp
+
+
+def test_promoted_pk_fmac_applies_vop3_modifiers_to_multiplicands_only():
+    cpp = gen_pk_fmac_vop3(['vdst'], ['src0', 'src1'])
+
+    assert 'read_lane(vdst, lane)' in cpp
+    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
+    assert 'inst_.abs & 1u, inst_.abs & 2u, false' in cpp
+    assert 'inst_.neg & 1u, inst_.neg & 2u, false' in cpp
+    assert 'effective_f16_omod' in cpp
+    assert 'wf.ieee_mode(), true, inst_.omod' in cpp
+    assert 'omod, inst_.clamp' in cpp
+    assert 'op_sel' not in cpp
+
+
+def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
+    cpp = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'fma',
+        'f16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
+    assert 'wf.fp_round_mode_f16_f64()' in cpp
+    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+    assert (
+        ', 0, inst_.clamp, wf.fp16_ovfl(), ' 'amdgpu::floating_clamp_nan_to_zero(wf))'
+    ) in cpp
+
+
+def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
+    signed = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'add_max_sat',
+        'i16',
+        op_sel_hi_2_expr='inst_.pad_14',
+        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+    )
+    unsigned = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'add_min_sat',
+        'u16',
+        op_sel_hi_2_expr='inst_.pad_14',
+        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+    )
+
+    assert 'std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767)' in signed
+    assert 'std::max(sum_lo, c_lo)' in signed
+    assert 'if (inst_.clamp)' in signed
+    assert 'std::max<int16_t>(static_cast<int16_t>(rlo), 0)' in signed
+    assert 'std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u)' in unsigned
+    assert 'std::min(sum_lo, c_lo)' in unsigned
+
+
+def test_pk_mad_integer_clamp_saturates_both_selected_halves():
+    signed = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'i16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+    unsigned = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'u16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+
+    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
+    assert signed.count('inst_.clamp') == 2
+    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
+    assert unsigned.count('inst_.clamp') == 2
 
 
 def test_dot8_iu4_uses_operand_signedness_modifiers():
@@ -34,6 +154,30 @@ def test_dot8_iu4_uses_operand_signedness_modifiers():
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
     assert 'raw_a | ~0xF' in cpp
     assert 'raw_b | ~0xF' in cpp
+    assert 'int64_t sum' in cpp
+    assert 'std::numeric_limits<int32_t>::min()' in cpp
+    assert 'std::numeric_limits<int32_t>::max()' in cpp
+
+
+def test_unsigned_dot_clamps_widened_accumulator_before_narrowing():
+    dot4 = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], 'dot4_u32_u8')
+    dot8 = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_u32_u4')
+
+    assert 'uint64_t sum' in dot4
+    assert 'if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))' in dot4
+    assert 'std::numeric_limits<uint32_t>::max()' in dot4
+    assert 'uint64_t sum' in dot8
+    assert 'if (inst_.clamp)' in dot8
+    assert 'std::numeric_limits<uint32_t>::max()' in dot8
+
+
+def test_signed_dot4_clamp_uses_profile_policy():
+    cpp = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], 'dot4_i32_iu8')
+
+    assert 'int64_t sum' in cpp
+    assert 'if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))' in cpp
+    assert 'std::numeric_limits<int32_t>::min()' in cpp
+    assert 'std::numeric_limits<int32_t>::max()' in cpp
 
 
 def test_pk_f16_binop_narrows_inline_float_constants():
@@ -158,6 +302,54 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
     assert 'read_lane64' not in cpp
 
 
+def test_cdna_pk_f32_reads_all_register_pairs():
+    cpp = gen_pk_binop_f32(
+        ['vdst'],
+        ['src0', 'src1'],
+        'add',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert 'read_lane_pair32(src0, lane)' in cpp
+    assert 'const uint32_t s0_lo_w = s0_pair_w.lo' in cpp
+    assert 'const uint32_t s0_hi_w = s0_pair_w.hi' in cpp
+    assert 'encoding_value_ >= 256' not in cpp
+
+
+def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
+    assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
+    assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
+    assert (
+        'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
+        in cpp
+    )
+    assert (
+        'amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi'
+        in cpp
+    )
+    assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
+    assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
+    assert 'results[lane] = {result_lo, result_hi};' in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, results[lane]);' in cpp
+    assert 'inst_.neg' not in cpp
+    assert 'inst_.clamp' not in cpp
+
+
+def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    reject = 'if (shifts.lo > 4u || shifts.hi > 4u)'
+    report = 'wf.report_instruction_execution_error('
+    write = 'write_pk_u64_pair(vdst, wf, lane, results[lane]);'
+    assert reject in cpp
+    assert report in cpp
+    assert write in cpp
+    assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
+
+
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
     probe = vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('opsel', 'opsel_hi'))
 
@@ -263,7 +455,7 @@ def test_mad_mixlo_bf16_uses_true16_low_write():
     assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
 
 
-def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
+def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     cpp_f32 = gen_mad_mix_bf16(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -280,7 +472,25 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
         use_cdna5_helpers=True,
     )
+    cpp_hi = gen_mad_mix_bf16(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        result='hi',
+        op_sel_hi_2_expr='inst_.pad_14',
+        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        use_cdna5_helpers=True,
+    )
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    assert 'util::f32_to_bf16(result)' in cpp_lo
+    mode_round = 'amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
+    assert mode_round in cpp_lo
+    assert mode_round in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_lo
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' not in cpp_f32
+    assert 'std::fma(a, b, c)' not in cpp_lo
+    assert 'std::fma(a, b, c)' not in cpp_hi
+    assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_hi

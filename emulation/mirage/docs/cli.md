@@ -23,7 +23,7 @@ background, and nothing outlives the process you typed it into.
 | `--json`      | Emit JSON output where applicable.                               |
 | `-v`, `-vv`   | Increase logging verbosity (`-v` = info, `-vv` = debug).         |
 | `-h`, `--help` | Print help (top level or per command).                          |
-| `-V`, `--version` | Print the mirage version.                                    |
+| `-V`, `--version` | Print the mirage version and installed RocJITsu build identity. |
 
 Global flags may appear before or after the subcommand, e.g. both
 `mirage --json profile list` and `mirage profile list --json`.
