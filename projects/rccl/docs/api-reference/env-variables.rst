@@ -918,6 +918,25 @@ in the following table.
           multi-node; gfx908 and gfx942 above 80 CUs use 2; gfx1250 uses 32;
           everything else uses 4.
 
+Reliability, availability, and serviceability
+=============================================
+
+The reliability, availability, and serviceability (RAS) environment variables
+for RCCL are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_RAS_ENABLE``
+        | Enables RCCL's RAS subsystem, which can be used to query the health of
+          RCCL jobs during execution.
+      - | ``1``: Enable RAS (default).
+        | ``0``: Disable RAS.
+
 Development and testing (advanced)
 ==================================
 
