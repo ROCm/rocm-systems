@@ -13,6 +13,91 @@
 
 namespace rocjitsu::test {
 
+/// Common issue-capacity probes. Target suites instantiate these with their
+/// architectural counter capacities and keep target-specific expectations.
+template <int YoungerLoads> __global__ void vmcnt_capacity_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float producer, younger, result;
+  asm volatile("global_load_dword %[producer], %[address], off\n"
+               ".rept %c[younger_loads]\n"
+               "global_load_dword %[younger], %[address], off\n"
+               ".endr\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+               : [address] "v"(&src[tid]), [younger_loads] "n"(YoungerLoads)
+               : "memory");
+  dst[tid] = result;
+}
+
+template <int YoungerReads> __global__ void lgkmcnt_capacity_kernel(int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, result;
+  asm volatile("ds_read_b32 %[producer], %[address]\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 %[younger], %[address]\n"
+               ".endr\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+               : [address] "v"(tid * 4), [younger_reads] "n"(YoungerReads)
+               : "memory");
+  dst[tid] = result;
+}
+
+/// Fill LGKMCNT with ordered LDS reads, then issue an unordered scalar load.
+/// At capacity, the scalar issue proves that the oldest LDS read completed;
+/// one token below capacity, consuming that LDS result must still race.
+template <int YoungerReads>
+__global__ void mixed_lgkmcnt_capacity_kernel(const int *scalar_src, int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, scalar_result, result;
+  asm volatile("ds_read_b32 %[producer], %[lds_address]\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 %[younger], %[lds_address]\n"
+               ".endr\n"
+               "s_load_dword %[scalar_result], %[scalar_address], 0x0\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger),
+                 [scalar_result] "=s"(scalar_result), [result] "=&v"(result)
+               : [lds_address] "v"(tid * 4), [scalar_address] "s"(scalar_src),
+                 [younger_reads] "n"(YoungerReads)
+               : "memory");
+  dst[tid] = result;
+}
+
+/// Exercise the decoded two-token count for a wide scalar load. With one
+/// fewer LDS token than the one-DWORD case, the wide issue still forces the
+/// oldest ordered LDS read to complete.
+template <int YoungerReads>
+__global__ void wide_scalar_lgkmcnt_capacity_kernel(const uint64_t *scalar_src, int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, result;
+  uint64_t scalar_result;
+  asm volatile("ds_read_b32 %[producer], %[lds_address]\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 %[younger], %[lds_address]\n"
+               ".endr\n"
+               "s_load_dwordx2 %[scalar_result], %[scalar_address], 0x0\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger),
+                 [scalar_result] "=s"(scalar_result), [result] "=&v"(result)
+               : [lds_address] "v"(tid * 4), [scalar_address] "s"(scalar_src),
+                 [younger_reads] "n"(YoungerReads)
+               : "memory");
+  dst[tid] = result;
+}
+
 class RaceTestBase : public ::testing::Test {
 protected:
   template <typename T> T *alloc(int count) {
