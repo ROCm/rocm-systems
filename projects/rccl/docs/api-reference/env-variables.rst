@@ -337,6 +337,12 @@ in the following table.
         | Write logs to a file rather than ``stdout``.
       - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
+    * - | ``NCCL_SET_THREAD_NAME``
+        | Gives more meaningful names to RCCL CPU threads to simplify debugging
+          and analysis.
+      - | ``0``: Disable thread naming (default).
+        | ``1``: Enable thread naming.
+
     * - | ``NCCL_CHECK_MODE``
         | Selects how thoroughly RCCL validates the arguments of every
           collective call. Checking costs latency, so it is disabled by default
