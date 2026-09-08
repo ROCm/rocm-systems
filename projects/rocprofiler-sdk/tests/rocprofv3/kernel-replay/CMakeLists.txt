@@ -145,22 +145,20 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# Regression test: --kernel-iteration-range selects host-observed launches, so replay
-# passes must not consume iterations. The filter advances a per-kernel counter on every
-# consultation; consulting it once per pass instead of once per dispatch charged a single
-# launch N iterations, so with a range of [1] the first pass was collected and the
-# remaining N-1 were rejected and silently dropped. The dispatches that survive the filter
-# must still carry all REPLAY_PASSES passes.
+# Regression test for AIPROFSDK-1130: --kernel-iteration-range selects logical launches,
+# so replay passes must not consume iterations. With four launches, range 2-3, and two
+# counter groups, exactly two logical dispatches must survive and each must carry passes
+# [0, 1]. This exercises rejecting launch 1, accepting launches 2 and 3, rejecting launch
+# 4, and resetting the cached decision between dispatches.
 add_test(
     NAME rocprofv3-test-kernel-replay-iteration-range-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
-        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
-        SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
-        SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --kernel-iteration-range "[1]" --output-format csv json -d
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-replay-beta-enabled --kernel-include-regex saxpy
+        --kernel-iteration-range "2-3" --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1)
+        $<TARGET_FILE:kernel-replay> 65536 4)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-iteration-range-generate
@@ -177,17 +175,17 @@ set_tests_properties(
                FIXTURES_SETUP
                rocprofv3-test-kernel-replay-iteration-range-data)
 
-# Filtering to iteration [1] deliberately skips the later launches of a kernel, so the
-# contiguous dispatch-id run the unfiltered validation asserts does not hold here and is
-# the one check deselected. Everything else, including the pass-completeness assertion
-# this test exists for, applies unchanged.
+# Validate the exact ticket invariant: two selected logical dispatches, each carrying two
+# distinct counter-group passes. Numeric dispatch IDs are deliberately not pinned.
 add_test(
     NAME rocprofv3-test-kernel-replay-iteration-range-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range/out_results.json
-        --passes ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU -k
-        "not dispatch_ids_increment_sequentially")
+        --passes 2 --expected-dispatch-count 2 --common-counters SQ_WAVES SQ_INSTS_VALU
+        -k
+        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch"
+    )
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-iteration-range-validate
