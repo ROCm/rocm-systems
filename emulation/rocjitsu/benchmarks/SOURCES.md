@@ -11,6 +11,9 @@ and HSCO files are build artifacts and must not be committed.
 from <https://github.com/ROCm/triton>. The workloads use fixed launch
 configurations and do not autotune while measuring. The aligned and boundary
 variants are local coverage rather than copies of an upstream parameter sweep.
+The GPT-OSS cases reproduce selected `gpt-oss-20b` dimensions for weighted
+RMSNorm and grouped-query sliding attention; they do not load the model,
+weights, or a model framework.
 
 ## hipBLASLt/TensileLite workloads
 

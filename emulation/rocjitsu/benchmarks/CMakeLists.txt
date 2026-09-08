@@ -73,5 +73,8 @@ add_dependencies(
     rocjitsu_benchmark_workloads
     rocjitsu_benchmark_hipblaslt
     rocjitsu_bin
+    rocjitsu_plugin_logging_so
+    rocjitsu_plugin_race_so
+    rocjitsu_plugin_throughput_so
     rocjitsu_shared
 )

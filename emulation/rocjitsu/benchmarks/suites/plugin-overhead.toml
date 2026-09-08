@@ -1,0 +1,11 @@
+name = "plugin-overhead"
+targets = ["gfx950", "gfx1250"]
+cases = [
+  "triton.copy_fp32_32m",
+  "triton.softmax_fp16_boundary",
+  "triton.gemm_bf16_aligned",
+  "triton.gpt_oss_gqa_bf16",
+]
+warmups = 3
+samples = 21
+timeout_seconds = 300

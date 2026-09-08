@@ -36,7 +36,7 @@ for `gfx950` and `gfx1250`. Install the binary packages from
 resulting SDK root as `ROCM_PATH`. The in-tree adapter links to the installed
 HIP and hipBLASLt packages; CMake does not fetch or build benchmark
 requirements from source. See
-[benchmarking.md](benchmarking.md) for the complete workflow.
+[benchmark-suite.md](benchmark-suite.md) for the complete workflow.
 
 ### Sanitizer builds
 

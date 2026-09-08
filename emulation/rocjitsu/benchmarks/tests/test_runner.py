@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -23,20 +24,42 @@ class RunnerTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.build = self.root / "build"
+        self.rocm = self.root / "rocm"
+        self.rocm.mkdir()
         (self.build / "tools" / "rocjitsu").mkdir(parents=True)
         (self.build / "benchmarks").mkdir()
-        (self.build / "CMakeCache.txt").write_text(
-            "CMAKE_BUILD_TYPE:STRING=Release\n"
-            f"CMAKE_HOME_DIRECTORY:INTERNAL={runner.ROCJITSU_ROOT}\n",
-            encoding="utf-8",
-        )
+        self._write_cache()
         for path in (
             self.build / "tools" / "rocjitsu" / "rocjitsu",
             self.build / "benchmarks" / "rocjitsu-benchmark-hipblaslt",
         ):
             path.write_text("#!/bin/sh\n", encoding="utf-8")
             path.chmod(0o755)
+        for plugin in ("logging", "race", "throughput"):
+            (self.build / f"librocjitsu_plugin_{plugin}.so").touch()
+        installed_rocm = mock.patch.object(
+            runner, "_installed_rocm_path", return_value=self.rocm
+        )
+        installed_rocm.start()
+        self.addCleanup(installed_rocm.stop)
         self.suite = runner.load_manifest()
+
+    def _write_cache(self, **overrides: str) -> None:
+        values = {
+            "CMAKE_BUILD_TYPE": "Release",
+            "CMAKE_HOME_DIRECTORY": str(runner.ROCJITSU_ROOT),
+            "LTO": "OFF",
+            "RJ_ENABLE_ASAN": "OFF",
+            "RJ_ENABLE_MSAN": "OFF",
+            "RJ_ENABLE_TSAN": "OFF",
+            "RJ_ENABLE_UBSAN": "OFF",
+            "ROCM_PATH": str(self.rocm),
+        }
+        values.update(overrides)
+        (self.build / "CMakeCache.txt").write_text(
+            "".join(f"{key}:STRING={value}\n" for key, value in values.items()),
+            encoding="utf-8",
+        )
 
     def _matrix(self, *cases: str, targets: tuple[str, ...] = ("gfx950",)):
         return runner.select_matrix(self.suite, cases=cases, targets=targets)
@@ -63,9 +86,22 @@ class RunnerTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        config = json.loads(
+            Path(argv[argv.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        for plugin in config.get("plugins", {}):
+            report = Path(config["sinks"]["dir"]) / f"{plugin}.log"
+            report.write_text(f"{plugin} report\n", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "out", "")
 
-    def _run(self, matrix, name: str, process=None, samples=None):
+    def _run(
+        self,
+        matrix,
+        name: str,
+        process=None,
+        samples=None,
+        plugin_profile: str = "none",
+    ):
         output = self.root / name
         packages = {
             "rocm-sdk-devel": "7.2.0",
@@ -106,20 +142,21 @@ class RunnerTest(unittest.TestCase):
                 build_dir=self.build,
                 output=output,
                 samples=samples,
+                plugin_profile=plugin_profile,
             )
         return output, result
 
     def test_default_manifest_has_full_ordered_matrix(self) -> None:
         matrix = runner.select_matrix(self.suite)
-        self.assertEqual(len(matrix), 18)
+        self.assertEqual(len(matrix), 32)
         self.assertEqual(set(runner.CASE_METADATA), set(self.suite.cases))
         self.assertEqual(
             matrix[:4],
             (
-                runner.Cell("triton.softmax_fp16_aligned", "gfx950"),
-                runner.Cell("triton.softmax_fp16_aligned", "gfx1250"),
-                runner.Cell("triton.softmax_fp16_boundary", "gfx950"),
-                runner.Cell("triton.softmax_fp16_boundary", "gfx1250"),
+                runner.Cell("triton.copy_fp32_32m", "gfx950"),
+                runner.Cell("triton.copy_fp32_32m", "gfx1250"),
+                runner.Cell("triton.vector_add_fp32_boundary", "gfx950"),
+                runner.Cell("triton.vector_add_fp32_boundary", "gfx1250"),
             ),
         )
         self.assertEqual(self.suite.warmups, 3)
@@ -156,6 +193,17 @@ class RunnerTest(unittest.TestCase):
         manifest.write_bytes(b"name = \xff\n")
         with self.assertRaisesRegex(runner.RunnerError, "cannot read manifest"):
             runner.load_manifest(manifest)
+
+    def test_even_sample_count_is_rejected(self) -> None:
+        with self.assertRaisesRegex(runner.RunnerError, "must be odd"):
+            runner.run_suite(
+                self.suite,
+                self._matrix("triton.rmsnorm_bf16"),
+                build_dir=self.build,
+                output=self.root / "even-samples",
+                samples=2,
+            )
+        self.assertFalse((self.root / "even-samples").exists())
 
     def test_subsets_keep_manifest_order_and_reject_unknowns(self) -> None:
         matrix = runner.select_matrix(
@@ -212,6 +260,27 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue(
                 command.environment["TRITON_CACHE_DIR"].endswith("triton/gfx950")
             )
+
+    def test_plugin_config_is_derived_without_modifying_base(self) -> None:
+        cell = runner.Cell("triton.rmsnorm_bf16", "gfx950")
+        base = runner.TARGET_CONFIGS[cell.target]
+        original = base.read_bytes()
+        command = runner.prepare_command(
+            self.build,
+            self.root / "plugin-config",
+            cell,
+            warmups=1,
+            samples=3,
+            plugin_profile="race",
+        )
+        generated = json.loads(command.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(generated["plugins"], {"race": {}})
+        self.assertEqual(generated["sinks"]["types"], ["file"])
+        self.assertEqual(
+            command.plugin_reports,
+            {"race": command.config_path.parent / "plugins" / "race.log"},
+        )
+        self.assertEqual(base.read_bytes(), original)
 
     def test_validate_and_aggregate_workload(self) -> None:
         path = self.root / "workload.json"
@@ -279,6 +348,7 @@ class RunnerTest(unittest.TestCase):
                 "benchmarkSuite",
                 "targets",
                 "measurement",
+                "configuration",
                 "provenance",
                 "environment",
                 "tests",
@@ -293,12 +363,24 @@ class RunnerTest(unittest.TestCase):
             {"warmups": 3, "samples": 3, "timeoutSeconds": 300.0},
         )
         self.assertEqual(
+            result["configuration"],
+            {
+                "id": "plugins-none-v1",
+                "pluginProfile": "none",
+                "plugins": [],
+                "targetConfigSha256": {
+                    "gfx950": runner._target_metadata("gfx950").config_sha256
+                },
+            },
+        )
+        self.assertEqual(
             result["provenance"],
             {
                 "rocjitsuCommitSha": "a" * 40,
                 "rocjitsuCommitTimestamp": "2026-09-01T21:42:10Z",
                 "dirty": False,
                 "buildType": "Release",
+                "rocmSdkPath": str(self.rocm),
                 "rocmSdkVersion": "7.2.0",
                 "pythonVersion": "3.12.0",
                 "torchVersion": "2.10.0",
@@ -368,6 +450,16 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(test["exitCode"], 0)
         self.assertFalse(test["timedOut"])
         self.assertIsNone(test["error"])
+        self.assertEqual(
+            test["artifacts"],
+            {
+                "workload": "cases/triton.rmsnorm_bf16/gfx950/workload.json",
+                "stdout": "cases/triton.rmsnorm_bf16/gfx950/stdout.txt",
+                "stderr": "cases/triton.rmsnorm_bf16/gfx950/stderr.txt",
+                "config": "cases/triton.rmsnorm_bf16/gfx950/config.json",
+                "pluginReports": {},
+            },
+        )
         self.assertNotIn("canonical", result["provenance"])
         self.assertTrue((output / "run.json").is_file())
         self.assertEqual(
@@ -431,13 +523,43 @@ class RunnerTest(unittest.TestCase):
         )
 
     def test_rejects_build_from_another_worktree(self) -> None:
-        (self.build / "CMakeCache.txt").write_text(
-            "CMAKE_BUILD_TYPE:STRING=Release\n"
-            "CMAKE_HOME_DIRECTORY:INTERNAL=/tmp/other-rocjitsu\n",
-            encoding="utf-8",
-        )
+        self._write_cache(CMAKE_HOME_DIRECTORY="/tmp/other-rocjitsu")
         with self.assertRaisesRegex(runner.RunnerError, "belongs to"):
             runner.validate_build(self.build, self._matrix("triton.rmsnorm_bf16"))
+
+    def test_build_validation_requires_pinned_sdk_and_no_instrumentation(self) -> None:
+        matrix = self._matrix("triton.rmsnorm_bf16")
+        metadata = runner.validate_build(self.build, matrix)
+        self.assertEqual(metadata, runner.BuildMetadata("Release", self.rocm))
+
+        self._write_cache(ROCM_PATH=str(self.root / "another-sdk"))
+        with self.assertRaisesRegex(runner.RunnerError, "this Python environment"):
+            runner.validate_build(self.build, matrix)
+
+        for option in (
+            "LTO",
+            "RJ_ENABLE_ASAN",
+            "RJ_ENABLE_MSAN",
+            "RJ_ENABLE_TSAN",
+            "RJ_ENABLE_UBSAN",
+        ):
+            with self.subTest(option=option):
+                self._write_cache(**{option: "ON"})
+                with self.assertRaisesRegex(
+                    runner.RunnerError, "LTO=OFF|disable sanitizers"
+                ):
+                    runner.validate_build(self.build, matrix)
+        self._write_cache()
+
+    def test_build_validation_requires_selected_plugin_binary(self) -> None:
+        plugin = self.build / "librocjitsu_plugin_race.so"
+        plugin.unlink()
+        with self.assertRaisesRegex(runner.RunnerError, "missing race plugin"):
+            runner.validate_build(
+                self.build,
+                self._matrix("triton.rmsnorm_bf16"),
+                plugin_profile="race",
+            )
 
     def test_target_metadata_is_read_from_selected_configuration(self) -> None:
         configuration = self.root / "target.json"
@@ -454,9 +576,63 @@ class RunnerTest(unittest.TestCase):
                 "target-metadata",
                 samples=1,
             )
-        self.assertEqual(metadata, runner.TargetMetadata("parallel", 8))
+        self.assertEqual(metadata.exec_mode, "parallel")
+        self.assertEqual(metadata.num_threads, 8)
+        self.assertEqual(
+            metadata.config_sha256,
+            hashlib.sha256(configuration.read_bytes()).hexdigest(),
+        )
         self.assertEqual(result["tests"][0]["execMode"], "parallel")
         self.assertEqual(result["tests"][0]["numThreads"], 8)
+        self.assertEqual(
+            result["configuration"]["targetConfigSha256"]["gfx950"],
+            metadata.config_sha256,
+        )
+
+    def test_plugin_profile_is_recorded_and_report_is_retained(self) -> None:
+        output, result = self._run(
+            self._matrix("triton.rmsnorm_bf16"),
+            "race-profile",
+            samples=1,
+            plugin_profile="race",
+        )
+        self.assertEqual(
+            result["configuration"],
+            {
+                "id": "plugins-race-v1",
+                "pluginProfile": "race",
+                "plugins": ["race"],
+                "targetConfigSha256": {
+                    "gfx950": runner._target_metadata("gfx950").config_sha256
+                },
+            },
+        )
+        report = "cases/triton.rmsnorm_bf16/gfx950/plugins/race.log"
+        self.assertEqual(
+            result["tests"][0]["artifacts"]["pluginReports"], {"race": report}
+        )
+        self.assertEqual((output / report).read_text(encoding="utf-8"), "race report\n")
+
+    def test_missing_plugin_report_fails_the_cell(self) -> None:
+        def no_report(argv, **_kwargs):
+            case = argv[argv.index("--case") + 1]
+            target = argv[argv.index("--target") + 1]
+            output = Path(argv[argv.index("--output") + 1])
+            output.write_text(
+                json.dumps(self._payload(runner.Cell(case, target), [1])),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        _, result = self._run(
+            self._matrix("triton.rmsnorm_bf16"),
+            "missing-plugin-report",
+            process=no_report,
+            samples=1,
+            plugin_profile="logging",
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("logging", result["tests"][0]["error"])
 
     def test_target_metadata_rejects_invalid_fields(self) -> None:
         configuration = self.root / "target.json"
@@ -594,7 +770,7 @@ class RunnerTest(unittest.TestCase):
             target = argv[argv.index("--target") + 1]
             output = Path(argv[argv.index("--output") + 1])
             output.write_text(
-                json.dumps(self._payload(runner.Cell(case, target), [1, 0])),
+                json.dumps(self._payload(runner.Cell(case, target), [1, 0, 3])),
                 encoding="utf-8",
             )
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -603,7 +779,7 @@ class RunnerTest(unittest.TestCase):
             self._matrix("triton.rmsnorm_bf16"),
             "malformed",
             process=malformed,
-            samples=2,
+            samples=3,
         )
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["tests"][0]["exitCode"], 0)
@@ -632,7 +808,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(persisted["status"], "failed")
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
-    def test_success_cleans_up_workload_process_group(self) -> None:
+    def test_success_does_not_signal_a_reaped_process_group(self) -> None:
         process = mock.Mock(pid=1234, returncode=0)
         process.communicate.return_value = ("out", "error")
         with (
@@ -642,7 +818,7 @@ class RunnerTest(unittest.TestCase):
             completed = runner._run_command(
                 ("workload",), cwd=self.root, env={}, timeout=1
             )
-        kill_group.assert_called_once_with(1234, signal.SIGKILL)
+        kill_group.assert_not_called()
         self.assertEqual(completed.stdout, "out")
         self.assertEqual(completed.stderr, "error")
 
@@ -681,6 +857,23 @@ class RunnerTest(unittest.TestCase):
         kill_group.assert_called_once_with(1234, signal.SIGKILL)
         self.assertEqual(process.communicate.call_count, 2)
 
+    def test_interruption_finalizes_the_run_artifact(self) -> None:
+        def interrupt(_argv, **_kwargs):
+            raise KeyboardInterrupt()
+
+        output = self.root / "interrupted"
+        with self.assertRaises(KeyboardInterrupt):
+            self._run(
+                self._matrix("triton.rmsnorm_bf16"),
+                "interrupted",
+                process=interrupt,
+                samples=1,
+            )
+        persisted = json.loads((output / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "failed")
+        self.assertIsNotNone(persisted["finishedAt"])
+        self.assertEqual(persisted["tests"], [])
+
     def test_existing_output_is_never_overwritten(self) -> None:
         output = self.root / "existing"
         output.mkdir()
@@ -708,7 +901,7 @@ class RunnerTest(unittest.TestCase):
             return self._successful_process(argv, **kwargs)
 
         matrix = self._matrix("triton.rmsnorm_bf16", "triton.gemm_bf16_aligned")
-        output, result = self._run(matrix, "partial", process=one_failure, samples=2)
+        output, result = self._run(matrix, "partial", process=one_failure, samples=3)
         self.assertEqual(
             [item["status"] for item in result["tests"]],
             ["failed", "completed"],

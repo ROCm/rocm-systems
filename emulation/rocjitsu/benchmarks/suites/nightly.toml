@@ -1,12 +1,19 @@
 name = "nightly"
 targets = ["gfx950", "gfx1250"]
 cases = [
+  "triton.copy_fp32_32m",
+  "triton.vector_add_fp32_boundary",
+  "triton.transpose_fp16_2048",
+  "triton.gather_fp32_irregular",
+  "triton.atomic_add_fp32_contended",
   "triton.softmax_fp16_aligned",
   "triton.softmax_fp16_boundary",
   "triton.rmsnorm_bf16",
   "triton.gemm_bf16_aligned",
   "triton.gemm_bf16_ragged",
   "triton.attention_fp16",
+  "triton.gpt_oss_rmsnorm_bf16",
+  "triton.gpt_oss_gqa_bf16",
   "tensile.gemm_fp16",
   "tensile.gemm_bf16_batched",
   "tensile.gemm_fp8_scaled",

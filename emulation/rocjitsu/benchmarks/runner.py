@@ -8,7 +8,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import math
 import os
@@ -45,6 +47,12 @@ PACKAGE_NAMES = (
 )
 CASE_ID = re.compile(r"^(triton|tensile)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$")
 WORKLOAD_FIELDS = {"schema", "case", "target", "provider", "parameters", "timings_ns"}
+PLUGIN_PROFILES: dict[str, tuple[str, ...]] = {
+    "none": (),
+    "logging": ("logging",),
+    "race": ("race",),
+    "throughput": ("throughput",),
+}
 
 
 class RunnerError(ValueError):
@@ -77,6 +85,8 @@ class PreparedCommand:
     cwd: Path
     environment: dict[str, str]
     workload_path: Path
+    config_path: Path
+    plugin_reports: dict[str, Path]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,9 +101,31 @@ class CaseMetadata:
 class TargetMetadata:
     exec_mode: str
     num_threads: int
+    config_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class BuildMetadata:
+    build_type: str
+    rocm_path: Path
 
 
 CASE_METADATA = {
+    "triton.copy_fp32_32m": CaseMetadata(
+        "Triton", "32 MiB contiguous FP32 copy", "Copy", "fp32"
+    ),
+    "triton.vector_add_fp32_boundary": CaseMetadata(
+        "Triton", "Boundary FP32 vector add", "Vector add", "fp32"
+    ),
+    "triton.transpose_fp16_2048": CaseMetadata(
+        "Triton", "2048x2048 FP16 transpose", "Transpose", "fp16"
+    ),
+    "triton.gather_fp32_irregular": CaseMetadata(
+        "Triton", "Irregular FP32 gather", "Gather", "fp32"
+    ),
+    "triton.atomic_add_fp32_contended": CaseMetadata(
+        "Triton", "Contended FP32 atomic add", "Atomic add", "fp32"
+    ),
     "triton.softmax_fp16_aligned": CaseMetadata(
         "Triton", "Aligned FP16 softmax", "Softmax", "fp16"
     ),
@@ -109,6 +141,12 @@ CASE_METADATA = {
     ),
     "triton.attention_fp16": CaseMetadata(
         "Triton", "FP16 attention", "Attention", "fp16"
+    ),
+    "triton.gpt_oss_rmsnorm_bf16": CaseMetadata(
+        "GPT-OSS", "GPT-OSS-20B BF16 RMSNorm", "RMSNorm", "bf16"
+    ),
+    "triton.gpt_oss_gqa_bf16": CaseMetadata(
+        "GPT-OSS", "GPT-OSS-20B BF16 sliding GQA", "Attention", "bf16"
     ),
     "tensile.gemm_fp16": CaseMetadata("TensileLite", "FP16 GEMM", "GEMM", "fp16"),
     "tensile.gemm_bf16_batched": CaseMetadata(
@@ -146,6 +184,13 @@ def _integer(value: Any, field: str, *, allow_zero: bool) -> int:
         qualifier = "non-negative" if allow_zero else "positive"
         raise RunnerError(f"{field} must be a {qualifier} integer")
     return value
+
+
+def _sample_count(value: Any, field: str = "samples") -> int:
+    count = _integer(value, field, allow_zero=False)
+    if count % 2 == 0:
+        raise RunnerError(f"{field} must be odd so its median is an observed sample")
+    return count
 
 
 def load_manifest(path: str | Path = DEFAULT_MANIFEST) -> Suite:
@@ -186,7 +231,7 @@ def load_manifest(path: str | Path = DEFAULT_MANIFEST) -> Suite:
         targets=targets,
         cases=cases,
         warmups=_integer(value["warmups"], "warmups", allow_zero=True),
-        samples=_integer(value["samples"], "samples", allow_zero=False),
+        samples=_sample_count(value["samples"]),
         timeout_seconds=float(timeout),
     )
 
@@ -233,12 +278,16 @@ def prepare_command(
     *,
     warmups: int,
     samples: int,
+    plugin_profile: str = "none",
 ) -> PreparedCommand:
     """Construct one shell-free Rocjitsu workload command."""
 
     build = Path(build_dir).expanduser().resolve()
     output_root = Path(output).expanduser().resolve()
     workload_path = output_root / "cases" / cell.case / cell.target / "workload.json"
+    config_path, plugin_reports = _materialize_config(
+        output_root, cell, plugin_profile
+    )
     payload = _program(build, cell) + (
         "--case",
         cell.case,
@@ -263,13 +312,15 @@ def prepare_command(
         argv=(
             str(build / "tools" / "rocjitsu" / "rocjitsu"),
             "--config",
-            str(TARGET_CONFIGS[cell.target]),
+            str(config_path),
             "--",
             *payload,
         ),
         cwd=ROCJITSU_ROOT,
         environment=environment,
         workload_path=workload_path,
+        config_path=config_path,
+        plugin_reports=plugin_reports,
     )
 
 
@@ -280,24 +331,63 @@ def _require_file(path: Path, description: str, *, executable: bool = False) -> 
         raise RunnerError(f"{description} is not executable: {path}")
 
 
-def validate_build(build_dir: str | Path, matrix: Sequence[Cell]) -> str:
+def _installed_rocm_path() -> Path:
+    spec = importlib.util.find_spec("_rocm_sdk_devel")
+    if spec is None or spec.origin is None:
+        raise RunnerError("the rocm-sdk-devel package is not installed")
+    return Path(spec.origin).resolve().parent
+
+
+def validate_build(
+    build_dir: str | Path,
+    matrix: Sequence[Cell],
+    *,
+    plugin_profile: str = "none",
+) -> BuildMetadata:
     """Require a Release build and every file needed by the selected matrix."""
 
     build = Path(build_dir).expanduser().resolve()
     cache = build / "CMakeCache.txt"
     _require_file(cache, "CMake cache")
-    build_type = None
-    source_dir = None
+    values: dict[str, str] = {}
     for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith("CMAKE_BUILD_TYPE:"):
-            build_type = line.partition("=")[2]
-        elif line.startswith("CMAKE_HOME_DIRECTORY:"):
-            source_dir = line.partition("=")[2]
+        key_and_type, separator, value = line.partition("=")
+        if separator and ":" in key_and_type:
+            key = key_and_type.partition(":")[0]
+            values[key] = value
+    build_type = values.get("CMAKE_BUILD_TYPE")
+    source_dir = values.get("CMAKE_HOME_DIRECTORY")
     if build_type != "Release":
         raise RunnerError(f"benchmark build must be Release, got {build_type!r}")
     if source_dir is None or Path(source_dir).resolve() != ROCJITSU_ROOT.resolve():
         raise RunnerError(
             f"benchmark build belongs to {source_dir!r}, expected {str(ROCJITSU_ROOT)!r}"
+        )
+    if values.get("LTO") != "OFF":
+        raise RunnerError("benchmark build must set LTO=OFF")
+    enabled_sanitizers = [
+        name
+        for name in (
+            "RJ_ENABLE_ASAN",
+            "RJ_ENABLE_MSAN",
+            "RJ_ENABLE_TSAN",
+            "RJ_ENABLE_UBSAN",
+        )
+        if values.get(name) != "OFF"
+    ]
+    if enabled_sanitizers:
+        raise RunnerError(
+            "benchmark build must disable sanitizers: " + ", ".join(enabled_sanitizers)
+        )
+    configured_rocm = values.get("ROCM_PATH")
+    if not configured_rocm:
+        raise RunnerError("benchmark build has no ROCM_PATH")
+    rocm_path = Path(configured_rocm).resolve()
+    installed_rocm = _installed_rocm_path()
+    if rocm_path != installed_rocm:
+        raise RunnerError(
+            f"benchmark build uses ROCM_PATH {str(rocm_path)!r}, "
+            f"but this Python environment provides {str(installed_rocm)!r}"
         )
     _require_file(
         build / "tools" / "rocjitsu" / "rocjitsu", "rocjitsu", executable=True
@@ -312,19 +402,35 @@ def validate_build(build_dir: str | Path, matrix: Sequence[Cell]) -> str:
         _require_file(
             BENCHMARK_ROOT / "workloads" / "triton_workloads.py", "Triton workload"
         )
-    return build_type
+    try:
+        plugins = PLUGIN_PROFILES[plugin_profile]
+    except KeyError as error:
+        raise RunnerError(f"unknown plugin profile {plugin_profile!r}") from error
+    for plugin in plugins:
+        _require_file(
+            build / f"librocjitsu_plugin_{plugin}.so",
+            f"{plugin} plugin",
+        )
+    return BuildMetadata(build_type=build_type, rocm_path=rocm_path)
 
 
-def _target_metadata(target: str) -> TargetMetadata:
+def _load_target_configuration(target: str) -> tuple[dict[str, Any], str]:
     path = TARGET_CONFIGS[target]
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        encoded = path.read_bytes()
+        value = json.loads(encoded)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError(
             f"cannot read target configuration {path}: {error}"
         ) from error
     if not isinstance(value, Mapping):
         raise RunnerError(f"target configuration must be a JSON object: {path}")
+    return dict(value), hashlib.sha256(encoded).hexdigest()
+
+
+def _target_metadata(target: str) -> TargetMetadata:
+    path = TARGET_CONFIGS[target]
+    value, config_sha256 = _load_target_configuration(target)
     exec_mode = value.get("exec_mode")
     num_threads = value.get("num_threads")
     if not isinstance(exec_mode, str) or not exec_mode:
@@ -335,7 +441,43 @@ def _target_metadata(target: str) -> TargetMetadata:
         or num_threads <= 0
     ):
         raise RunnerError(f"target configuration has invalid num_threads: {path}")
-    return TargetMetadata(exec_mode=exec_mode, num_threads=num_threads)
+    return TargetMetadata(
+        exec_mode=exec_mode,
+        num_threads=num_threads,
+        config_sha256=config_sha256,
+    )
+
+
+def _materialize_config(
+    output_root: Path, cell: Cell, plugin_profile: str
+) -> tuple[Path, dict[str, Path]]:
+    try:
+        plugins = PLUGIN_PROFILES[plugin_profile]
+    except KeyError as error:
+        raise RunnerError(f"unknown plugin profile {plugin_profile!r}") from error
+    value, _ = _load_target_configuration(cell.target)
+    if value.get("plugins") or value.get("sinks"):
+        raise RunnerError(
+            f"benchmark base configuration must not enable plugins or sinks: "
+            f"{TARGET_CONFIGS[cell.target]}"
+        )
+
+    cell_dir = output_root / "cases" / cell.case / cell.target
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    reports: dict[str, Path] = {}
+    if plugins:
+        sink_dir = cell_dir / "plugins"
+        sink_dir.mkdir()
+        value["plugins"] = {plugin: {} for plugin in plugins}
+        value["sinks"] = {"types": ["file"], "dir": str(sink_dir)}
+        reports = {plugin: sink_dir / f"{plugin}.log" for plugin in plugins}
+
+    config_path = cell_dir / "config.json"
+    config_path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return config_path, reports
 
 
 def _camel_case(key: str) -> str:
@@ -465,7 +607,7 @@ def _source_info() -> dict[str, Any]:
     try:
         dirty = bool(
             subprocess.check_output(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--", "."],
                 cwd=ROCJITSU_ROOT,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -498,14 +640,15 @@ def _environment_info() -> dict[str, Any]:
 
 
 def _provenance(
-    source: Mapping[str, Any], environment: Mapping[str, Any], build_type: str
+    source: Mapping[str, Any], environment: Mapping[str, Any], build: BuildMetadata
 ) -> dict[str, Any]:
     packages = environment["packages"]
     return {
         "rocjitsuCommitSha": source["commit_sha"],
         "rocjitsuCommitTimestamp": source["commit_timestamp"],
         "dirty": source["dirty"],
-        "buildType": build_type,
+        "buildType": build.build_type,
+        "rocmSdkPath": str(build.rocm_path),
         "rocmSdkVersion": packages["rocm-sdk-devel"],
         "pythonVersion": environment["python"],
         "torchVersion": packages["torch"],
@@ -578,12 +721,17 @@ def _run_command(
         except BaseException:
             pass
         raise
-    if os.name == "posix":
-        terminate_group()
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
-def _failed_test(cell: Cell, target: TargetMetadata, error: str) -> dict[str, Any]:
+def _failed_test(
+    cell: Cell,
+    target: TargetMetadata,
+    error: str,
+    *,
+    config_path: str,
+    plugin_reports: Mapping[str, str],
+) -> dict[str, Any]:
     metadata = CASE_METADATA[cell.case]
     base = f"cases/{cell.case}/{cell.target}"
     return {
@@ -613,6 +761,8 @@ def _failed_test(cell: Cell, target: TargetMetadata, error: str) -> dict[str, An
             "workload": f"{base}/workload.json",
             "stdout": f"{base}/stdout.txt",
             "stderr": f"{base}/stderr.txt",
+            "config": config_path,
+            "pluginReports": dict(plugin_reports),
         },
     }
 
@@ -625,6 +775,7 @@ def run_suite(
     output: str | Path,
     warmups: int | None = None,
     samples: int | None = None,
+    plugin_profile: str = "none",
 ) -> dict[str, Any]:
     """Run all selected cells, preserving partial results after failures."""
 
@@ -636,13 +787,9 @@ def run_suite(
         if warmups is None
         else _integer(warmups, "warmups", allow_zero=True)
     )
-    selected_samples = (
-        suite.samples
-        if samples is None
-        else _integer(samples, "samples", allow_zero=False)
-    )
+    selected_samples = suite.samples if samples is None else _sample_count(samples)
     build = Path(build_dir).expanduser().resolve()
-    build_type = validate_build(build, matrix)
+    build_metadata = validate_build(build, matrix, plugin_profile=plugin_profile)
     targets = tuple(dict.fromkeys(cell.target for cell in matrix))
     target_metadata = {target: _target_metadata(target) for target in targets}
     started = time.monotonic()
@@ -663,7 +810,15 @@ def run_suite(
             "samples": selected_samples,
             "timeoutSeconds": suite.timeout_seconds,
         },
-        "provenance": _provenance(source, environment, build_type),
+        "configuration": {
+            "id": f"plugins-{plugin_profile}-v1",
+            "pluginProfile": plugin_profile,
+            "plugins": list(PLUGIN_PROFILES[plugin_profile]),
+            "targetConfigSha256": {
+                target: target_metadata[target].config_sha256 for target in targets
+            },
+        },
+        "provenance": _provenance(source, environment, build_metadata),
         "environment": {
             key: environment[key] for key in ("hostname", "platform", "kernel", "cpu")
         },
@@ -671,53 +826,87 @@ def run_suite(
     }
     _write_run(output_path, run)
 
-    for cell in matrix:
-        command = prepare_command(
-            build, output_path, cell, warmups=selected_warmups, samples=selected_samples
-        )
-        cell_dir = command.workload_path.parent
-        cell_dir.mkdir(parents=True)
-        (output_path / "cache" / "triton" / cell.target).mkdir(
-            parents=True, exist_ok=True
-        )
-        stdout = ""
-        stderr = ""
-        result = _failed_test(
-            cell, target_metadata[cell.target], "workload did not run"
-        )
-        try:
-            completed = _run_command(
-                command.argv,
-                cwd=command.cwd,
-                env=command.environment,
-                timeout=suite.timeout_seconds,
+    try:
+        for cell in matrix:
+            command = prepare_command(
+                build,
+                output_path,
+                cell,
+                warmups=selected_warmups,
+                samples=selected_samples,
+                plugin_profile=plugin_profile,
             )
-            stdout = _captured_text(completed.stdout)
-            stderr = _captured_text(completed.stderr)
-            result["exitCode"] = completed.returncode
-            if completed.returncode != 0:
-                raise RunnerError(f"command exited with status {completed.returncode}")
-            aggregate = validate_workload(command.workload_path, cell, selected_samples)
-            result.update(aggregate)
-            result["status"] = "completed"
-            result["error"] = None
-        except subprocess.TimeoutExpired as error:
-            stdout = _captured_text(error.stdout)
-            stderr = _captured_text(error.stderr)
-            result["status"] = "timeout"
-            result["timedOut"] = True
-            result["error"] = (
-                f"command timed out after {suite.timeout_seconds:g} seconds"
+            cell_dir = command.workload_path.parent
+            (output_path / "cache" / "triton" / cell.target).mkdir(
+                parents=True, exist_ok=True
             )
-        except (OSError, RunnerError) as error:
-            result["error"] = str(error)
-        if not command.workload_path.is_file():
-            result["artifacts"]["workload"] = None
-        (cell_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
-        (cell_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-        run["tests"].append(result)
+            config_artifact = str(command.config_path.relative_to(output_path))
+            plugin_artifacts = {
+                plugin: str(path.relative_to(output_path))
+                for plugin, path in command.plugin_reports.items()
+            }
+            stdout = ""
+            stderr = ""
+            result = _failed_test(
+                cell,
+                target_metadata[cell.target],
+                "workload did not run",
+                config_path=config_artifact,
+                plugin_reports=plugin_artifacts,
+            )
+            try:
+                completed = _run_command(
+                    command.argv,
+                    cwd=command.cwd,
+                    env=command.environment,
+                    timeout=suite.timeout_seconds,
+                )
+                stdout = _captured_text(completed.stdout)
+                stderr = _captured_text(completed.stderr)
+                result["exitCode"] = completed.returncode
+                if completed.returncode != 0:
+                    raise RunnerError(
+                        f"command exited with status {completed.returncode}"
+                    )
+                aggregate = validate_workload(
+                    command.workload_path, cell, selected_samples
+                )
+                missing_reports = [
+                    plugin
+                    for plugin, path in command.plugin_reports.items()
+                    if not path.is_file()
+                ]
+                if missing_reports:
+                    raise RunnerError(
+                        "workload did not produce plugin reports: "
+                        + ", ".join(missing_reports)
+                    )
+                result.update(aggregate)
+                result["status"] = "completed"
+                result["error"] = None
+            except subprocess.TimeoutExpired as error:
+                stdout = _captured_text(error.stdout)
+                stderr = _captured_text(error.stderr)
+                result["status"] = "timeout"
+                result["timedOut"] = True
+                result["error"] = (
+                    f"command timed out after {suite.timeout_seconds:g} seconds"
+                )
+            except (OSError, RunnerError) as error:
+                result["error"] = str(error)
+            if not command.workload_path.is_file():
+                result["artifacts"]["workload"] = None
+            (cell_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
+            (cell_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
+            run["tests"].append(result)
+            run["wallTimeSeconds"] = time.monotonic() - started
+            _write_run(output_path, run)
+    except BaseException:
+        run["status"] = "failed"
+        run["finishedAt"] = _utc_now()
         run["wallTimeSeconds"] = time.monotonic() - started
         _write_run(output_path, run)
+        raise
 
     run["status"] = (
         "completed"
@@ -737,15 +926,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--warmups", type=int)
     parser.add_argument("--samples", type=int)
+    parser.add_argument(
+        "--plugin-profile", choices=tuple(PLUGIN_PROFILES), default="none"
+    )
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--list", action="store_true")
     return parser
 
 
+def _raise_interruption(signum: int, _frame: Any) -> None:
+    raise KeyboardInterrupt(signal.Signals(signum).name)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
+    previous_handlers = {
+        signum: signal.signal(signum, _raise_interruption)
+        for signum in (signal.SIGHUP, signal.SIGTERM)
+    }
     try:
         suite = load_manifest(arguments.manifest)
         matrix = select_matrix(suite, targets=arguments.target, cases=arguments.case)
@@ -764,6 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output=arguments.output,
             warmups=arguments.warmups,
             samples=arguments.samples,
+            plugin_profile=arguments.plugin_profile,
         )
         artifact = arguments.output.expanduser().resolve() / "run.json"
         print(f"run {run['status']}: {artifact}")
@@ -771,6 +972,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RunnerError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("error: benchmark run interrupted", file=sys.stderr)
+        return 130
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

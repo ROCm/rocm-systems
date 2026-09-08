@@ -252,7 +252,7 @@ void write_parameters(std::ostream &output, const CaseSpec &problem) {
          << problem.output_dtype << "\", \"accumulator_dtype\": \"fp32\"";
   if (problem.scalar_scales)
     output << ", \"scalar_scales\": true";
-  output << ", \"beta\": 0}";
+  output << ", \"beta\": 0, \"input_pattern\": \"A=0x3c bytes, B=0x38 bytes\"}";
 }
 
 std::size_t checked_product(std::size_t left, std::size_t right, std::string_view name) {
@@ -293,7 +293,7 @@ public:
       HIP_CHECK(hipMalloc(&pointer_, bytes));
   }
 
-  void fill_zero() { HIP_CHECK(hipMemset(pointer_, 0, bytes_)); }
+  void fill_byte(unsigned char value) { HIP_CHECK(hipMemset(pointer_, value, bytes_)); }
 
   template <typename T> void copy_scalar(const T &value) {
     if (bytes_ != sizeof(T))
@@ -477,10 +477,12 @@ public:
     b_.allocate(checked_product(b_elements, element_size(problem.input_type), "B"));
     c_.allocate(checked_product(output_elements, element_size(problem.output_type), "C"));
     d_.allocate(checked_product(output_elements, element_size(problem.output_type), "D"));
-    a_.fill_zero();
-    b_.fill_zero();
-    c_.fill_zero();
-    d_.fill_zero();
+    // These byte patterns are finite and nonzero in every selected FP16,
+    // BF16, and FP8 input format. Initialization is outside the timed region.
+    a_.fill_byte(0x3c);
+    b_.fill_byte(0x38);
+    c_.fill_byte(0);
+    d_.fill_byte(0);
 
     if (problem.scalar_scales) {
       constexpr float scale = 1.0F;
