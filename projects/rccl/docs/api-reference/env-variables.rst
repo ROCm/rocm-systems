@@ -487,6 +487,10 @@ in the following table.
           ``/var/run/nvidia-topologyd/virtualTopology.xml`` when it is present.
       - | Path to an accessible XML file describing part or all of the topology.
 
+    * - | ``NCCL_TOPO_DUMP_FILE``
+        | Specifies a file to which RCCL dumps the detected XML topology.
+      - | Path to a file that RCCL creates or overwrites.
+
     * - | ``NCCL_IGNORE_NET_MISMATCH``
         | Controls what happens when ranks report a different number of local
           network (NET) devices during communicator initialization. RCCL gathers
