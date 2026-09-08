@@ -95,7 +95,7 @@ make_mock_queue(rocprofiler_agent_id_t agent_id)
 }
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
-using query_clock_t = std::function<aqlprofile_att_gpu_clock_t(void)>;
+using query_clock_t  = std::function<aqlprofile_att_gpu_clock_t(void)>;
 using drain_t        = std::function<hsa_status_t(aqlprofile_att_data_callback_t, void*)>;
 
 class MockPackets : public hsa::SQTTBufferingPackets
@@ -107,12 +107,12 @@ public:
     , clock_fn(std::move(_clock)){};
 
     std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
-    aqlprofile_att_gpu_clock_t get_gpu_clock() const override
+    aqlprofile_att_gpu_clock_t               get_gpu_clock() const override
     {
         return clock_fn ? clock_fn() : aqlprofile_att_gpu_clock_t{};
     }
     query_status_t                           query_fn;
-    query_clock_t clock_fn;
+    query_clock_t                            clock_fn;
     drain_t                                  drain_fn{};
     hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data) override
     {
@@ -142,7 +142,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               rocprofiler_user_data_t                         userdata,
               decltype(att_queue_t::submit_fn)                submit_fn = mock_submit,
               drain_t                                         drain_fn  = {},
-              query_clock_t                                   clock = {})
+              query_clock_t                                   clock     = {})
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -181,7 +181,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     // them here or the producer aborts with small_vector::at out_of_range.
     control_packet->populate_before();
     control_packet->populate_after();
-    auto buffer_packet      = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn, clock);
+    auto buffer_packet =
+        std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn, clock);
     buffer_packet->header   = 1;
     buffer_packet->drain_fn = std::move(drain_fn);
 
@@ -377,9 +378,8 @@ TEST(thread_trace, timestamps_follow_buffer_boundaries)
         return aqlprofile_att_gpu_clock_t{100, 100 * (call + 1)};
     };
     auto userdata = rocprofiler_user_data_t{.ptr = &state};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(
-            fetch_cb, query_status, userdata, rocprofiler::thread_trace::mock_submit, {}, query_clock);
+    auto threads  = rocprofiler::thread_trace::start_threads(
+        fetch_cb, query_status, userdata, rocprofiler::thread_trace::mock_submit, {}, query_clock);
 
     while(state.data_callbacks.load() < 3)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
