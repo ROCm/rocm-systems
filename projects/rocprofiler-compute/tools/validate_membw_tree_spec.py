@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from membw_analysis.guidance import _PLACEHOLDER_RE  # noqa: E402
 from membw_analysis.models import MEMBW_TABLE_IDS  # noqa: E402
 from membw_analysis.tree_spec import (  # noqa: E402
     collect_metric_keys,
@@ -92,6 +93,20 @@ def validate() -> list[str]:
                     f"[{arch}] tree metric {metric!r} uses $denom "
                     f"in its formula -- must use hardware cycle denominators"
                 )
+
+        for gid, template in tree_spec.guidance_templates.items():
+            for match in _PLACEHOLDER_RE.finditer(template):
+                kind, key = match.group(1), match.group(2)
+                if kind == "metric" and key not in analysis_metrics:
+                    errors.append(
+                        f"[{arch}] guidance {gid!r}: "
+                        f"{{metric:{key}}} not in analysis config"
+                    )
+                if kind == "threshold" and key not in tree_spec.thresholds:
+                    errors.append(
+                        f"[{arch}] guidance {gid!r}: "
+                        f"{{threshold:{key}}} not in thresholds"
+                    )
 
         config_only = sorted(frozenset(analysis_metrics) - tree_keys)
         if config_only:
