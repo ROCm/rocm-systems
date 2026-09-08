@@ -946,6 +946,13 @@ for RCCL are collected in the following table.
         | Default: ``localhost:28028``.
         | Enclose an IPv6 address in square brackets, for example ``[::1]``.
 
+    * - | ``NCCL_RAS_TIMEOUT_FACTOR``
+        | Specifies a multiplier applied consistently to all RAS subsystem
+          timeouts. Increase it when debugging, tracing, or other overhead makes
+          application execution less predictable.
+      - | Positive integer multiplier.
+        | Default: ``1``.
+
 Development and testing (advanced)
 ==================================
 
