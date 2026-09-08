@@ -20,7 +20,16 @@
 #                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
 #   RCCL_TESTS_DIR     rccl-tests source tree (default: $WORKDIR/projects/rccl-tests)
 #   GIN_PYTEST_TIMEOUT Wall-clock cap for pytest matrix entries (default: 1800s)
+#   GIN_PYTEST_HW_CASES  mpirun cases under -k GinSdma (default: 9). Offline
+#                  parser/tier guards do not launch and are not counted.
 #   RCCL_TESTS_BCAST_GIN_TYPE  NCCL_GIN_TYPE for Broadcast pytest (default: 6)
+#   RCCL_TESTS_BCAST_TIMEOUT_S / RCCL_TESTS_BCAST_CONN_RETRIES
+#                  Inner pytest launch budget. Unset → derived so
+#                  HW_CASES * retries * TIMEOUT_S is strictly under
+#                  GIN_PYTEST_TIMEOUT minus kill-after and slack. Needed
+#                  because GNU timeout killing pytest does not killpg the
+#                  mpirun session (start_new_session=True); pytest's own
+#                  TimeoutExpired handler is what reaps the group.
 
 set -euo pipefail
 
@@ -29,6 +38,9 @@ MSG_SIZE="${MSG_SIZE:-33554432}"
 BENCH_TIMEOUT="${BENCH_TIMEOUT:-600s}"
 BENCH_KILL_AFTER="${BENCH_KILL_AFTER:-30s}"
 GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
+# Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
+# (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
+GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"
@@ -123,6 +135,62 @@ gin_env_to_bcast_xenv() {
   printf '%s' "${raw}"
 }
 
+# GNU timeout accepts 1800 / 1800s / 30m / 1h. Integer seconds only.
+gin_duration_sec() {
+  local raw="${1// /}"
+  if [[ "${raw}" =~ ^([0-9]+)([smh]?)$ ]]; then
+    local n="${BASH_REMATCH[1]}"
+    case "${BASH_REMATCH[2]}" in
+      m) echo $((n * 60)) ;;
+      h) echo $((n * 3600)) ;;
+      *) echo "${n}" ;;
+    esac
+    return 0
+  fi
+  echo "ERROR: cannot parse duration '${1}'" >&2
+  return 1
+}
+
+# pytest's communicate()+killpg is the only path that reaps mpirun (new session).
+# Size TIMEOUT_S and CONN_RETRIES so even the worst-case inner budget (every
+# hardware case using every retry, each waiting the full per-attempt cap) is
+# strictly under GIN_PYTEST_TIMEOUT. Leave already-set env vars alone.
+apply_gin_pytest_inner_budget() {
+  local outer_s kill_s slack usable retries denom timeout_s inner
+  outer_s="$(gin_duration_sec "${GIN_PYTEST_TIMEOUT}")" || return 1
+  kill_s="$(gin_duration_sec "${BENCH_KILL_AFTER}")" || return 1
+  slack=60
+  usable=$((outer_s - kill_s - slack))
+  if ((usable < 30)); then
+    echo "ERROR: GIN_PYTEST_TIMEOUT=${GIN_PYTEST_TIMEOUT} leaves no room for pytest after kill-after/slack" >&2
+    return 1
+  fi
+  if [[ -z "${RCCL_TESTS_BCAST_CONN_RETRIES:-}" ]]; then
+    export RCCL_TESTS_BCAST_CONN_RETRIES=2
+  fi
+  retries="${RCCL_TESTS_BCAST_CONN_RETRIES}"
+  if ((retries < 1)); then
+    retries=1
+    export RCCL_TESTS_BCAST_CONN_RETRIES=1
+  fi
+  denom=$((GIN_PYTEST_HW_CASES * retries))
+  if ((denom < 1)); then
+    denom=1
+  fi
+  if [[ -z "${RCCL_TESTS_BCAST_TIMEOUT_S:-}" ]]; then
+    timeout_s=$(((usable - 1) / denom))
+    if ((timeout_s < 30)); then
+      timeout_s=30
+    fi
+    export RCCL_TESTS_BCAST_TIMEOUT_S="${timeout_s}"
+  fi
+  inner=$((GIN_PYTEST_HW_CASES * retries * RCCL_TESTS_BCAST_TIMEOUT_S))
+  echo "==> pytest inner budget: RCCL_TESTS_BCAST_TIMEOUT_S=${RCCL_TESTS_BCAST_TIMEOUT_S}s retries=${retries} hw_cases=${GIN_PYTEST_HW_CASES} max=${inner}s < outer ${outer_s}s (kill-after ${kill_s}s, slack ${slack}s)"
+  if ((inner + kill_s + slack >= outer_s)); then
+    echo "WARNING: inner budget ${inner}s is not strictly under GIN_PYTEST_TIMEOUT=${outer_s}s; raise the outer cap or lower TIMEOUT_S/retries" >&2
+  fi
+}
+
 # Word-splitting on flag/arg vars below is intentional.
 # shellcheck disable=SC2086
 run_test() {
@@ -166,6 +234,11 @@ run_test() {
       return
     fi
     ensure_pytest
+    apply_gin_pytest_inner_budget || {
+      FAILED_RUNS+=("${name} (inner budget)")
+      set -e
+      return
+    }
     bcast_xenv="$(gin_env_to_bcast_xenv "${env_flags}")"
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
       env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
@@ -173,6 +246,8 @@ run_test() {
         RCCL_TESTS_BCAST_EXE="${bcast_exe}" \
         RCCL_TESTS_BCAST_NP="${NP}" \
         RCCL_TESTS_BCAST_GIN_TYPE="${RCCL_TESTS_BCAST_GIN_TYPE:-6}" \
+        RCCL_TESTS_BCAST_TIMEOUT_S="${RCCL_TESTS_BCAST_TIMEOUT_S}" \
+        RCCL_TESTS_BCAST_CONN_RETRIES="${RCCL_TESTS_BCAST_CONN_RETRIES}" \
         RCCL_TESTS_BCAST_XENV="${bcast_xenv}" \
         RCCL_TESTS_MPI_LAUNCHER="${MPI_HOME}/bin/mpirun" \
         python3 -m pytest "${pytest_file}" ${args} -p no:cacheprovider
