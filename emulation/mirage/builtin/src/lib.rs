@@ -13,7 +13,7 @@
 //! from one the user wrote.
 
 pub mod agents;
-pub mod presets;
+mod presets;
 pub mod profiles;
 pub mod topologies;
 
@@ -129,8 +129,11 @@ pub fn ensure_profiles(force: bool) -> Result<Ensured> {
 /// document.
 ///
 /// Without `force` — the startup path, run before every command — only
-/// missing documents are written, except for an unchanged legacy agent
-/// missing its SDMA queue count, which is upgraded to the shipped definition.
+/// missing documents are written, so a fresh config directory fills
+/// itself in and an existing one is left exactly as it is. The one
+/// exception is [`repair_sdma_queue_count`], which fills in a single
+/// field an older mirage never wrote and without which rocjitsu refuses
+/// to start at all.
 ///
 /// With `force` — `mirage state builtins`, which exists so a mirage
 /// upgrade can bring its new definitions with it — every document that is
@@ -154,7 +157,8 @@ fn ensure<T: Serialize>(
     let mut out = Ensured::default();
     for (name, document) in documents {
         let path = kind.path(name);
-        if path.exists() && !is_legacy_sdma_agent(kind, &path, &document) {
+        if path.exists() {
+            repair_sdma_queue_count(kind, &path, &document)?;
             if !force {
                 out.documents.push((name.to_string(), false));
                 continue;
@@ -171,21 +175,58 @@ fn ensure<T: Serialize>(
     Ok(out)
 }
 
-fn is_legacy_sdma_agent<T: Serialize>(kind: DocKind, path: &std::path::Path, document: &T) -> bool {
+/// Give an on-disk agent the SDMA queue count rocjitsu now requires.
+///
+/// rocjitsu refuses a device that has SDMA engines and no queues on them
+/// — `num_sdma_queues_per_engine must be nonzero when num_sdma_engines
+/// is nonzero`, thrown while the config is loaded, which means the
+/// session dies at daemon start. Mirage never wrote the field before
+/// this release, so *every* agent file an older mirage left behind is
+/// one rocjitsu will now reject.
+///
+/// Those files cannot simply be replaced with the shipped definition.
+/// An older builtin and a builtin the user has edited look alike from
+/// here, and the second is theirs to keep — mirage's standing promise
+/// (see `is_pristine_builtin`) is that it never overwrites a document
+/// somebody changed. So only the one field that makes the file unusable
+/// is filled in, from the shipped definition, and only when it is
+/// absent: an explicit zero is an answer, and mirage does not argue
+/// with it.
+fn repair_sdma_queue_count<T: Serialize>(
+    kind: DocKind,
+    path: &std::path::Path,
+    document: &T,
+) -> Result<()> {
     if !matches!(kind, DocKind::Agent) {
-        return false;
+        return Ok(());
     }
-    let Ok(mut legacy) = serde_json::to_value(document) else {
-        return false;
+    let Some(queues) = serde_json::to_value(document)
+        .ok()
+        .as_ref()
+        .and_then(|shipped| shipped.pointer("/vm/gpu/device/num_sdma_queues_per_engine"))
+        .and_then(serde_json::Value::as_u64)
+        .filter(|queues| *queues > 0)
+    else {
+        return Ok(());
     };
-    let Some(device) = legacy
+    let Ok(mut stored) = mirage_core::state::read_json::<serde_json::Value>(path) else {
+        return Ok(());
+    };
+    let Some(device) = stored
         .pointer_mut("/vm/gpu/device")
         .and_then(serde_json::Value::as_object_mut)
     else {
-        return false;
+        return Ok(());
     };
-    device.remove("num_sdma_queues_per_engine");
-    mirage_core::state::read_json::<serde_json::Value>(path).is_ok_and(|stored| stored == legacy)
+    let engines = device
+        .get("num_sdma_engines")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if engines == 0 || device.contains_key("num_sdma_queues_per_engine") {
+        return Ok(());
+    }
+    device.insert("num_sdma_queues_per_engine".to_string(), queues.into());
+    mirage_core::state::write_json(path, &stored)
 }
 
 #[cfg(test)]
@@ -236,34 +277,77 @@ mod tests {
         }
     }
 
+    /// An explicit zero is the user's answer, and mirage does not
+    /// second-guess it — even though rocjitsu will refuse the file.
     #[test]
-    fn legacy_sdma_upgrade_preserves_user_edits() {
+    fn an_explicit_sdma_queue_count_is_left_alone() {
         let _guard = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
 
         for (name, agent) in agents() {
             let path = mirage_core::paths::agent_path(name);
-            for explicit_zero in [false, true] {
-                let mut edited = serde_json::to_value(&agent).unwrap();
-                if explicit_zero {
-                    edited["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"] = 0.into();
-                } else {
-                    edited["vm"]["gpu"]["device"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("num_sdma_queues_per_engine");
-                    edited["vm"]["gpu"]["device"]["marketing_name"] = "custom GPU".into();
-                }
-                mirage_core::state::write_json(&path, &edited).unwrap();
-                for force in [false, true] {
-                    ensure_agents(force).unwrap();
-                    assert_eq!(
-                        mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
-                        edited
-                    );
-                }
+            let mut edited = serde_json::to_value(&agent).unwrap();
+            edited["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"] = 0.into();
+            mirage_core::state::write_json(&path, &edited).unwrap();
+            for force in [false, true] {
+                ensure_agents(force).unwrap();
+                assert_eq!(
+                    mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
+                    edited
+                );
             }
+        }
+
+        mirage_core::paths::clear_test_root();
+    }
+
+    /// The repair is one field wide.
+    ///
+    /// An agent an older mirage wrote is not the shipped one minus a
+    /// key — it is a different document, with its own topology and its
+    /// own device identity, and it may be one the user has since
+    /// edited. Both have to survive; only the field rocjitsu refuses to
+    /// start without is filled in.
+    #[test]
+    fn a_missing_sdma_queue_count_is_filled_in_without_touching_anything_else() {
+        let _guard = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        for (name, agent) in agents() {
+            let path = mirage_core::paths::agent_path(name);
+            let shipped = serde_json::to_value(&agent).unwrap();
+            let mut legacy = shipped.clone();
+            let device = legacy["vm"]["gpu"]["device"].as_object_mut().unwrap();
+            device.remove("num_sdma_queues_per_engine");
+            // Nothing a released mirage wrote looks like the shipped
+            // document: the tree and the identity moved too.
+            device.insert("marketing_name".to_string(), "custom GPU".into());
+            legacy["topology"]["root"]["children"] = serde_json::json!([]);
+            mirage_core::state::write_json(&path, &legacy).unwrap();
+
+            ensure_agents(false).unwrap();
+
+            let mut expected = legacy.clone();
+            expected["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"] =
+                shipped["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"].clone();
+            let repaired = mirage_core::state::read_json::<serde_json::Value>(&path).unwrap();
+            assert_eq!(repaired, expected, "{name}");
+            assert!(
+                repaired["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"]
+                    .as_u64()
+                    .is_some_and(|queues| queues > 0),
+                "{name}"
+            );
+
+            // Idempotent: a second pass has nothing left to do.
+            ensure_agents(false).unwrap();
+            assert_eq!(
+                mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
+                expected,
+                "{name}"
+            );
         }
 
         mirage_core::paths::clear_test_root();

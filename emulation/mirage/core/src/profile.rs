@@ -366,12 +366,14 @@ impl<'de> Deserialize<'de> for ProfileDef {
             extra: serde_json::Map<String, serde_json::Value>,
         }
         let value = serde_json::Value::deserialize(deserializer)?;
-        let name = value["name"].as_str().unwrap_or("<unnamed>");
+        let name = value["name"].as_str().unwrap_or("<unnamed>").to_string();
+        // Only the fields a document may legally leave out are worth a
+        // warning. `name`, `emulator`, `emulator.emulator` and
+        // `emulator.topology` are required, so the parse below fails on
+        // them a line later and names them itself — warning first would
+        // just report the same omission twice, once under the wrong
+        // profile name for a document whose `name` is not a string.
         for path in [
-            "/name",
-            "/emulator",
-            "/emulator/emulator",
-            "/emulator/topology",
             "/emulator/plugins",
             "/emulator/exec_mode",
             "/emulator/options",
@@ -395,6 +397,17 @@ impl<'de> Deserialize<'de> for ProfileDef {
                     "RocJITsu field {key:?} is specified both on the profile and its emulator"
                 )));
             }
+            // Say so. A root key mirage does not recognise is forwarded
+            // to the emulator, and the emulator drops what *it* does not
+            // recognise without a word — so a misspelled mirage field
+            // (`containerise`, `descriptoin`) otherwise disappears
+            // between the two with nothing anywhere to explain why the
+            // profile did not do what it says. This is the last layer
+            // that still knows which file the key came from.
+            tracing::warn!(
+                "profile {name:?} field {key:?} is not a mirage field; \
+                 forwarding it to the emulator, which ignores what it does not know"
+            );
             fields.emulator.extra.insert(key, value);
         }
         Ok(Self {
