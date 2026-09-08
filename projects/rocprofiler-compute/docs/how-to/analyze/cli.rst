@@ -129,6 +129,10 @@ There are three high-level GPU analysis views:
                       2.1.29 -> L1I Fetch Latency
       ...
 
+   On MI300 and MI350 series GPUs, block **1 (System Info)** also reports compute
+   and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
+   for how those fields affect metric normalization.
+
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
    option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
