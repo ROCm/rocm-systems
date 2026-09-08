@@ -1712,7 +1712,7 @@ drain_intercept_work(bool sync_async_handlers)
             "async_handler_exists={}",
             sync_async_handlers,
             s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-            async_signal_handler_exists() != nullptr);
+            async_signal_handler_exists());
     }
 
     // Match signal-less teardown order: wait for in-flight doorbell workers
