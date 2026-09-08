@@ -30,6 +30,9 @@
 
 #include "rocm_smi/rocm_smi_ampp.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -104,13 +107,49 @@ bool app_modes_supported(const std::string& root) {
 // Reads a single line from a sysfs file. ENOENT is preserved so callers can
 // distinguish an optional file from a permission or I/O failure.
 rsmi_status_t read_sysfs_line(const std::string& path, std::string* out) {
-  errno = 0;
-  std::ifstream f(path);
-  if (!f.good()) {
-    return errno == ENOENT ? RSMI_STATUS_NO_DATA : convert_ampp_errno(errno);
+  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return errno == ENOENT ? RSMI_STATUS_NO_DATA : convert_ampp_errno(errno);
+
+  char buffer[4096];
+  ssize_t bytes_read;
+  do {
+    bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+  } while (bytes_read < 0 && errno == EINTR);
+  int read_errno = errno;
+  int close_result = close(fd);
+  if (bytes_read < 0) return convert_ampp_errno(read_errno);
+  if (close_result != 0) return convert_ampp_errno(errno);
+  buffer[bytes_read] = '\0';
+  *out = std::string(buffer);
+  size_t newline = out->find('\n');
+  if (newline != std::string::npos) out->resize(newline);
+  return RSMI_STATUS_SUCCESS;
+}
+
+rsmi_status_t write_sysfs_value(const std::string& path, const std::string& value) {
+  int fd = open(path.c_str(), O_WRONLY | O_CLOEXEC);
+  if (fd < 0) return convert_ampp_errno(errno);
+
+  size_t written = 0;
+  while (written < value.size()) {
+    ssize_t result = write(fd, value.data() + written, value.size() - written);
+    while (result < 0 && errno == EINTR) {
+      result = write(fd, value.data() + written, value.size() - written);
+    }
+    if (result < 0) {
+      int write_errno = errno;
+      close(fd);
+      return write_errno == EINVAL ? RSMI_STATUS_INVALID_ARGS : convert_ampp_errno(write_errno);
+    }
+    if (result == 0) {
+      close(fd);
+      return RSMI_STATUS_FILE_ERROR;
+    }
+    written += static_cast<size_t>(result);
   }
-  std::getline(f, *out);
-  return f ? RSMI_STATUS_SUCCESS : RSMI_STATUS_FILE_ERROR;
+
+  if (close(fd) != 0) return convert_ampp_errno(errno);
+  return RSMI_STATUS_SUCCESS;
 }
 
 // Reads app_modes/profile_abi (e.g. "1.0\n") verbatim, trimmed of the
@@ -361,9 +400,14 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
 
   if (version != nullptr) {
     std::string abi_version_str;
+    version[0] = '\0';
     rsmi_status_t abi_status = read_profile_abi(root, &abi_version_str);
-    if (abi_status != RSMI_STATUS_SUCCESS) return abi_status;
-    snprintf(version, RSMI_AMPP_MAX_STRING_LENGTH, "%s", abi_version_str.c_str());
+    if (abi_status != RSMI_STATUS_SUCCESS && abi_status != RSMI_STATUS_NO_DATA) {
+      return abi_status;
+    }
+    if (abi_status == RSMI_STATUS_SUCCESS) {
+      snprintf(version, RSMI_AMPP_MAX_STRING_LENGTH, "%s", abi_version_str.c_str());
+    }
   }
 
   uint32_t active_index = 0;
@@ -583,26 +627,7 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
     return resolve_ret;
   }
 
-  std::ofstream active_file(root + "active_profile");
-  if (!active_file.good()) {
-    return RSMI_STATUS_PERMISSION;
-  }
-  active_file << index;
-  active_file.flush();
-  if (!active_file) {
-    // Driver rejects unconfigured custom slots (e.g. an empty profile_5)
-    // with -EINVAL; std::ofstream does not reliably surface errno here,
-    // so re-check errno directly.
-    int err = errno;
-    active_file.close();
-    if (err == EINVAL) {
-      return RSMI_STATUS_INVALID_ARGS;
-    }
-    return convert_ampp_errno(err);
-  }
-  active_file.close();
-  if (!active_file) return RSMI_STATUS_FILE_ERROR;
-  return RSMI_STATUS_SUCCESS;
+  return write_sysfs_value(root + "active_profile", std::to_string(index));
   CATCH
 }
 
@@ -678,21 +703,8 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
   }
 
   // Select the target slot.
-  {
-    std::ofstream profile_file(root + "config/profile");
-    if (!profile_file.good()) {
-      return RSMI_STATUS_PERMISSION;
-    }
-    profile_file << index;
-    profile_file.flush();
-    if (!profile_file) {
-      int err = errno;
-      profile_file.close();
-      return convert_ampp_errno(err);
-    }
-    profile_file.close();
-    if (!profile_file) return RSMI_STATUS_FILE_ERROR;
-  }
+  rsmi_status_t write_status = write_sysfs_value(root + "config/profile", std::to_string(index));
+  if (write_status != RSMI_STATUS_SUCCESS) return write_status;
 
   // Stage only the fields the caller asked for -- partial staging is
   // intentional; do not force-write the full field set (the driver
@@ -702,38 +714,11 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
     std::string field_path =
         root + "config/" +
         std::string(fields[i].name, strnlen(fields[i].name, sizeof(fields[i].name)));
-    std::ofstream field_file(field_path);
-    if (!field_file.good()) {
-      return RSMI_STATUS_PERMISSION;
-    }
-    field_file << fields[i].value;
-    field_file.flush();
-    if (!field_file) {
-      int err = errno;
-      field_file.close();
-      return convert_ampp_errno(err);
-    }
-    field_file.close();
-    if (!field_file) return RSMI_STATUS_FILE_ERROR;
+    write_status = write_sysfs_value(field_path, std::to_string(fields[i].value));
+    if (write_status != RSMI_STATUS_SUCCESS) return write_status;
   }
 
   // Commit.
-  {
-    std::ofstream commit_file(root + "config/commit");
-    if (!commit_file.good()) {
-      return RSMI_STATUS_PERMISSION;
-    }
-    commit_file << 1;
-    commit_file.flush();
-    if (!commit_file) {
-      int err = errno;
-      commit_file.close();
-      return convert_ampp_errno(err);
-    }
-    commit_file.close();
-    if (!commit_file) return RSMI_STATUS_FILE_ERROR;
-  }
-
-  return RSMI_STATUS_SUCCESS;
+  return write_sysfs_value(root + "config/commit", "1");
   CATCH
 }

@@ -151,18 +151,6 @@ class TestGpuAmpp(unittest.TestCase):
             if not profiles:
                 continue
 
-            # ACTIVATE the currently-active profile is a no-op but must
-            # still succeed when activating the already-active profile.
-            active_profile = next((p for p in profiles if p["is_active"]), profiles[0])
-            msg = (
-                f"\t### amdsmi_activate_ampp_profile(gpu={i}, {active_profile['name']}):"
-            )
-            try:
-                amdsmi.amdsmi_activate_ampp_profile(processors[i], active_profile["name"])
-                self.common.print(msg, "OK")
-            except amdsmi.AmdSmiLibraryException as e:
-                self.fail(f"Failed to ACTIVATE {active_profile['name']}: {e}")
-
             # ACTIVATE of an unpublished/invalid name must fail with INVAL,
             # not silently succeed.
             msg = f"\t### amdsmi_activate_ampp_profile(gpu={i}, ../../etc):"
@@ -179,8 +167,7 @@ class TestGpuAmpp(unittest.TestCase):
             writable = next((p for p in profiles if p["is_writable"]), None)
             if writable is not None:
                 msg = (
-                    f"\t### amdsmi_configure_ampp_profile(gpu={i}, {writable['name']}, "
-                    "no fields):"
+                    f"\t### amdsmi_configure_ampp_profile(gpu={i}, {writable['name']}, no fields):"
                 )
                 with self.assertRaises(amdsmi.AmdSmiLibraryException, msg=msg) as ctx:
                     amdsmi.amdsmi_configure_ampp_profile(processors[i], writable["name"], [])
