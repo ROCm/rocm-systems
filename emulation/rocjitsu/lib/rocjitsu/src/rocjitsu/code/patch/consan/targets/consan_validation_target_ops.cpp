@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 
 namespace rocjitsu::consan_validation_target_detail {
 [[nodiscard]] ConSanEncodedMutationValidation

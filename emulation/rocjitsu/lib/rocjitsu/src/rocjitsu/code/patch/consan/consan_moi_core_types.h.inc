@@ -5,12 +5,12 @@ enum class ConSanMoiDiagnosticKind : uint32_t {
   BarrierDivergence = 3,
 };
 
-[[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
+[[nodiscard]] inline uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? profile->max_group_segment_bytes : 64u * 1024u;
 }
 
-[[nodiscard]] constexpr uint32_t
+[[nodiscard]] inline uint32_t
 consan_moi_max_workgroup_lds_bytes(const RuntimeCapabilities &capabilities, rj_code_arch_t arch) {
   return capabilities.max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
 }

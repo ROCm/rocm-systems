@@ -19,10 +19,6 @@
 namespace rocjitsu {
 
 struct ConSanProgramAnalysisTargetOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna3Cdna4ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanRdna3ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanRdna4ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna5ProgramAnalysisOperations;
 
 /// Architectural operand encodings used uniformly by every supported target
 /// profile.  Concrete target packages own exceptions; common construction and
@@ -481,25 +477,6 @@ inline constexpr uint16_t kConSanCdnaSemanticFormMask =
     kConSanCommonSemanticFormMask |
     consan_capability_form_bit(ConSanCapabilityForm::RelaxedLdsAtomicAccess);
 
-#include "rocjitsu/code/patch/consan/targets/shared/cdna3_cdna4/consan_cdna3_cdna4_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/shared/rdna3_rdna4/consan_rdna_target_profile.h.inc"
-
-#include "rocjitsu/code/patch/consan/targets/cdna3/consan_gfx942_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/cdna4/consan_gfx950_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/cdna5/consan_gfx1250_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/rdna3/consan_gfx1100_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/rdna4/consan_gfx1201_target_profile.h.inc"
-
-/// The production target-admission map and documentation iteration order.
-/// Concrete architectural facts live in the gfx-named profile owners above.
-inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
-    kConSanGfx942TargetProfile,
-    kConSanGfx950TargetProfile,
-    kConSanGfx1100TargetProfile,
-    kConSanGfx1201TargetProfile,
-    kConSanGfx1250TargetProfile,
-}};
-
 inline constexpr auto kConSanCapabilityEngines = [] {
   using E = ConSanCapabilityEngine;
   return make_consan_enum_vocabulary("unknown", consan_enum(E::SuperCollider, "SuperCollider"),
@@ -543,22 +520,8 @@ template <typename Values>
   return true;
 }
 
-[[nodiscard]] constexpr const ConSanTargetProfile *
-consan_target_profile(rj_code_target_id_t target) {
-  for (const ConSanTargetProfile &profile : kConSanTargetProfiles) {
-    if (target == profile.target)
-      return &profile;
-  }
-  return nullptr;
-}
-
-[[nodiscard]] constexpr const ConSanTargetProfile *consan_target_profile(rj_code_arch_t arch) {
-  for (const ConSanTargetProfile &profile : kConSanTargetProfiles) {
-    if (arch == profile.arch)
-      return &profile;
-  }
-  return nullptr;
-}
+[[nodiscard]] const ConSanTargetProfile *consan_target_profile(rj_code_target_id_t target);
+[[nodiscard]] const ConSanTargetProfile *consan_target_profile(rj_code_arch_t arch);
 
 template <std::size_t N>
 [[nodiscard]] constexpr bool
@@ -625,8 +588,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         profile.semantic_form_mask == 0u ||
         (profile.has_selectable_vgpr_bank !=
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
-        (profile.requires_split_two_address_lds_relocation &&
-         profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
         profile.moi_dispatch_identity_placement ==
             ConSanMoiDispatchIdentityPlacement::Unsupported ||
@@ -637,9 +598,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.dispatch_identity == ConSanDispatchIdentitySource::PreloadedSgprPair)) ||
         (!profile.moi_access_reports_need_explicit_dispatch_identity &&
          profile.dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral) ||
-        (profile.requires_raw_memory_order_qualifier !=
-         (profile.arch == ROCJITSU_CODE_ARCH_RDNA3 || profile.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-          profile.arch == ROCJITSU_CODE_ARCH_CDNA5)) ||
         (profile.has_cluster_facilities &&
          (profile.semantic_form_mask &
           consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u) ||
@@ -674,23 +632,21 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
   return true;
 }
 
-[[nodiscard]] constexpr bool consan_target_profiles_are_valid() {
-  return consan_target_profiles_are_valid(kConSanTargetProfiles);
-}
+[[nodiscard]] bool consan_target_profiles_are_valid();
 
-[[nodiscard]] constexpr rj_code_arch_t consan_arch_for_target(rj_code_target_id_t target) {
+[[nodiscard]] inline rj_code_arch_t consan_arch_for_target(rj_code_target_id_t target) {
   const ConSanTargetProfile *profile = consan_target_profile(target);
   return profile ? profile->arch : ROCJITSU_CODE_ARCH_INVALID;
 }
 
-[[nodiscard]] constexpr bool consan_is_capability_arch(rj_code_arch_t arch) {
+[[nodiscard]] inline bool consan_is_capability_arch(rj_code_arch_t arch) {
   return consan_target_profile(arch) != nullptr;
 }
 
 /// Return whether a target can recover system-SGPR payload that overflows the
 /// descriptor's ordinary preload window. Entry-prologue lowering uses this
 /// capability instead of naming the current targets that implement it.
-[[nodiscard]] constexpr bool
+[[nodiscard]] inline bool
 consan_arch_supports_kernarg_preload_overflow_recovery(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->supports_kernarg_preload_overflow_recovery;
@@ -717,43 +673,25 @@ consan_profile_normalize_private_size(const ConSanTargetProfile &profile,
   return static_cast<uint32_t>(normalized);
 }
 
-[[nodiscard]] constexpr std::optional<uint32_t>
+[[nodiscard]] inline std::optional<uint32_t>
 consan_address_free_private_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? std::optional<uint32_t>(profile->address_free_private_limit_bytes)
                  : std::nullopt;
 }
 
-[[nodiscard]] constexpr std::optional<uint32_t>
+[[nodiscard]] inline std::optional<uint32_t>
 consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t requested_bytes) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? consan_profile_normalize_private_size(*profile, requested_bytes) : std::nullopt;
 }
 
-[[nodiscard]] constexpr bool consan_arch_is_cdna3_or_cdna4(rj_code_arch_t arch) {
-  return consan_is_capability_arch(arch) &&
-         (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4);
-}
-
-[[nodiscard]] constexpr bool consan_arch_is_rdna4_or_cdna5(rj_code_arch_t arch) {
-  return consan_is_capability_arch(arch) &&
-         (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
-}
-
-[[nodiscard]] constexpr bool consan_arch_is_cdna5(rj_code_arch_t arch) {
-  return consan_is_capability_arch(arch) && arch == ROCJITSU_CODE_ARCH_CDNA5;
-}
-
-[[nodiscard]] constexpr bool consan_arch_is_rdna3(rj_code_arch_t arch) {
-  return consan_is_capability_arch(arch) && arch == ROCJITSU_CODE_ARCH_RDNA3;
-}
-
-[[nodiscard]] constexpr bool consan_arch_has_cluster_facilities(rj_code_arch_t arch) {
+[[nodiscard]] inline bool consan_arch_has_cluster_facilities(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->has_cluster_facilities;
 }
 
-[[nodiscard]] constexpr bool consan_arch_has_selectable_vgpr_bank(rj_code_arch_t arch) {
+[[nodiscard]] inline bool consan_arch_has_selectable_vgpr_bank(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->has_selectable_vgpr_bank;
 }
@@ -782,8 +720,8 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 /// Target-family availability shared with production admission. Exact
 /// mnemonic, encoding, scope, and operand checks remain in the decoded
 /// inventory and lowerers.
-[[nodiscard]] constexpr bool consan_arch_supports_capability_form(rj_code_arch_t arch,
-                                                                  ConSanCapabilityForm form) {
+[[nodiscard]] inline bool consan_arch_supports_capability_form(rj_code_arch_t arch,
+                                                               ConSanCapabilityForm form) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   const uint16_t form_bit = consan_capability_form_bit(form);
   return profile && form_bit != 0u && (profile->semantic_form_mask & form_bit) != 0u;
@@ -793,7 +731,7 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 /// still comes from the decoded semantic inventory and engine lowerers; this
 /// function projects their stable target/engine contract without duplicating
 /// target-native mnemonic lists.
-[[nodiscard]] constexpr ConSanCapabilityDisposition
+[[nodiscard]] inline ConSanCapabilityDisposition
 consan_capability_disposition(rj_code_target_id_t target, ConSanCapabilityEngine engine,
                               ConSanCapabilityForm form) {
   const rj_code_arch_t arch = consan_arch_for_target(target);
@@ -863,7 +801,6 @@ consan_capability_disposition_name(ConSanCapabilityDisposition disposition) {
   return kConSanCapabilityDispositions.name(disposition);
 }
 
-static_assert(consan_target_profiles_are_valid());
 static_assert(consan_capability_enum_is_complete(kConSanCapabilityEngines));
 static_assert(consan_capability_enum_is_complete(kConSanCapabilityDomains));
 static_assert(consan_capability_enum_is_complete(kConSanCapabilityForms));

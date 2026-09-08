@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <climits>

@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"

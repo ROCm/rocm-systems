@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 
 #include <iostream>
 #include <string>

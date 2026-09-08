@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # The production target graph follows the semantic direction of the lowering
-# pipeline. Each component may use the components named before it; architecture
-# boundary checks forbid the important reverse dependencies.
+# pipeline. Each component may use the components named before it.
 rj_add_object_library(
     rocjitsu_consan_contracts
         consan_access_classifier.cpp
@@ -27,6 +26,7 @@ rj_add_object_library(
         targets/consan_fault_target_ops.cpp
         targets/consan_program_analysis_target_ops.cpp
         targets/consan_supercollider_target_ops.cpp
+        targets/consan_target_profiles.cpp
         targets/consan_validation_target_ops.cpp
         targets/rdna3/consan_program_analysis_rdna3_target_ops.cpp
         targets/rdna3/consan_supercollider_rdna3_target_ops.cpp

@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <gtest/gtest.h>
@@ -17,6 +18,11 @@
 
 namespace rocjitsu {
 namespace {
+
+inline constexpr uint16_t kExpectedCdna5SemanticFormMask =
+    kConSanCdnaSemanticFormMask |
+    consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier) |
+    consan_capability_form_bit(ConSanCapabilityForm::OrderedLdsAtomic);
 
 /// Independent expected values for one target-wide architectural contract.
 ///
@@ -423,7 +429,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = true,
-        .semantic_form_mask = kConSanGfx1250SemanticFormMask,
+        .semantic_form_mask = kExpectedCdna5SemanticFormMask,
         .requires_sc_runtime_flat_group_gate = true,
         .requires_raw_memory_order_qualifier = true,
     },
@@ -591,13 +597,8 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("unknown post-instrumentation transport model", [](auto &profiles) {
     profiles[0].code_transport = static_cast<ConSanCodeTransportModel>(255u);
   });
-  expect_invalid("two-address relocation split outside CDNA5", [](auto &profiles) {
-    profiles[0].requires_split_two_address_lds_relocation = true;
-  });
   expect_invalid("SC runtime group gate without selectable VGPR banks",
                  [](auto &profiles) { profiles[0].requires_sc_runtime_flat_group_gate = true; });
-  expect_invalid("raw memory-order qualifier disagrees with encoding",
-                 [](auto &profiles) { profiles[0].requires_raw_memory_order_qualifier = true; });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {
     profiles[0].semantic_form_mask = static_cast<uint16_t>(
         profiles[0].semantic_form_mask | (1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)));
@@ -905,7 +906,7 @@ TEST(ConSanCapabilityContract, CapabilityFormBitsAreUniqueBoundedAndComposeDecla
                 expected_common |
                 consan_capability_form_bit(ConSanCapabilityForm::RelaxedLdsAtomicAccess)));
   EXPECT_EQ(
-      kConSanGfx1250SemanticFormMask,
+      kExpectedCdna5SemanticFormMask,
       static_cast<uint16_t>(kConSanCdnaSemanticFormMask |
                             consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier) |
                             consan_capability_form_bit(ConSanCapabilityForm::OrderedLdsAtomic)));

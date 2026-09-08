@@ -308,12 +308,12 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
     const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
-[[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
+[[nodiscard]] inline uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? profile->ordinary_sgpr_limit : kMaxSgprs;
 }
 
-[[nodiscard]] constexpr bool
+[[nodiscard]] inline bool
 persistent_sgpr_range_overlaps_reserved_ordinary_range(uint16_t base, uint16_t width,
                                                        rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);

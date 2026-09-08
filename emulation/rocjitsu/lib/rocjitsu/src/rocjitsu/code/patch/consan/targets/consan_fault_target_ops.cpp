@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 
 namespace rocjitsu {
 

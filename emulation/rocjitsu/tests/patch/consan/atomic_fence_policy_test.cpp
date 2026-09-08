@@ -29,7 +29,8 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   ConSanAtomicSite site;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
+  site.size = consan_target_profile(target.arch)->vector_memory.instruction_word_count *
+              sizeof(uint32_t);
   site.width_bits = 32;
   site.destination_vgpr = 1;
   site.address_vgpr = 0;
@@ -74,7 +75,8 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.support_reason = ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
+  site.size = consan_target_profile(target.arch)->vector_memory.instruction_word_count *
+              sizeof(uint32_t);
   site.width_bits = 32;
   site.address_vgpr = 0;
   site.scalar_address_sgpr = 4;
@@ -238,7 +240,8 @@ ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
     ConSanFenceSite site;
     site.text_offset = event.text_offset();
     site.file_offset = event.text_offset();
-    site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
+    site.size = consan_target_profile(target.arch)->vector_memory.instruction_word_count *
+                sizeof(uint32_t);
     site.cache_operation = event.memory_role == ConSanSyncMemoryRole::Acquire
                                ? ConSanCacheOperation::Acquire
                                : ConSanCacheOperation::Release;
