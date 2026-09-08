@@ -227,6 +227,19 @@ class DeviceTableGenerationTest(unittest.TestCase):
             r"^\s*(%s), // unroll (\d+)$" % value_pattern, block.group(1), re.M
         )
         self.assertTrue(entries, "no %s[] entries parsed" % name)
+        # The host indexes these tables by the NCCL_UNROLL_* ordinal, not by the
+        # trailing comment: unrollAvailability() subscripts them with comm->unroll,
+        # where NCCL_UNROLL_1 is 0 and each step doubles the factor. Keying the dict
+        # off the comment below would hide a reordered all_unrolls, which emits rows
+        # that read correctly but sit at the wrong ordinals.
+        order = [unroll for _, unroll in entries]
+        self.assertEqual(
+            [str(2 ** i) for i in range(len(order))],
+            order,
+            "%s[] rows are not in NCCL_UNROLL_* order (1, 2, 4, ...), so the "
+            "table is misaligned against the enum the host subscripts it with"
+            % name,
+        )
         return {unroll: value for value, unroll in entries}
 
     def _entry_guards(self, unroll):

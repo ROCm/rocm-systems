@@ -792,8 +792,15 @@ with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, fn in specialized_filelist:
     # cmake/DeviceLinker.cmake drops a .cpp from a GPU target when this predicate is
     # false, so it has to stay in step with the #if get_arch_guard() emits. Derive the
-    # arch test from the same table; the ENABLE_LL128 term is additional, since these
-    # files are not compiled at all in a build without LL128.
+    # arch test from the same table.
+    #
+    # The ENABLE_LL128 term makes this predicate stricter than that #if, which drops
+    # the term for an arch-pinned unroll because the unroll branch wins ahead of the
+    # LL128 branches. With LL128 off, these shards would leave the target while
+    # device_table.h still declares them. Unreachable today: LL128 is only disabled
+    # below HIP 6.1.33591 (see the top-level CMakeLists), which no gfx1250-capable
+    # toolchain is. It would become live if an unroll were ever pinned to an arch old
+    # enough to pair with such a toolchain.
     if fn.unroll in unroll_arch_requirement:
       cmake_guard = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
       if fn.proto == "LL128":
