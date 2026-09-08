@@ -125,19 +125,14 @@ def build_type_aliases(preproc_file):
           m = define_pat.match(line)
           if m:
             alias, target = m.group(1), m.group(2)
-            parent.setdefault(alias, alias)
-            parent.setdefault(target, target)
             union(alias, target)
             defined.add(alias)
     except IOError:
       continue
 
-  aliases = {}
-  for alias in defined:
-    canonical = find(alias)
-    if canonical != alias:
-      aliases[alias] = canonical
-  return aliases
+  for sym in defined:
+    find(sym)
+  return parent
 
 # Rewriting alias type names in a normalized type string to their canonical form.
 def resolve_type_aliases(type_str):
@@ -145,7 +140,7 @@ def resolve_type_aliases(type_str):
   if type_aliases is None:
     type_aliases = build_type_aliases(api_hfile)
   for alias, canonical in type_aliases.items():
-    type_str = re.sub(r'\b' + re.escape(alias) + r'\b', lambda m: canonical, type_str)
+    type_str = re.sub(r'\b' + re.escape(alias) + r'\b', canonical, type_str)
   return type_str
 
 # Creating a list of arguments [(type, name), ...]
