@@ -193,6 +193,15 @@ in the following table.
         | Default: unset (tries ``libnccl-tuner.so``).
         | ``none``: Disables external tuner loading.
 
+    * - | ``NCCL_PROFILER_PLUGIN``
+        | Selects a profiler plugin by suffix or library name. RCCL first tries
+          the exact value, then ``libnccl-profiler-<suffix>.so``. If unset, RCCL
+          tries ``libnccl-profiler.so``. If no plugin is found, profiling is not
+          enabled.
+      - | Plugin suffix, plugin file name, or ``none``.
+        | ``STATIC_PLUGIN``: Search for plugin symbols in the program binary.
+        | ``none``: Disable profiler plugin loading.
+
     * - | ``NCCL_MEM_SYNC_DOMAIN``
         | Controls the CUDA Memory Sync Domain launch attribute for NCCL kernels on
           NVIDIA CUDA 12.0+ sm90/Hopper-class GPUs. RCCL preserves this environment
