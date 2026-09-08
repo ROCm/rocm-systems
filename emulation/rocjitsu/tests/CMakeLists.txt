@@ -457,6 +457,7 @@ add_executable(
     patch/probe_symbol_test.cpp
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp
+    patch/probe_live_in_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
