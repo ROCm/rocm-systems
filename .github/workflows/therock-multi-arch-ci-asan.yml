@@ -82,6 +82,7 @@ jobs:
       # result behind it. Sanity still runs and still reports its own status.
       #sanity_blocks_components: false
       build_native_linux: false
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
       build_pytorch: false
       build_jax: false
