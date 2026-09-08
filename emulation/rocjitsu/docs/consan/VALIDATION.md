@@ -54,12 +54,12 @@ member changes the intended ordering property and requires the applicable
 sanitizer evidence while retaining an independent control oracle wherever
 possible.
 
-The contract is deliberately independent of the current prototype. Tests may
-require that the intended code object was instrumented, that semantic evidence
+The contract is deliberately independent of current implementation choices.
+Tests may require that the intended code object was instrumented, that semantic evidence
 is complete, and that diagnostics match the declared clean or racy outcome.
 They do not assert patch counts, instruction encodings, code-cave use, helper
 layout, register allocation, or any other implementation choice. This lets the
-same suite remain an oracle during the production replacement.
+same suite remain an oracle across architectural changes.
 
 Every fixture runs as an uninstrumented baseline and under SuperCollider,
 Record/Replay, Sampled, and Inline Shadow. The common matrix is registered for
@@ -73,7 +73,7 @@ The initial target-capability disposition is:
 
 | Capability | Device disposition |
 | --- | --- |
-| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms, including adjacent CDNA3/4 `ds_read2_b64`/`ds_write2_b64` and gfx11/12 `ds_load_2addr_b64`/`ds_store_2addr_b64`, plus each family's stride-64 forms, under one four-value exact publication contract. CDNA4 additionally executes exact B32/B128 MUBUF direct-to-LDS delivery with implicit M0/physical-lane destinations in simulation and hardware; CDNA3 transports the applicable B32 form. |
+| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms, including adjacent CDNA3/4 `ds_read2_b64`/`ds_write2_b64` and RDNA3/4 `ds_load_2addr_b64`/`ds_store_2addr_b64`, plus each family's stride-64 forms, under one four-value exact publication contract. CDNA4 additionally executes exact B32/B128 MUBUF direct-to-LDS delivery with implicit M0/physical-lane destinations in simulation and hardware; CDNA3 transports the applicable B32 form. |
 | Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
 | Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including address/destination aliasing. |
@@ -119,9 +119,9 @@ the physical resource lock prevents simulator work from running concurrently.
 
 Individual target, engine, clean/racy, baseline, and health labels can be
 combined with these commands. Failures remain ordinary visible CTest failures;
-known prototype defects are not encoded as expected passes. End-to-end
-campaigns remain the final qualification authority and the source of future
-small reductions.
+known implementation defects are not encoded as expected passes. End-to-end
+campaigns remain the final qualification authority and the source of focused
+regressions.
 
 The compact physical gfx1100 bring-up gate is registered separately from the
 application campaign:
@@ -640,7 +640,7 @@ name instead of depending on an older internal value type.
 
 No clean profile currently has a workload-specific tuning exception. In
 particular, Qwen Sampled relies on the ordinary `standard-v1` runtime profile:
-stride 16,384 and offset zero are automatic runtime defaults, not environment
+stride 256 and offset zero are automatic runtime defaults, not environment
 settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
@@ -958,7 +958,7 @@ For a new gfx architecture:
 3. run `doctor`, retain `manifest --json`, and pass clean rows;
 4. inventory every fault family and review new target-specific specs;
 5. run overhead and contained fault rows against one frozen commit; and
-6. update [STATUS_RDNA4.md](STATUS_RDNA4.md) only from the generated results.
+6. update that target's status ledger only from the generated results.
 
 Do not copy gfx1201 coverage denominators, machine-code identities, or timing
 factors to another target. A port is credible when another engineer can use

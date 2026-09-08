@@ -4,8 +4,8 @@ This document defines ConSan's malformed-input and containment contract. It is
 deliberately separate from detection quality: a timeout, crash, reset, or
 application failure is never a ConSan race diagnostic.
 
-The contract applies to SuperCollider and to all three MOI engines:
-`record_replay`, `inline_shadow`, and `sampled`. It covers the public transform
+The contract applies to SuperCollider and to all three MOI modes:
+`record-replay`, `inline-shadow`, and `sampled`. It covers the public transform
 boundary, the HSA hook's install decision, and carefully contained execution of
 structurally valid but semantically ill-formed GPU programs. Arbitrary
 structurally malformed bytes must never be submitted to a GPU.
@@ -34,6 +34,11 @@ the transformer's semantic validation boundary. Such an input retains an
 explicit original-load outcome, not relabeled as rejection. Expanding the
 semantic validation boundary is separate work; the contract must accurately
 report what is and is not rejected today.
+
+`RJ_CONSAN_REQUIRE_PATCH=1` is a separate hook policy. It can reject an
+applicable `Unchanged` result even though the transform's fail-closed install
+action alone is “load original.” `RJ_CONSAN_POLICY=strict` enables both
+fail-closed and require-patch behavior.
 
 ## Input and report-state boundaries
 

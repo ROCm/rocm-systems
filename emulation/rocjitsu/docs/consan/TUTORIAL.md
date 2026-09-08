@@ -24,9 +24,10 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Loading the hook selects ConSan's recommended default analysis and standard
-settings. ConSan discovers relevant sites and manages registers, report memory,
-synchronization tracking, and other instrumentation resources automatically.
+Loading the hook selects ConSan's mechanical default, MOI Record/Replay, and
+its standard settings. ConSan discovers relevant sites and manages registers,
+report memory, synchronization tracking, and other instrumentation resources
+automatically.
 `RJ_CONSAN_LOG=1` is optional; it adds compact evidence for understanding the
 run.
 
@@ -72,7 +73,8 @@ a ConSan diagnostic.
 
 (Full document: [FLAVORS.md](FLAVORS.md))
 
-Most investigations should stay with the default. ConSan also offers two other
+The default is a useful inspectable starting point. Select another mode when
+its evidence model better matches the investigation; ConSan offers two other
 MOI engines and the complementary SuperCollider flavor.
 
 | Flavor | Engine | Useful positive evidence | Main tradeoff |
@@ -105,6 +107,10 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
+
+On physical gfx1201, the current empirical recommendation is to use Sampled
+for ordinary barrier/LDS triage and reserve Record/Replay for expert
+synchronization-history work.
 
 ### Different flavor: SuperCollider
 

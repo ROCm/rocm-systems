@@ -5,7 +5,7 @@ hook. It has native support for `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and
 `gfx1250` and does not translate code objects between GPU architectures.
 
 ConSan reads the active workgroup-LDS capacity from the runtime agent. It does
-not hard-code a gfx942 LDS size; simulator and offline tests use the selected
+not hard-code a target-family LDS size; simulator and offline tests use the selected
 RocJITsu JSON configuration as their source of truth.
 
 Use [TUTORIAL.md](TUTORIAL.md) for a short walkthrough,
@@ -60,7 +60,7 @@ comparison in [FLAVORS.md](FLAVORS.md).
 | --- | --- | --- |
 | default or `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | Mechanical default and expert synchronization engine with clear reference/debug semantics, but only a bounded dynamic snapshot. |
 | `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. | Strongest supported-form attribution, with higher overhead. |
-| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 16,384 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
+| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 256 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
 | `RJ_CONSAN_MODE=supercollider` | Duplicate/read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. | Complementary value-instability diagnostic; it does not attribute a happens-before edge or exact racing pair. |
 
 `RJ_CONSAN_MODE` defaults to `record-replay`; spelling it explicitly can make a
@@ -165,6 +165,7 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=N` | unset (unlimited) | Bound the sum of conservative major-image reservations across code objects currently being transformed. Each reservation is the maximum of the explicitly modeled incremental-patch, composite-patch, and final-validation ownership phases described below. All inventory and retry passes for one reader share it. `N` is unsigned decimal; zero rejects every nonempty transform. A rejected fail-open load bypasses transformation, runs the original object, and makes the final analysis verdict incomplete. Fail-closed mode and `RJ_CONSAN_REQUIRE_PATCH=1` instead reject the load because applicability is not yet known. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES=N` | unset (unlimited) | Bound the live aggregate of full retained replacement images. `N` is unsigned decimal; zero rejects every nonempty replacement, including a no-growth rewrite. Bytes are released when a replacement load fails or its executable is destroyed. Retained ownership and its charge survive hook unload/reload because unload does not quiesce runtime loads or invalidate existing executables. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES=N` | unset (unlimited) | Additionally bound the live aggregate of alignment-inclusive ELF growth across retained replacement code objects in this process. `N` is unsigned decimal; zero permits only no-growth replacements. Growth is released when a replacement load fails or its executable is destroyed and, like full-image ownership, survives hook unload/reload. In fail-open mode, an over-budget code object runs uninstrumented and makes the final analysis verdict incomplete; use fail-closed mode when every applicable object must be instrumented. |
+| `RJ_CONSAN_MAX_PATCHES=N` | `65536` | Expert static patch cap. Setting it explicitly makes omitted admitted sites an intentional coverage limit; ordinary runs use the implementation-sized all-supported allowance. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
 
 The kernel allowlist is a production scoping control, not a substring filter.
@@ -249,9 +250,9 @@ outside the hook lifetime and cannot be reconciled on reload. Teardown reports
 the live and peak values for all three controls, including baseline runs where
 the ceilings are unlimited.
 
-For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
-`RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.
-Do not combine old selection variables with `RJ_CONSAN_MODE`.
+The old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
+`RJ_CONSAN_MOI_BACKEND` selection variables are deprecated but accepted with
+warnings. Do not combine them with `RJ_CONSAN_MODE`.
 The absolute and percentage growth variables are mutually exclusive. A
 growth-policy rejection reports the exact alignment-inclusive bytes required,
 the effective total limit, and the selected policy. Successive ConSan stages
@@ -273,6 +274,22 @@ The automatic marker reports that at least one duplicated/read-back value
 differed. It does not identify an address, lane, value, or happens-before
 violation. A race-free program can advance another wave between the original
 and repeated access, so compare repeated known-correct and suspect runs.
+
+SuperCollider timing perturbation is a validation-only composition mechanism,
+not part of an ordinary detection run:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RJ_CONSAN_SC_PERTURB_KIND=none|barrier|atomic` | `none` | Select one synchronization family to delay. |
+| `RJ_CONSAN_SC_PERTURB_EDGE=release|acquire` | `release` | Select the ordering edge of an atomic perturbation. |
+| `RJ_CONSAN_SC_PERTURB_IDENTITY=IDENTITY` | unset | Select the reviewed semantic sequence identity. |
+| `RJ_CONSAN_SC_PERTURB_INDEX=N` | `0` | Zero-based diagnostic selector when an identity is not supplied. Prefer identity. |
+| `RJ_CONSAN_SC_PERTURB_MAX=N` | `1` | Bound the number of selected perturbations. |
+| `RJ_CONSAN_SC_PERTURB_SLEEP=N` | `1` | Sleep immediate used by the perturbation. |
+| `RJ_CONSAN_SC_PERTURB_REQUIRED_COUNT=N` | `0` | Require exactly this many selected perturbations when nonzero. |
+
+As with fault injection, inventory and review an exact identity before using a
+live perturbation in a qualification campaign.
 
 ## MOI report buffers
 
@@ -320,20 +337,23 @@ Sampled banks, saturation, undercoverage, overflow, and drops.
 | `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=0|1` | `0` | Record/Replay per-lane dynamic append. This is bounded expert tracing, not an exhaustive ordinary contract. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE=N` | `1` | Sampled static site stride; this removes nonselected sites and therefore limits declared coverage. |
 | `RJ_CONSAN_MOI_SAMPLE_OFFSET=M` | `0` | Static residue, smaller than the static stride. |
-| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N` | `65,536` for Record/Replay; `16,384` for Sampled | Expert power-of-two runtime stride in `1..16777216`; leaves all eligible static sites patched. |
+| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N` | `65,536` for Record/Replay; `256` for Sampled; `1` for Inline Shadow | Expert power-of-two runtime stride in `1..16777216`; leaves all eligible static sites patched. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=M` | `0` | Expert runtime residue smaller than the runtime stride. |
 | `RJ_CONSAN_MOI_SAMPLED_CHECK=0|1` | `0` | Enable the lower-fidelity immediate adjacent-range GPU check in addition to host scanning. |
 
-Record/Replay runtime selection retains whole workgroups. It mixes the exact
-x/y/z workgroup coordinates and the gfx1250 cluster coordinate when present,
-but not dispatch identity; offset zero therefore always includes workgroup
-zero and selects the same workgroup coordinates across repeated launches.
+Record/Replay runtime selection retains whole workgroups. Its per-probe gate
+mixes the exact x/y/z workgroup coordinates and the CDNA5 cluster coordinate
+when present, but deliberately does not rotate selection by dispatch identity.
+Offset zero therefore includes workgroup zero across repeated launches.
 Dispatch identity remains part of each retained record and host-replay key.
 
-Sampled runtime selection mixes hardware dispatch identity, workgroup
-coordinates, wave owner, epoch, persistent per-wave sequence, static site, and
-LDS address. Each logical range receives as many as eight immutable windows
-when capacity permits. A later valid identity after every bank fills is
+Sampled uses the same dispatch/workgroup vocabulary. When entry-captured
+identity and scalar resources permit, a fast gate skips the shared access body
+for an unselected workgroup; private-identity and compact-spill operating points
+use an in-body fallback. Selected workgroups additionally mix owner, epoch,
+persistent sequence, static site, and LDS-cell identity into bounded causal
+windows. Each logical range receives as many as eight immutable windows when
+capacity permits. A later valid identity after every bank fills is
 `sampled_saturated_windows`; malformed publication or true evidence loss uses
 separate counters and makes the analysis incomplete.
 
@@ -398,8 +418,8 @@ Supported mutation families are:
 | Drop a barrier | `RJ_CONSAN_FAULT_DROP_BARRIER=1` | Logical barriers may require exact sequence and companion identities. |
 | Move a barrier | `RJ_CONSAN_FAULT_MOVE_BARRIER=1` | Set the direction and an exact suitable destination identity. |
 | Change barrier ID/scope or participants | `RJ_CONSAN_FAULT_MUTATE_BARRIER_ID_SCOPE=1` or `RJ_CONSAN_FAULT_MUTATE_BARRIER_PARTICIPANTS=1` | Set the exact sequence and target ID/scope, count, or mask required by the selected form. |
-| Change an atomic address | `RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS=1` | Declare a nonzero aligned `RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA` backed by valid padded storage. |
-| Change an LDS address register | `RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS=1` | Set `RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR` to a distinct, already allocated and workload-initialized VGPR selected from the production kernel. gfx1250 two-address DS forms are excluded until their split relocation has an exact proof. |
+| Change an atomic address | `RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS=1` | Declare a positive, four-byte-aligned, signed-24-bit `RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA` backed by valid padded storage. |
+| Change an LDS address register | `RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS=1` | Set `RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR` to a distinct, already allocated and workload-initialized VGPR selected from the production kernel. |
 | Weaken atomic ordering or scope | `RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1` or `RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE=1` | Order weakening can select `release`, `acquire`, or `any` through `RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE`. |
 | Change an ordinary access | `RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS=1`, `RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER=1`, or `RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE=1` | Wrong-address injection requires explicitly padded valid storage and its aligned delta. |
 
@@ -407,6 +427,44 @@ Barrier sequence, companion, and destination identities are printed by the
 dry-run inventory when the selected family needs them. If an exact site occurs
 in more than one code-object load, `RJ_CONSAN_FAULT_LOAD_OCCURRENCE=N` selects
 the one-based occurrence for a live exactly-one run.
+
+The complete fault-selection controls are:
+
+| Variable | Use |
+| --- | --- |
+| `RJ_CONSAN_FAULT_SITE_IDENTITY` | Exact primary identity printed by dry run. |
+| `RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY` | Exact logical barrier sequence containing the primary. |
+| `RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY` and `RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY` | Paired identities required for grouped barrier drops; setting only one is invalid. |
+| `RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY` | Reviewed destination for a barrier move. |
+| `RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION=legacy-marker|earlier|later` | Direction/form of the move; new campaigns should use an explicit reviewed direction. |
+| `RJ_CONSAN_FAULT_BARRIER_TARGET_ID` | New barrier ID/scope value; required by ID/scope mutation. |
+| `RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_COUNT` or `RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_MASK` | New participant contract for the selected target form. |
+| `RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE=any|release|acquire` | Ordering edge weakened by the atomic-order family. |
+| `RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA` | Required positive, four-byte-aligned, signed-24-bit delta into explicitly valid padded storage. |
+| `RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA` | Required positive aligned signed-24-bit delta into explicitly valid storage. |
+| `RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR` | Distinct allocated and initialized 8-bit VGPR index for LDS wrong-address mutation. |
+| `RJ_CONSAN_FAULT_LOAD_OCCURRENCE` | Positive one-based matching reader load for an exactly-one run. |
+| `RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` | Process-wide exactly-one reservation wait; default `30000`. |
+
+`RJ_CONSAN_FAULT_BARRIER_INDEX`, `RJ_CONSAN_FAULT_ATOMIC_INDEX`,
+`RJ_CONSAN_FAULT_LDS_INDEX`, and `RJ_CONSAN_FAULT_ORDINARY_INDEX` are accepted
+zero-based diagnostic selectors. They are less stable than semantic identities
+and should not be committed as campaign provenance.
+
+Three explicitly destructive proof overrides exist for carefully reviewed
+malformed controls:
+
+- `RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP`;
+- `RJ_CONSAN_FAULT_ALLOW_COMPLETING_CONDITIONAL_BARRIER_MOVE`; and
+- `RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE`.
+
+They relax specific mutation-safety proofs, not ConSan instrumentation safety.
+Do not use them for ordinary detection or as a shortcut around a dry-run
+review.
+
+Variables named `RJ_CONSAN_TEST_*` and the low-level `RJ_CONSAN_PROBE_*`
+mechanism controls are test interfaces, not supported user configuration, and
+are intentionally omitted from this reference.
 
 The LDS wrong-address family rewrites only the decoded DS address operand. It
 does not grow a kernel's VGPR allocation or synthesize a register value: doing
