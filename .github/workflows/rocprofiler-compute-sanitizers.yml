@@ -49,7 +49,11 @@ permissions:
 
 env:
   ROCPROFSYS_CI: ON
-  ROCM_PATH: "/opt/rocm"
+  # ROCM_PATH is discovered from the venv at runtime, see "Install nightly ROCm
+  # wheels".
+  ROCM_VENV: "/opt/rocm-venv"
+  WHEEL_INDEX_URL: "https://nightly.repo.amd.com/rocm/whl-next/"
+  GFX_TARGET: "gfx950"
 
 jobs:
   ci_config:
@@ -112,16 +116,40 @@ jobs:
         run: |
           apt-get update
           apt-get install -y pkg-config
+          # Drop this once the nightly image carries the Dockerfile.ubuntu.ci change.
+          apt-get install -y python3-venv python3-dev
           echo "✅ Dependencies Installed!"
 
-      - name: Install latest nightly ROCm
+      - name: Install nightly ROCm wheels
         shell: bash
         run: |
           set -e
-          mkdir "${ROCM_PATH}"
-          tarball="$(ls "${ROCM_PATH}"-*-multiarch.tar.gz | head -n1)"
-          tar -xf "${tarball}" -C "${ROCM_PATH}"
-          echo "ROCm installed to: ${ROCM_PATH}"
+          python3 -m venv "${ROCM_VENV}"
+
+          # No torch here. Sanitizing a stock libtorch build is out of scope, so
+          # the trace collector stays unbuilt in these jobs.
+          "${ROCM_VENV}/bin/pip" install \
+            --index-url "${WHEEL_INDEX_URL}" \
+            --timeout 600 \
+            "rocm[libraries,profiler,devel,device-${GFX_TARGET}]"
+
+          "${ROCM_VENV}/bin/rocm-sdk" init
+
+          # pip only warns on an unknown extra, so assert the device wheel landed.
+          "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${GFX_TARGET}" > /dev/null
+
+          # $GITHUB_ENV is a file; every later step in this job starts with these
+          # set. A plain export would not outlive this step.
+          rocm_path="$("${ROCM_VENV}/bin/rocm-sdk" path --root)"
+          {
+            echo "ROCM_PATH=${rocm_path}"
+            echo "HIP_PATH=${rocm_path}"
+            echo "HIP_DEVICE_LIB_PATH=${rocm_path}/lib/llvm/amdgcn/bitcode"
+            echo "PATH=${ROCM_VENV}/bin:${rocm_path}/bin:${rocm_path}/lib/llvm/bin:${PATH}"
+            echo "LD_LIBRARY_PATH=${rocm_path}/lib:${rocm_path}/lib/llvm/lib:${rocm_path}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          } >> "${GITHUB_ENV}"
+
+          echo "ROCm installed to: ${rocm_path}"
           echo "✅ ROCm Installation Complete!"
 
       - name: Output TheRock manifest
@@ -131,9 +159,8 @@ jobs:
         id: sanitizer_runtime
         shell: bash
         run: |
-          resource_dir="$("${ROCM_PATH}/llvm/bin/clang" -print-resource-dir)"
-          sanitizer_lib_dir="${resource_dir}/lib/linux"
-          if [ ! -d "${sanitizer_lib_dir}" ]; then
+          sanitizer_lib_dir="$("${ROCM_PATH}/lib/llvm/bin/clang" -print-runtime-dir)"
+          if [ ! -f "${sanitizer_lib_dir}/libclang_rt.asan.so" ]; then
             echo "❌ Missing clang sanitizer runtime: ${sanitizer_lib_dir}"
             exit 1
           fi
@@ -144,24 +171,9 @@ jobs:
         working-directory: projects/rocprofiler-compute
         shell: bash
         run: |
-          for attempt in 1 2 3; do
-            pip install \
-              -r requirements.txt \
-              --break-system-packages \
-              --ignore-installed \
-              --timeout 60 && break
-            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
-            sleep 10
-          done
-          for attempt in 1 2 3; do
-            pip install \
-              -r requirements-test.txt \
-              --break-system-packages \
-              --ignore-installed \
-              --timeout 60 && break
-            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
-            sleep 10
-          done
+          set -e
+          pip install -r requirements.txt --timeout 600
+          pip install -r requirements-test.txt --timeout 600
           echo "✅ pip requirements installed!"
 
       - name: Configure, build, and test
@@ -174,8 +186,7 @@ jobs:
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git config --global --add safe.directory "${PWD}"
 
-          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
-          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${{ steps.sanitizer_runtime.outputs.sanitizer_lib_dir }}:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="${{ steps.sanitizer_runtime.outputs.sanitizer_lib_dir }}:${LD_LIBRARY_PATH}"
 
           c_compiler="$(command -v amdclang)"
           cxx_compiler="$(command -v amdclang++)"
