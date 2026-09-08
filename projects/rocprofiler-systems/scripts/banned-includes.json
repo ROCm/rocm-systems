@@ -1,6 +1,26 @@
 [
     {
+        "header": "timemory/environment/declaration.hpp",
+        "hint": "use \"common/environment.hpp\""
+    },
+    {
+        "header": "timemory/units.hpp",
+        "hint": "use \"common/units/*.hpp\""
+    },
+    {
+        "header": "timemory/utility/delimit.hpp",
+        "hint": "use \"common/delimit.hpp\""
+    },
+    {
+        "header": "timemory/utility/demangle.hpp",
+        "hint": "use \"core/demangler.hpp\""
+    },
+    {
         "header": "timemory/utility/filepath.hpp",
         "hint": "use \"common/path.hpp\" (rocprofsys::path::)"
+    },
+    {
+        "header": "timemory/utility/join.hpp",
+        "hint": "use \"common/join.hpp\""
     }
 ]
