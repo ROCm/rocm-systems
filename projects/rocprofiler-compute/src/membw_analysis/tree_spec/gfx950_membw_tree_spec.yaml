@@ -88,7 +88,7 @@ nodes:
     label: "L2 back pressure"
     guidance_id: gl2_back_pressure
 
-  gl2_mem_bw_bound:
+  gl2_hbm_bw_bound:
     level: GL2
     metric: "L2 Memory BW Bound - Combined Credit Pressure"
     op: gte
@@ -96,27 +96,27 @@ nodes:
     label: "HBM BW stall"
     children:
 
-      gl2_mem_bw_read:
+      gl2_hbm_bw_read:
         metric: "L2 Memory BW Bound - Read Credit Pressure"
         op: gte
         threshold: stall_pct_high
         label: "HBM rd stall"
-        guidance_id: gl2_mem_bw_read
+        guidance_id: gl2_hbm_bw_read
 
-      gl2_mem_bw_write:
+      gl2_hbm_bw_write:
         metric: "L2 Memory BW Bound - Write Credit Pressure"
         op: gte
         threshold: stall_pct_high
         label: "HBM wr stall"
-        guidance_id: gl2_mem_bw_write
+        guidance_id: gl2_hbm_bw_write
 
-      gl2_mem_bw_other:
+      gl2_hbm_bw_other:
         requires_parent: true
         requires_siblings_false:
-          - gl2_mem_bw_read
-          - gl2_mem_bw_write
+          - gl2_hbm_bw_read
+          - gl2_hbm_bw_write
         label: "HBM balanced"
-        guidance_id: gl2_mem_bw_other
+        guidance_id: gl2_hbm_bw_other
 
   gl2_internal_resource:
     level: GL2
@@ -142,25 +142,17 @@ nodes:
     label: "L2 low hit rate"
     guidance_id: gl2_cache_efficiency
 
-  gl2_remote_pressure:
+  gl2_gmi_pressure:
     level: GL2
     metric: "L2 Remote Access Pressure (GMI)"
     op: gte
     threshold: stall_pct_high
     label: "GMI stall"
-    guidance_id: gl2_remote_pressure
+    guidance_id: gl2_gmi_pressure
 
   # --- EA: Efficiency Arbiter Bottleneck Detection ---
   # Source metrics: Table 3018 (EA Bottleneck Detection Indicators)
   # in 3000_mem_bw.yaml
-
-  ea_gmi_bw_bound:
-    level: EA
-    metric: "EA GMI BW Bound - Combined"
-    op: gte
-    threshold: stall_pct_high
-    label: "EA GMI stall"
-    guidance_id: ea_gmi_bw_bound
 
   ea_io_bw_bound:
     level: EA

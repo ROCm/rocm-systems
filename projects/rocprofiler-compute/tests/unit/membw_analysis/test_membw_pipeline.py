@@ -30,7 +30,6 @@ UTCL1_HBM_WORKLOAD = {
     "L2 Internal Resource Pressure - Source FIFO": 1.0,
     "L2 Cache Efficiency": 80.0,
     "L2 Remote Access Pressure (GMI)": 0.5,
-    "EA GMI BW Bound - Combined": 0.1,
     "EA IO BW Bound - Combined": 0.0,
     "EA Write Backpressure": 1.0,
     "EA HBM Atomic Pressure": 0.5,
@@ -96,9 +95,9 @@ class TestFullPipeline:
         assert states["gl1_tcp_utcl1_stall"] == "active"
         assert states["gl1_tcp_other_stall"] == "inactive"
         assert states["gl1_vmem_stall"] == "inactive"
-        assert states["gl2_mem_bw_bound"] == "active"
-        assert states["gl2_mem_bw_read"] == "active"
-        assert states["gl2_mem_bw_other"] == "inactive"
+        assert states["gl2_hbm_bw_bound"] == "active"
+        assert states["gl2_hbm_bw_read"] == "active"
+        assert states["gl2_hbm_bw_other"] == "inactive"
 
         assert len(result.guidance_blocks) > 0
         guidance_text = "\n".join(result.guidance_blocks)
@@ -126,10 +125,10 @@ class TestFullPipeline:
         )
         states = collect_node_states(result.nodes)
 
-        assert states["gl2_mem_bw_bound"] == "active"
-        assert states["gl2_mem_bw_read"] == "inactive"
-        assert states["gl2_mem_bw_write"] == "inactive"
-        assert states["gl2_mem_bw_other"] == "active"
+        assert states["gl2_hbm_bw_bound"] == "active"
+        assert states["gl2_hbm_bw_read"] == "inactive"
+        assert states["gl2_hbm_bw_write"] == "inactive"
+        assert states["gl2_hbm_bw_other"] == "active"
 
         guidance_text = "\n".join(result.guidance_blocks)
         assert "balanced" in guidance_text.lower()
