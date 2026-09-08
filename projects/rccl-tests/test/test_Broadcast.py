@@ -158,6 +158,10 @@ BCAST_NP = _env_int("RCCL_TESTS_BCAST_NP", 0) or ngpus
 BCAST_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 BCAST_CTAS = os.environ.get("RCCL_TESTS_BCAST_CTAS", "8")
 BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "6")
+# Manual / SUT defaults. GIN CI (run-gin-ci.sh) overrides both so
+# HW_CASES * retries * TIMEOUT_S stays under GIN_PYTEST_TIMEOUT; otherwise
+# GNU timeout kills pytest and leaves the mpirun session (start_new_session)
+# orphaned because killpg only runs in this TimeoutExpired handler.
 BCAST_TIMEOUT_S = _env_int("RCCL_TESTS_BCAST_TIMEOUT_S", 900)
 BCAST_CONN_RETRIES = _env_int("RCCL_TESTS_BCAST_CONN_RETRIES", 5)
 BCAST_MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
