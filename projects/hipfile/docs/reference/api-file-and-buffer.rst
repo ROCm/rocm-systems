@@ -19,3 +19,4 @@ hipFile driver.
 
 .. doxygengroup:: file
    :content-only:
+   :members:

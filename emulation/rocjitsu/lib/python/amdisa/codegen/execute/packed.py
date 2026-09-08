@@ -179,8 +179,16 @@ def gen_pk_binop(
             ),
         }
         lo_expr, hi_expr = i_op_map[op]
-        L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-        L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
+        if op in ('add', 'sub'):
+            L.append(
+                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_lo, b_lo, inst_.clamp));'
+            )
+            L.append(
+                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_hi, b_hi, inst_.clamp));'
+            )
+        else:
+            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
+            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
@@ -216,8 +224,16 @@ def gen_pk_binop(
             ),
         }
         lo_expr, hi_expr = u_op_map[op]
-        L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-        L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
+        if op in ('add', 'sub'):
+            L.append(
+                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_lo, b_lo, inst_.clamp));'
+            )
+            L.append(
+                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_hi, b_hi, inst_.clamp));'
+            )
+        else:
+            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
+            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
@@ -233,6 +249,7 @@ def gen_pk_ternary(
     dtype: str | None,
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
+    integer_clamp: bool = False,
 ) -> str:
     """Generate packed 16-bit ternary op (V_PK_FMA_F16, V_PK_MAD_I16, etc.)."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -416,6 +433,17 @@ def gen_pk_ternary(
             L.append(
                 '    uint16_t rhi = static_cast<uint16_t>(std::max(std::max(a_hi, b_hi), c_hi));'
             )
+        elif op == 'mad' and integer_clamp:
+            L.append(
+                '    uint16_t rlo = amdgpu::vop3_integer_mad<int16_t, 16>('
+                'static_cast<uint16_t>(a_lo), static_cast<uint16_t>(b_lo), '
+                'static_cast<uint16_t>(c_lo), inst_.clamp);'
+            )
+            L.append(
+                '    uint16_t rhi = amdgpu::vop3_integer_mad<int16_t, 16>('
+                'static_cast<uint16_t>(a_hi), static_cast<uint16_t>(b_hi), '
+                'static_cast<uint16_t>(c_hi), inst_.clamp);'
+            )
         else:
             L.append(
                 '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
@@ -478,6 +506,15 @@ def gen_pk_ternary(
         elif op in ('max3', 'maximum3'):
             L.append('    uint16_t rlo = std::max(std::max(a_lo, b_lo), c_lo);')
             L.append('    uint16_t rhi = std::max(std::max(a_hi, b_hi), c_hi);')
+        elif op == 'mad' and integer_clamp:
+            L.append(
+                '    uint16_t rlo = amdgpu::vop3_integer_mad<uint16_t, 16>('
+                'a_lo, b_lo, c_lo, inst_.clamp);'
+            )
+            L.append(
+                '    uint16_t rhi = amdgpu::vop3_integer_mad<uint16_t, 16>('
+                'a_hi, b_hi, c_hi, inst_.clamp);'
+            )
         else:
             L.append(
                 '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
