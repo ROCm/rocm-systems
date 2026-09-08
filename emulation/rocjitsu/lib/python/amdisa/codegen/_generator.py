@@ -14964,9 +14964,51 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 execution_code = execution_code.replace(
                     f'Operand::{method}(', f'Operand::{method}_exec('
                 )
-            execution_code += '\n\n' + textwrap.dedent('''\
+            packed_16bit_read_base = ''
+            packed_16bit_write_base = ''
+            if uses_packed_16bit_sources:
+                packed_16bit_read_base = textwrap.dedent('''\
+                  if (auto packed = packed_16bit_vgpr_source(
+                          packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+                    uint32_t off = packed->reg +
+                                   (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                    return wf.vgpr_alloc().base +
+                           amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+                  }
+                  if (auto packed = packed_16bit_vgpr_dst(
+                          packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+                    uint32_t off = packed->reg +
+                                   (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                    return wf.vgpr_alloc().base +
+                           amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+                  }
+                ''')
+                packed_16bit_write_base = textwrap.dedent('''\
+                  if (auto packed = packed_16bit_vgpr_dst(
+                          packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+                    amdgpu::VgprMsbRole role =
+                        vgpr_msb_role() == amdgpu::VgprMsbRole::None
+                            ? amdgpu::VgprMsbRole::Dst
+                            : vgpr_msb_role();
+                    uint32_t off = packed->reg +
+                                   (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
+                  }
+                  if (auto packed = packed_16bit_vgpr_source(
+                          packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+                    amdgpu::VgprMsbRole role =
+                        vgpr_msb_role() == amdgpu::VgprMsbRole::None
+                            ? amdgpu::VgprMsbRole::Dst
+                            : vgpr_msb_role();
+                    uint32_t off = packed->reg +
+                                   (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
+                  }
+                ''')
+            simd_access_code = textwrap.dedent('''\
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
+                @PACKED_16BIT_READ_BASE@
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
                     return wf.vgpr_alloc().base +
                            amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
@@ -14975,6 +15017,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
+                @PACKED_16BIT_WRITE_BASE@
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     amdgpu::VgprMsbRole role =
                         vgpr_msb_role() == amdgpu::VgprMsbRole::None
@@ -15174,7 +15217,23 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   return is_complete(*static_cast<const ExecutionBackend *>(
                       full_execution_backend()));
                 }
-                ''')
+            ''')
+            simd_access_code = simd_access_code.replace(
+                '@PACKED_16BIT_READ_BASE@\n',
+                (
+                    f'{packed_16bit_read_base.rstrip()}\n'
+                    if packed_16bit_read_base
+                    else ''
+                ),
+            ).replace(
+                '@PACKED_16BIT_WRITE_BASE@\n',
+                (
+                    f'{packed_16bit_write_base.rstrip()}\n'
+                    if packed_16bit_write_base
+                    else ''
+                ),
+            )
+            execution_code += '\n\n' + simd_access_code
             execution_code = execution_code.replace(
                 'raw_compute_unit(wf.cu())',
                 'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',
