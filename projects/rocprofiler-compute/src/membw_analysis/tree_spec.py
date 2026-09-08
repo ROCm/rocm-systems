@@ -17,8 +17,8 @@ from utils.utils_common import load_yaml
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
-# Structural edits (add/remove/reorder nodes) change the hash and
-# require updating it here. Threshold-only edits are safe.
+# Structural edits (add/remove nodes, rename keys) change the hash
+# and require updating it here. Reordering and threshold-only edits are safe.
 _KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
 
 
@@ -72,6 +72,9 @@ def _parse_tree_spec(
     thresholds = raw.get("thresholds", {})
     if not isinstance(thresholds, dict):
         console_error("membw", "'thresholds' must be a mapping")
+    for key, val in thresholds.items():
+        if not isinstance(val, (int, float)) or isinstance(val, bool):
+            console_error("membw", f"threshold {key!r} must be numeric, got {val!r}")
 
     raw_nodes = raw.get("nodes", {})
     if not isinstance(raw_nodes, dict):
