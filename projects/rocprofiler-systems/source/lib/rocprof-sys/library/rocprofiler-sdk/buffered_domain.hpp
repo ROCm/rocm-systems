@@ -68,7 +68,7 @@ public:
             m_buffer);  // configure_buffer_tracing_service -> Add throw upon failure in
                         // SdkBackend
 
-        typename SdkBackend::callback_thread_t thread{};
+        typename SdkBackend::callback_thread_id_t thread{};
         SdkBackend::create_callback_thread(
             &thread);  // create_callback_thread -> Add throw upon failure in SdkBackend
 
@@ -86,6 +86,12 @@ public:
     [[nodiscard]] SdkBackend::buffer_id_t buffer_id() const noexcept { return m_buffer; }
 
 private:
+    [[nodiscard]] static bool is_valid(
+        const typename SdkBackend::buffer_id_t& buf) noexcept
+    {
+        return buf.handle != 0;
+    }
+
     void destroy() noexcept
     {
         if(!is_valid(m_buffer))

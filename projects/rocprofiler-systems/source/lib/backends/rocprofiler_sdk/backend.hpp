@@ -57,13 +57,15 @@ struct backend
     using device_counting_agent_cb_t   = Wrapper::device_counting_agent_cb_t;
     using device_counting_service_cb_t = Wrapper::device_counting_service_cb_t;
     using buffer_policy_t              = Wrapper::buffer_policy_t;
-    using buffer_tracing_cb_t          = Wrapper::buffer_tracing_cb_t;
-    using callback_tracing_cb_t        = Wrapper::callback_tracing_cb_t;
-    using callback_tracing_kind_t      = Wrapper::callback_tracing_kind;
-    using buffer_tracing_kind_t        = Wrapper::buffer_tracing_kind;
-    using tracing_operation_t          = Wrapper::tracing_operation;
-    using callback_thread_id_t         = Wrapper::callback_thread_id;
-    using runtime_library_t            = Wrapper::runtime_library_t;
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
+        Wrapper::BUFFER_POLICY_LOSSLESS;
+    using buffer_tracing_cb_t     = Wrapper::buffer_tracing_cb_t;
+    using callback_tracing_cb_t   = Wrapper::callback_tracing_cb_t;
+    using callback_tracing_kind_t = Wrapper::callback_tracing_kind;
+    using buffer_tracing_kind_t   = Wrapper::buffer_tracing_kind;
+    using tracing_operation_t     = Wrapper::tracing_operation;
+    using callback_thread_id_t    = Wrapper::callback_thread_id;
+    using runtime_library_t       = Wrapper::runtime_library_t;
     using external_correlation_request_kind_t =
         Wrapper::external_correlation_request_kind;
     using external_correlation_id_request_cb_t =
