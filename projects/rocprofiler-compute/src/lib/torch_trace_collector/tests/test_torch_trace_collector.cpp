@@ -32,6 +32,9 @@ extern "C"
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -195,26 +198,73 @@ std::size_t count_in_marker_path(const std::string& wire, const std::string& nee
 
 TEST(LeafContext, ForwardTopLevelLeafIsAten)
 {
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, true),
+    EXPECT_STREQ(torch_trace_collector::default_leaf_label(false, 42, true),
                  torch_trace_collector::kAtenTopLevelLeaf);
 }
 
 TEST(LeafContext, ForwardNestedLeafIsAtenNested)
 {
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, false),
+    EXPECT_STREQ(torch_trace_collector::default_leaf_label(false, 42, false),
                  torch_trace_collector::kAtenNestedLeaf);
 }
 
 TEST(LeafContext, BackwardWithSeqLeafIsAutogradBwd)
 {
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, 7, true),
+    EXPECT_STREQ(torch_trace_collector::default_leaf_label(true, 7, true),
                  torch_trace_collector::kAutogradBackwardLeaf);
 }
 
 TEST(LeafContext, BackwardWithoutSeqLeafIsAutogradEngine)
 {
-    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, -1, true),
+    EXPECT_STREQ(torch_trace_collector::default_leaf_label(true, -1, true),
                  torch_trace_collector::kAutogradEngineLeaf);
+}
+
+TEST(LeafContext, ContextCarriesLabelAfterCounter)
+{
+    const std::string context = torch_trace_collector::default_leaf_context(false, 42, false);
+    const auto        at      = context.find('@');
+    ASSERT_NE(at, std::string::npos);
+    EXPECT_EQ(context[0], '#');
+    EXPECT_EQ(context.substr(at + 1), torch_trace_collector::kAtenNestedLeaf);
+    EXPECT_GT(at, 1u);
+}
+
+TEST(LeafContext, RepeatedInvocationsGetDistinctContexts)
+{
+    std::set<std::string> seen;
+    for (int i = 0; i < 100; ++i)
+    {
+        seen.insert(torch_trace_collector::default_leaf_context(false, 42, false));
+    }
+    EXPECT_EQ(seen.size(), 100u);
+}
+
+TEST(LeafContext, ContextsAreDistinctAcrossThreads)
+{
+    constexpr int            n_workers  = 4;
+    constexpr int            per_worker = 50;
+    std::mutex               mu;
+    std::set<std::string>    seen;
+    std::vector<std::thread> threads;
+    for (int t = 0; t < n_workers; ++t)
+    {
+        threads.emplace_back(
+            [&]
+            {
+                for (int i = 0; i < per_worker; ++i)
+                {
+                    auto context = torch_trace_collector::default_leaf_context(false, 42, false);
+                    std::lock_guard<std::mutex> lock(mu);
+                    seen.insert(std::move(context));
+                }
+            });
+    }
+    for (auto& thread : threads)
+    {
+        thread.join();
+    }
+    EXPECT_EQ(seen.size(), static_cast<std::size_t>(n_workers * per_worker));
 }
 
 namespace
@@ -418,6 +468,15 @@ TEST(ArgsRendering, CapArgsBlobTruncatesPastLimit)
     EXPECT_EQ(capped.size(), kMaxArgsLen + 3);
     EXPECT_EQ(capped.compare(kMaxArgsLen, 3, "..."), 0);
     EXPECT_EQ(capped.substr(0, kMaxArgsLen), std::string(kMaxArgsLen, 'a'));
+}
+
+TEST(ArgsRendering, CapArgsBlobKeepsClosingParenWhenParenthesized)
+{
+    const std::string over   = "(" + std::string(kMaxArgsLen, 'a') + ")";
+    const std::string capped = cap_args_blob(over);
+    EXPECT_EQ(capped.size(), kMaxArgsLen + 4);
+    EXPECT_EQ(capped.compare(kMaxArgsLen, 4, "...)"), 0);
+    EXPECT_EQ(capped.front(), '(');
 }
 
 TEST_F(TorchTraceCollectorTest, RecordedArgsForMmReluCat)

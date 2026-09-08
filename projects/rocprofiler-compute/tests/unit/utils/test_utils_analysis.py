@@ -1028,7 +1028,6 @@ def test_build_call_trees_multiple_source_locations():
 
 _OPERATOR_SUMMARY_COLUMNS = [
     "Operator",
-    "Location",
     "Calls",
     "Dispatches",
     "Dispatches_Per_Call",
@@ -1077,7 +1076,6 @@ def test_build_operator_summary_row_values_for_single_dispatch():
         }
     ])
     row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
-    assert row["Location"] == "f.py:1"
     assert row["Calls"] == 1
     assert row["Dispatches"] == 1
     assert row["Dispatches_Per_Call"] == 1.0
@@ -1087,6 +1085,62 @@ def test_build_operator_summary_row_values_for_single_dispatch():
     assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
     assert row["Min_Dispatch"] == pytest.approx(2.0)
     assert row["Max_Dispatch"] == pytest.approx(2.0)
+
+
+def test_build_operator_summary_aggregates_operator_over_locations():
+    """One operator run from two call sites yields one row whose totals cover
+    both, with Min and Max spanning them."""
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 3_000_000,
+        },
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "11@g.py:9",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+    ])
+    assert summary["Operator"].tolist().count("op_a") == 1
+    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
+    assert row["Calls"] == 2
+    assert row["Dispatches"] == 2
+    assert row["Total_GPU"] == pytest.approx(4.0)
+    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
+    assert row["Mean_Per_Call"] == pytest.approx(2.0)
+    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
+    assert row["Min_Dispatch"] == pytest.approx(1.0)
+    assert row["Max_Dispatch"] == pytest.approx(3.0)
+
+
+def test_build_operator_summary_mean_per_dispatch_weights_by_dispatch_count():
+    """Aggregating two locations weights each mean by its dispatch count."""
+    root_a = CallTreeNode(name="f.py:1")
+    op_a = CallTreeNode(name="op")
+    op_a.kernel_launches = 3
+    op_a.total_duration_ms = 30.0
+    op_a.mean_dispatch_ns = 10_000_000.0
+    op_a.invocation_ids.add("a")
+    root_a.children["op"] = op_a
+
+    root_b = CallTreeNode(name="g.py:2")
+    op_b = CallTreeNode(name="op")
+    op_b.kernel_launches = 1
+    op_b.total_duration_ms = 2.0
+    op_b.mean_dispatch_ns = 2_000_000.0
+    op_b.invocation_ids.add("b")
+    root_b.children["op"] = op_b
+
+    summary = build_operator_summary({"f.py:1": root_a, "g.py:2": root_b})
+    row = summary.loc[summary["Operator"] == "op"].iloc[0]
+    assert row["Dispatches"] == 4
+    assert row["Total_GPU"] == pytest.approx(32.0)
+    assert row["Mean_Per_Dispatch"] == pytest.approx(8.0)
 
 
 def test_build_operator_summary_sort_by_total_descending():
