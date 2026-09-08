@@ -22,10 +22,13 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
+#   guards          kernel-count pytest plus src/include/test_poison_hip_atomics.py
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DHOST_TEST_COVERAGE=ON, the default)
+#                   with -DHOST_TEST_COVERAGE=ON, the default). Also runs the
+#                   CPU-only guards: kernel-count pytest plus the
+#                   __hip_atomic_* poison compile probe.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
 #                   (clean, no hash mismatch), plus an overall line/branch union
@@ -195,6 +198,14 @@ do_host_tests() {
   return "$rc"
 }
 
+# CPU-only compile probes that #pragma GCC poison in poison_hip_atomics.h
+# actually rejects __hip_atomic_* (in particular __hip_atomic_load). Needs
+# amdclang++ and HIP headers from ROCM_PATH; no GPU and no librccl.so.
+do_poison_hip_atomics() {
+  echo "==> Poison HIP atomics (src/include/test_poison_hip_atomics.py)"
+  python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
+}
+
 # Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
 # the lean host-test image needs no system pytest. See that dir's README.
 do_guards() {
@@ -206,6 +217,7 @@ do_guards() {
     "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
   fi
   "$venv/bin/python" -m pytest "$gd/tests" -v
+  do_poison_hip_atomics
 }
 
 # Turn the per-binary profraw sets produced by the `run` phase into coverage
