@@ -92,23 +92,32 @@ struct AppliedSite {
   uint16_t target_pair_base = 0;
 };
 
-// Human-readable single-lane register name for spill diagnostics.
+// Human-readable register name for spill diagnostics. Ordinary registers are
+// named by prefix and index (s5, v3, acc2); special singletons carry no index.
 std::string reg_name(RegisterRef ref) {
-  const char *prefix = "?";
   switch (ref.cls) {
   case RegClass::SGPR:
-    prefix = "s";
-    break;
+    return "s" + std::to_string(ref.index);
   case RegClass::VGPR:
-    prefix = "v";
-    break;
+    return "v" + std::to_string(ref.index);
   case RegClass::ACC_VGPR:
-    prefix = "acc";
-    break;
-  default:
-    break;
+    return "acc" + std::to_string(ref.index);
+  case RegClass::TTMP:
+    return "ttmp" + std::to_string(ref.index);
+  case RegClass::EXEC:
+    return "exec";
+  case RegClass::VCC:
+    return "vcc";
+  case RegClass::SCC:
+    return "scc";
+  case RegClass::M0:
+    return "m0";
+  case RegClass::FLAT_SCRATCH:
+    return "flat_scratch";
+  case RegClass::PC:
+    return "pc";
   }
-  return std::string(prefix) + std::to_string(ref.index);
+  return "?" + std::to_string(ref.index);
 }
 
 // Largest positive byte offset encodable in the scratch store/load offset field,

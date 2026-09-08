@@ -54,6 +54,9 @@ struct ScopedCfgEdge {
 /// block. The standard backward equations are:
 ///   live_out(B) = union(live_in(S) for S in successors(B))
 ///   live_in(B)  = gen(B) union (live_out(B) - kill(B))
+///
+/// All four sets are ordinary-register-only; special singletons are projected
+/// out of each instruction's def/use before the transfer function runs.
 struct BlockLiveness {
   RegisterSet live_in;
   RegisterSet live_out;
@@ -189,9 +192,15 @@ public:
   [[nodiscard]] bool has_live_before(const Instruction &inst) const;
 
   /// @brief Registers live immediately before @p inst executes.
+  ///
+  /// @details Ordinary registers only. Special singletons (EXEC/M0/PC/...) are
+  /// deliberately excluded: implicit special uses are not yet fully modeled, so
+  /// this analysis does not answer special-register liveness.
   [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
 
-  /// @brief Convenience predicate for one register reference.
+  /// @brief Convenience predicate for one register reference. Only meaningful
+  /// for ordinary classes; special-register liveness is not tracked (see
+  /// live_before()).
   [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
 
   /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
