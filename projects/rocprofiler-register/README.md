@@ -10,10 +10,11 @@ library.
 When a runtime is initialized (either explicitly or lazily) and constructs its intercept API table, it passes the table to
 rocprofiler-register. Rocprofiler-register then selects startup profiling or attachment:
 
-- Startup profiling takes precedence when `ROCPROFILER_REGISTER_FORCE_LOAD=1`, when an explicit
-  library is configured through `ROCP_TOOL_LIBRARIES` or `ROCPROFILER_REGISTER_LIBRARY` (unless
-  `ROCPROFILER_REGISTER_FORCE_LOAD=0` suppresses automatic startup loading), or when an
-  `LD_PRELOAD` library directly defines `rocprofiler_configure`.
+- Explicit startup profiling takes precedence over attachment. It is selected by
+  `ROCPROFILER_REGISTER_FORCE_LOAD=1` or by an `LD_PRELOAD` library that directly defines
+  `rocprofiler_configure`. `ROCP_TOOL_LIBRARIES` and `ROCPROFILER_REGISTER_LIBRARY` also select
+  startup profiling by default, but `ROCPROFILER_REGISTER_FORCE_LOAD=0` prevents those two
+  variables from triggering startup loading.
 - When attachment is enabled through `ROCP_TOOL_ATTACH=1` or the corresponding build default,
   an ambient `rocprofiler_configure` symbol alone does not activate startup profiling. This
   allows a framework to expose a dormant entry point without suppressing the attachment listener.
@@ -30,7 +31,7 @@ kernel dispatch timing.
 | Environment Variable              | Description                                                               | Default Value                            |
 |-----------------------------------|---------------------------------------------------------------------------|------------------------------------------|
 | `ROCP_TOOL_LIBRARIES`             | List of rocprofiler-sdk tool libraries (space, comma, or colon separated) | Empty (string)                           |
-| `ROCP_TOOL_ATTACH`                | Enable the attachment listener instead of ambient-symbol startup loading  | Build-dependent                          |
+| `ROCP_TOOL_ATTACH`                | Prefer the attachment listener over ambient-symbol startup loading        | Build-dependent                          |
 | `ROCPROFILER_REGISTER_LIBRARY`    | Explicit rocprofiler-sdk library to load                                  | Empty (string)                           |
 | `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)                              |
 | `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)                             |

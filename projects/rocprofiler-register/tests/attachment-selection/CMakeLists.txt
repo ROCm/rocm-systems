@@ -203,6 +203,15 @@ rocp_register_add_attachment_selection_test(
     "${_EXPLICIT_SELECTION_FAIL_REGEX}")
 
 rocp_register_add_attachment_selection_test(
+    test-tool-libraries-force-load-zero-with-attachment
+    ENVIRONMENT
+    "ROCP_TOOL_ATTACH=1;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCPROFILER_REGISTER_FORCE_LOAD=0;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+    PASS_REGEX
+    "Test PASSED: attachment library selected over implicit configure symbol"
+    FAIL_REGEX
+    "Test FAILED")
+
+rocp_register_add_attachment_selection_test(
     test-explicit-register-library-with-attachment
     ENVIRONMENT
     "ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
@@ -210,6 +219,15 @@ rocp_register_add_attachment_selection_test(
     ".rocprofiler.cpp. hsa ::"
     FAIL_REGEX
     "${_EXPLICIT_SELECTION_FAIL_REGEX}")
+
+rocp_register_add_attachment_selection_test(
+    test-register-library-force-load-zero-with-attachment
+    ENVIRONMENT
+    "ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_FORCE_LOAD=0;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+    PASS_REGEX
+    "Test PASSED: attachment library selected over implicit configure symbol"
+    FAIL_REGEX
+    "Test FAILED")
 
 rocp_register_add_attachment_selection_test(
     test-preloaded-configure-with-ambient-symbol
