@@ -10,10 +10,6 @@ Asynchronous multi-stream I/O with registered streams
 writes it back out, and splits the work across multiple HIP streams that run
 concurrently.
 
-.. note::
-
-  Asynchronous I/O does not currently support the fastpath backend and will perform fallback I/O using a CPU bounce buffer.
-
 When to use this pattern
 =========================
 
