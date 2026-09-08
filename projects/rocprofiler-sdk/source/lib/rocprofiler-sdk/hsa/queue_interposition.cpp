@@ -1821,21 +1821,43 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
     auto cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
     while(cur > 0)
     {
-        // Last consumer: fence doorbell workers before bypass re-enables.
-        // Do not join async completion handlers by default -- a stuck handler
-        // would block stop_context forever (ROCM-29631).
+        // Last consumer: fence doorbell workers, drop the count so async handlers
+        // abandon their waits, then join them before bypass re-enables.
         if(cur == 1 && s_intercept_installed.load(std::memory_order_acquire))
         {
-            if(queue_interposition_debug_enabled())
+            auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
+            cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+            if(cur == 0) return;
+            if(cur == 1)
             {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] consumer_context_stopped 1->0 ctx={} (pre-drain)",
-                    fmt::ptr(ctx));
-                log_all_queue_shadow_states("before 1->0 drain");
+                if(queue_interposition_debug_enabled())
+                {
+                    ROCP_WARNING << fmt::format(
+                        "[ROCM-29631] consumer_context_stopped 1->0 ctx={} (pre-drain)",
+                        fmt::ptr(ctx));
+                    log_all_queue_shadow_states("before 1->0 drain");
+                }
+                s_consumer_transition_in_progress.store(true, std::memory_order_release);
+                drain_intercept_work(false);
+                if(s_active_queue_interposition_consumers.compare_exchange_weak(
+                       cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
+                {
+                    interposition_sync();
+                    s_consumer_transition_in_progress.store(false, std::memory_order_release);
+                    if(queue_interposition_debug_enabled())
+                    {
+                        log_all_queue_shadow_states("after 1->0 drain");
+                        ROCP_WARNING << fmt::format(
+                            "[ROCM-29631] consumer_context_stopped ctx={} now={}",
+                            fmt::ptr(ctx),
+                            cur - 1);
+                    }
+                    return;
+                }
+                s_consumer_transition_in_progress.store(false, std::memory_order_release);
+                cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+                continue;
             }
-            drain_intercept_work(stop_drain_syncs_async_handlers());
-            if(queue_interposition_debug_enabled())
-                log_all_queue_shadow_states("after 1->0 drain");
         }
 
         if(s_active_queue_interposition_consumers.compare_exchange_weak(
