@@ -1,0 +1,125 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# HRR GPU capture/replay integration tests.
+#
+# hrr_roundtrip_test.cc is the driver: it sets HIP_HRR_CAPTURE_OUTPUT, spawns the
+# hidden [.][hrr-direct] workloads from this same binary as subprocesses, then
+# runs hrr-playback to validate replayed device-to-host buffers byte-for-byte.
+# The workload translation units (hrr_workload / hrr_repro_workload / hrr_spt_workload)
+# provide those hidden _Direct cases and must be linked into the same executable.
+#
+# hrr_regions_test.cc covers the external region annotation channel
+# (hrr/hrr_regions.h): CPU-only sidecar framing tests, plus its own hidden
+# [.][hrr-direct] workload that carves blocks out of a single hipMalloc by
+# pointer arithmetic and is replayed against a synthetic sidecar.
+#
+# hrr_api_matrix_test.cc is the per-API replay matrix: Unit_HRR_ApiMatrix_T*_Roundtrip
+# captures each tier's workloads from hrr_api_matrix_workload_test.cc — one call
+# site per API family, including APIs whose replay is known to be wrong, because
+# a captured no-op is exactly what the matrix needs to observe — and asserts
+# every API's replay class still matches what HRR's generator declares.
+#
+# hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
+# api_matrix.yaml.  Regenerate after an upstream classification change with:
+#   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
+#       <this dir>/hrr_api_matrix_expectations.h
+#
+# hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
+# argument no allocation explains: a sentinel keeps its value, an
+# address-shaped lost pointer becomes null. Contains its own hidden
+# [.][hrr-direct] workload.
+
+# The workload translation units carry __global__ kernels, device built-ins
+# (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
+# be compiled with the HIP device toolchain rather than a plain C++ compiler.
+# hrr_roundtrip_test.cc and hrr_api_matrix_test.cc are host-only drivers
+# (subprocess orchestration + hipRTC host calls) and stay plain C++ translation
+# units.
+set(HRR_GPU_WORKLOAD_SOURCES
+  hrr_workload_test.cc
+  hrr_repro_workload_test.cc
+  hrr_spt_workload_test.cc
+  hrr_regions_test.cc
+  hrr_api_matrix_workload_test.cc
+  hrr_kernel_args_test.cc
+)
+
+if(NOT DEFINED HIP_PLATFORM)
+  set(HIP_PLATFORM "amd")
+endif()
+
+if(HIP_PLATFORM STREQUAL "amd" OR HIP_PLATFORM STREQUAL "nvidia")
+  enable_language(HIP)
+  set_source_files_properties(${HRR_GPU_WORKLOAD_SOURCES} PROPERTIES LANGUAGE HIP)
+endif()
+
+add_executable(hrr-integration-tests
+  ${HRR_GPU_WORKLOAD_SOURCES}
+  hrr_roundtrip_test.cc
+  hrr_api_matrix_test.cc
+)
+set_target_properties(hrr-integration-tests PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  HIP_STANDARD 17
+  HIP_STANDARD_REQUIRED ON)
+
+# hrr_spt_workload_test.cc calls the ordinary hipMemset* names and relies on the
+# per-thread-default-stream compile option to redirect them to the _spt entry
+# points under test. This must stay per source so the other workloads keep
+# resolving to the plain entry points.
+if(HIP_PLATFORM STREQUAL "amd")
+  set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
+                              COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
+elseif(HIP_PLATFORM STREQUAL "nvidia")
+  set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
+                              COMPILE_OPTIONS "--default-stream=per-thread")
+endif()
+
+# ${CMAKE_CURRENT_SOURCE_DIR}/.. -> local harness headers.
+# ../../playback -> hrr_reader.h / hip_playback.h (also propagated by hrr::reader).
+target_include_directories(hrr-integration-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../playback
+)
+
+# hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
+find_package(hiprtc CONFIG REQUIRED)
+
+target_link_libraries(hrr-integration-tests PRIVATE
+  hrr::reader
+  hip::host
+  hiprtc::hiprtc
+  Catch2::Catch2WithMain)
+
+# Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
+# Unit_HRR_MultiThreadRoundtrip. If it is not found, HRR_RAW_TRACE_EXE is defined
+# empty and that test skips itself at run time.
+if(NOT DEFINED HRR_RAW_TRACE_EXE)
+  find_program(_hrr_raw_trace_found NAMES hip_raw_trace hip_raw_trace.exe
+    HINTS
+      "${CMAKE_INSTALL_PREFIX}/bin"
+      "${ROCM_PATH}/bin"
+  )
+  if(_hrr_raw_trace_found)
+    set(HRR_RAW_TRACE_EXE "${_hrr_raw_trace_found}")
+  else()
+    set(HRR_RAW_TRACE_EXE "")
+  endif()
+endif()
+
+target_compile_definitions(hrr-integration-tests PRIVATE
+  HRR_API_ARGS_IMPLEMENTATION
+  __HIP_PLATFORM_AMD__
+  HRR_TEST_EXE="$<TARGET_FILE:hrr-integration-tests>"
+  HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>"
+  HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
+  ROCM_BIN_PATH="${ROCM_PATH}/bin"
+)
+
+# The integration tests spawn hrr-playback; make sure it is built first.
+add_dependencies(hrr-integration-tests hrr-playback)
+
+add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
