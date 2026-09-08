@@ -988,6 +988,13 @@ application adds explicit synchronization between streams.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
 
+    * - | ``NCCL_LAUNCH_RACE_FATAL``
+        | Attempts to detect host threads racing to launch work on the same
+          device. Such a race violates the deterministic program order required
+          by ``NCCL_LAUNCH_ORDER_IMPLICIT``.
+      - | ``1``: Return a fatal error when a launch race is detected (default).
+        | ``0``: Disable launch-race detection.
+
 Inspector profiling
 ===================
 
