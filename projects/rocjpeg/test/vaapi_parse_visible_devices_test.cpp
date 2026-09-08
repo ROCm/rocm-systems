@@ -22,16 +22,15 @@ THE SOFTWARE.
 
 // Host-only table-driven test for ParseVisibleDevicesCsv (no GPU / HIP / VAAPI).
 // Build/run:
-//   c++ -std=c++17 -I projects/rocjpeg/src \
-//       projects/rocjpeg/test/vaapi_parse_visible_devices_test.cpp \
-//       -o t && ./t
+//   c++ -std=c++17 -I projects/rocjpeg/src
+//       projects/rocjpeg/test/vaapi_parse_visible_devices_test.cpp -o t && ./t
 
-#include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <vector>
 
-#include "rocjpeg_parse_helpers.h"
+#include "rocjpeg_commons.h"
 
 namespace {
 
