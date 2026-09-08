@@ -15,6 +15,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
   fakes/wrap_fakes.cc                  # rccl_wrap.cc dependency seams (cf. p2p_fakes.cc)
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
@@ -696,6 +697,12 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 target_sources(rccl-UnitTestsMicro PRIVATE
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+# Produced by the hipify step, so it does not exist at configure time. Source-file
+# properties are DIRECTORY-scoped, so setting this here rather than relying on
+# another block having done so keeps this target standing alone.
+set_source_files_properties(
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+  PROPERTIES GENERATED TRUE)
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)

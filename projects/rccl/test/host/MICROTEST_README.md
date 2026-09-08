@@ -56,6 +56,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     deps it pulls in. **Do not add an `IsArchMatch` fake to this binary**:
     it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
     former hardcoded-false stub was removed for exactly this reason.
+    Covers a low-dependency first batch plus a second batch that added
+    controllable `RCCL_PARAM`/`getenv` seams to reach the CE/DDA gates and
+    low-tier symmetric-kernel arms; see `wrap-test.cc`'s header comment for
+    exact scope.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
