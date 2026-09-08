@@ -38,18 +38,25 @@ def _render_template(
     metric_values: dict[str, Optional[float]],
 ) -> str:
     """Replace {threshold:...} and {metric:...} placeholders."""
+    return _PLACEHOLDER_RE.sub(
+        lambda m: _replace_placeholder(m, thresholds, metric_values), template
+    )
 
-    def _replace_match(match: re.Match) -> str:  # type: ignore[type-arg]
-        kind = match.group(1)
-        key = match.group(2)
-        if kind == "threshold":
-            value = thresholds.get(key)
-            if value is None:
-                return "N/A"
-            return _format_threshold_value(value)
-        return _format_metric_value(metric_values.get(key))
 
-    return _PLACEHOLDER_RE.sub(_replace_match, template)
+def _replace_placeholder(
+    match: re.Match,  # type: ignore[type-arg]
+    thresholds: dict[str, float],
+    metric_values: dict[str, Optional[float]],
+) -> str:
+    """Resolve a single {threshold:KEY} or {metric:KEY} placeholder."""
+    kind = match.group(1)
+    key = match.group(2)
+    if kind == "threshold":
+        value = thresholds.get(key)
+        if value is None:
+            return "N/A"
+        return _format_threshold_value(value)
+    return _format_metric_value(metric_values.get(key))
 
 
 def _format_threshold_value(value: float) -> str:
