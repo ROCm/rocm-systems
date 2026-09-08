@@ -515,7 +515,7 @@ template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWorkArgs const* args, bool multimem) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
-                                      blockIdx.x, ncclSymkReduceLLMaxThreads, multimem, handler.comm.lsaMultimem);
+                                      blockIdx.x, ncclSymkMaxThreads, multimem, handler.comm.lsaMultimem);
 
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
@@ -536,13 +536,7 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
 
     ncclCoopCta cta;
     int t = threadIdx.x;
-#if defined(__gfx950__)
-    // This is the one LL kernel the host narrows by message size, so the stride comes from the
-    // launch rather than the pitch above, which stays at the widest case and keeps the slot layout.
     int tn = blockDim.x;
-#else
-    int tn = ncclSymkReduceLLMaxThreads;
-#endif
     // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
     // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.
     [[maybe_unused]] bool profilerPhase1Done = false;
