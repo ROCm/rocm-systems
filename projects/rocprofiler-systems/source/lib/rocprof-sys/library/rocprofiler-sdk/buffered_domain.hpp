@@ -77,7 +77,15 @@ public:
             thread);  // assign_callback_thread -> Add throw upon failure in SdkBackend
     }
 
-    void flush() const;
+    void flush() const
+    {
+        if(!is_valid(m_buffer))
+        {
+            return;
+        }
+
+        SdkBackend::flush_buffer(m_buffer);
+    }
 
     [[nodiscard]] std::string_view name() const noexcept
     {

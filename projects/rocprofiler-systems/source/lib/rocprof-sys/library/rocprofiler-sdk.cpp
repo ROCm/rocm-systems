@@ -2492,6 +2492,15 @@ flush()
             }
         }
     }
+
+    // g_domain_service (kfd_events) owns its own buffers, created and tracked
+    // separately from tool_data->get_buffers() above -- flush them here too, or
+    // any records still sitting in them at shutdown are silently dropped.
+    if(g_domain_service)
+    {
+        LOG_DEBUG("kfd_events: flushing domain_service buffers");
+        g_domain_service->flush();
+    }
 }
 
 int

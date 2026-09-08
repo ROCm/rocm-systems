@@ -82,8 +82,11 @@ public:
 
     void flush() const
     {
+        LOG_DEBUG("domain_service: flushing {} buffered domain(s)",
+                  m_buffered_domains.size());
         for(const auto& domain : m_buffered_domains)
         {
+            LOG_DEBUG("domain_service: flushing domain '{}'", domain.name());
             domain.flush();
         }
     }
