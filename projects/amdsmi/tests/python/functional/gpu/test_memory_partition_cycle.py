@@ -63,12 +63,11 @@ _ALWAYS_RELOAD = os.environ.get("AMDSMI_TEST_ALWAYS_RELOAD") == "1"
 
 _BANNER_WIDTH = 70
 
-# name -> (enum, expected status). UNKNOWN is a reporting sentinel, not settable.
-# Every NPS mode accepts [PASS, INVAL, NOT_SUPPORTED] from the shared table, since
-# which modes a device supports is hardware-dependent.
+# name -> enum. UNKNOWN is a reporting sentinel, not settable. The shared table's
+# status column is not used: _stage_mode states what it accepts itself.
 _NPS_MODES = {
-    name: (partition_type, expected_status)
-    for name, partition_type, expected_status in common.MEMORY_PARTITION_TYPES
+    name: partition_type
+    for name, partition_type, _ in common.MEMORY_PARTITION_TYPES
     if name != "UNKNOWN"
 }
 
@@ -98,14 +97,6 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         if os.geteuid() != 0:
             raise unittest.SkipTest("Memory partition tests need root/admin")
         cls.common = common.Common(common.verbose)
-        # HSMP is a CPU-side status; a GPU memory-partition call reporting it is a
-        # real bug, so drop it from the statuses check_ret silently tolerates.
-        cls.common.not_supported_error_codes = [
-            entry for entry in cls.common.not_supported_error_codes if "HSMP" not in entry[1]
-        ]
-
-    def setUp(self):
-        self.raise_exception = None
 
     def tearDown(self):
         try:
@@ -131,7 +122,7 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         """
         return len(amdsmi.amdsmi_get_socket_handles())
 
-    def _for_each_gpu(self, call_name, api, expected=None, params=""):
+    def _for_each_gpu(self, call_name, api, accept, params=""):
         """Run *api* on every handle in one session; return ``{index: result}``.
 
         Only handles that answered appear in the result. In a partitioned layout
@@ -148,22 +139,24 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
                 f"{len(gpus)} (processor) partition handles"
             )
             self.assertTrue(gpus, "No GPU handles returned after amdsmi_init()")
-            for i, gpu in enumerate(gpus):
-                msg = f"\t### {call_name}(gpu={i}{params}):"
-                try:
-                    result = api(gpu)
-                    self.common.print(msg, result)
-                    self.common.check_ret("", "", self.common.PASS)
-                    answered[i] = result
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.common.check_ret(msg, e, expected or self.common.PASS):
-                        self.raise_exception = e
+            # One sweep per call so a device that reports an unaccepted status
+            # cannot hide the devices after it.
+            with self.common.status_sweep():
+                for i, gpu in enumerate(gpus):
+                    msg = f"\t### {call_name}(gpu={i}{params}):"
+                    with self.common.expect_status(msg, accept):
+                        answered[i] = api(gpu)
+                    # Setters return nothing; only a getter has a result to show.
+                    if answered.get(i) is not None:
+                        self.common.print(f"\t\t{answered[i]}")
         return answered
 
     def _read_modes(self):
         """``{index: NPS mode}`` for every handle that reports one."""
         return self._for_each_gpu(
-            "amdsmi_get_gpu_memory_partition", amdsmi.amdsmi_get_gpu_memory_partition
+            "amdsmi_get_gpu_memory_partition",
+            amdsmi.amdsmi_get_gpu_memory_partition,
+            accept=[amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
         )
 
     @staticmethod
@@ -181,7 +174,9 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         authority.
         """
         configs = self._for_each_gpu(
-            "amdsmi_get_gpu_memory_partition_config", amdsmi.amdsmi_get_gpu_memory_partition_config
+            "amdsmi_get_gpu_memory_partition_config",
+            amdsmi.amdsmi_get_gpu_memory_partition_config,
+            accept=[amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
         )
         for config in configs.values():
             caps = [c for c in config.get("partition_caps", []) if c in _NPS_MODES]
@@ -214,6 +209,7 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         profiles = self._for_each_gpu(
             "amdsmi_get_gpu_accelerator_partition_profile",
             amdsmi.amdsmi_get_gpu_accelerator_partition_profile,
+            accept=[amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
         )
         return [p for p in map(self._profile_of, profiles.values()) if p is not None]
 
@@ -236,16 +232,22 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         """Stage *mode* on every device. False when no device accepted it.
 
         A hardware-dependent rejection is an expected status rather than a test
-        failure -- see _NPS_MODES.
+        failure.
         """
-        partition_type, expected = _NPS_MODES[mode]
-        accepted = self._for_each_gpu(
+        # INVAL is how a device declines a mode it cannot do, and a handle without
+        # the partition APIs answers NOT_SUPPORTED; neither is a test failure.
+        accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.INVAL,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+        ]
+        successfully_set = self._for_each_gpu(
             "amdsmi_set_gpu_memory_partition_mode",
-            lambda gpu: amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, partition_type),
-            expected,
-            f", memory_partition_type={mode}",
+            lambda gpu: amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, _NPS_MODES[mode]),
+            accept=accept,
+            params=f", memory_partition_type={mode}",
         )
-        return bool(accepted)
+        return bool(successfully_set)
 
     def _reload_driver(self):
         """Unload then reload amdgpu. shell=False, so there is no injection surface.
@@ -316,9 +318,6 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
 
     def _restore_memory_partition(self, mode):
         """Put the device back on the memory partition mode the run started with."""
-        # Runs as cleanup, after the body raised its own; reset so the check below
-        # reports only statuses seen while restoring.
-        self.raise_exception = None
         self._separator(f"Restore memory partition ({mode})")
         if not self.common.check_amdgpu_driver():
             self.common.print(f"  amdgpu is not loaded; cannot restore {mode} -- node left as-is")
@@ -330,8 +329,6 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
                 self.fail(f"could not stage restore back to {mode}")
             self._reload_driver()
             self._assert_all_on(self._read_modes(), mode, "restore failed")
-        if self.raise_exception:
-            raise self.raise_exception
 
     def _restore_accelerator_profiles(self, profiles):
         """Re-apply the accelerator profiles captured before the cycle.
@@ -342,14 +339,16 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         """
         if not profiles:
             return
-        self.raise_exception = None
         self._separator("Restore accelerator partition")
         if not self.common.check_amdgpu_driver():
             self.common.print("  amdgpu is not loaded; cannot restore the accelerator profile")
             return
         self.common.print(f"  Restoring : {self._describe_profiles(profiles)}")
         wanted = iter(profiles)
-        with AmdsmiSession() as gpus:
+        # Handles without a profile are skipped below, so only a handle that
+        # lacks the API entirely may decline the write.
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with AmdsmiSession() as gpus, self.common.status_sweep():
             for i, gpu in enumerate(gpus):
                 current = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpu)
                 if self._profile_of(current) is None:
@@ -362,15 +361,8 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
                     "\t### amdsmi_set_gpu_accelerator_partition_profile("
                     f"gpu={i}, profile={name}, index={index}):"
                 )
-                try:
-                    result = amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpu, index)
-                    self.common.print(msg, result)
-                    self.common.check_ret("", "", self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.common.check_ret(msg, e, self.common.PASS):
-                        self.raise_exception = e
-        if self.raise_exception:
-            raise self.raise_exception
+                with self.common.expect_status(msg, accept):
+                    amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpu, index)
 
     def _assert_all_on(self, modes, mode, context):
         """Fail unless every handle that reported a mode reports *mode*."""
@@ -413,9 +405,6 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
                     self.common.print(f"  [PASS] {mode} staged; reported mode unchanged")
                 else:
                     self.common.print(f"  [INFO] {mode} was rejected; reported mode unchanged")
-
-        if self.raise_exception:
-            raise self.raise_exception
 
     def test_cycle_memory_partition_modes(self):
         self.common.print_func_name("")
@@ -486,6 +475,3 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
             self.common.print(f"  Modes applied : {', '.join(applied)}")
         else:
             self.common.print("  No mode was settable; validated the reported status instead")
-
-        if self.raise_exception:
-            raise self.raise_exception
