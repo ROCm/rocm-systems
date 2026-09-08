@@ -32,8 +32,8 @@
 #include "hip_capture.h"
 #include "hip_capture_writer.h"
 
-// hrr_api_args.h lives in the same directory (hipamd/src/hrr/)
-#include "hrr_api_args.h"
+// hrr_api_args.h now lives in projects/hrr/include/hrr (shared wire format)
+#include "hrr/hrr_api_args.h"
 
 #include "hip/amd_detail/hip_api_trace.hpp"
 
