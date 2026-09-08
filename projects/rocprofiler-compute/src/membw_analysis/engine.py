@@ -168,10 +168,12 @@ def _evaluate_node(
 
     if state == "active" and node.children:
         children = _evaluate_siblings(node.children, parent_supporting=supporting)
-    elif node.children:
+    elif state == "inactive" and node.children:
         # Design choice: inactive parent suppresses children without
         # evaluating their metrics (low aggregate → subtree not actionable).
         children = tuple(_make_inactive_subtree(child) for child in node.children)
+    elif node.children:
+        children = tuple(_make_indeterminate_subtree(child) for child in node.children)
     else:
         children = ()
 
@@ -298,6 +300,20 @@ def _make_inactive_subtree(node: ResolvedNode) -> BottleneckNode:
         label=node.spec.label,
         level=node.spec.level,
         state="inactive",
+        supporting=(),
+        children=children,
+        guidance_id=node.spec.guidance_id,
+    )
+
+
+def _make_indeterminate_subtree(node: ResolvedNode) -> BottleneckNode:
+    """Create an indeterminate node with all children also indeterminate."""
+    children = tuple(_make_indeterminate_subtree(child) for child in node.children)
+    return BottleneckNode(
+        id=node.spec.id,
+        label=node.spec.label,
+        level=node.spec.level,
+        state="indeterminate",
         supporting=(),
         children=children,
         guidance_id=node.spec.guidance_id,

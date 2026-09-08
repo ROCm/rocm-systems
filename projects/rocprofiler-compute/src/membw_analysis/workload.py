@@ -27,7 +27,7 @@ def load_membw_metrics(
     """Load and evaluate membw metrics from a workload directory."""
     sys_info = _load_sys_info(workload_dir)
     arch_configs = _build_membw_arch_configs(arch, sys_info)
-    raw_pmc_df = file_io.create_df_pmc(str(workload_dir), kernel_verbose=0, verbose=0)
+    raw_pmc_df = file_io.create_df_pmc(str(workload_dir), verbose=0)
 
     if raw_pmc_df.empty:
         _report_missing_pmc(workload_dir)
