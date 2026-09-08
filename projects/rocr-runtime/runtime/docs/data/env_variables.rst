@@ -100,10 +100,10 @@
         | Any other value: Never load the HotSwap tool.
 
     * - | ``HSA_DISABLE_GFX12_STRICT``
-        | Stops the runtime from reporting the "strict" ISA variant on A0 silicon. When set, the agent keeps the base target instead of re-pointing to the strict variant.
-      - ``0``
+        | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.
+      - ``1``
       - | 0: Report the strict ISA variant on A0 agents.
-        | 1: Keep the base target on A0 agents.
+        | 1, unset, empty, or any other value: Keep the base target on A0 agents.
 
     * - | ``HSA_HOTSWAP_VERBOSE``
         | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.

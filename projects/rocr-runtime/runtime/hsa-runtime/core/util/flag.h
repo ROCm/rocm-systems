@@ -249,10 +249,11 @@ class Flag {
     var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
     disable_pc_sampling_ = (var == "1") ? true : false;
 
-    // Kill switch for reporting the "strict" ISA variant on A0 silicon. When set,
-    // the agent keeps the base target instead of re-pointing to the strict variant.
+    // Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by
+    // default, so the agent keeps the base target. Set the variable to 0 to opt
+    // in and have the agent re-point to the strict variant.
     var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
-    disable_gfx12_strict_ = (var == "1") ? true : false;
+    disable_gfx12_strict_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
@@ -613,7 +614,7 @@ class Flag {
   bool no_scratch_thread_limit_;
   bool disable_image_;
   bool disable_pc_sampling_;
-  bool disable_gfx12_strict_ = false;
+  bool disable_gfx12_strict_ = true;
   bool loader_enable_mmap_uri_;
   bool check_sramecc_validity_;
   bool debug_;
