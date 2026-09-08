@@ -9,6 +9,7 @@
 
 #include <hip_test_common.hh>
 
+#include <hip/hip_bf16.h>
 #include <hip/hip_fp4.h>
 #include <hip/hip_fp16.h>
 
@@ -455,4 +456,27 @@ HIP_TEST_CASE(Unit_ocp_fp4_to_halfraw_signed_zero_host) {
     REQUIRE(pair.x.x == 0x8000);
     REQUIRE(pair.y.x == 0x0000);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - The bf16 destination must decode E2M1 signed zeros to the matching bf16
+ * signed zero: encoding 0x8 gives bf16 0x8000, encoding 0x0 gives 0x0000.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp4_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp4_to_bfloat16raw_signed_zero_host) {
+  // Low nibble 0x8 is -0.0, high nibble 0x0 is +0.0.
+  __hip_fp4x2_e2m1 packed;
+  packed.__x = static_cast<__hip_fp4x2_storage_t>(0x08);
+  const __hip_bfloat162_raw out = static_cast<__hip_bfloat162_raw>(packed);
+
+  INFO("E2M1 pair 0x08 -> bf16 bits 0x" << std::hex << out.x << ", 0x" << out.y);
+  REQUIRE(out.x == 0x8000);
+  REQUIRE(out.y == 0x0000);
 }
