@@ -6,8 +6,10 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -104,6 +106,21 @@ void SoC::flush_all() {
 }
 
 void SoC::initialize() {
+  // Let every XCD's command processor see its siblings, so a queue marked for
+  // fan-out can split its dispatches across the whole device. Each CP's rank is
+  // its own XCD index, which fixes the workgroup-to-XCD mapping independently of
+  // which XCD a given queue happened to be assigned to.
+  {
+    std::vector<amdgpu::CommandProcessor *> cps;
+    cps.reserve(xcds_.size());
+    for (auto *xcd_ptr : xcds_)
+      cps.push_back(xcd_ptr->command_processor());
+    if (std::find(cps.begin(), cps.end(), nullptr) == cps.end()) {
+      for (uint32_t i = 0; i < cps.size(); ++i)
+        cps[i]->set_xcd_topology(i, cps);
+    }
+  }
+
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the

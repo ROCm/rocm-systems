@@ -8,13 +8,17 @@ name: HIP contract-test coverage
 #   1. Coverage: fails when a newly-added public HIP runtime API (declared in
 #      projects/hip/include/hip/hip_runtime_api.h) ships without a corresponding
 #      contract test and is not on the intentionally-uncovered allowlist
-#      (projects/hip-tests/catch/contract/uncovered_apis.txt).
+#      (projects/hip-tests/catch/contract/uncovered_apis.txt), when contract case
+#      names do not match the structured naming convention, or when
+#      CONTRACT_COVERAGE.md's numeric snapshot drifts.
 #   2. Test plan: fails when catch/TEST_PLAN.md is out of date with the test
 #      sources (a case was added, renamed, or removed, or an @asserts tag
 #      changed, without regenerating the plan).
+#   3. Tool tests: runs focused unit tests for the static coverage and test-plan
+#      tools themselves.
 #
 # See projects/hip-tests/catch/contract/AUTHORING.md for how to add a contract
-# test and keep both current.
+# test and keep all gates current.
 
 on:
   pull_request:
@@ -25,6 +29,7 @@ on:
       - "projects/hip-tests/catch/config/configs/contract.yaml"
       - "projects/hip-tests/catch/tools/**"
       - "projects/hip-tests/catch/TEST_PLAN.md"
+      - "projects/hip-tests/CONTRACT_COVERAGE.md"
 
 permissions:
   contents: read
@@ -40,6 +45,14 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+
+      - name: Test contract coverage checker
+        run: |
+          python -m unittest projects/hip-tests/catch/contract/tools/test_check_contract_coverage.py
+
+      - name: Test test-plan generator
+        run: |
+          python -m unittest projects/hip-tests/catch/tools/test_gen_test_plan.py
 
       - name: Check contract-test coverage
         run: |

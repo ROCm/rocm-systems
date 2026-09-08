@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #define _GNU_SOURCE \
   1  // REQUIRED: to utilize some GNU features/functions, see
@@ -88,7 +69,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
@@ -943,9 +924,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-  unsigned char buff[bytesPerLine + 1];
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
@@ -1369,7 +1350,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {

@@ -78,15 +78,7 @@ void SCmpkLeU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
-      amdgpu::RegisterAccess(wf).read_scalar(sdst),
-      static_cast<uint32_t>(static_cast<int32_t>(
-          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
-  amdgpu::RegisterAccess(wf).write_scalar(
-      sdst,
-      (amdgpu::RegisterAccess(wf).read_scalar(sdst) +
-       static_cast<uint32_t>(static_cast<int32_t>(
-           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
+  amdgpu::execute_s_addk_i32_sopk(*this, wf);
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {

@@ -1,0 +1,287 @@
+name: RCCL coco nightly
+
+# Nightly coco launches on the ruby and OCI clusters.
+#
+# One workflow per trigger type: this file owns the nightly schedule only.
+# Other trigger types get their own callers later; every caller fans out into
+# the shared launcher, rccl-coco-run.yml, which holds the run steps and no
+# trigger-specific logic.
+#
+# Process:
+#   1. `setup` runs on the cluster runner, checks out the coco harness at the
+#      requested ref, and resolves it to one exact commit. The runner label
+#      below names a pool of machines, not a single fixed host, so pinning to
+#      a commit here -- rather than letting each fan-out job below re-resolve
+#      a floating ref on whichever machine it happens to land on -- is what
+#      guarantees each cluster's fan-out jobs run the identical commit.
+#   2. Each cluster's perf and unit/coverage jobs call rccl-coco-run.yml with
+#      that pinned commit and their own job key. Jobs within a cluster do not
+#      depend on each other, so a failure or re-run of one never touches the
+#      other's status, log, or artifact.
+#
+# These jobs run only against the refs configured below, never against a pull
+# request: this workflow has no pull_request trigger, and workflow_dispatch
+# requires write access to this repository, so a fork cannot reach it.
+#
+# SCHEDULING: cron here is UTC and does not observe DST, so a fixed entry
+# drifts an hour across the year. 04:00 UTC is 22:00 CST in winter and 23:00
+# CDT in summer -- both comfortably after the 21:00 CST maintenance window in
+# which the runner's node may be restarted. Do not move this earlier than
+# 03:00 UTC: that is 21:00 CST in winter and would land inside the restart
+# window.
+on:
+  schedule:
+    - cron: '47 3 * * 1-5'  # 22:00 CST / 23:00 CDT -- after the 21:00 CST maintenance restart
+  # Manual dispatch exists so this workflow can be exercised without waiting
+  # for the cron, and so a missed night can be re-driven by hand. It
+  # deliberately offers no job selector: what runs nightly is the point of
+  # the file.
+  workflow_dispatch:
+    inputs:
+      coco_ref:
+        description: 'ROCm/tRCCL ref for the coco harness.'
+        type: string
+        required: false
+        default: 'main'
+      dry_run:
+        description: 'Resolve stacks and submissions without building or running anything.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs on the cluster runner itself (rather than a generic CPU runner) so the
+  # commit it resolves below is checked out from the same pool perf and
+  # coverage will run on, then hands that commit to both.
+  setup:
+    name: Ruby Setup
+    runs-on: ruby-linux-slurm-scale-runner
+    outputs:
+      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
+      coco_args: ${{ steps.resolve.outputs.coco_args }}
+      # `scheduled` is what the nightly trend queries in the coco database
+      # select on. A manual dispatch must not be recorded as one, or a
+      # hand-driven test lands in the nightly series as though it were that
+      # night's data point.
+      trigger_kind: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+    steps:
+      # Limit the checkout to the composite action's own directory.
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/actions/checkout-coco-harness
+
+      - name: Checkout the coco harness
+        uses: ./.github/actions/checkout-coco-harness
+        with:
+          ref: ${{ inputs.coco_ref || 'main' }}
+          path: _coco
+          client-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Resolve run parameters
+        id: resolve
+        working-directory: _coco
+        env:
+          # A scheduled run has no inputs context, so this falls back to the
+          # same value the dispatch input defaults to.
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          # Pin to the exact commit just checked out, rather than passing the
+          # ref (e.g. "main") through unresolved -- see the note at the top of
+          # this file on why that matters with a multi-machine runner pool.
+          coco_sha="$(git rev-parse HEAD)"
+
+          # -vv because the only record of a failed unattended run is this
+          # log. --prune-build and --skip-failed-builds so one job failing to
+          # build doesn't cost the other its nightly data point.
+          args='-vv --prune-build --skip-failed-builds'
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            args="${args} --dry-run"
+          fi
+          {
+            echo "coco_ref=${coco_sha}"
+            echo "coco_args=${args}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # This runner is persistent and keeps its workspace between runs.
+      - name: Clean up harness checkout
+        if: always()
+        run: rm -rf _coco
+
+  # The fan-out. Two independent jobs so each gets its own status, log,
+  # artifact and re-run button.
+  #
+  # They are not ordered against each other. Both submit work to the cluster,
+  # which owns the nodes and queues rather than cancelling, so contention
+  # resolves there instead of here. Add `needs: perf` to coverage if they
+  # should go back to running one after the other.
+  ruby-perf:
+    name: 'Perf (ruby64-rccl-perf-nightly)'
+    needs: setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: ruby64-rccl-perf-nightly
+      runs_on: ruby-linux-slurm-scale-runner
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      # A full nightly run of this job is expected to take upward of six
+      # hours (multi-node sweep across several software stacks). This budget
+      # is set with several hours of margin above that so a slow but healthy
+      # run is not killed by the platform default before it can finish; tune
+      # down once real run times are in hand.
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-perf
+
+  ruby-coverage:
+    name: 'Coverage (ruby64-rccl-coverage-nightly)'
+    needs: setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: ruby64-rccl-coverage-nightly
+      runs_on: ruby-linux-slurm-scale-runner
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      # Many unit-test lanes on an instrumented build; instrumented gtest is
+      # substantially slower than release, so this also expects an upward-of-
+      # six-hour run. Same margin as perf; tune down once real times are in
+      # hand.
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-coverage
+
+  ruby-unit:
+    name: 'Unit (ruby64-rccl-unit-nightly)'
+    needs: setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: ruby64-rccl-unit-nightly
+      runs_on: ruby-linux-slurm-scale-runner
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-unit
+
+  oci-setup:
+    name: OCI Setup
+    runs-on: oci-linux-slurm-scale-runner
+    outputs:
+      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
+      coco_args: ${{ steps.resolve.outputs.coco_args }}
+      trigger_kind: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/actions/checkout-coco-harness
+
+      - name: Checkout the coco harness
+        uses: ./.github/actions/checkout-coco-harness
+        with:
+          ref: ${{ inputs.coco_ref || 'main' }}
+          path: _coco
+          client-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Resolve run parameters
+        id: resolve
+        working-directory: _coco
+        env:
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          coco_sha="$(git rev-parse HEAD)"
+
+          args='-vv --prune-build --skip-failed-builds'
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            args="${args} --dry-run"
+          fi
+          {
+            echo "coco_ref=${coco_sha}"
+            echo "coco_args=${args}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Clean up harness checkout
+        if: always()
+        run: rm -rf _coco
+
+  oci-perf:
+    name: 'Perf (oci-rccl-perf-nightly)'
+    needs: oci-setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: oci-rccl-perf-nightly
+      runs_on: oci-linux-slurm-scale-runner
+      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.oci-setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-oci-perf
+
+  oci-unit:
+    name: 'Unit (oci-rccl-unit-nightly)'
+    needs: oci-setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: oci-rccl-unit-nightly
+      runs_on: oci-linux-slurm-scale-runner
+      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.oci-setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-oci-unit
+
+  oci-nixl:
+    name: 'NIXL (oci-nixl-nightly)'
+    needs: oci-setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: oci-nixl-nightly
+      runs_on: oci-linux-slurm-scale-runner
+      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.oci-setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
+      timeout_minutes: 120
+      concurrency_group: rccl-coco-nightly-oci-nixl

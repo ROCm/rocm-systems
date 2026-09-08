@@ -50,6 +50,60 @@ _FIELDLESS_NAME_MAP: dict[str, str] = {
 }
 
 
+def format_encoding_name(enc_name: str) -> str:
+    """Format an MR-ISA encoding name as a C++ PascalCase fragment."""
+    parts = enc_name.split('_')
+    if parts[0] == 'ENC':
+        parts = parts[1:]
+    return ''.join(part.capitalize() for part in parts)
+
+
+def format_true_encoding_name(
+    enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Format the concrete C++ encoding class used by an instruction."""
+    if is_implied_literal_enc:
+        return enc_name.split('_')[0].capitalize()
+    return format_encoding_name(enc_name)
+
+
+def format_instruction_name(
+    name: str, enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Format an instruction's generated C++ class/decode-function name."""
+    mnemonic = ''.join(part.capitalize() for part in name.split('_'))
+    encoding = format_true_encoding_name(
+        enc_name, is_implied_literal_enc=is_implied_literal_enc
+    )
+    return f'{mnemonic}{encoding}'
+
+
+def opcode_name_fragment(token: str) -> str:
+    """Return one C++ opcode-constant fragment for a mnemonic token."""
+    token = token.lower()
+    if token.endswith('exec') and len(token) > len('exec'):
+        return f'{token[:-4].capitalize()}Exec'
+    if token.endswith('pc') and len(token) > len('pc'):
+        return f'{token[:-2].capitalize()}Pc'
+    return token.capitalize()
+
+
+def opcode_constant_base_name(mnemonic: str) -> str:
+    """Return the generated C++ opcode-constant base for a mnemonic."""
+    return 'k' + ''.join(
+        opcode_name_fragment(token) for token in mnemonic.lower().split('_') if token
+    )
+
+
+def opcode_constant_name(
+    mnemonic: str, enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Return the concrete encoding-qualified C++ opcode-constant name."""
+    return opcode_constant_base_name(mnemonic) + format_true_encoding_name(
+        enc_name, is_implied_literal_enc=is_implied_literal_enc
+    )
+
+
 def synthesize_fieldless_name(operand_type: str) -> str:
     """Return a stable, valid C++ base identifier for a fieldless operand.
 
@@ -162,9 +216,7 @@ class InstBase:
     @cached_property
     def fmt_enc_name(self) -> str:
         """Encoding name formatted to C++ PascalCase style."""
-        if self.enc_name.split('_')[0] == 'ENC':
-            return ''.join(x.capitalize() for x in self.enc_name.split('_')[1:])
-        return ''.join(x.capitalize() for x in self.enc_name.split('_'))
+        return format_encoding_name(self.enc_name)
 
     @cached_property
     def fmt_true_enc_name(self) -> str:
@@ -174,9 +226,9 @@ class InstBase:
         their parent encoding name (e.g., ``Vop2``) because the C++ class
         hierarchy inherits from the parent encoding class.
         """
-        if self.is_implied_literal_enc:
-            return self.enc_name.split('_')[0].capitalize()
-        return self.fmt_enc_name
+        return format_true_encoding_name(
+            self.enc_name, is_implied_literal_enc=self.is_implied_literal_enc
+        )
 
 
 class InstEncoding(InstBase):
@@ -243,6 +295,8 @@ class Instruction(InstBase):
             classes. ``None`` means encoding provenance is unknown; modifier
             generation rejects that state, so synthetic VOP instructions must
             provide an explicit set.
+        source_addition: Additions provenance for a repository-supplied instruction,
+            or ``None`` when the instruction came from the base MR ISA XML.
     """
 
     def __init__(
@@ -253,19 +307,31 @@ class Instruction(InstBase):
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
         available_encodings: frozenset[str] | None = None,
+        source_addition: IsaAdditionProvenance | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
         self.available_encodings = available_encodings
+        self.source_addition = source_addition
+        # Populated by an optional ISA-variant manifest after the base XML and
+        # additive deltas have been parsed.  The generator copies these masks
+        # into decoded instructions; the runtime decoder then fails closed when
+        # its concrete target lacks a required feature.
+        self.required_feature_mask = 0
+        self.encoding_feature_masks: dict[str, int] = {}
+        # A model-only instruction is decoded and represented, but deliberately
+        # omitted from generated execution callback tables.
+        self.model_only = False
 
     @cached_property
     def fmt_name(self) -> str:
         """Instruction name formatted to C++ PascalCase style."""
-        return (
-            f'{"".join(x.capitalize() for x in self.name.split("_"))}'
-            f'{self.fmt_true_enc_name}'
+        return format_instruction_name(
+            self.name,
+            self.enc_name,
+            is_implied_literal_enc=self.is_implied_literal_enc,
         )
 
     @cached_property
@@ -332,6 +398,14 @@ class DecodeTableEntry:
     decode_func: str | None = None
 
 
+@dataclass(frozen=True)
+class IsaAdditionProvenance:
+    """Identity and source path for one applied ISA additions document."""
+
+    identifier: str
+    path: str
+
+
 class IsaSpec:
     """Internal representation of a machine-readable ISA spec.
 
@@ -357,6 +431,8 @@ class IsaSpec:
             encoding conditions indicate an implied literal DWORD.
             Populated during parsing using the profile's
             ``is_implied_literal_encoding()`` method.
+        applied_additions: Ordered provenance for ISA additions documents
+            merged into this specification.
     """
 
     def __init__(
@@ -380,6 +456,9 @@ class IsaSpec:
             2, profile.max_enc_bits
         )
         self.alt_encs_with_implied_literal: set[str] = set()
+        self.applied_additions: tuple[IsaAdditionProvenance, ...] = ()
+        self.isa_features: tuple[str, ...] = ()
+        self.isa_variants: dict[str, int] = {}
         # Every fieldless operand type observed while parsing this spec.
         # Consumed by fieldless_policy.validate_fieldless_taxonomy.
         self.fieldless_operand_types: set[str] = set()

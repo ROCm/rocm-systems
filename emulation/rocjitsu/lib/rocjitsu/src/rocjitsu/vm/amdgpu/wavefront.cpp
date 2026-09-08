@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
 namespace rocjitsu {
@@ -11,6 +12,10 @@ namespace amdgpu {
 Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
+bool Wavefront::uses_separate_trap_ctrl() const {
+  return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
+}
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 

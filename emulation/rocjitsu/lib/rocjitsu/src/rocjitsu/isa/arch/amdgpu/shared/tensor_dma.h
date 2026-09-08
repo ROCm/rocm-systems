@@ -21,8 +21,15 @@ namespace amdgpu {
 
 namespace tensor_dma_detail {
 
-// See docs/tensor-dma.md for the CDNA5 descriptor coordinate system,
-// ISA-backed behavior, and rocJITsu's advancing-iteration support boundary.
+// The descriptor layout is specified by the AMD CDNA5 ISA, sections 10.11.1
+// through 10.11.6, and is also present in the ROCm HIP header
+// hip/amd_detail/amd_gfx1250_TDM.h. Descriptors produced from MLIR follow
+// LLVM's AMDGPUToROCDL make_dma_descriptor lowering.
+//
+// rocJITsu consumes encoded descriptor values literally: null optional groups
+// read as zero, zero strides alias coordinates, gather is rank two, and a zero
+// active tensor extent masks the whole transfer. Masked loads zero-fill LDS;
+// masked stores suppress global writes while completion effects still retire.
 constexpr int kSgprNull = 124;
 constexpr uint32_t kGlobalHighBitsMask = (1u << 25) - 1u;
 
@@ -51,8 +58,11 @@ std::array<uint32_t, N> read_sgpr_group(const Wavefront &wf, int reg, bool allow
   if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + N > 106)
     throw util::UnimplementedInst("tensor DMA non-SGPR descriptor operand");
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
+  auto group = amdgpu::RegisterAccess(wf).read_sgpr_region(base, static_cast<uint32_t>(N));
+  if (!group.valid())
+    throw util::UnimplementedInst("tensor DMA descriptor outside wavefront SGPR block");
   for (size_t i = 0; i < N; ++i)
-    words[i] = amdgpu::RegisterAccess(wf).read_sgpr(base + static_cast<uint32_t>(i));
+    words[i] = group.dword(static_cast<uint32_t>(i));
   return words;
 }
 
@@ -194,6 +204,12 @@ struct TensorDmaAxis {
   uint64_t stride = 0;
 };
 
+// Iteration advances the global address linearly, but bounds checks need a
+// logical tensor origin. This layout orders non-unit axes by storage stride and
+// supports a greedy inverse only when every axis starts beyond the occupied
+// span of all faster axes. Empty, single-iteration, and zero-increment
+// descriptors need no inverse. Rejecting other advancing layouts is a
+// rocJITsu support boundary rather than an ISA restriction.
 class TensorDmaLayout {
 public:
   explicit TensorDmaLayout(const TensorDmaDescriptor &desc) : rank_(desc.rank()) {

@@ -9,6 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
 * Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
+* Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
 
 ### Changed
 * Raised the default channel count on single-node gfx1250 (MI450) to 256 for both collectives and P2P. The count is still clamped by the GPU CU count and by `NCCL_MAX_NCHANNELS` / `NCCL_MAX_CTAS` / `NCCL_MAX_P2P_NCHANNELS`. Multi-node gfx1250 keeps the 64-channel cap on the NET path. `RCCL_SATURATE_P2P_NCHANNELS` now defaults to on for gfx1250 so the per-peer channel count tiles the larger pool; set it to `0` to restore the previous behavior.
@@ -18,6 +19,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Fixed
 * `NCCL_MAX_P2P_NCHANNELS` opt-in is now detected from the environment rather than from the parameter value. The value defaults to `MAXCHANNELS`, so every unset run was treated as an opt-in past the historical `4*CHANNEL_LIMIT` (64) bound. As a result, P2P channels on non-gfx1250 architectures were limited only by the collective channel count, and the gfx950 (MI350) multi-node P2P caps never applied. Set `NCCL_MAX_P2P_NCHANNELS` explicitly to restore a higher bound.
+* Fixed `NCCL_CHECK_MODE` having no effect. `commAlloc` reset `comm->checkMode` from the deprecated `NCCL_CHECK_POINTERS` after `NCCL_CHECK_MODE` had already been parsed, so `DEBUG_LOCAL` was only reachable through the deprecated variable and `DEBUG_GLOBAL`, which validates symmetric buffer registration across ranks, was unreachable entirely.
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
@@ -30,6 +32,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.29.7.
 * Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
+* Added accl-profiler profiler plugin for per-collective timing decomposition (`ACCL_PROFILER_OUTPUT_DIR`, `ACCL_PROFILER_MIN_SIZE_BYTES`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
 * Added GPU-Initiated Networking (GIN) InfiniBand proxy backend for device-initiated collectives on RDMA-capable NICs. Select with `NCCL_GIN_TYPE=2` (proxy). Requires symmetric window registration and Linux kernel ≥ 6.8 for expected performance.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
