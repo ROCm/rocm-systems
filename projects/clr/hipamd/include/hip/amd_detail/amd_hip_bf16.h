@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef __HIP_TO_CLANG_MEMORY_SCOPE
-#define __HIP_TO_CLANG_MEMORY_SCOPE(hip_scope)                                                     \
-  ((hip_scope) == __HIP_MEMORY_SCOPE_SINGLETHREAD                                                  \
-       ? __MEMORY_SCOPE_SINGLE                                                                     \
-       : (hip_scope) == __HIP_MEMORY_SCOPE_WAVEFRONT                                               \
-             ? __MEMORY_SCOPE_WVFRNT                                                               \
-             : (hip_scope) == __HIP_MEMORY_SCOPE_WORKGROUP                                         \
-                   ? __MEMORY_SCOPE_WRKGRP                                                         \
-                   : (hip_scope) == __HIP_MEMORY_SCOPE_AGENT                                       \
-                         ? __MEMORY_SCOPE_DEVICE                                                   \
-                         : (hip_scope) == __HIP_MEMORY_SCOPE_SYSTEM                                \
-                               ? __MEMORY_SCOPE_SYSTEM                                             \
-                               : __MEMORY_SCOPE_SYSTEM)
-#endif
-
 /**
  * \file
  * \brief hip_bf16.h provides struct for __hip_bfloat16 types
@@ -1968,10 +1953,10 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
   };
   u_hold old_val, new_val;
   old_val.u32 =
-      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __HIP_TO_CLANG_MEMORY_SCOPE(__HIP_MEMORY_SCOPE_AGENT));
+      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_TO_CLANG_MEMORY_SCOPE(__HIP_MEMORY_SCOPE_AGENT)));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE));
   return old_val.h2r;
 #endif
 }

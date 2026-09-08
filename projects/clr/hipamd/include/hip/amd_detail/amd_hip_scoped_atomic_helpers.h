@@ -6,23 +6,6 @@
 
 #pragma once
 
-// __HIP_MEMORY_SCOPE_* enumerators are not the same integers as Clang's
-// __MEMORY_SCOPE_* (used by __scoped_atomic_*). Convert at every call.
-#ifndef __HIP_TO_CLANG_MEMORY_SCOPE
-#define __HIP_TO_CLANG_MEMORY_SCOPE(hip_scope)                                                     \
-  ((hip_scope) == __HIP_MEMORY_SCOPE_SINGLETHREAD                                                  \
-       ? __MEMORY_SCOPE_SINGLE                                                                     \
-       : (hip_scope) == __HIP_MEMORY_SCOPE_WAVEFRONT                                               \
-             ? __MEMORY_SCOPE_WVFRNT                                                               \
-             : (hip_scope) == __HIP_MEMORY_SCOPE_WORKGROUP                                         \
-                   ? __MEMORY_SCOPE_WRKGRP                                                         \
-                   : (hip_scope) == __HIP_MEMORY_SCOPE_AGENT                                       \
-                         ? __MEMORY_SCOPE_DEVICE                                                   \
-                         : (hip_scope) == __HIP_MEMORY_SCOPE_SYSTEM                                \
-                               ? __MEMORY_SCOPE_SYSTEM                                             \
-                               : __MEMORY_SCOPE_SYSTEM)
-#endif
-
 #ifdef __cplusplus
 
 // __scoped_atomic_* require integer/pointer objects. HIP's __hip_atomic_*
