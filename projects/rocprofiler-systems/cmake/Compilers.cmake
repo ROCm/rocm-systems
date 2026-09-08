@@ -37,20 +37,18 @@ include(MacroUtilities)
 # ----------------------------------------------------------------------------------------#
 set(ROCPROFSYS_GNU_MINIMUM_VERSION 11)
 
-foreach(_LANG C CXX)
-    if(
-        CMAKE_${_LANG}_COMPILER_ID STREQUAL "GNU"
-        AND CMAKE_${_LANG}_COMPILER_VERSION VERSION_LESS ROCPROFSYS_GNU_MINIMUM_VERSION
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS ROCPROFSYS_GNU_MINIMUM_VERSION
+)
+    message(
+        WARNING
+        "${PROJECT_NAME} requires GCC >= ${ROCPROFSYS_GNU_MINIMUM_VERSION} for C++20 but "
+        "CMAKE_CXX_COMPILER is GCC ${CMAKE_CXX_COMPILER_VERSION} "
+        "(${CMAKE_CXX_COMPILER}). This configuration is untested and unsupported; "
+        "the build is likely to fail. On RHEL 8, enable gcc-toolset-11 or later."
     )
-        message(
-            WARNING
-            "${PROJECT_NAME} requires GCC >= ${ROCPROFSYS_GNU_MINIMUM_VERSION} for C++20 but "
-            "CMAKE_${_LANG}_COMPILER is GCC ${CMAKE_${_LANG}_COMPILER_VERSION} "
-            "(${CMAKE_${_LANG}_COMPILER}). This configuration is untested and unsupported; "
-            "the build is likely to fail. On RHEL 8, enable gcc-toolset-11 or later."
-        )
-    endif()
-endforeach()
+endif()
 
 if("${LIBNAME}" STREQUAL "")
     string(TOLOWER "${PROJECT_NAME}" LIBNAME)

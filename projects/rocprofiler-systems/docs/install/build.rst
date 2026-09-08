@@ -56,7 +56,7 @@ Build requirements
 
   * GCC 11 is the first release with reasonably complete C++20 support. GCC 10 is
     missing ``using enum``, ``std::source_location``, ``std::bit_cast``, and
-    ``<latch>``/``<barrier>``/``<semaphore>``, and no longer receives testing.
+    ``<latch>``/``<barrier>``/``<semaphore>``, and is no longer tested.
   * On RHEL 8, the system GCC is too old; use ``gcc-toolset-11`` or later
   * Older GCC compilers may still work but are not tested and are not supported
   * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
