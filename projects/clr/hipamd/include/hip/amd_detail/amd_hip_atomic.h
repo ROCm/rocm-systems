@@ -20,15 +20,6 @@
 #define __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY
 #endif
 
-template <bool B, typename T, typename F> struct Cond_t;
-
-template <typename T, typename F> struct Cond_t<true, T, F> {
-  using type = T;
-};
-template <typename T, typename F> struct Cond_t<false, T, F> {
-  using type = F;
-};
-
 #if !__HIP_DEVICE_COMPILE__
 // TODO: Remove this after compiler pre-defines the following Macros.
 #define __HIP_MEMORY_SCOPE_SINGLETHREAD 1
@@ -38,69 +29,9 @@ template <typename T, typename F> struct Cond_t<false, T, F> {
 #define __HIP_MEMORY_SCOPE_SYSTEM 5
 #endif
 
-// __HIP_MEMORY_SCOPE_* and Clang's __MEMORY_SCOPE_* are different enumerations,
-// so a scope supplied by a caller has to be translated rather than forwarded.
-constexpr int __hip_to_clang_memory_scope(int __hip_scope) {
-  return __hip_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD ? __MEMORY_SCOPE_SINGLE
-         : __hip_scope == __HIP_MEMORY_SCOPE_WAVEFRONT  ? __MEMORY_SCOPE_WVFRNT
-         : __hip_scope == __HIP_MEMORY_SCOPE_WORKGROUP  ? __MEMORY_SCOPE_WRKGRP
-         : __hip_scope == __HIP_MEMORY_SCOPE_AGENT      ? __MEMORY_SCOPE_DEVICE
-                                                        : __MEMORY_SCOPE_SYSTEM;
-}
-
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_unsafe_atomics.h"
 #endif
-
-// Atomic expanders
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Op, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_expander(T* p, T x, Op op, F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp0{__scoped_atomic_load_n(q, mem_order, __hip_to_clang_memory_scope(mem_scope))};
-  U tmp1;
-  do {
-    tmp1 = tmp0;
-
-    op(reinterpret_cast<T&>(tmp1), x);
-  } while (!__scoped_atomic_compare_exchange_n(q, &tmp0, tmp1, false, mem_order, mem_order,
-                                               __hip_to_clang_memory_scope(mem_scope)));
-
-  return reinterpret_cast<const T&>(tmp0);
-}
-
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Cmp, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_extrema_expander(T* p, T x, Cmp cmp,
-                                                                         F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp{__scoped_atomic_load_n(q, mem_order, __hip_to_clang_memory_scope(mem_scope))};
-  while (cmp(x, reinterpret_cast<const T&>(tmp)) &&
-         !__scoped_atomic_compare_exchange_n(q, &tmp, x, false, mem_order, mem_order,
-                                             __hip_to_clang_memory_scope(mem_scope)));
-
-  return reinterpret_cast<const T&>(tmp);
-}
 
 __device__ inline unsigned short int atomicCAS(unsigned short int* address,
                                                unsigned short int compare, unsigned short int val) {
