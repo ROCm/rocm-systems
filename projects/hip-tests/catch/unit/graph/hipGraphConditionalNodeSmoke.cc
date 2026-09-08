@@ -5,7 +5,7 @@
  */
 
 /**
- * Smoke tests for GFX12 / PR-7152 conditional graph node AQL vendor packets.
+ * Smoke tests for conditional graph node AQL IB packets.
  *
  * PURPOSE
  * -------
@@ -23,18 +23,8 @@
  *   3. Argument validation   — runtime checks that the API rejects bad inputs
  *      with the documented error codes.
  *
- *   4. Packet path smoke     — minimal WHILE / IF graphs that force the runtime
- *      to emit the new vendor COND_BRANCH / LOOP_BACK AQL packets.  These tests
- *      are tagged [!mayfail] because the CP firmware may reject the packet with
- *      hipErrorLaunchFailure (HSA_STATUS_ERROR_INVALID_PACKET_FORMAT 0x1009)
- *      until matching GFX12 microcode ships.  A launch failure is surfaced
- *      explicitly via WARN so it is visible in the test log even when the
- *      test is marked may-fail.
- *
- * Firmware ABI note (as of PR-7152 / June 2026): the current firmware uses
- * packet type 6 for COND_BRANCH and type 7 for LOOP_BACK.  WHILE keeps the
- * legacy [body packets | LOOP_BACK] lowering; it is not lowered to COND_BRANCH
- * repeat mode yet.
+ *   4. Packet path smoke     — minimal WHILE / IF graphs that exercise
+ *      AQL_IB_COND_JUMP entry, tail jumps, and termination.
  */
 
 #include <cstddef>
@@ -70,66 +60,28 @@ static_assert(offsetof(hipGraphConditionalHandle, default_value) == 8,
 static_assert(offsetof(hipGraphConditionalHandle, signal_handle) == 16,
               "hipGraphConditionalHandle::signal_handle offset changed");
 
-static_assert(HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER == 5,
-              "AQL INDIRECT_BUFFER packet type changed");
-static_assert(HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH == 6,
-              "AQL COND_BRANCH packet type changed");
-static_assert(HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK == 7,
-              "AQL LOOP_BACK packet type changed");
-static_assert(HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP ==
-                  HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH,
-              "conditional jump compatibility alias changed");
+static_assert(HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP == 6,
+              "AQL IB conditional jump packet type changed");
+static_assert(HSA_AMD_PACKET_TYPE_AQL_IB_JUMP == 7,
+              "AQL IB jump packet type changed");
+static_assert(HSA_AMD_PACKET_TYPE_RESERVED5 == 5,
+              "AQL IB format 5 must remain reserved");
 
-static_assert(HSA_AMD_AQL_COND_BRANCH_COND_BOOL_TRUE == 10,
-              "COND_BRANCH BOOL_TRUE cond_op changed");
-static_assert(HSA_AMD_AQL_COND_BRANCH_EXEC_BRANCH_ONCE == 0,
-              "COND_BRANCH BRANCH_ONCE execution mode changed");
-static_assert(HSA_AMD_AQL_COND_BRANCH_POST_ACTION_NONE == 0,
-              "COND_BRANCH NONE post action changed");
+static_assert(HSA_AMD_AQL_IB_COND_JUMP_OP_EQ == 0);
+static_assert(HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_TRUE == 10);
+static_assert(HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_FALSE == 11);
+static_assert(sizeof(hsa_amd_aql_ib_cond_jump_packet_t) == 64,
+              "conditional jump packet must remain one AQL slot");
+static_assert(offsetof(hsa_amd_aql_ib_cond_jump_packet_t, condition_signal) == 8);
+static_assert(offsetof(hsa_amd_aql_ib_cond_jump_packet_t, true_target_base_addr) == 24);
+static_assert(offsetof(hsa_amd_aql_ib_cond_jump_packet_t, false_target_base_addr) == 32);
+static_assert(offsetof(hsa_amd_aql_ib_cond_jump_packet_t, completion_signal) == 48);
 
-static_assert(sizeof(hsa_amd_aql_cond_branch_packet_t) == 64,
-              "COND_BRANCH packet must remain one AQL slot");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, header) == 0,
-              "COND_BRANCH header offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, cond_op) == 4,
-              "COND_BRANCH cond_op offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, execution_mode) == 5,
-              "COND_BRANCH execution_mode offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, post_action) == 6,
-              "COND_BRANCH post_action offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, flags) == 7,
-              "COND_BRANCH flags offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, condition_signal) == 8,
-              "COND_BRANCH condition_signal offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, test_value) == 16,
-              "COND_BRANCH test_value offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t,
-                       true_target_offset_packets) == 24,
-              "COND_BRANCH true_target_offset_packets offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t,
-                       true_target_size_packets) == 28,
-              "COND_BRANCH true_target_size_packets offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t,
-                       false_target_offset_packets) == 32,
-              "COND_BRANCH false_target_offset_packets offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t,
-                       false_target_size_packets) == 36,
-              "COND_BRANCH false_target_size_packets offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, ib_base_addr) == 40,
-              "COND_BRANCH ib_base_addr offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, branch_options) == 48,
-              "COND_BRANCH branch_options offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, ib_size_packets) == 52,
-              "COND_BRANCH ib_size_packets offset changed");
-static_assert(offsetof(hsa_amd_aql_cond_branch_packet_t, completion_signal) == 56,
-              "COND_BRANCH completion_signal offset changed");
-
-static_assert(sizeof(hsa_amd_aql_loop_back_t) == 64,
-              "LOOP_BACK packet must remain one AQL slot");
-static_assert(offsetof(hsa_amd_aql_loop_back_t, condition_signal) == 8,
-              "LOOP_BACK condition_signal offset changed");
-static_assert(offsetof(hsa_amd_aql_loop_back_t, test_value) == 16,
-              "LOOP_BACK test_value offset changed");
+static_assert(sizeof(hsa_amd_aql_ib_jump_packet_t) == 64,
+              "unconditional jump packet must remain one AQL slot");
+static_assert(offsetof(hsa_amd_aql_ib_jump_packet_t, target_size_packets) == 4);
+static_assert(offsetof(hsa_amd_aql_ib_jump_packet_t, target_base_addr) == 8);
+static_assert(offsetof(hsa_amd_aql_ib_jump_packet_t, completion_signal) == 48);
 
 // ---------------------------------------------------------------------------
 // Layer 2: Handle plumbing — no graph launch required
@@ -325,22 +277,11 @@ TEST_CASE("Smoke_hipGraphAddConditionalNode_IfTwoBodiesDistinct") {
 }
 
 // ---------------------------------------------------------------------------
-// Layer 4: Packet path smoke — forces the runtime to emit COND_BRANCH / LOOP_BACK packets
+// Layer 4: AQL IB packet-path smoke
 // ---------------------------------------------------------------------------
 //
-// These tests are tagged [!mayfail] because:
-//   - The CP firmware on the target system may not yet recognise vendor packet
-//     type 6 (HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH).  In that case the
-//     CP aborts the queue with HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (0x1009)
-//     which surfaces as hipErrorLaunchFailure (719) from hipStreamSynchronize.
-//
-// A WARN message is printed for any launch failure so the outcome is visible
-// even when the test is marked may-fail.  The test PASSES if:
-//   a) hipGraphLaunch + hipStreamSynchronize both succeed (firmware accepts
-//      the packet), OR
-//   b) hipStreamSynchronize returns hipErrorLaunchFailure (firmware rejects
-//      the packet with the expected error code).
-// Any other error code is treated as a hard failure.
+// These tests validate the observable graph and AQL packet semantics. A launch
+// failure is reported explicitly before the test fails.
 
 // Minimal kernel: writes 0 to the condition cell (terminates the loop).
 static __global__ void smokeCondSetKernel(hipGraphConditionalHandle handle,
@@ -355,18 +296,29 @@ static __global__ void smokeIfBodyKernel(int* output) {
   *output = 99;
 }
 
+static __global__ void smokeIfElseBodyKernel(int* output, int value) {
+  *output = value;
+}
+
+static __global__ void smokeWhileCountKernel(hipGraphConditionalHandle handle,
+                                              int* counter, int limit) {
+  const int value = atomicAdd(counter, 1) + 1;
+  hipGraphSetConditional(handle, value < limit ? 1ULL : 0ULL);
+}
+
+static __global__ void smokeObserveKernel(const int* input, int* output) {
+  *output = *input;
+}
+
 /**
  * Helper: build a minimal WHILE graph (1 body kernel, 1 iteration), launch it,
  * and return the hipError_t from hipStreamSynchronize.
  *
  * The graph is:
- *   parent: [ COND_BRANCH (BOOL_TRUE, defaultValue=1) ]
+ *   parent: [ AQL_IB_COND_JUMP (BOOL_TRUE, defaultValue=1) ]
  *   body:   [ smokeCondSetKernel ] → writes 0 → loop exits
  *
- * Expected outcomes:
- *   hipSuccess              → firmware accepted the packet; counter == 1.
- *   hipErrorLaunchFailure   → firmware rejected the packet (expected on pre-GFX12
- *                             or mismatched firmware); counter is undefined.
+ * Expected outcome: launch succeeds and counter == 1.
  */
 static hipError_t runMinimalWhileSmoke(int* h_counter_out) {
   int* d_counter = nullptr;
@@ -418,26 +370,16 @@ static hipError_t runMinimalWhileSmoke(int* h_counter_out) {
   return syncErr;
 }
 
-TEST_CASE("Smoke_hipGraphConditionalNode_While_PacketPath",
-          "[!mayfail]"
-          // [!mayfail]: CP firmware may reject vendor packet type 6
-          // (HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH) with
-          // HSA_STATUS_ERROR_INVALID_PACKET_FORMAT → hipErrorLaunchFailure.
-) {
+TEST_CASE("Smoke_hipGraphConditionalNode_While_PacketPath") {
   int h_counter = -1;
   hipError_t err = runMinimalWhileSmoke(&h_counter);
 
   if (err == hipSuccess) {
-    INFO("Packet accepted by firmware. counter=" << h_counter);
-    // If the packet was accepted and the loop ran correctly, counter == 1.
-    // With a firmware ABI mismatch the loop may not terminate, so we only
-    // check that counter is non-negative rather than asserting == 1.
-    REQUIRE(h_counter >= 0);
+    INFO("Conditional graph completed. counter=" << h_counter);
+    REQUIRE(h_counter == 1);
   } else if (err == hipErrorLaunchFailure) {
-    WARN("hipErrorLaunchFailure: CP rejected COND_BRANCH packet "
-         "(expected on pre-GFX12 or mismatched firmware). "
-         "This is the documented failure mode for PR-7152 before firmware ships.");
-    // Not a hard failure — this is the expected outcome on current hardware.
+    WARN("hipErrorLaunchFailure while executing AQL IB conditional graph");
+    REQUIRE(err == hipSuccess);
   } else {
     // Any other error is unexpected.
     INFO("Unexpected error: " << hipGetErrorString(err) << " (" << err << ")");
@@ -446,10 +388,9 @@ TEST_CASE("Smoke_hipGraphConditionalNode_While_PacketPath",
 }
 
 TEST_CASE("Smoke_hipGraphConditionalNode_While_ZeroIter_PacketPath",
-          "[!mayfail]"
-          // [!mayfail]: same firmware boundary as above.
+          "[graph][conditional]"
           // defaultValue=0 → WHILE should not enter the body (0 iterations).
-          // If the CP accepts the packet, counter must remain 0.
+          // The counter must remain 0.
 ) {
   int* d_counter = nullptr;
   HIP_CHECK(hipMalloc(&d_counter, sizeof(int)));
@@ -497,8 +438,8 @@ TEST_CASE("Smoke_hipGraphConditionalNode_While_ZeroIter_PacketPath",
     // Body must not have run.
     REQUIRE(h_counter == 0);
   } else if (syncErr == hipErrorLaunchFailure) {
-    WARN("hipErrorLaunchFailure: CP rejected COND_BRANCH packet "
-         "(expected on pre-GFX12 or mismatched firmware).");
+    WARN("hipErrorLaunchFailure while executing AQL IB conditional graph");
+    REQUIRE(syncErr == hipSuccess);
   } else {
     INFO("Unexpected error: " << hipGetErrorString(syncErr)
          << " (" << syncErr << ")");
@@ -511,9 +452,90 @@ TEST_CASE("Smoke_hipGraphConditionalNode_While_ZeroIter_PacketPath",
   HIP_CHECK(hipFree(d_counter));
 }
 
+TEST_CASE("Smoke_hipGraphConditionalNode_While_RepeatedAndPqContinuation") {
+  // This exercises the complete CFG rather than only its first edge:
+  //
+  //   PQ COND_JUMP -> body -> IB COND_JUMP -> body ... -> null
+  //                  (five iterations)                  |
+  //                                                     v
+  //                                          following PQ dispatch
+  //
+  // Every back edge must observe the preceding kernel's condition write. The
+  // dependent parent-graph kernel must run only after the complete
+  // selected IB path has finished and queue execution has resumed.
+  int* d_counter = nullptr;
+  int* d_observed = nullptr;
+  HIP_CHECK(hipMalloc(&d_counter, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_observed, sizeof(int)));
+  HIP_CHECK(hipMemset(d_counter, 0, sizeof(int)));
+  HIP_CHECK(hipMemset(d_observed, 0, sizeof(int)));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphConditionalHandle handle;
+  HIP_CHECK(hipGraphConditionalHandleCreate(&handle, graph, 1u, 0));
+
+  hipGraph_t body_graph = nullptr;
+  hipGraphNode_t cond_node;
+  HIP_CHECK(hipGraphAddConditionalNode(&cond_node, graph, nullptr, 0,
+                                        handle, hipGraphCondTypeWhile, 1,
+                                        &body_graph));
+
+  int limit = 5;
+  void* body_args[] = {&handle, &d_counter, &limit};
+  hipKernelNodeParams body_params = {};
+  body_params.func = reinterpret_cast<void*>(smokeWhileCountKernel);
+  body_params.gridDim = dim3(1);
+  body_params.blockDim = dim3(1);
+  body_params.kernelParams = body_args;
+  hipGraphNode_t body_node;
+  HIP_CHECK(hipGraphAddKernelNode(&body_node, body_graph, nullptr, 0,
+                                  &body_params));
+
+  void* observe_args[] = {&d_counter, &d_observed};
+  hipKernelNodeParams observe_params = {};
+  observe_params.func = reinterpret_cast<void*>(smokeObserveKernel);
+  observe_params.gridDim = dim3(1);
+  observe_params.blockDim = dim3(1);
+  observe_params.kernelParams = observe_args;
+  hipGraphNode_t observe_node;
+  HIP_CHECK(hipGraphAddKernelNode(&observe_node, graph, &cond_node, 1,
+                                  &observe_params));
+
+  hipGraphExec_t exec;
+  hipStream_t stream;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  hipError_t sync_err = hipStreamSynchronize(stream);
+
+  if (sync_err == hipSuccess) {
+    int counter = 0;
+    int observed = 0;
+    HIP_CHECK(hipMemcpy(&counter, d_counter, sizeof(int),
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&observed, d_observed, sizeof(int),
+                        hipMemcpyDeviceToHost));
+    REQUIRE(counter == limit);
+    REQUIRE(observed == limit);
+  } else if (sync_err == hipErrorLaunchFailure) {
+    WARN("hipErrorLaunchFailure while executing repeated AQL IB conditional graph");
+    REQUIRE(sync_err == hipSuccess);
+  } else {
+    INFO("Unexpected error: " << hipGetErrorString(sync_err)
+         << " (" << sync_err << ")");
+    REQUIRE(sync_err == hipSuccess);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(d_observed));
+  HIP_CHECK(hipFree(d_counter));
+}
+
 TEST_CASE("Smoke_hipGraphConditionalNode_If_TrueBranch_PacketPath",
-          "[!mayfail]"
-          // [!mayfail]: same firmware boundary as WHILE tests.
+          "[graph][conditional]"
           // IF with defaultValue=1 → body should run → output == 99.
 ) {
   int* d_output = nullptr;
@@ -559,8 +581,8 @@ TEST_CASE("Smoke_hipGraphConditionalNode_If_TrueBranch_PacketPath",
     INFO("Packet accepted. output=" << h_output << " (expected 99)");
     REQUIRE(h_output == 99);
   } else if (syncErr == hipErrorLaunchFailure) {
-    WARN("hipErrorLaunchFailure: CP rejected COND_BRANCH packet "
-         "(expected on pre-GFX12 or mismatched firmware).");
+    WARN("hipErrorLaunchFailure while executing AQL IB conditional graph");
+    REQUIRE(syncErr == hipSuccess);
   } else {
     INFO("Unexpected error: " << hipGetErrorString(syncErr)
          << " (" << syncErr << ")");
@@ -574,8 +596,7 @@ TEST_CASE("Smoke_hipGraphConditionalNode_If_TrueBranch_PacketPath",
 }
 
 TEST_CASE("Smoke_hipGraphConditionalNode_If_FalseBranch_PacketPath",
-          "[!mayfail]"
-          // [!mayfail]: same firmware boundary as WHILE tests.
+          "[graph][conditional]"
           // IF with defaultValue=0 → body should NOT run → output stays 0.
 ) {
   int* d_output = nullptr;
@@ -621,8 +642,8 @@ TEST_CASE("Smoke_hipGraphConditionalNode_If_FalseBranch_PacketPath",
     INFO("Packet accepted. output=" << h_output << " (expected 0, body skipped)");
     REQUIRE(h_output == 0);
   } else if (syncErr == hipErrorLaunchFailure) {
-    WARN("hipErrorLaunchFailure: CP rejected COND_BRANCH packet "
-         "(expected on pre-GFX12 or mismatched firmware).");
+    WARN("hipErrorLaunchFailure while executing AQL IB conditional graph");
+    REQUIRE(syncErr == hipSuccess);
   } else {
     INFO("Unexpected error: " << hipGetErrorString(syncErr)
          << " (" << syncErr << ")");
@@ -635,17 +656,87 @@ TEST_CASE("Smoke_hipGraphConditionalNode_If_FalseBranch_PacketPath",
   HIP_CHECK(hipFree(d_output));
 }
 
+static hipError_t runIfElseSmoke(unsigned int default_value,
+                                 int* h_output_out) {
+  int* d_output = nullptr;
+  HIP_CHECK(hipMalloc(&d_output, sizeof(int)));
+  int zero = 0;
+  HIP_CHECK(hipMemcpy(d_output, &zero, sizeof(int), hipMemcpyHostToDevice));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphConditionalHandle handle;
+  HIP_CHECK(hipGraphConditionalHandleCreate(&handle, graph, default_value, 0));
+
+  hipGraph_t body_graphs[2] = {nullptr, nullptr};
+  hipGraphNode_t cond_node;
+  HIP_CHECK(hipGraphAddConditionalNode(&cond_node, graph, nullptr, 0,
+                                        handle, hipGraphCondTypeIf, 2,
+                                        body_graphs));
+
+  int true_value = 101;
+  int false_value = 202;
+  void* true_args[] = {&d_output, &true_value};
+  void* false_args[] = {&d_output, &false_value};
+  hipKernelNodeParams true_kp = {};
+  true_kp.func = reinterpret_cast<void*>(smokeIfElseBodyKernel);
+  true_kp.gridDim = dim3(1);
+  true_kp.blockDim = dim3(1);
+  true_kp.kernelParams = true_args;
+  hipKernelNodeParams false_kp = true_kp;
+  false_kp.kernelParams = false_args;
+  hipGraphNode_t true_node;
+  hipGraphNode_t false_node;
+  HIP_CHECK(hipGraphAddKernelNode(&true_node, body_graphs[0], nullptr, 0,
+                                  &true_kp));
+  HIP_CHECK(hipGraphAddKernelNode(&false_node, body_graphs[1], nullptr, 0,
+                                  &false_kp));
+
+  hipGraphExec_t exec;
+  hipStream_t stream;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  hipError_t sync_err = hipStreamSynchronize(stream);
+  if (sync_err == hipSuccess) {
+    HIP_CHECK(hipMemcpy(h_output_out, d_output, sizeof(int),
+                        hipMemcpyDeviceToHost));
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(d_output));
+  return sync_err;
+}
+
+TEST_CASE("Smoke_hipGraphConditionalNode_IfElse_BranchIsolation_PacketPath") {
+  const unsigned int default_value = GENERATE(0u, 1u);
+  int output = -1;
+  hipError_t err = runIfElseSmoke(default_value, &output);
+
+  if (err == hipSuccess) {
+    // The descriptors point at unrelated extents in one allocation. Executing
+    // both arms or falling through from TRUE into FALSE is a failure.
+    REQUIRE(output == (default_value != 0 ? 101 : 202));
+  } else if (err == hipErrorLaunchFailure) {
+    WARN("hipErrorLaunchFailure while executing AQL IB conditional graph");
+    REQUIRE(err == hipSuccess);
+  } else {
+    INFO("Unexpected error: " << hipGetErrorString(err) << " (" << err << ")");
+    REQUIRE(err == hipSuccess);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Layer 4b: Instantiation smoke — verify hipGraphInstantiate succeeds even
 // before launch (the packet is not emitted until hipGraphLaunch).
-// These are NOT tagged [!mayfail] because instantiation should always succeed
-// regardless of firmware state.
 // ---------------------------------------------------------------------------
 
 TEST_CASE("Smoke_hipGraphConditionalNode_While_InstantiateOnly") {
   // Verify that a WHILE graph with a body kernel can be instantiated without
   // error.  Does not launch.  This exercises BuildIB and the IB allocation
-  // path without touching the CP.
+  // path without submitting a packet.
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

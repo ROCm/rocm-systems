@@ -1842,31 +1842,33 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
 // ================================================================================================
 // HIP graph conditional node entry packet.  Mirrors dispatchBarrierValuePacket
-// but emits a vendor HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH instead.
+// but emits a vendor HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP instead.
 //
-// The CP is expected to:
+// AQL_IB_COND_JUMP semantics are:
 //   - read cond_signal.value (the cond cell at amd_signal_t +8)
 //   - treat nonzero as TRUE (BOOL_TRUE)
-//   - if TRUE, fetch true_pkts packets from ib_base_addr + true_offset_pkts * 64
-//   - if FALSE, fetch false_pkts packets from ib_base_addr + false_offset_pkts * 64
-//   - then resume from this queue
+//   - if TRUE, tail-jump to the true IB descriptor
+//   - if FALSE, tail-jump to the false IB descriptor
+//   - complete the PQ root when the selected transitive IB path terminates
 //
-// barrier=1 + SYSTEM acquire/release on the header ensures any prior packet
-// (including a kernel that wrote the cond cell) has retired and its store is
-// visible to the CP before the cond load.
-void VirtualGPU::dispatchCondBranchPacket(hsa_signal_t cond_signal,
-                                          uint64_t ib_base_addr,
-                                          uint32_t true_offset_pkts,
+// barrier=1 waits for prior packet completion, and SYSTEM acquire makes a
+// preceding condition write visible before it is read. SYSTEM release belongs
+// to root-final completion after the selected transitive IB path terminates.
+void VirtualGPU::dispatchCondBranchPacket(amd::Marker& command,
+                                          hsa_signal_t cond_signal,
+                                          uint64_t true_base_addr,
                                           uint32_t true_pkts,
-                                          uint32_t false_offset_pkts,
-                                          uint32_t false_pkts,
-                                          uint32_t ib_size_pkts) {
+                                          uint64_t false_base_addr,
+                                          uint32_t false_pkts) {
+  std::scoped_lock lock(execution());
+  profilingBegin(command);
+
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
 
   // Header bits: VENDOR_SPECIFIC + barrier + SYSTEM acquire/release fences.
-  // Identical scope choice as barrier_value to make any prior write to the
-  // cond cell visible to the CP load.
+  // The barrier and acquire order the condition load; the release is deferred
+  // to root-final completion.
   constexpr uint16_t kVendorSpecificHBits =
       (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
   constexpr uint16_t kBarrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
@@ -1874,41 +1876,44 @@ void VirtualGPU::dispatchCondBranchPacket(hsa_signal_t cond_signal,
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   const uint16_t header = kVendorSpecificHBits | kBarrierHBits | kSystemScopeHBits;
-  const uint16_t rest = HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH;
+  const uint16_t rest = HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP;
 
   // Build the packet body on the stack first; the slot starts as INVALID and
   // we publish the real header last via release-store.
-  hsa_amd_aql_cond_branch_packet_t pkt;
+  hsa_amd_aql_ib_cond_jump_packet_t pkt;
   std::memset(&pkt, 0, sizeof(pkt));
-  pkt.cond_op = HSA_AMD_AQL_COND_BRANCH_COND_BOOL_TRUE;
-  pkt.execution_mode = HSA_AMD_AQL_COND_BRANCH_EXEC_BRANCH_ONCE;
-  pkt.post_action = HSA_AMD_AQL_COND_BRANCH_POST_ACTION_NONE;
+  pkt.cond_op = HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_TRUE;
   pkt.condition_signal = cond_signal;
   pkt.test_value = 0;
-  pkt.true_target_offset_packets = true_offset_pkts;
+  pkt.true_target_base_addr = true_base_addr;
   pkt.true_target_size_packets = true_pkts;
-  pkt.false_target_offset_packets = false_offset_pkts;
+  pkt.false_target_base_addr = false_base_addr;
   pkt.false_target_size_packets = false_pkts;
-  pkt.ib_base_addr = ib_base_addr;
-  pkt.ib_size_packets = ib_size_pkts;
-  pkt.completion_signal = hsa_signal_t{0};
+  // Completion of a PQ-origin jump covers the complete selected IB path.
+  // Track that completion directly so graph-owned IB storage remains live for
+  // every reachable target.
+  pkt.completion_signal =
+      Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 
   setFenceDirty(true);
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
 
-  auto* aql_loc = &(reinterpret_cast<hsa_amd_aql_cond_branch_packet_t*>(
+  auto* aql_loc = &(reinterpret_cast<hsa_amd_aql_ib_cond_jump_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
   *aql_loc = pkt;
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
+  hasPendingDispatch_ = false;
+  profilingEnd();
+
   ClPrint(amd::LOG_INFO, amd::LOG_AQL,
-          "[cond_branch] queue=%p index=%lu ib=0x%lx true_off=%u true_pkts=%u "
-          "false_off=%u false_pkts=%u ib_pkts=%u cond_sig=0x%lx",
-          gpu_queue_, index, ib_base_addr, true_offset_pkts, true_pkts,
-          false_offset_pkts, false_pkts, ib_size_pkts, cond_signal.handle);
+          "[ib_cond_jump] queue=%p index=%lu true=0x%lx/%u false=0x%lx/%u "
+          "cond_sig=0x%lx",
+          gpu_queue_, index, true_base_addr, true_pkts, false_base_addr,
+          false_pkts, cond_signal.handle);
 }
 
 // ================================================================================================

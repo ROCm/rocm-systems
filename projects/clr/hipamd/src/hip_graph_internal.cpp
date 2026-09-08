@@ -1619,8 +1619,8 @@ hipError_t GraphExec::CaptureAQLPackets() {
 
   // Build IB buffers for any conditional nodes in the parent graph.
   // BuildIB walks each body Graph, captures its kernel-dispatch packets,
-  // and assembles them (plus a vendor LOOP_BACK for WHILE) into a single
-  // contiguous IB.  Done here so the kernArgManager_ pool is already
+  // and assembles them (plus a vendor conditional tail jump for WHILE) into a
+  // single contiguous IB.  Done here so the kernArgManager_ pool is already
   // available for body-kernel kernarg allocation.  Conditional nodes
   // remain non-captureable so the segment scheduler dispatches their
   // CondJumpCommand via the legacy CreateCommand + EnqueueCommands path.
@@ -2716,6 +2716,7 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
   }
 
   amd::Device* device = g_devices[devId]->devices()[0];
+
   assert(alignment != 0 && "Alignment must be non-zero");
 
   // Check if we have any pools allocated for this device
@@ -2788,24 +2789,23 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 }
 
 // ================================================================================================
-// GraphConditionalNode: lazy IB build + COND_BRANCH command (M2 IB path).
+// GraphConditionalNode: AQL IB construction and conditional-jump submission.
 //
 // BuildIB() is called from GraphExec::CaptureAQLPackets() at instantiate time
 // after the parent's GraphKernelArgManager pool has been allocated.  It walks
-// each body Graph (POC: kernel-only, insertion-order) and captures the body's
+// each body Graph (currently kernel-only, in topological order) and captures the body's
 // AQL kernel-dispatch packets via the same machinery that the segmented
 // scheduler uses for regular nodes (GraphNode::CaptureAndFormPacket).  For
-// WHILE we append a vendor LOOP_BACK packet so the CP re-evaluates the cond
-// signal after every iteration.  The IB lives in executable host kernarg
-// memory so it is CP-fetchable with the current firmware design.
+// WHILE we append an AQL_IB_COND_JUMP packet to re-evaluate the condition
+// signal after every iteration. The IB lives in 64-byte-aligned memory that is
+// accessible to the queue's agent, as required for an AQL IB target.
 //
 // CondJumpCommand::submit() runs at launch on the launch stream's
 // roc::VirtualGPU.  It resets the cond cell back to the handle's default
 // value (otherwise iteration N would observe value=0 left by iteration N-1)
-// and emits a single vendor COND_BRANCH packet via the new
-// dispatchCondBranchPacket helper.  The CP follows the COND_BRANCH into the IB,
-// runs the body, and (for WHILE) loops via LOOP_BACK until the kernel zeroes
-// the cond cell.
+// and emits one AQL_IB_COND_JUMP through dispatchCondBranchPacket. For WHILE,
+// the selected path runs the body and its conditional tail jump until the
+// condition becomes false.
 
 GraphConditionalNode::~GraphConditionalNode() {
   for (auto* body : bodies_) {
@@ -2846,6 +2846,16 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
 
   amd::Device* device = g_devices[devId]->devices()[0];
 
+  std::vector<std::vector<GraphNode*>> body_orders(bodies_.size());
+  for (size_t bi = 0; bi < bodies_.size(); ++bi) {
+    Graph* body = bodies_[bi];
+    if (body == nullptr || !body->TopologicalOrder(body_orders[bi])) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph][cond] conditional body is null or cyclic");
+      return hipErrorInvalidValue;
+    }
+  }
+
   // GraphExec::GetKernelArgSizeForGraph only sums kernarg sizes for the
   // parent graph's segments, not for kernels nested in conditional bodies.
   // Bootstrap a kernarg pool sized for our bodies (plus a chunk of
@@ -2857,7 +2867,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     if (body == nullptr) {
       return hipErrorInvalidValue;
     }
-    for (auto* node : body->GetNodes()) {
+    for (auto* node : body_orders[bi]) {
       if (node != nullptr && node->GetType() == hipGraphNodeTypeKernel) {
         cond_kernarg_reserve += node->GetKerArgSize();
       }
@@ -2883,7 +2893,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     if (body == nullptr) {
       return hipErrorInvalidValue;
     }
-    for (auto* node : body->GetNodes()) {
+    for (auto* node : body_orders[bi]) {
       if (node == nullptr) {
         continue;
       }
@@ -2913,8 +2923,8 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
       for (auto* pkt : nodePackets) {
         // Zero the captured packet's completion_signal (offset 56) so the
         // body kernel inside the IB does not try to signal a per-packet
-        // completion.  Aggregation (if any) is handled at the COND_BRANCH
-        // entry packet level.
+        // completion. The PQ-origin AQL_IB_COND_JUMP owns completion for the
+        // complete selected path.
         std::memset(pkt + 56, 0, 8);
         body_bytes[bi].insert(body_bytes[bi].end(), pkt, pkt + 64);
       }
@@ -2922,7 +2932,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     }
   }
 
-  // Compute IB layout + COND_BRANCH arguments per cond_type.
+  // Compute the IB layout and root AQL_IB_COND_JUMP targets.
   size_t total_pkts = 0;
   size_t true_off_pkts = 0;
   size_t true_pkts = 0;
@@ -2930,35 +2940,39 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
   size_t false_pkts = 0;
 
   if (cond_type_ == hipGraphCondTypeWhile) {
-    // Layout: [body | loop_back].  COND_BRANCH runs body+loop_back if cond is
-    // nonzero; skips entirely if cond == 0 (handles 0-iteration WHILE).
-    total_pkts = body_pkt_count[0] + 1;  // +1 for trailing loop_back
+    // Layout: [body | conditional-back-edge]. The root conditional jump enters
+    // the IB when cond is nonzero. The tail jump either restarts the same IB or
+    // terminates it; a zero root condition skips the IB entirely.
+    total_pkts = body_pkt_count[0] + 1;
     true_off_pkts = 0;
     true_pkts = total_pkts;
     false_off_pkts = 0;
     false_pkts = 0;
   } else {
     if (bodies_.size() == 1) {
-      // IF (1 body).  Layout: [body].  Run body if cond != 0, skip otherwise.
-      total_pkts = body_pkt_count[0];
+      // IF (1 body). Layout: [body | terminal jump]. Every nonempty target
+      // count runs through a final JUMP; bare descriptor exhaustion is not an
+      // architected AQL-IB terminator.
+      total_pkts = body_pkt_count[0] == 0 ? 0 : body_pkt_count[0] + 1;
       true_off_pkts = 0;
-      true_pkts = body_pkt_count[0];
+      true_pkts = total_pkts;
       false_off_pkts = 0;
       false_pkts = 0;
     } else {
       // IF / ELSE (2 bodies).  CUDA convention: body[0] = "if" (TRUE),
-      // body[1] = "else" (FALSE).  IB layout is [true_arm | false_arm].
-      total_pkts = body_pkt_count[0] + body_pkt_count[1];
+      // body[1] = "else" (FALSE). Each nonempty arm owns its terminal JUMP,
+      // so selecting TRUE cannot fall into or prefetch the FALSE extent.
+      true_pkts = body_pkt_count[0] == 0 ? 0 : body_pkt_count[0] + 1;
+      false_pkts = body_pkt_count[1] == 0 ? 0 : body_pkt_count[1] + 1;
+      total_pkts = true_pkts + false_pkts;
       true_off_pkts = 0;
-      true_pkts = body_pkt_count[0];
-      false_off_pkts = body_pkt_count[0];
-      false_pkts = body_pkt_count[1];
+      false_off_pkts = true_pkts;
     }
   }
 
   if (total_pkts == 0) {
-    // Empty conditional with empty body and no loop_back -- nothing to
-    // dispatch.  Mark as built and let CondJumpCommand::submit() be a no-op.
+    // An empty conditional has no IB target. Mark it as built and let
+    // CondJumpCommand::submit() enqueue the corresponding empty marker.
     ib_addr_ = nullptr;
     ib_size_bytes_ = 0;
     ib_size_pkts_ = 0;
@@ -2968,6 +2982,14 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     false_pkts_ = 0;
     ib_built_ = true;
     return hipSuccess;
+  }
+
+  // Reject target descriptors larger than the documented AQL IB limit instead
+  // of truncating size_t counts into packet fields.
+  if (total_pkts > HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS ||
+      true_pkts > HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS ||
+      false_pkts > HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS) {
+    return hipErrorInvalidValue;
   }
 
   // Allocate IB in executable host kernarg memory.  Device::hostAlloc(...,
@@ -2981,45 +3003,64 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     return hipErrorMemoryAllocation;
   }
 
-  // Memcpy captured body packets, then (WHILE only) build + memcpy loop_back.
+  // Materialize body packets and their required control-flow terminators.
   uint8_t* dst = static_cast<uint8_t*>(ib);
+  auto append_terminal_jump = [&dst]() {
+    hsa_amd_aql_ib_jump_packet_t terminal;
+    std::memset(&terminal, 0, sizeof(terminal));
+    terminal.header.header = static_cast<uint16_t>(
+        (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+        (1 << HSA_PACKET_HEADER_BARRIER) |
+        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE));
+    terminal.header.AmdFormat = HSA_AMD_PACKET_TYPE_AQL_IB_JUMP;
+    std::memcpy(dst, &terminal, sizeof(terminal));
+    dst += sizeof(terminal);
+  };
   if (cond_type_ == hipGraphCondTypeWhile) {
     if (!body_bytes[0].empty()) {
       std::memcpy(dst, body_bytes[0].data(), body_bytes[0].size());
       dst += body_bytes[0].size();
     }
-    hsa_amd_aql_loop_back_t lb;
-    std::memset(&lb, 0, sizeof(lb));
     constexpr uint16_t kVendorH = static_cast<uint16_t>(
         HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
     constexpr uint16_t kBarrierH =
         static_cast<uint16_t>(1 << HSA_PACKET_HEADER_BARRIER);
-    constexpr uint16_t kSysScopeH = static_cast<uint16_t>(
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE));
-    lb.header.header = static_cast<uint16_t>(kVendorH | kBarrierH | kSysScopeH);
-    lb.header.AmdFormat = HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK;
-    lb.condition_signal.handle = handle_.signal_handle;
-    lb.test_value = 1;
-    lb.cond_op = HSA_SIGNAL_CONDITION_NE;
-    lb.ib_size_packets = static_cast<uint32_t>(total_pkts);
-    lb.completion_signal.handle = 0;
-    std::memcpy(dst, &lb, sizeof(lb));
-    dst += sizeof(lb);
+    // An IB-origin jump may acquire prior results but must use release scope
+    // NONE and a zero completion signal. The PQ-origin jump owns completion.
+    constexpr uint16_t kSysAcquireH = static_cast<uint16_t>(
+        HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+    hsa_amd_aql_ib_cond_jump_packet_t condition;
+    std::memset(&condition, 0, sizeof(condition));
+    condition.header.header =
+        static_cast<uint16_t>(kVendorH | kBarrierH | kSysAcquireH);
+    condition.header.AmdFormat = HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP;
+    condition.cond_op = HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_TRUE;
+    condition.condition_signal.handle = handle_.signal_handle;
+    condition.test_value = 0;
+    condition.true_target_base_addr = reinterpret_cast<uint64_t>(ib);
+    condition.true_target_size_packets = static_cast<uint32_t>(total_pkts);
+    condition.false_target_base_addr = 0;
+    condition.false_target_size_packets = 0;
+    condition.completion_signal.handle = 0;
+    std::memcpy(dst, &condition, sizeof(condition));
+    dst += sizeof(condition);
   } else if (bodies_.size() == 1) {
     if (!body_bytes[0].empty()) {
       std::memcpy(dst, body_bytes[0].data(), body_bytes[0].size());
       dst += body_bytes[0].size();
+      append_terminal_jump();
     }
   } else {
-    // IF / ELSE: memcpy true_arm (body[0]) first, then false_arm (body[1]).
+    // IF / ELSE: each arm is body packets followed by its terminal JUMP.
     if (!body_bytes[0].empty()) {
       std::memcpy(dst, body_bytes[0].data(), body_bytes[0].size());
       dst += body_bytes[0].size();
+      append_terminal_jump();
     }
     if (!body_bytes[1].empty()) {
       std::memcpy(dst, body_bytes[1].data(), body_bytes[1].size());
       dst += body_bytes[1].size();
+      append_terminal_jump();
     }
   }
 
@@ -3030,7 +3071,6 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
   true_pkts_ = static_cast<uint32_t>(true_pkts);
   false_off_pkts_ = static_cast<uint32_t>(false_off_pkts);
   false_pkts_ = static_cast<uint32_t>(false_pkts);
-  ib_template_.assign(static_cast<uint8_t*>(ib), static_cast<uint8_t*>(ib) + ib_bytes);
   ib_device_ = device;
   ib_built_ = true;
 
@@ -3045,8 +3085,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
 
 GraphConditionalNode::CondJumpCommand::CondJumpCommand(
     amd::HostQueue& queue, GraphConditionalNode& node)
-    : amd::Command(queue, CL_COMMAND_MARKER, EventWaitList{}, /*commandWaitBits=*/0,
-                   /*waitingEvent=*/nullptr),
+    : amd::Marker(queue, /*userVisible=*/false, EventWaitList{}),
       node_(node) {}
 
 void GraphConditionalNode::CondJumpCommand::submit(device::VirtualDevice& device) {
@@ -3058,8 +3097,9 @@ void GraphConditionalNode::CondJumpCommand::submit(device::VirtualDevice& device
   }
 
   if (node_.GetIbAddr() == nullptr || node_.ib_size_pkts_ == 0) {
-    // Empty conditional: nothing to dispatch.  Treat as a no-op marker.
-    setStatus(CL_COMPLETE);
+    // Empty conditional is still a real queue marker so dependencies and the
+    // command lifetime use the normal completion path.
+    device.submitMarker(*this);
     return;
   }
 
@@ -3070,20 +3110,20 @@ void GraphConditionalNode::CondJumpCommand::submit(device::VirtualDevice& device
 
   // Reset the cond cell to its default value before re-entering the
   // conditional.  Required so launch N+1 doesn't observe the value left
-  // by launch N inside the kernel.  Relaxed is fine because the COND_BRANCH
-  // packet itself carries SYSTEM acquire/release fences.
+  // by launch N inside the kernel. Relaxed is sufficient because the
+  // AQL_IB_COND_JUMP carries SYSTEM acquire and release scopes.
   hsa_signal_store_relaxed(cond_sig, default_value);
 
-  node_.RefreshIb();
-
   auto& vgpu = static_cast<amd::roc::VirtualGPU&>(device);
-  vgpu.dispatchCondBranchPacket(cond_sig,
-                                reinterpret_cast<uint64_t>(node_.GetIbAddr()),
-                                node_.GetTrueOffsetPkts(), node_.GetTruePkts(),
-                                node_.GetFalseOffsetPkts(), node_.GetFalsePkts(),
-                                node_.GetIbSizePkts());
-
-  setStatus(CL_COMPLETE);
+  const uint64_t base = reinterpret_cast<uint64_t>(node_.GetIbAddr());
+  const uint64_t true_base = node_.GetTruePkts() == 0
+                                 ? 0
+                                 : base + uint64_t(node_.GetTrueOffsetPkts()) * 64;
+  const uint64_t false_base = node_.GetFalsePkts() == 0
+                                  ? 0
+                                  : base + uint64_t(node_.GetFalseOffsetPkts()) * 64;
+  vgpu.dispatchCondBranchPacket(*this, cond_sig, true_base, node_.GetTruePkts(),
+                                false_base, node_.GetFalsePkts());
 }
 
 }  // namespace hip

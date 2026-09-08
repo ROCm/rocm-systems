@@ -77,7 +77,7 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
- * - 1.26 - AMD AQL indirect buffer, conditional branch, and loop-back packet definitions
+ * - 1.26 - AMD AQL IB conditional and unconditional tail-jump packets
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 26
@@ -130,25 +130,14 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
-  /**
-   * Dispatches an indirect buffer through a vendor-specific AQL packet.
-   */
-  HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER = 5,
+  /* Reserved. No AQL indirect-buffer packet uses format 5. */
+  HSA_AMD_PACKET_TYPE_RESERVED5 = 5,
 
-  /**
-   * Conditionally dispatches true/false sub-ranges of an indirect buffer.
-   */
-  HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH = 6,
+  /** Selects one of two independent IB descriptors and tail-jumps to it. */
+  HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP = 6,
 
-  /**
-   * Loop-back packet used inside an indirect buffer.
-   */
-  HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK = 7,
-
-  /**
-   * Compatibility alias for the conditional indirect-buffer branch packet.
-   */
-  HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP = HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH,
+  /** Unconditionally tail-jumps to an AQL indirect buffer. */
+  HSA_AMD_PACKET_TYPE_AQL_IB_JUMP = 7,
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
@@ -159,26 +148,26 @@ typedef enum {
  */
 typedef uint8_t hsa_amd_packet_type8_t;
 
-/**
- * @brief Condition operation for @ref hsa_amd_aql_cond_branch_packet_t.
- */
-typedef enum {
-  HSA_AMD_AQL_COND_BRANCH_COND_BOOL_TRUE = 10,
-} hsa_amd_aql_cond_branch_cond_op_t;
+/** Maximum number of 64-byte packets in an AQL IB target descriptor. */
+#define HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS 0xffffu
 
 /**
- * @brief Execution mode for @ref hsa_amd_aql_cond_branch_packet_t.
+ * @brief Condition operation for @ref hsa_amd_aql_ib_cond_jump_packet_t.
  */
 typedef enum {
-  HSA_AMD_AQL_COND_BRANCH_EXEC_BRANCH_ONCE = 0,
-} hsa_amd_aql_cond_branch_execution_mode_t;
-
-/**
- * @brief Post action for @ref hsa_amd_aql_cond_branch_packet_t.
- */
-typedef enum {
-  HSA_AMD_AQL_COND_BRANCH_POST_ACTION_NONE = 0,
-} hsa_amd_aql_cond_branch_post_action_t;
+  HSA_AMD_AQL_IB_COND_JUMP_OP_EQ = 0,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_NE = 1,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_ULT = 2,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_ULE = 3,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_UGT = 4,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_UGE = 5,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_SLT = 6,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_SLE = 7,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_SGT = 8,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_SGE = 9,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_TRUE = 10,
+  HSA_AMD_AQL_IB_COND_JUMP_OP_BOOL_FALSE = 11,
+} hsa_amd_aql_ib_cond_jump_cond_op_t;
 
 /**
  * @brief AMD vendor specific AQL packet header
@@ -264,50 +253,53 @@ typedef struct hsa_amd_barrier_value_packet_s {
 } hsa_amd_barrier_value_packet_t;
 
 /**
- * @brief AMD conditional indirect-buffer branch packet.
+ * @brief AMD conditional indirect-buffer tail-jump packet.
  *
  * When the condition is true, the packet processor executes
- * true_target_size_packets packets starting at ib_base_addr plus
- * true_target_offset_packets AQL slots.  When the condition is false, it
- * executes false_target_size_packets packets starting at ib_base_addr plus
- * false_target_offset_packets AQL slots.  A zero-sized target is permitted.
+ * the true target IB. When false, it executes the false target IB. Each target
+ * size counts 64-byte slots through its next jump, inclusive. Every nonnull
+ * target must end at such a jump; bare descriptor exhaustion is undefined.
+ * A target size must not exceed ::HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS.
+ * An IB-origin jump must be the final slot of
+ * its active descriptor, have a zero completion signal, and use release scope
+ * NONE. A null {address, size} target completes the PQ root.
  */
-typedef struct hsa_amd_aql_cond_branch_packet_s {
+typedef struct hsa_amd_aql_ib_cond_jump_packet_s {
   hsa_amd_vendor_packet_header_t header;
   uint8_t cond_op;
-  uint8_t execution_mode;
-  uint8_t post_action;
   uint8_t flags;
+  uint16_t reserved0;
   hsa_signal_t condition_signal;
   hsa_signal_value_t test_value;
-  uint32_t true_target_offset_packets;
+  uint64_t true_target_base_addr;
+  uint64_t false_target_base_addr;
   uint32_t true_target_size_packets;
-  uint32_t false_target_offset_packets;
   uint32_t false_target_size_packets;
-  uint64_t ib_base_addr;
-  uint32_t branch_options;
-  uint32_t ib_size_packets;
   hsa_signal_t completion_signal;
-} hsa_amd_aql_cond_branch_packet_t;
-
-typedef hsa_amd_aql_cond_branch_packet_t
-    hsa_amd_dispatch_indirect_buffer_conditional_jump_t;
+  uint64_t reserved1;
+} hsa_amd_aql_ib_cond_jump_packet_t;
 
 /**
- * @brief AMD loop-back packet used inside an indirect buffer.
+ * @brief AMD unconditional indirect-buffer tail-jump packet.
+ *
+ * target_size_packets counts 64-byte slots through the target's next jump,
+ * inclusive. Every nonnull target must end at such a jump; bare descriptor
+ * exhaustion is undefined. A target size must not exceed
+ * ::HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS. An IB-origin jump
+ * must be the final slot of its active descriptor, have a zero completion
+ * signal, and use release scope NONE.
  */
-typedef struct hsa_amd_aql_loop_back_s {
+typedef struct hsa_amd_aql_ib_jump_packet_s {
   hsa_amd_vendor_packet_header_t header;
-  uint32_t reserved0;
-  hsa_signal_t condition_signal;
-  hsa_signal_value_t test_value;
-  hsa_signal_condition32_t cond_op;
-  uint32_t ib_size_packets;
+  uint32_t target_size_packets;
+  uint64_t target_base_addr;
   uint64_t reserved1;
   uint64_t reserved2;
   uint64_t reserved3;
+  uint64_t reserved4;
   hsa_signal_t completion_signal;
-} hsa_amd_aql_loop_back_t;
+  uint64_t reserved5;
+} hsa_amd_aql_ib_jump_packet_t;
 
 /**
  * @brief Enumeration constants corresponding to the sub-fields of

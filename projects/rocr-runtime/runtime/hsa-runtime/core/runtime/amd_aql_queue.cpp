@@ -78,6 +78,17 @@ namespace AMD {
 
 #define SCRATCH_ALT_RATIO 4
 
+// Keep the AQL IB recovery fields at their specified offsets from
+// read_dispatch_id in the shared queue ABI.
+static_assert(offsetof(amd_queue_v2_t, aql_ib_active_packet) -
+                      offsetof(amd_queue_v2_t, read_dispatch_id) ==
+                  0x880,
+              "AQL IB active-packet queue ABI offset is stale");
+static_assert(offsetof(amd_queue_v2_t, aql_ib_root_packet) -
+                      offsetof(amd_queue_v2_t, read_dispatch_id) ==
+                  0x888,
+              "AQL IB root-packet queue ABI offset is stale");
+
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
                    void* err_data, bool metadata_prefetch, uint64_t flags)
@@ -1033,6 +1044,21 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   auto get_dispatch_pkt = [&]() {
     dispatch_id = amd_queue_.read_dispatch_id;
+
+    // A recoverable AQL IB error reports its precise active dispatch through
+    // the queue ABI. Consume it once; dispatch_id remains the PQ root ID for
+    // scratch ownership and tooling.
+    const uint64_t active_ib_packet = amd_queue_.aql_ib_active_packet;
+    amd_queue_.aql_ib_active_packet = 0;
+    if (active_ib_packet != 0 && (active_ib_packet & 0x3f) == 0) {
+      auto* active = reinterpret_cast<core::AqlPacket*>(active_ib_packet);
+      const uint8_t active_type = core::AqlPacket::type(active->packet.header);
+      if ((active_type == HSA_PACKET_TYPE_KERNEL_DISPATCH || active->isExtDispatch()) &&
+          active->IsDispatchAndNeedsScratch()) {
+        return active;
+      }
+    }
+
     do {
       // On GPUs where EOP is handled in asic, the read_dispatch_id is not
       // updated after each packet so look for the first dispatch that needs
@@ -1043,11 +1069,93 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
       core::AqlPacket *dispatch_pkt =
           &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
 
-      if (dispatch_pkt->IsDispatchAndNeedsScratch())
+      const uint16_t packet_header = dispatch_pkt->packet.header;
+      const uint8_t packet_type = core::AqlPacket::type(packet_header);
+
+      if ((packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
+           dispatch_pkt->isExtDispatch()) &&
+          dispatch_pkt->IsDispatchAndNeedsScratch()) {
         return dispatch_pkt;
 
+      }
+
+      if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+          (dispatch_pkt->amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP ||
+           dispatch_pkt->amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_IB_JUMP)) {
+        // If the precise active IB packet address is not yet available, walk the immutable,
+        // host-readable IB graph rooted at the current PQ packet and use the
+        // reachable dispatch with the largest per-thread scratch requirement.
+        struct IbDescriptor {
+          uint64_t base;
+          uint32_t packets;
+        };
+        IbDescriptor pending[64] = {};
+        IbDescriptor visited[64] = {};
+        size_t pending_count = 0;
+        size_t visited_count = 0;
+        core::AqlPacket* largest_dispatch = nullptr;
+        uint32_t largest_private_segment = 0;
+
+        auto enqueue = [&](uint64_t base, uint32_t packets) {
+          if (base == 0 || packets == 0 || pending_count >= 64) return;
+          for (size_t i = 0; i < visited_count; ++i) {
+            if (visited[i].base == base && visited[i].packets == packets) return;
+          }
+          for (size_t i = 0; i < pending_count; ++i) {
+            if (pending[i].base == base && pending[i].packets == packets) return;
+          }
+          pending[pending_count++] = {base, packets};
+        };
+
+        if (dispatch_pkt->amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP) {
+          const auto* jump = reinterpret_cast<const hsa_amd_aql_ib_cond_jump_packet_t*>(dispatch_pkt);
+          enqueue(jump->true_target_base_addr, jump->true_target_size_packets);
+          enqueue(jump->false_target_base_addr, jump->false_target_size_packets);
+        } else {
+          const auto* jump = reinterpret_cast<const hsa_amd_aql_ib_jump_packet_t*>(dispatch_pkt);
+          enqueue(jump->target_base_addr, jump->target_size_packets);
+        }
+
+        while (pending_count != 0) {
+          const IbDescriptor ib = pending[--pending_count];
+          if (visited_count >= 64) break;
+          visited[visited_count++] = ib;
+
+          auto* ib_packets = reinterpret_cast<core::AqlPacket*>(ib.base);
+          for (uint32_t i = 0; i < ib.packets; ++i) {
+            core::AqlPacket* ib_pkt = &ib_packets[i];
+            const uint16_t ib_header = ib_pkt->packet.header;
+            const uint8_t ib_type = core::AqlPacket::type(ib_header);
+            if ((ib_type == HSA_PACKET_TYPE_KERNEL_DISPATCH || ib_pkt->isExtDispatch()) &&
+                ib_pkt->IsDispatchAndNeedsScratch()) {
+              const uint32_t private_segment = ib_pkt->isDispatch()
+                                                   ? ib_pkt->dispatch.private_segment_size
+                                                   : ib_pkt->ext_dispatch.private_segment_size;
+              if (largest_dispatch == nullptr || private_segment > largest_private_segment) {
+                largest_dispatch = ib_pkt;
+                largest_private_segment = private_segment;
+              }
+            }
+            if (ib_type != HSA_PACKET_TYPE_VENDOR_SPECIFIC) continue;
+
+            if (ib_pkt->amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_IB_JUMP) {
+              const auto* jump = reinterpret_cast<const hsa_amd_aql_ib_jump_packet_t*>(ib_pkt);
+              enqueue(jump->target_base_addr, jump->target_size_packets);
+              break;  // tail jump: later source slots are unreachable
+            }
+            if (ib_pkt->amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_IB_COND_JUMP) {
+              const auto* jump = reinterpret_cast<const hsa_amd_aql_ib_cond_jump_packet_t*>(ib_pkt);
+              enqueue(jump->true_target_base_addr, jump->true_target_size_packets);
+              enqueue(jump->false_target_base_addr, jump->false_target_size_packets);
+              break;  // tail jump: later source slots are unreachable
+            }
+          }
+        }
+        if (largest_dispatch != nullptr) return largest_dispatch;
+      }
+
       dispatch_id++;
-    } while (dispatch_id <= LoadWriteIndexRelaxed());
+    } while (dispatch_id < LoadWriteIndexRelaxed());
 
     return (core::AqlPacket *)NULL;
   };

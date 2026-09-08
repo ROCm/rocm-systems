@@ -2886,19 +2886,13 @@ class GraphEmptyNode : public GraphNode {
 //
 // Conditional graph node (HIP graph IF / WHILE).  Owns 1 (WHILE / IF-no-else)
 // or 2 (IF/ELSE) empty body graphs that the caller populates after node
-// creation.  The runtime reads the bodies at GraphExec::Init time to build
-// the per-conditional indirect buffer (see m2_clr_ib_build), and at
-// GraphExec::Run time emits a single vendor COND_BRANCH AQL packet on the
-// launch stream's HW queue (see m2_clr_packet_emit + m2_clr_launch_reset).
-//
-// The CreateCommand override currently emits an amd::Marker as a stand-in so
-// segment scheduling and dependency edges work end-to-end while the IB / packet
-// emission path is still under construction.
+// creation. The runtime reads the bodies at GraphExec::Init time to build the
+// per-conditional AQL IB and emits one PQ-origin AQL_IB_COND_JUMP on the launch
+// stream's queue for each graph launch.
 //
 // Lifetime: parent graph owns the GraphConditionalNode, which owns the body
 // hip::Graph objects; ~GraphConditionalNode() deletes the bodies.  The
-// underlying hsa_signal_t in the handle is owned by hipGraphConditionalHandle
-// and freed under m2_lifetime.
+// underlying hsa_signal_t in the handle is owned by hipGraphConditionalHandle.
 class GraphConditionalNode : public GraphNode {
  protected:
   // Copy ctor: deep-clones the body graphs so the GraphExec returned by
@@ -2921,11 +2915,10 @@ class GraphConditionalNode : public GraphNode {
   }
 
  public:
-  // Custom amd::Command emitted at graph launch.  submit() resets the cond
-  // signal to its default and rings out one vendor COND_BRANCH AQL packet on
-  // the launch stream's HW queue.  Defined out-of-line in
-  // hip_graph_internal.cpp because submit() needs HSA + rocvirtual headers.
-  class CondJumpCommand : public amd::Command {
+  // Command emitted at graph launch. submit() resets the condition signal to
+  // its default and enqueues one AQL_IB_COND_JUMP on the launch stream.
+  // Defined out-of-line because submit() needs HSA and rocvirtual headers.
+  class CondJumpCommand : public amd::Marker {
    public:
     CondJumpCommand(amd::HostQueue& queue, GraphConditionalNode& node);
     void submit(device::VirtualDevice& device) final;
@@ -2958,10 +2951,10 @@ class GraphConditionalNode : public GraphNode {
 
   // Walks each body Graph, captures kernel-dispatch packets via
   // GraphNode::CaptureAndFormPacket(kernArgMgr), and assembles a contiguous
-  // IB in coarse-grain VRAM (or pinned host memory on non-largeBar systems).
-  // For WHILE, an hsa_amd_aql_loop_back_t is appended so the CP re-evaluates
-  // the cond signal at the tail of every iteration.  POC: bodies must contain
-  // only kernel nodes.  Idempotent across launches; first call wins.
+  // IB in queue-agent-accessible memory. For WHILE, an
+  // hsa_amd_aql_ib_cond_jump_packet_t is appended to re-evaluate the condition
+  // at the tail of every iteration. Bodies currently support kernel nodes
+  // only. Idempotent across launches; first call wins.
   hipError_t BuildIB(GraphKernelArgManager* kernArgMgr, int devId);
 
   hipError_t CreateCommand(hip::Stream* stream) override {
@@ -2980,11 +2973,6 @@ class GraphConditionalNode : public GraphNode {
 
   // Used by CondJumpCommand::submit().
   void* GetIbAddr() const { return ib_addr_; }
-  void RefreshIb() {
-    if (ib_addr_ != nullptr && !ib_template_.empty()) {
-      std::memcpy(ib_addr_, ib_template_.data(), ib_template_.size());
-    }
-  }
   uint32_t GetTrueOffsetPkts() const { return true_off_pkts_; }
   uint32_t GetTruePkts() const { return true_pkts_; }
   uint32_t GetFalseOffsetPkts() const { return false_off_pkts_; }
@@ -3000,12 +2988,11 @@ class GraphConditionalNode : public GraphNode {
   // IB metadata, populated by BuildIB() at instantiate time.
   void* ib_addr_ = nullptr;        //!< Base of the IB in device-accessible memory.
   size_t ib_size_bytes_ = 0;       //!< Allocation size for ib_addr_, used by hostFree.
-  size_t ib_size_pkts_ = 0;        //!< Total IB packets including loop_back (WHILE).
-  uint32_t true_off_pkts_ = 0;     //!< cond_branch.true_target_offset_packets
-  uint32_t true_pkts_ = 0;         //!< cond_branch.true_target_size_packets
-  uint32_t false_off_pkts_ = 0;    //!< cond_branch.false_target_offset_packets
-  uint32_t false_pkts_ = 0;        //!< cond_branch.false_target_size_packets
-  std::vector<uint8_t> ib_template_;  //!< Pristine IB bytes copied before each launch.
+  size_t ib_size_pkts_ = 0;        //!< Total immutable IB packets.
+  uint32_t true_off_pkts_ = 0;     //!< True target offset in the allocation.
+  uint32_t true_pkts_ = 0;         //!< True target packet count.
+  uint32_t false_off_pkts_ = 0;    //!< False target offset in the allocation.
+  uint32_t false_pkts_ = 0;        //!< False target packet count.
   amd::Device* ib_device_ = nullptr;  //!< Device that allocated ib_addr_.
   bool ib_built_ = false;
 };

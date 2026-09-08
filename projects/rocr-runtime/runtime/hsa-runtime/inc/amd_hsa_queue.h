@@ -149,6 +149,11 @@ typedef struct AMD_QUEUE_ALIGN amd_queue_v2_s {
   uint32_t reserved5;
 
   scratch_last_used_index_xcc_t scratch_last_used_index[MAX_NUM_XCC];
+  // Exact active IB packet reported for a recoverable AQL-IB error.
+  // This occupies bytes that were tail padding in the aligned queue ABI.
+  volatile uint64_t aql_ib_active_packet;
+  // PQ root retained while an AQL IB is active.
+  volatile uint64_t aql_ib_root_packet;
 } amd_queue_v2_t;
 
 #endif // AMD_HSA_QUEUE_H

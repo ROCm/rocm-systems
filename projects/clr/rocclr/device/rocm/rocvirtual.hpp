@@ -655,18 +655,16 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
 
  public:
-  //! Emit one vendor COND_BRANCH (HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH) on
-  //! gpu_queue_ pointing at @a ib_base_addr.  The CP treats a nonzero
-  //! @a cond_signal value as TRUE and executes either the true or false IB
-  //! packet sub-range.  Used by HIP graph IF / WHILE conditional nodes; see
+  //! Emit one vendor AQL_IB_COND_JUMP on gpu_queue_. A nonzero
+  //! @a cond_signal selects the true target; zero selects the false target.
+  //! Used by HIP graph IF / WHILE conditional nodes; see
   //! [hipamd/src/hip_graph_internal.hpp] GraphConditionalNode.
-  void dispatchCondBranchPacket(hsa_signal_t cond_signal,
-                                uint64_t ib_base_addr,
-                                uint32_t true_offset_pkts,
+  void dispatchCondBranchPacket(amd::Marker& command,
+                                hsa_signal_t cond_signal,
+                                uint64_t true_base_addr,
                                 uint32_t true_pkts,
-                                uint32_t false_offset_pkts,
-                                uint32_t false_pkts,
-                                uint32_t ib_size_pkts);
+                                uint64_t false_base_addr,
+                                uint32_t false_pkts);
 
  private:
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
