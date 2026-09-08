@@ -68,6 +68,9 @@ def extract_membw_metrics(
     if present == metric_keys:
         availability = "full"
         availability_reason = None
+    elif not present:
+        availability = "unavailable"
+        availability_reason = "all metric values are None"
     else:
         missing = sorted(metric_keys - present)
         availability = "partial"
