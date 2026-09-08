@@ -30,12 +30,18 @@ use `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`,
 respectively, including their 320, 288 and 256 CU topologies. Mirage no
 longer maintains separate hardware values or uniform 256-CU layouts.
 
-On startup, Mirage automatically refreshes an existing builtin
-agent that matches the shipped definition except for a missing
-`vm.gpu.device.num_sdma_queues_per_engine` field. User-edited agents are
-left untouched; agents with nonzero `num_sdma_engines` must specify a
-nonzero queue count. The shipped MI300X and MI350X presets use 8 queues
-per engine, and MI450X uses 2.
+RocJITsu refuses a device that has SDMA engines and no queues on them,
+and it refuses it while loading the config — so a session dies at daemon
+start rather than at profile validation. Mirage never wrote
+`vm.gpu.device.num_sdma_queues_per_engine` before this release, so every
+agent an older Mirage left on disk is one RocJITsu now rejects. On
+startup Mirage fills that one field in from the shipped definition, in
+place, when the stored agent has a nonzero `num_sdma_engines` and no
+queue count of its own. Nothing else about the file is touched: an older
+builtin and an agent you edited look alike from here, and both are yours
+to keep. An explicit `0` is an answer, and Mirage does not argue with it
+— RocJITsu will. The shipped MI300X and MI350X presets use 8 queues per
+engine, and MI450X uses 2.
 
 Agents with older or customized layouts are not overwritten. Missing fields
 are reported against the selected RocJITsu preset during profile validation
@@ -68,8 +74,18 @@ Objects are merged recursively over the agent configuration; scalar values
 and arrays replace the corresponding values. Mirage's per-node GPU count
 and explicitly selected plugins remain authoritative. Duplicate root and
 emulator overrides are rejected. Mirage-only container and system-topology
-controls still reject unknown fields. RocJITsu remains responsible for
-validating passthrough fields; unsupported keys are not silently discarded.
+controls still reject unknown fields *within* them.
+
+Passthrough is not validation, and RocJITsu is not a backstop: it parses
+the synthesised config with `skip_unexpected_fields_in_json` set, so a key
+it does not recognise is dropped without a word (see
+`config_common.h`). A misspelled key therefore survives Mirage and
+vanishes in RocJITsu, and the machine that comes up is quietly not the one
+the file describes. What Mirage can still tell you is that the key was not
+one of *its own*: a profile-root field Mirage does not recognise is
+forwarded to the emulator with a warning naming it, which is the signal to
+read for `containerise`, `descriptoin` and the like. Inside `emulator` and
+inside an agent there is no such signal — check those against the preset.
 
 Missing profile fields produce warnings on stderr. Omitted `plugins`,
 `exec_mode` and `options` use their defaults; required structural fields

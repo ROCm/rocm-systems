@@ -32,8 +32,14 @@ pub type EmulatorKind = String;
 /// system it emulates.
 ///
 /// Additional fields are passed to the selected emulator's configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EmulatorDef {
+    /// Fields with no typed meaning to mirage, handed to the backend as
+    /// they were written. Deserialization never puts one of the field
+    /// names below in here; [`Serialize`] guarantees the same for a map
+    /// built in Rust, because a flattened map that shadows a typed
+    /// field would otherwise write a profile with duplicate JSON keys
+    /// that mirage could never read back.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 
@@ -57,6 +63,34 @@ pub struct EmulatorDef {
 
     /// System topology (rack/node/GPU layout plus the per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
+}
+
+/// Written as `extra` with the typed fields laid over it.
+///
+/// Not derived: `#[serde(flatten)]` streams both halves, so an `extra`
+/// holding a typed field's name — `extra` is public, and the profile
+/// parser is the only thing that currently keeps one out — emits that
+/// key twice. `state::write_json` streams straight to the file, so the
+/// result is a profile on disk that fails to parse with `duplicate
+/// field`, and the user's only copy of it is unreadable. Building a
+/// `Value` first makes the typed field win instead.
+impl Serialize for EmulatorDef {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        let mut value = serde_json::Value::Object(self.extra.clone());
+        for (key, typed) in [
+            ("emulator", serde_json::to_value(&self.emulator)),
+            ("plugins", serde_json::to_value(&self.plugins)),
+            ("exec_mode", serde_json::to_value(&self.exec_mode)),
+            ("options", serde_json::to_value(&self.options)),
+            ("topology", serde_json::to_value(&self.topology)),
+        ] {
+            value[key] = typed.map_err(serde::ser::Error::custom)?;
+        }
+        value.serialize(serializer)
+    }
 }
 
 /// Whether the host's hardware/environment can actually run an

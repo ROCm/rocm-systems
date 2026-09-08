@@ -752,13 +752,26 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
         "num_threads": 1u32,
-        "exec_mode": exec_mode,
     });
     merge_config(
         &mut sim,
         serde_json::to_value(&agent).map_err(|error| MirageError::Other(error.to_string()))?,
     );
     merge_config(&mut sim, serde_json::Value::Object(def.extra.clone()));
+    // `exec_mode` is mirage's, not the document's. An agent is now a
+    // rocjitsu config with its `vm` and `topology` taken out, and the
+    // ones mirage ships from are whole configs with `exec_mode`,
+    // `max_ticks` and `num_threads` at their root — so an agent imported
+    // from one carries those keys in `AgentDef::extra` and, merged here,
+    // would quietly outrank `--exec-mode`. Functional and clocked are
+    // different runs with different results; the profile decides, and
+    // this is asserted after both merges so nothing can take it back.
+    // `max_ticks` and `num_threads` are seeded above instead, where a
+    // document may still override them: they are defaults mirage has no
+    // opinion about, not a claim about how the session runs.
+    if let Some(map) = sim.as_object_mut() {
+        map.insert("exec_mode".to_string(), exec_mode.into());
+    }
     if !sim["vm"].is_object() {
         return Err(MirageError::Other("rocjitsu vm must be an object".into()));
     }
@@ -866,6 +879,17 @@ fn collect_missing_fields(
                         &format!("{path}/{index}"),
                         missing,
                     );
+                }
+            }
+            // A child the tree does not have at all. Matching runs from
+            // `actual` above, so without this a component the preset has
+            // and the document dropped — the whole IOD memory tier, say —
+            // is the one omission that goes unreported.
+            for reference in expected {
+                if let Some(kind) = reference["type"].as_str()
+                    && !actual.iter().any(|child| child["type"] == kind)
+                {
+                    missing.push(format!("{path}/{kind}"));
                 }
             }
         }
@@ -1118,6 +1142,26 @@ mod tests {
         assert_eq!(emitted["vm"]["gpu"]["num_gpus"], 2);
     }
 
+    /// An agent is a rocjitsu config with two keys taken out, so an
+    /// imported one carries that config's root keys — and one of them
+    /// says how the session runs.
+    #[test]
+    fn an_agents_root_keys_cannot_take_over_the_profiles_exec_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut json = serde_json::to_value(def_with_gpus(1)).unwrap();
+        json["exec_mode"] = serde_json::json!("Clocked");
+        json["topology"]["agent"]["exec_mode"] = serde_json::json!("functional");
+        json["topology"]["agent"]["max_ticks"] = serde_json::json!(5);
+        let def: EmulatorDef = serde_json::from_value(json).unwrap();
+        assert_eq!(def.exec_mode, ExecMode::Clocked);
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(kmd_config(&def, tmp.path()).unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(config["exec_mode"], "clocked");
+        // The keys mirage only seeds a default for stay overridable.
+        assert_eq!(config["max_ticks"], 5);
+    }
+
     #[test]
     fn missing_config_fields_name_omissions_not_zeroes() {
         let mut config: serde_json::Value =
@@ -1142,6 +1186,22 @@ mod tests {
             &mut missing,
         );
         assert_eq!(missing, vec!["/topology/root/config/num_wf_slots"]);
+
+        // A component the document dropped entirely is named too.
+        let mut missing = Vec::new();
+        collect_missing_fields(
+            Some(&serde_json::json!([{"type": "xcd"}])),
+            &serde_json::json!([{"type": "gpu_memory"}, {"type": "iod"}, {"type": "xcd"}]),
+            "/topology/root/children",
+            &mut missing,
+        );
+        assert_eq!(
+            missing,
+            vec![
+                "/topology/root/children/gpu_memory",
+                "/topology/root/children/iod"
+            ]
+        );
     }
 
     #[test]

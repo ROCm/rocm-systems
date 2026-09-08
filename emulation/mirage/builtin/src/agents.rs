@@ -7,6 +7,8 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
         ("mi300x", mi300x()),
         ("mi350x", mi350x()),
         ("mi450x", mi450x()),
+        // \NPI new GPU: add its preset to `PRESETS` in `build.rs` and a
+        // builtin agent mirroring `configs/<gpu>.json` here.
     ]
 }
 
@@ -22,6 +24,14 @@ pub fn mi450x() -> AgentDef {
     from_preset(MI450X)
 }
 
+/// One builtin, parsed from the preset `build.rs` embedded.
+///
+/// The `expect` is the workspace's one production opt-out of
+/// `expect_used`, and it is here because there is nothing to report:
+/// `build.rs` parses the same string into the same [`AgentDef`] and
+/// fails the build if it cannot, so a panic here means the crate was
+/// linked against a `mirage_core` it was not built against. There is no
+/// user input on this path and no configuration that reaches it.
 #[allow(clippy::expect_used)]
 fn from_preset(json: &str) -> AgentDef {
     serde_json::from_str(json).expect("builtin agent validated by build.rs")

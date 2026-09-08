@@ -263,12 +263,54 @@ pub struct VirtualMachineConfig {
 }
 
 /// Top-level agent (single-device hardware) definition.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// # Absent is not zero
+///
+/// rocjitsu's schema has its own defaults, and several of them are not
+/// Rust's: `drm_render_minor` defaults to 128 there and to 0 here, and a
+/// 0 maps the emulated GPU onto a render node that does not exist, so
+/// HSA aborts with `OUT_OF_RESOURCES`. A field the document did not
+/// mention therefore has to stay unmentioned when mirage writes the
+/// document back out, rather than being written as the Rust default.
+///
+/// [`omitted`](Self::omitted) is how that is remembered: every path
+/// `Deserialize` had to fill in, with the value it filled in, so
+/// `Serialize` can take it back out again. Two consequences a caller
+/// has to know about, because the type cannot enforce either:
+///
+/// * The record is taken when the document is *parsed*. An `AgentDef`
+///   built in Rust — [`Default::default`], a struct literal — has an
+///   empty record and serializes every field explicitly, `drm_render_minor: 0`
+///   included. Build agents by parsing, not by constructing, anywhere
+///   the result reaches rocjitsu.
+/// * The record is keyed by JSON pointer, so array paths are keyed by
+///   *index*. Inserting into, removing from or reordering any `Vec` in
+///   here after parsing re-points those paths at different elements,
+///   and an element that happens to hold the recorded default loses
+///   that field on the next serialize. Reparse rather than mutate a
+///   `Vec`.
+#[derive(Debug, Clone, Eq, Default)]
 pub struct AgentDef {
+    /// Document keys with no typed field of their own, kept so they
+    /// reach the emulator. `vm` and `topology` are not among them and
+    /// are overwritten on serialize by the fields below.
     pub extra: serde_json::Map<String, serde_json::Value>,
     pub vm: VirtualMachineConfig,
     pub topology: AgentTopologyDef,
+    /// `(pointer, value)` for every field `Deserialize` defaulted
+    /// because the document omitted it. See the type docs.
     omitted: Vec<(String, serde_json::Value)>,
+}
+
+/// Two agents are equal when they describe the same machine.
+///
+/// Deliberately not derived: `omitted` is provenance, not content, so a
+/// terse document and a fully spelled-out one describing the same GPU
+/// would otherwise compare unequal while serializing identically.
+impl PartialEq for AgentDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.extra == other.extra && self.vm == other.vm && self.topology == other.topology
+    }
 }
 
 impl Serialize for AgentDef {

@@ -347,7 +347,11 @@ jobs:
       - name: Test Mirage against this RocJITsu build
         if: matrix.name == 'release'
         working-directory: ${{ github.workspace }}/rocm-systems/emulation/mirage
-        timeout-minutes: 15
+        # A cold, uncached debug build of the whole workspace plus ~270
+        # process-spawning integration tests, several of which carry
+        # 60-90s readiness deadlines of their own. A kill here produces no
+        # libtest output at all, so there is nothing to triage.
+        timeout-minutes: 30
         shell: bash
         env:
           ROCJITSU_LIB: ${{ env.ROCJITSU_BUILD_DIR }}/librocjitsu.so
@@ -356,6 +360,11 @@ jobs:
         run: |
           test -f "${ROCJITSU_LIB}"
           test -f "${ROCJITSU_HOOKS_LIB}"
+          # Setting ROCJITSU_INCLUDE_DIR is a hard override: the ABI
+          # layout test early-returns on it instead of falling back to
+          # its own search, so a wrong path here does not fail — it
+          # silently skips the one check that catches header drift.
+          test -d "${ROCJITSU_INCLUDE_DIR}"
           unset MIRAGE_E2E_ALLOW_SKIP
           cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
 

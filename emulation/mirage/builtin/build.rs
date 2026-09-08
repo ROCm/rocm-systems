@@ -1,8 +1,22 @@
+//! Embed the rocjitsu presets the builtin agents are, validating each
+//! one against [`mirage_core::agent::AgentDef`] here rather than at run
+//! time: the presets are source, not installed data — a released mirage
+//! cannot go looking for them — and doing it here means a preset that
+//! stops parsing fails the build instead of every run.
+
+// A build script may panic: a preset that is missing, unparseable or no
+// longer an agent is not something the crate can be built without, and
+// there is no caller to return an error to.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+/// The preset each builtin agent is, in `agents()` order: the Rust
+/// constant to emit, and the `rocjitsu/configs/<stem>.json` it is read
+/// from.
+///
+/// \NPI new GPU: add its preset here and a builtin agent in `agents.rs`.
 const PRESETS: [(&str, &str); 3] = [
     ("MI300X", "gfx942_cdna3"),
     ("MI350X", "gfx950_mi355x"),
