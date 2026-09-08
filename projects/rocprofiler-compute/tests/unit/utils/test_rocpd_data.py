@@ -16,8 +16,11 @@ from utils.rocpd_data import (
     convert_dbs_to_csv,
 )
 from utils.utils_analysis import (
+    build_call_trees,
     build_call_trees_with_kernel_ids,
+    format_operator_args,
     process_ml_api_trace_output,
+    split_operator_args,
     write_ml_api_trace_consolidated_csv,
 )
 from utils.utils_profile import (
@@ -34,10 +37,11 @@ def _write_gzip_csv(path, df):
         df.to_csv(f, index=False)
 
 
+# Function values carry the wire "|<backend>" suffix.
 MARKER_ROWS = [
     (
         "roctx",
-        "nn.Module.Linear.forward:#1@test.py:10",
+        "nn.Module.Linear.forward:#1@test.py:10|torch",
         100,
         200,
         1000,
@@ -47,7 +51,7 @@ MARKER_ROWS = [
     ),
     (
         "roctx",
-        "nn.Module.Linear.forward:#2@test.py:10",
+        "nn.Module.Linear.forward:#2@test.py:10|torch",
         100,
         200,
         1001,
@@ -55,7 +59,7 @@ MARKER_ROWS = [
         3000,
         4000,
     ),
-    ("roctx", "torch.mm:#1@test.py:15", 100, 200, 1002, GUID, 5000, 6000),
+    ("roctx", "torch.mm:#1@test.py:15|torch", 100, 200, 1002, GUID, 5000, 6000),
 ]
 
 COUNTER_ROWS = [
@@ -282,15 +286,18 @@ COUNTER_COLUMNS_CSV = [
 
 
 def build_marker_df(include_guid):
-    """Build a dataframe from the marker rows."""
+    """Build the augmented marker dataframe, splitting Function and Backend from
+    each raw marker value."""
+    parsed = [_parse_function_fields(r[1]) for r in MARKER_ROWS]
     data = {
         "Domain": [r[0] for r in MARKER_ROWS],
-        "Function": [r[1] for r in MARKER_ROWS],
+        "Function": [function for function, _backend, _args in parsed],
         "Process_Id": [r[2] for r in MARKER_ROWS],
         "Thread_Id": [r[3] for r in MARKER_ROWS],
         "Correlation_Id": [r[4] for r in MARKER_ROWS],
         "Start_Timestamp": [r[6] for r in MARKER_ROWS],
         "End_Timestamp": [r[7] for r in MARKER_ROWS],
+        "Backend": [backend for _function, backend, _args in parsed],
     }
 
     if include_guid:
@@ -466,6 +473,38 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
     [
         ("aten::add", "aten::add", "unknown", ""),
         ("aten::mm|torch", "aten::mm", "torch", ""),
+        # Untagged single-frame marker with context.
+        (
+            "torch.empty:#1@linear.py:109",
+            "torch.empty:#1@linear.py:109",
+            "unknown",
+            "",
+        ),
+        # Tagged single-frame marker: suffix stripped, backend exposed.
+        (
+            "nn.Module.MyModel.forward:#1@train.py:42|torch",
+            "nn.Module.MyModel.forward:#1@train.py:42",
+            "torch",
+            "",
+        ),
+        # Multi-frame leaf attributed to its producing backend.
+        (
+            "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2|triton",
+            "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2",
+            "triton",
+            "",
+        ),
+        # Untagged multi-frame ATen leaf.
+        (
+            "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0",
+            "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0",
+            "unknown",
+            "",
+        ),
+        # Unrecognized suffix, empty string, and None fall back to "unknown".
+        ("op|bogus", "op|bogus", "unknown", ""),
+        ("", "", "unknown", ""),
+        (None, "", "unknown", ""),
         (
             "aten::mm:#1@aten:0|args=(self=float32[2x3], mat2=float32[3x4])|torch",
             "aten::mm:#1@aten:0",
@@ -622,17 +661,6 @@ def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     assert dst.read_bytes() == src.read_bytes()
 
 
-def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
-    """Untagged rows default to Backend='torch' in the consolidated df."""
-    workload_dir = str(tmp_path)
-    write_rocpd_layout(workload_dir)
-
-    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
-
-    assert "Backend" in consolidated_df.columns
-    assert (consolidated_df["Backend"] == "torch").all()
-
-
 def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     """A pre-stripped + tagged CSV (as produced by _augment_marker_csv)
     surfaces the per-row Backend value into the consolidated dataframe.
@@ -692,3 +720,196 @@ def test_process_ml_api_trace_output_preserves_per_row_args(tmp_path):
     )
     assert args_by_operator.get("torch.mm") == "(self=float32[2x2])"
     assert args_by_operator.get("nn.Module.Linear.forward") == "(input=float32[2x2])"
+
+
+# ---- Operator-args parsing and rendering for the analyze display ----
+
+
+@pytest.mark.parametrize(
+    "blob, expected",
+    [
+        ("", []),
+        ("()", []),
+        ("(  )", []),
+        ("(self=float32[2x2])", ["self=float32[2x2]"]),
+        (
+            "(self=float32[2x2], mat2=float32[2x3])",
+            ["self=float32[2x2]", "mat2=float32[2x3]"],
+        ),
+        # Commas inside a tensor list must not split the argument.
+        (
+            "(tensors=[float32[2], float32[2]], dim=0)",
+            ["tensors=[float32[2], float32[2]]", "dim=0"],
+        ),
+        # Commas inside nested parentheses stay within the token.
+        (
+            "(size=(2, 3), stride=(3, 1))",
+            ["size=(2, 3)", "stride=(3, 1)"],
+        ),
+        # Commas inside braces stay within the token.
+        (
+            "(options={dtype: float32, device: cuda}, x=1)",
+            ["options={dtype: float32, device: cuda}", "x=1"],
+        ),
+        # Commas inside a double-quoted string stay within the token.
+        (
+            '(name="a, b", count=2)',
+            ['name="a, b"', "count=2"],
+        ),
+        # Commas inside a single-quoted string stay within the token.
+        (
+            "(label='x, y', n=1)",
+            ["label='x, y'", "n=1"],
+        ),
+        # An escaped quote does not close the string, so its comma is kept.
+        (
+            '(s="a\\"b, c", n=1)',
+            ['s="a\\"b, c"', "n=1"],
+        ),
+        # A blob without the wrapping parentheses still splits.
+        ("a=1, b=2", ["a=1", "b=2"]),
+    ],
+)
+def test_split_operator_args(blob, expected):
+    """Top-level argument tokens are split while bracketed groups stay intact."""
+    assert split_operator_args(blob) == expected
+
+
+def test_format_operator_args_empty_inputs():
+    """Empty and contentless blobs render as an empty string."""
+    assert format_operator_args("") == ""
+    assert format_operator_args("()") == ""
+
+
+def test_format_operator_args_passthrough_when_short():
+    """A short blob is returned in full."""
+    assert (
+        format_operator_args("(self=float32[2x2], mat2=float32[2x3])")
+        == "(self=float32[2x2], mat2=float32[2x3])"
+    )
+
+
+def test_format_operator_args_truncates_item_count():
+    """Items beyond max_items collapse into an ellipsis token."""
+    blob = "(" + ", ".join(f"a{i}=1" for i in range(10)) + ")"
+    rendered = format_operator_args(blob, max_items=3)
+    assert rendered == "(a0=1, a1=1, a2=1, ...)"
+
+
+def test_format_operator_args_truncates_length():
+    """An over-long rendering is capped with a trailing ellipsis."""
+    blob = "(name=" + "x" * 200 + ")"
+    rendered = format_operator_args(blob, max_chars=40)
+    assert len(rendered) <= 40
+    assert rendered.endswith("...)")
+
+
+def test_build_call_trees_attaches_leaf_args():
+    """Args from the wire attach to the leaf operator node of the call tree."""
+    df = pd.DataFrame({
+        "Operator_Name": ["nn.Module.Linear.forward/aten::mm"],
+        "Context_Id": ["1@m.py:10/#1@m.py:12"],
+        "Kernel_Name": ["kernel_gemm"],
+        "Args": ["(self=float32[2x2], mat2=float32[2x3])"],
+    })
+
+    trees = build_call_trees(df)
+
+    root = trees["m.py:10"]
+    parent = root.children["nn.Module.Linear.forward"]
+    leaf = parent.children["aten::mm"]
+    assert leaf.args_variants == [("(self=float32[2x2], mat2=float32[2x3])", 1)]
+    # Args belong to the leaf only; ancestor frames stay empty.
+    assert parent.args_variants == []
+
+
+def test_build_call_trees_without_args_column():
+    """A trace lacking the Args column records no argument variants."""
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::mm"],
+        "Context_Id": ["1@m.py:10"],
+        "Kernel_Name": ["kernel_gemm"],
+    })
+
+    trees = build_call_trees(df)
+
+    leaf = trees["m.py:10"].children["aten::mm"]
+    assert leaf.args_variants == []
+
+
+def test_build_call_trees_counts_every_args_variant():
+    """Distinct argument sets are kept with their call counts, most frequent
+    first, and the counts total the node's call count."""
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::mm"] * 3,
+        "Context_Id": ["1@m.py:10", "2@m.py:10", "3@m.py:10"],
+        "Kernel_Name": ["kernel_gemm"] * 3,
+        "Args": [
+            "(self=float32[4x4])",
+            "(self=float32[2x2])",
+            "(self=float32[4x4])",
+        ],
+    })
+
+    trees = build_call_trees(df)
+
+    leaf = trees["m.py:10"].children["aten::mm"]
+    assert leaf.args_variants == [
+        ("(self=float32[4x4])", 2),
+        ("(self=float32[2x2])", 1),
+    ]
+    assert sum(count for _blob, count in leaf.args_variants) == leaf.call_count
+
+
+def test_build_call_trees_ignores_contentless_args_placeholder():
+    """A contentless "()" blob is not recorded as an argument variant."""
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::mm"] * 2,
+        "Context_Id": ["1@m.py:10", "2@m.py:10"],
+        "Kernel_Name": ["kernel_gemm"] * 2,
+        "Args": ["()", "(self=float32[2x2])"],
+    })
+
+    trees = build_call_trees(df)
+
+    leaf = trees["m.py:10"].children["aten::mm"]
+    assert leaf.args_variants == [("(self=float32[2x2])", 1)]
+
+
+def test_build_call_trees_args_variants_without_context_ids():
+    """A trace without Context_Id records its blobs with a call count of 0."""
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::mm"] * 2,
+        "Kernel_Name": ["kernel_gemm", "kernel_other"],
+        "Args": ["(self=float32[4x4])", "(self=float32[2x2])"],
+    })
+
+    trees = build_call_trees(df)
+
+    leaf = trees["unknown:0"].children["aten::mm"]
+    assert leaf.args_variants == [
+        ("(self=float32[2x2])", 0),
+        ("(self=float32[4x4])", 0),
+    ]
+
+
+def test_build_call_trees_args_variants_deeper_than_context_path():
+    """A frame deeper than the Context_Id path records its blobs with a call
+    count of 0."""
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::matmul/aten::mm"] * 2,
+        "Context_Id": ["1@m.py:10"] * 2,
+        "Kernel_Name": ["kernel_gemm", "kernel_other"],
+        "Args": ["(self=float32[4x4])", "(self=float32[2x2])"],
+    })
+
+    trees = build_call_trees(df)
+
+    outer = trees["m.py:10"].children["aten::matmul"]
+    leaf = outer.children["aten::mm"]
+    assert outer.call_count == 1
+    assert leaf.call_count == 0
+    assert leaf.args_variants == [
+        ("(self=float32[2x2])", 0),
+        ("(self=float32[4x4])", 0),
+    ]
