@@ -175,7 +175,17 @@ class PerfCollector:
         output_svg: Path,
         title: str = "Data Hazard Plugin — Cumulative",
     ) -> None:
-        """Merge all collected perf.data files and write a cumulative flamegraph SVG."""
+        """Merge all collected perf.data files and write a cumulative flamegraph SVG.
+
+        Any SVG already at *output_svg* is removed first, so a run that reports
+        no flamegraph leaves none behind.
+        """
+        # The output directory is reusable, so the destination may still hold a
+        # profile of an earlier run. Every path below either replaces it or
+        # explains that it generated nothing, and a leftover SVG alongside this
+        # run's fresh reports would read as that run's profile.
+        output_svg.unlink(missing_ok=True)
+
         present = [f for f in self._data_files if f.is_file()]
         if not present:
             print(
