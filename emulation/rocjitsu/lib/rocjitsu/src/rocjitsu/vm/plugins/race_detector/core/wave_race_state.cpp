@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <bit>
 #include <span>
+#include <stdexcept>
 
 namespace rocjitsu::plugins::race_detector {
 namespace {
@@ -18,8 +20,9 @@ struct ProfileScope {
 };
 } // namespace
 
-WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector)
-    : waveId(waveId), detector(detector) {
+WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector,
+                             CounterCapacities counterCapacities)
+    : counterCapacities(counterCapacities), waveId(waveId), detector(detector) {
   vgprMemoryEvents.resize(vgprCount);
   sgprMemoryEvents.resize(sgprCount);
   sgprEventCount.resize(sgprCount, 0);
@@ -113,6 +116,54 @@ void WaveRaceState::registerEventWithIntervals(
     }
   }
   waveMemoryEvents.push_back(eventId);
+}
+
+void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type) {
+  // The runtime plugin calls this only for pre-GFX12 capacity models, where
+  // these internal split names alias the combined architectural counters.
+  if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, type))
+    type = amdgpu::WaitCounterType::VMCNT;
+  else if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, type))
+    type = amdgpu::WaitCounterType::LGKMCNT;
+
+  int capacity;
+  switch (type) {
+  case amdgpu::WaitCounterType::VMCNT:
+    capacity = counterCapacities.vmcnt;
+    break;
+  case amdgpu::WaitCounterType::LGKMCNT:
+    capacity = counterCapacities.lgkmcnt;
+    break;
+  case amdgpu::WaitCounterType::EXPCNT:
+  case amdgpu::WaitCounterType::VSCNT:
+  case amdgpu::WaitCounterType::LOADCNT:
+  case amdgpu::WaitCounterType::STORECNT:
+  case amdgpu::WaitCounterType::DSCNT:
+  case amdgpu::WaitCounterType::KMCNT:
+  case amdgpu::WaitCounterType::TENSORCNT:
+  case amdgpu::WaitCounterType::ASYNCCNT:
+    return;
+  default:
+    throw std::invalid_argument("invalid wait counter type");
+  }
+  if (capacity <= 0)
+    throw std::logic_error("counter capacity is not configured");
+
+  // The total event count is an inexpensive upper bound for either counter.
+  // Below that bound, the common path returns without scanning any events.
+  if (static_cast<int>(waveMemoryEvents.size()) < capacity)
+    return;
+
+  // An instruction cannot issue if adding its counter token would overflow the
+  // finite counter. Immediately before it reads its operands, hardware has
+  // therefore established the same upper bound as an implicit partial wait.
+  applyCounterConstraint(type, capacity - 1, /*includeUnordered=*/false);
+}
+
+void WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
+  prepareForCounterIncrement(info.wait_counter_type);
+  if (info.additional_wait_counter_type)
+    prepareForCounterIncrement(*info.additional_wait_counter_type);
 }
 
 void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
@@ -240,8 +291,34 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   }
 }
 
+int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
+  switch (type) {
+  case amdgpu::WaitCounterType::VMCNT:
+    return counterCapacities.vmcnt;
+  case amdgpu::WaitCounterType::LGKMCNT:
+    return counterCapacities.lgkmcnt;
+  case amdgpu::WaitCounterType::EXPCNT:
+    return amdgpu::WaitCounters::EXPCNT_MAX;
+  case amdgpu::WaitCounterType::VSCNT:
+    return amdgpu::WaitCounters::VSCNT_MAX;
+  case amdgpu::WaitCounterType::LOADCNT:
+    return amdgpu::WaitCounters::VMCNT_MAX;
+  case amdgpu::WaitCounterType::STORECNT:
+    return amdgpu::WaitCounters::VSCNT_MAX;
+  case amdgpu::WaitCounterType::DSCNT:
+    return amdgpu::WaitCounters::DSCNT_MAX;
+  case amdgpu::WaitCounterType::KMCNT:
+    return amdgpu::WaitCounters::KMCNT_MAX;
+  case amdgpu::WaitCounterType::TENSORCNT:
+    return amdgpu::WaitCounters::TENSORCNT_MAX;
+  case amdgpu::WaitCounterType::ASYNCCNT:
+    return amdgpu::WaitCounters::ASYNCCNT_MAX;
+  }
+  throw std::invalid_argument("invalid wait counter type");
+}
+
 void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold) {
-  if (threshold < 0)
+  if (threshold < 0 || threshold == doNotWaitValue(type))
     return;
 
   if (threshold == 0) {

@@ -43,6 +43,20 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
   return ExecutionPlugin::kFullByteMask;
 }
 
+bool supports_counter_capacity(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool supports_race_detector_memory_ordering(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -273,7 +287,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
-      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler));
+      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
+      counterCapacitiesForArch(wavefronts.front()->cu().arch()));
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];
@@ -437,6 +452,19 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
                                                           amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  if (supports_counter_capacity(wf.cu().arch())) {
+    if (inst.is_memory_op()) {
+      const auto *info = inst.amdgpu_memory_issue_info();
+      assert(info && "memory instruction reached the race detector without issue metadata");
+      if (info && (!info->exec_masked || wf.exec() != 0))
+        s->race_state->prepareForMemoryIssue(*info);
+    }
+
+    // Messages share LGKMCNT on the capacity-modeled targets but are not memory
+    // instructions, so they intentionally remain outside memory issue metadata.
+    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
+      s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+  }
   s->trace.push(pc);
   s->disasm->record(pc, inst);
 }
