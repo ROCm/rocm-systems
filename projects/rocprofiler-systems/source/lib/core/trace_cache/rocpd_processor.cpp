@@ -950,6 +950,20 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         pmc_uid.agent_id = make_agent_uid(agent_ref);
 
         try_insert_pmc_event(pmc_data, pmc_uid, "KFD PMC event");
+
+        // end
+
+        profiler_hub::writer_types::pmc_event_data_t pmc_data_end;
+        pmc_data_end.event = event;
+        pmc_data_end.value = 0;
+
+        profiler_hub::writer_types::sample_data_t sample_end;
+        sample_end.timestamp = kfd.end_timestamp;
+        sample_end.track     = track;
+        pmc_data_end.sample  = sample_end;
+
+        try_insert_pmc_event(pmc_data, pmc_uid, "KFD PMC event");
+
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
