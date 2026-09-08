@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
@@ -123,8 +124,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition =
-        slot.uses_vcc ? wf.vcc() : amdgpu::RegisterAccess(wf).read_scalar64(*slot.src2);
+    uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxF32: {

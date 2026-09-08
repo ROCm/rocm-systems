@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
+#include "scoped_temp.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -1699,6 +1700,149 @@ TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth
   args.num_events = events.size();
   args.timeout = 1;
   EXPECT_EQ(driver.ioctl(AMDKFD_IOC_WAIT_EVENTS, &args), -EINVAL);
+}
+
+// --- Authorizing the daemon to reach into this address space ---
+//
+// A client names the daemon a permitted ptracer so the daemon's memory bridge
+// can service GPU access to host memory it holds no mapping for. That grant is
+// process-wide and outlives the connection, so who receives it, and when, is a
+// trust decision rather than a detail. These cover the decision itself; the
+// syscall behind it is the kernel's.
+
+namespace {
+
+/// @brief Serve one RPC_HANDSHAKE and stop.
+/// @param[in] fd Server end of the socketpair.
+/// @param[in] result Header result: nonzero makes the client reject the peer.
+void serve_one_handshake(int fd, int32_t result) {
+  rocjitsu::RpcHeader request{};
+  if (!rocjitsu::rpc_recv_exact(fd, &request, sizeof(request)))
+    return;
+  rocjitsu::RpcHeader response{};
+  response.opcode = rocjitsu::RPC_HANDSHAKE;
+  response.request_id = request.request_id;
+  response.result = result;
+  response.payload_bytes =
+      result == 0 ? static_cast<uint32_t>(sizeof(rocjitsu::RpcHandshakeResponse)) : 0;
+  if (!rocjitsu::rpc_send_exact(fd, &response, sizeof(response)) || result != 0)
+    return;
+  rocjitsu::RpcHandshakeResponse payload{};
+  payload.version = rocjitsu::kRpcProtocolVersion;
+  rocjitsu::rpc_send_exact(fd, &payload, sizeof(payload));
+}
+
+} // namespace
+
+// Both ends of a socketpair belong to this process, so SO_PEERCRED reports this
+// PID -- which is what makes the launcher's PID the only variable here.
+TEST(RemoteDriverPtracerGrantTest, AuthorizesOnlyTheDaemonItsLauncherStarted) {
+  const rocjitsu::test::ScopedEnvironmentVariable daemon_pid(rocjitsu::kRpcDaemonPidEnv,
+                                                             std::to_string(getpid()));
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, 0);
+    ::close(fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_GE(driver.open(), 0);
+
+  ASSERT_TRUE(driver.ptracer_verdict().has_value());
+  EXPECT_EQ(*driver.ptracer_verdict(), rocjitsu::PtracerGrantVerdict::Grant);
+}
+
+// The socket path is well known, so a same-user process can be listening on it.
+// SO_PEERCRED reports that process truthfully; it is simply not the daemon this
+// client's launcher started, and Yama's relationship check is exactly what
+// would otherwise separate them.
+TEST(RemoteDriverPtracerGrantTest, RefusesAListenerThatIsNotTheLaunchedDaemon) {
+  const rocjitsu::test::ScopedEnvironmentVariable daemon_pid(rocjitsu::kRpcDaemonPidEnv,
+                                                             std::to_string(getpid() + 1));
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, 0);
+    ::close(fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_GE(driver.open(), 0);
+
+  ASSERT_TRUE(driver.ptracer_verdict().has_value());
+  EXPECT_EQ(*driver.ptracer_verdict(), rocjitsu::PtracerGrantVerdict::RefusedPeerMismatch);
+}
+
+// Attach mode: no launcher named a daemon, so there is nothing to compare the
+// peer against and the grant is withheld rather than given to whoever answered.
+TEST(RemoteDriverPtracerGrantTest, TrustsTheSocketWhenNoLauncherNamedADaemon) {
+  // Empty rather than unset: both mean "no launcher named one", and the empty
+  // spelling is also what an inherited-but-cleared environment looks like.
+  const rocjitsu::test::ScopedEnvironmentVariable daemon_pid(rocjitsu::kRpcDaemonPidEnv, "");
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, 0);
+    ::close(fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_GE(driver.open(), 0);
+
+  ASSERT_TRUE(driver.ptracer_verdict().has_value());
+  EXPECT_EQ(*driver.ptracer_verdict(), rocjitsu::PtracerGrantVerdict::GrantUnverifiedPeer);
+}
+
+// Having named a daemon outranks trusting the socket, so a peer failing the PID
+// check is refused rather than falling back to being trusted -- which would
+// make the check decorative.
+TEST(RemoteDriverPtracerGrantTest, DoesNotFallBackToTrustWhenTheNamedPidMismatches) {
+  const uid_t self = geteuid();
+  EXPECT_EQ(rocjitsu::ptracer_grant_verdict(4242, 4243, self, self),
+            rocjitsu::PtracerGrantVerdict::RefusedPeerMismatch);
+}
+
+// A peer that fails the handshake has proved nothing, so the question of
+// authorizing it is never reached -- not asked and refused, but not asked.
+TEST(RemoteDriverPtracerGrantTest, NeverReachesTheQuestionWhenTheHandshakeFails) {
+  const rocjitsu::test::ScopedEnvironmentVariable daemon_pid(rocjitsu::kRpcDaemonPidEnv,
+                                                             std::to_string(getpid()));
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, -EPROTO);
+    ::close(fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  EXPECT_LT(driver.open(), 0);
+
+  EXPECT_FALSE(driver.ptracer_verdict().has_value())
+      << "a peer that never completed the handshake must not be considered for a grant";
+}
+
+TEST(RemoteDriverPtracerGrantTest, ReadsYamaScopeAsThePolicyItDenotes) {
+  using rocjitsu::PtraceScopePolicy;
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text(std::nullopt), PtraceScopePolicy::Absent);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text("0"), PtraceScopePolicy::Disabled);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text("1\n"), PtraceScopePolicy::Relational);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text(" 2 "), PtraceScopePolicy::AdminOnly);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text("3"), PtraceScopePolicy::NoAttach);
+  // A scope this build does not know, and a value that is not one at all, both
+  // resolve to "attempt the grant" rather than to "skip it": skipping is the
+  // answer that silently loses the access.
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text("4"), PtraceScopePolicy::Unknown);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text(""), PtraceScopePolicy::Unknown);
+  EXPECT_EQ(rocjitsu::ptrace_scope_policy_from_text("banana"), PtraceScopePolicy::Unknown);
+}
+
+TEST(RemoteDriverPtracerGrantTest, RefusesAPeerBelongingToAnotherUser) {
+  const uid_t self = geteuid();
+  EXPECT_EQ(rocjitsu::ptracer_grant_verdict(4242, 4242, self + 1, self),
+            rocjitsu::PtracerGrantVerdict::RefusedForeignUser);
+  EXPECT_EQ(rocjitsu::ptracer_grant_verdict(4242, 0, self, self),
+            rocjitsu::PtracerGrantVerdict::RefusedNoPeer);
 }
 
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---

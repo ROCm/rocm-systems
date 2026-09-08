@@ -11,6 +11,7 @@
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -110,6 +111,35 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
+// The VMM reads the bus shape through these two entry points, and nothing else
+// in the suite does: the device tests build a PciDeviceConfig by hand, so a
+// field dropped in the loader, or a wrong default for an omitted section, would
+// leave every test green while a guest saw the wrong device.
+TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
+  const auto identity = config::load_device_identity(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
+                                                     rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(identity.pci.vram_aperture_bytes, 268435456u);
+  EXPECT_EQ(identity.device.vendor_id, 0x1002u)
+      << "the identity must come from the same file as the bus shape";
+
+  const auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
+      << "the two entry points disagree about the same file";
+}
+
+// A config with no bus section still has to yield a usable one, because most
+// parts do not describe a bus at all.
+TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
+  const auto identity =
+      config::load_device_identity(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  const config::PciDeviceConfig fallback;
+  EXPECT_EQ(identity.pci.class_code, fallback.class_code);
+  EXPECT_EQ(identity.pci.doorbell_aperture_bytes, fallback.doorbell_aperture_bytes);
+  EXPECT_EQ(identity.pci.register_aperture_bytes, fallback.register_aperture_bytes);
+  EXPECT_EQ(identity.pci.vram_aperture_bytes, fallback.vram_aperture_bytes);
+}
+
 TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
   auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
                                     rocjitsu::kEmbeddedSchema);
@@ -179,6 +209,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
   EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_EQ(kmd::gfx_target_name(120501u), "gfx1251");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1251"), 120501u);
   EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
   EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
@@ -1118,6 +1150,25 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
   EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
+}
+
+TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
+  const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
+    "device":{"gfx_target_version":120501}}}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsGfx1251SimulationUntilExecutionIsImplemented) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1251"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

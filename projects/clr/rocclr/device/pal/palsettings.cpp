@@ -217,7 +217,9 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         supportDepthsRGB_ = true;
       }
       if (use64BitPtr_) {
-        maxAllocSize_ = 64ULL * Gi;
+        // Unified memory APUs address the carve-out and the aperture as one pool, which
+        // already exceeds 64 GiB on shipping parts.
+        maxAllocSize_ = 256ULL * Gi;
       } else {
         maxAllocSize_ = 3ULL * Gi;
       }

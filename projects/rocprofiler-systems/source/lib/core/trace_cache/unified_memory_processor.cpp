@@ -11,11 +11,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/format.h>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <system_error>
 #include <type_traits>

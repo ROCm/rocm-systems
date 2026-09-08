@@ -111,6 +111,9 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
                                       ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
+  if (!rcclParamDdaLL()) {
+    return false;
+  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -129,6 +132,10 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
 
   const size_t perRankBytes = sendcount * ncclTypeSize(datatype);
   if (perRankBytes % 16 != 0) {
+    return false;
+  }
+
+  if (perRankBytes * (size_t)comm->nRanks > (size_t)rcclParamDdaLLThreshold()) {
     return false;
   }
   // expand from 8B to 16B

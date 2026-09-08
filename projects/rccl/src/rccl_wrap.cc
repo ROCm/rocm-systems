@@ -35,6 +35,9 @@ THE SOFTWARE.
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#if defined(ENABLE_ROCSHMEM_GIN)
+#include "algorithms/gin/gin_all_reduce.h"
+#endif
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -67,11 +70,11 @@ RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(65536));          // 64 KiB
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(67108864)); // 64 MiB
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -626,6 +629,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
       break;
+    case rcclAddonAlgos_t::RCCL_GIN_SDMA:
+      *algoName = "GIN-SDMA";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -859,7 +865,7 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
-// (symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
+// (GIN-SDMA / symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
 // outcome for any given operands is identical.
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
@@ -870,6 +876,18 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->nMaxChannels = 0;
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+  // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
+  // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init
+  // runs off a private stream in relaxed mode; kernels re-read signal baselines.
+  // Must beat CE / DDA / symmetric so rcclGetCollImplInfo names the backend that ran.
+  if (ncclGroupDepth == 0 && ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    decision->algo = RCCL_GIN_SDMA;
+    decision->nMaxChannels = kGinAllReduceLsaCtas;
+    return ncclSuccess;
+  }
+#endif
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
   // as the pre-refactor collectives.cc path did.
@@ -929,8 +947,20 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  //
+  // GIN AllReduce is selected first in this function and requires symmetric
+  // windows. By default it only claims messages >= 256 MiB, so DDA must still be
+  // allowed for smaller symmetric AllReduces (otherwise they would hit the
+  // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
+  // !symEligible gate because GIN already returned above for those sizes.
+  bool ddaSymEligible = symEligible;
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
+    ddaSymEligible = false;
+  }
+#endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1050,15 +1080,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // symk never reclaims it), mirroring rcclSelectAllReduce.
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllGatherDdaFabricLL128Blocks(comm, sendcount, datatype);
@@ -1263,8 +1291,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   }
 
   // (4) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  // That reduce runs with PreOpSrcs=0 / postOp=false, an unscaled sum, so ncclAvg and
+  // user-defined PreMulSum (op >= ncclNumOps) fall through to the ring kernel instead.
   size_t directMsgSize = totalBytes;
-  if (!symEligible && ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, directMsgSize)) {
+  if (!symEligible && ncclGroupDepth == 0 && op < ncclAvg && rcclUseReduceScatterDirect(comm, directMsgSize)) {
     decision->algo = RCCL_DIRECT_REDUCESCATTER;
     decision->protocol = NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
