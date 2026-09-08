@@ -1053,6 +1053,39 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
             self.assertIn(valid, message)
 
+    def test_unsupported_value_hint_does_not_precede_the_payload(self):
+        """The valid-input hint must travel inside the error, not ahead of it.
+
+        It used to be printed straight to stdout before the exception was
+        raised, so `amd-smi set -C 0 --json` emitted a bare line first and
+        json.loads failed on it.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import contextlib
+        import io
+        import json as json_mod
+        from unittest import mock
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "json"
+
+        host: Any = _Host()
+        hint = "Valid inputs are: SPX, DPX. Use `sudo amd-smi partition --accelerator` to find acceptable values."
+        printed = io.StringIO()
+        with mock.patch.object(sys, "argv", ["amd-smi", "set"]):
+            with contextlib.redirect_stdout(printed):
+                with self.assertRaises(cli_exc.AmdSmiInvalidParameterValueException) as ctx:
+                    AMDSMIParser._is_command_supported(host, "0", ["SPX", "DPX"], hint=hint)
+
+        self.assertEqual(printed.getvalue(), "", "hint was written to stdout")
+        payload = json_mod.loads(str(ctx.exception))
+        self.assertIn(hint, payload["error"])
+        self.assertEqual(payload["code"], int(self.ExitCode.INVALID_PARAMETER_VALUE))
+
     # ---- CSV error rows must stay parseable ----
     # A message that breaks naive CSV building three ways: the comma splits the
     # row into extra columns, the newline splits it into an extra row, and the
