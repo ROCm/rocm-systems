@@ -13,6 +13,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -39,9 +40,9 @@ concept backend_contract = requires(
     {
         Backend::make_agent_id(std::uint64_t{})
     } -> std::same_as<typename Backend::agent_id_t>;
-    { backend.create_context(&context) } -> std::same_as<typename Backend::status_t>;
-    { backend.start_context(context) } -> std::same_as<typename Backend::status_t>;
-    { backend.stop_context(context) } -> std::same_as<typename Backend::status_t>;
+    { backend.create_context(&context) } -> std::same_as<void>;
+    { backend.start_context(context) } -> std::same_as<void>;
+    { backend.stop_context(context) } -> std::same_as<void>;
     {
         backend.sample_device_counting_service(context, user_data, flags, records,
                                                record_count)
@@ -170,30 +171,31 @@ public:
     {
         if(m_context_started) return;
 
-        auto status = m_backend_api->start_context(m_context);
-        if(status == Backend::status_success)
+        try
         {
+            m_backend_api->start_context(m_context);
             m_context_started = true;
             m_prev_values.clear();
             LOG_DEBUG("GPU PMC context started for device {}.",
                       m_agent->device_type_index);
-        }
-        else
+        } catch(const std::exception& e)
         {
             // HSA may not be initialized yet at this call site. The hsa_init callback
             // registered in tool_init will call start() again once HSA is live.
-            LOG_DEBUG("GPU PMC context start deferred for device {} (status={}).",
-                      m_agent->device_type_index, static_cast<int>(status));
+            LOG_DEBUG("GPU PMC context start deferred for device {} ({}).",
+                      m_agent->device_type_index, e.what());
         }
     }
 
     void stop()
     {
-        auto status = m_backend_api->stop_context(m_context);
-        if(status != Backend::status_success)
+        try
         {
-            LOG_WARNING("Failed to stop context for device {} (status={})",
-                        m_agent->device_type_index, static_cast<int>(status));
+            m_backend_api->stop_context(m_context);
+        } catch(const std::exception& e)
+        {
+            LOG_WARNING("Failed to stop context for device {} ({})",
+                        m_agent->device_type_index, e.what());
         }
     }
 

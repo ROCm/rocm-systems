@@ -101,8 +101,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     records[1].id            = 20;
     records[1].counter_value = 100.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
@@ -183,8 +182,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
         records[i].counter_value = static_cast<double>(10 * (i + 1));
     }
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
@@ -237,8 +235,7 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     record.id            = sdk_instance_id;
     record.counter_value = 99.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
@@ -278,8 +275,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
     record.id            = 5;
     record.counter_value = 1.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     // Two successive sample calls; each must return correct data.
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
@@ -316,8 +312,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce(Return(MockBackend::status_error));
@@ -333,8 +328,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
 
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,

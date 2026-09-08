@@ -90,9 +90,9 @@ public:
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
-    MOCK_METHOD(status_t, create_context, (context_id_t * context));
-    MOCK_METHOD(status_t, start_context, (context_id_t context));
-    MOCK_METHOD(status_t, stop_context, (context_id_t context));
+    MOCK_METHOD(void, create_context, (context_id_t * context));
+    MOCK_METHOD(void, start_context, (context_id_t context));
+    MOCK_METHOD(void, stop_context, (context_id_t context));
 
     MOCK_METHOD(status_t, sample_device_counting_service,
                 (context_id_t ctx, user_data_t user_data, counter_flag_t flags,
