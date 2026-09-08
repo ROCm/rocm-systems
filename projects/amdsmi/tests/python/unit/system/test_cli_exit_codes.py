@@ -1053,6 +1053,73 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
             self.assertIn(valid, message)
 
+    # ---- CSV error rows must stay parseable ----
+    # A message that breaks naive CSV building three ways: the comma splits the
+    # row into extra columns, the newline splits it into an extra row, and the
+    # quote has to be escaped rather than emitted raw.
+    HOSTILE_MESSAGE = 'comma, quote " and\nnewline'
+
+    def _csv_exceptions(self):
+        """Every CLI exception, built so HOSTILE_MESSAGE reaches its message."""
+        text = self.HOSTILE_MESSAGE
+        return [
+            cli_exc.AmdSmiCommandNotSupportedException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiDeviceNotFoundException(
+                command=text, outputformat="csv", device_kind=cli_exc.AmdSmiDeviceKind.GPU
+            ),
+            cli_exc.AmdSmiInvalidCommandException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidFilePathException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidParameterException(command="set", arg=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidParameterValueException(
+                command="set", arg=text, outputformat="csv"
+            ),
+            cli_exc.AmdSmiInvalidSubcommandException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiLibraryErrorException(
+                outputformat="csv",
+                error_code=amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                detail=text,
+            ),
+            cli_exc.AmdSmiMissingParameterValueException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiPermissionDeniedException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiRequiredCommandException(command=text, outputformat="csv"),
+        ]
+
+    def test_csv_error_output_round_trips(self):
+        """--csv errors must survive a CSV reader unchanged.
+
+        The hint strings list valid options comma-separated, so an unquoted row
+        splits: the reader then takes a fragment of the message as the exit
+        code. Reading it back must yield the same message and code the JSON
+        format reports.
+        """
+        import csv
+        import io
+
+        for exc in self._csv_exceptions():
+            with self.subTest(exception=type(exc).__name__):
+                payload = str(exc)
+                parsed = list(csv.DictReader(io.StringIO(payload)))
+                self.assertEqual(len(parsed), 1, "message split across rows")
+                self.assertEqual(
+                    len(payload.splitlines()), 2, "layout newlines reached the csv payload"
+                )
+                self.assertEqual(
+                    dict(parsed[0]), {"error": exc.json_message["error"], "code": str(exc.value)}
+                )
+
+    def test_every_exception_is_covered_by_the_csv_round_trip(self):
+        """A new exception class must be added to _csv_exceptions."""
+        import inspect
+
+        declared = {
+            obj
+            for obj in vars(cli_exc).values()
+            if inspect.isclass(obj)
+            and issubclass(obj, cli_exc.AmdSmiException)
+            and obj is not cli_exc.AmdSmiException
+        }
+        self.assertEqual(declared, {type(exc) for exc in self._csv_exceptions()})
+
     # ---- device-init failure reporting (drives amdsmi_commands._exit_on_init_error) ----
     def test_init_error_reports_in_the_requested_format_without_a_traceback(self):
         """Device init runs before argv is parsed, so it cannot reach the
