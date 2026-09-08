@@ -105,7 +105,83 @@ using rocprofiler_sdk::wrapper;
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
 struct external_dependencies
-{};
+{
+    using agent_t         = ::rocprofsys::agent;
+    using agent_type_t    = ::rocprofsys::agent_type;
+    using agent_manager_t = ::rocprofsys::agent_manager;
+    using track_t         = trace_cache::info::track;
+    using thread_info_t   = trace_cache::info::thread;
+    using pmc_info_t      = trace_cache::info::pmc;
+    using kfd_sample_t    = trace_cache::kfd_sample;
+
+    static constexpr agent_type_t AGENT_TYPE_GPU = agent_type_t::GPU;
+    static constexpr agent_type_t AGENT_TYPE_CPU = agent_type_t::CPU;
+
+    static agent_manager_t& get_agent_manager()
+    {
+        return ::rocprofsys::get_agent_manager_instance();
+    }
+
+    static void add_string(std::string_view value)
+    {
+        trace_cache::get_metadata_registry().add_string(value);
+    }
+
+    static void add_thread_info(const thread_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_thread_info(info);
+    }
+
+    static void add_track(const track_t& info)
+    {
+        trace_cache::get_metadata_registry().add_track(info);
+    }
+
+    static void add_pmc_info(const pmc_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_pmc_info(info);
+    }
+
+    static void buffer_storage_store(kfd_sample_t&& sample)
+    {
+        trace_cache::get_buffer_storage().store(std::move(sample));
+    }
+
+    static std::int32_t get_pid() { return static_cast<std::int32_t>(::getpid()); }
+    static std::int32_t get_ppid() { return static_cast<std::int32_t>(::getppid()); }
+
+    // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
+    // kfd_events.hpp never includes that header, so the value is surfaced here.
+    static constexpr std::string_view pmc_value_type_absolute = trace_cache::ABSOLUTE;
+
+    // Single source of truth for these strings is core/categories.hpp's
+    // trait::name<category::X>; kfd_events.hpp itself never includes
+    // categories.hpp, so the values are surfaced here instead.
+    static constexpr std::string_view kfd_page_fault_category_name =
+        trait::name<category::rocm_kfd_page_fault>::value;
+    static constexpr std::string_view kfd_page_fault_category_description =
+        trait::name<category::rocm_kfd_page_fault>::description;
+    static constexpr std::string_view kfd_page_migrate_category_name =
+        trait::name<category::rocm_kfd_page_migrate>::value;
+    static constexpr std::string_view kfd_page_migrate_category_description =
+        trait::name<category::rocm_kfd_page_migrate>::description;
+    static constexpr std::string_view kfd_queue_category_name =
+        trait::name<category::rocm_kfd_queue>::value;
+    static constexpr std::string_view kfd_queue_category_description =
+        trait::name<category::rocm_kfd_queue>::description;
+    static constexpr std::string_view kfd_event_queue_category_name =
+        trait::name<category::rocm_kfd_event_queue>::value;
+    static constexpr std::string_view kfd_event_queue_category_description =
+        trait::name<category::rocm_kfd_event_queue>::description;
+    static constexpr std::string_view kfd_event_unmap_from_gpu_category_name =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::value;
+    static constexpr std::string_view kfd_event_unmap_from_gpu_category_description =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::description;
+    static constexpr std::string_view kfd_event_dropped_events_category_name =
+        trait::name<category::rocm_kfd_event_dropped_events>::value;
+    static constexpr std::string_view kfd_event_dropped_events_category_description =
+        trait::name<category::rocm_kfd_event_dropped_events>::description;
+};
 
 std::shared_ptr<domain_service<production_backend, external_dependencies>>
     g_domain_service;
