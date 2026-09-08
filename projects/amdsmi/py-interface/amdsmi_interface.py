@@ -27,7 +27,7 @@ from ctypes import POINTER, c_void_p
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
@@ -7233,8 +7233,8 @@ def _ampp_field_to_dict(field) -> Dict[str, Any]:
         "name": name,
         "unit": unit,
         "value": field.value,
-        "min_value": field.min_value,
-        "max_value": field.max_value,
+        "limit_min": field.limit_min,
+        "limit_max": field.limit_max,
         "has_limits": bool(field.has_limits),
     }
 
@@ -7300,7 +7300,7 @@ def amdsmi_get_ampp_fields(
 
     Returns:
         List[dict]: One dict per published field, each with 'name', 'unit',
-        'value', 'min_value', 'max_value', 'has_limits'.
+        'value', 'limit_min', 'limit_max', 'has_limits'.
 
     Raises:
         AmdSmiParameterException: If processor_handle is invalid
@@ -7352,12 +7352,12 @@ def amdsmi_activate_ampp_profile(processor_handle: processor_handle_t, profile_n
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
 
-    profile_name_bytes = (
-        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    _check_res(
+        amdsmi_wrapper.amdsmi_activate_ampp_profile(processor_handle, profile_name.encode("utf-8"))
     )
-
-    _check_res(amdsmi_wrapper.amdsmi_activate_ampp_profile(processor_handle, profile_name_bytes))
 
 
 def amdsmi_configure_ampp_profile(
@@ -7387,22 +7387,25 @@ def amdsmi_configure_ampp_profile(
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    profile_name_bytes = (
-        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
-    )
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
+    if not isinstance(fields, list):
+        raise AmdSmiParameterException(fields, list)
 
     num_fields = len(fields)
     field_array = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields)()
     for i, field in enumerate(fields):
+        if not isinstance(field, dict) or "name" not in field or "value" not in field:
+            raise AmdSmiParameterException(field, "dict with keys 'name' and 'value'")
         field_name = field["name"]
-        field_name_bytes = field_name.encode("utf-8") if isinstance(field_name, str) else field_name
-        field_array[i].name = field_name_bytes
+        if not isinstance(field_name, str):
+            raise AmdSmiParameterException(field_name, str)
+        field_array[i].name = field_name.encode("utf-8")
         field_array[i].value = int(field["value"])
 
     _check_res(
         amdsmi_wrapper.amdsmi_configure_ampp_profile(
-            processor_handle, profile_name_bytes, field_array, num_fields
+            processor_handle, profile_name.encode("utf-8"), field_array, num_fields
         )
     )
 

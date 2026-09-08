@@ -5267,8 +5267,8 @@ pub struct AmdsmiAmppFieldT {
     pub name: [::std::os::raw::c_char; 256usize],
     pub unit: [::std::os::raw::c_char; 256usize],
     pub value: i64,
-    pub min_value: i64,
-    pub max_value: i64,
+    pub limit_min: i64,
+    pub limit_max: i64,
     pub has_limits: bool,
     pub reserved: [u32; 4usize],
 }
@@ -5282,10 +5282,10 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiAmppFieldT, unit) - 256usize];
     ["Offset of field: AmdsmiAmppFieldT::value"]
         [::std::mem::offset_of!(AmdsmiAmppFieldT, value) - 512usize];
-    ["Offset of field: AmdsmiAmppFieldT::min_value"]
-        [::std::mem::offset_of!(AmdsmiAmppFieldT, min_value) - 520usize];
-    ["Offset of field: AmdsmiAmppFieldT::max_value"]
-        [::std::mem::offset_of!(AmdsmiAmppFieldT, max_value) - 528usize];
+    ["Offset of field: AmdsmiAmppFieldT::limit_min"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, limit_min) - 520usize];
+    ["Offset of field: AmdsmiAmppFieldT::limit_max"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, limit_max) - 528usize];
     ["Offset of field: AmdsmiAmppFieldT::has_limits"]
         [::std::mem::offset_of!(AmdsmiAmppFieldT, has_limits) - 536usize];
     ["Offset of field: AmdsmiAmppFieldT::reserved"]

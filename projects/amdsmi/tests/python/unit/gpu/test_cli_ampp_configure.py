@@ -52,10 +52,85 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py")
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py")
+HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py")
 
 # AMDSMI_STATUS_* sentinels used by the stubbed library-error paths.
 _STATUS_INVAL = 1
 _STATUS_NO_PERM = 10
+
+
+class _FakeInitFlagsForHelpersImport:
+    INIT_ALL_PROCESSORS = 0xFFFFFFFF
+    INIT_AMD_GPUS = 1
+    INIT_AMD_CPUS = 2
+    INIT_AMD_NICS = 4
+
+
+class _FakeClkTypeForHelpersImport:
+    """Enough ``AmdSmiClkType`` members for ``amdsmi_helpers`` to import."""
+
+    SYS = "SYS"
+    MEM = "MEM"
+    DF = "DF"
+    SOC = "SOC"
+    DCEF = "DCEF"
+    VCLK0 = "VCLK0"
+    VCLK1 = "VCLK1"
+    DCLK0 = "DCLK0"
+    DCLK1 = "DCLK1"
+
+
+def _import_real_amdsmi_helpers():
+    """Load the REAL ``AMDSMIHelpers`` class (same file
+    ``test_amdsmi_helpers_ampp.py`` pins down directly) so
+    ``_FakeAMDSMIHelpers`` below can delegate ``is_valid_ampp_field_name``/
+    ``parse_ampp_field_value`` to it instead of hand-reimplementing them --
+    otherwise this file's copy could silently drift from the shipped
+    validators. Uses a throwaway module name so it never collides with the
+    per-test fake ``amdsmi_helpers`` module installed by
+    ``_install_fake_modules()``.
+    """
+    saved = {
+        name: sys.modules.pop(name, None)
+        for name in ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception", "amdsmi_init")
+    }
+    try:
+        amdsmi_pkg = types.ModuleType("amdsmi")
+        interface = types.ModuleType("amdsmi.amdsmi_interface")
+        exception = types.ModuleType("amdsmi.amdsmi_exception")
+
+        interface.amdsmi_wrapper = types.ModuleType("amdsmi.amdsmi_wrapper")
+        interface.AmdSmiInitFlags = _FakeInitFlagsForHelpersImport
+        interface.AmdSmiClkType = _FakeClkTypeForHelpersImport
+        interface.AmdSmiLibraryException = _FakeLibraryException
+        interface.AmdSmiParameterException = _FakeLibraryException
+        interface.AMDSMI_MAX_STRING_LENGTH = 256
+        interface.amdsmi_init = lambda _flag: None
+        interface.amdsmi_shut_down = lambda: None
+        interface.amdsmi_get_processor_handles = lambda: []
+
+        exception.AmdSmiLibraryException = _FakeLibraryException
+        exception.AmdSmiParameterException = _FakeLibraryException
+
+        amdsmi_pkg.amdsmi_interface = interface
+        amdsmi_pkg.amdsmi_exception = exception
+
+        sys.modules["amdsmi"] = amdsmi_pkg
+        sys.modules["amdsmi.amdsmi_interface"] = interface
+        sys.modules["amdsmi.amdsmi_exception"] = exception
+
+        spec = importlib.util.spec_from_file_location("_real_amdsmi_helpers", HELPERS_PATH)
+        module = importlib.util.module_from_spec(spec)
+        if _CLI_DIR not in sys.path:
+            sys.path.insert(0, _CLI_DIR)
+        spec.loader.exec_module(module)
+        return module.AMDSMIHelpers
+    finally:
+        for name, mod in saved.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
 
 class _FakeLibraryException(Exception):
@@ -71,6 +146,9 @@ class _FakeLibraryException(Exception):
 
     def get_error_info(self, detailed=True):
         return self._message
+
+
+_RealAMDSMIHelpers = _import_real_amdsmi_helpers()
 
 
 def _install_fake_modules():
@@ -110,27 +188,14 @@ def _install_fake_modules():
     # amdsmi_parser.py and set_value.py additionally import this sibling
     # module by bare name at module scope; the tests here never construct a
     # real AMDSMIParser/heavyweight AMDSMIHelpers (only the unbound
-    # ``_ampp_configure_options`` method and the two static AMPP validators),
-    # so a minimal stand-in mirroring those two static methods is enough.
+    # ``_ampp_configure_options`` method and the two static AMPP validators
+    # are ever touched), so a minimal stand-in is enough -- but the two
+    # validators themselves delegate to the real implementation (pinned
+    # directly in test_amdsmi_helpers_ampp.py) so this file can't drift out
+    # of sync with it.
     class _FakeAMDSMIHelpers:
-        @staticmethod
-        def is_valid_ampp_field_name(name):
-            if not isinstance(name, str) or not name:
-                return False
-            try:
-                return len(name.encode("utf-8")) < interface.AMDSMI_MAX_STRING_LENGTH
-            except UnicodeEncodeError:
-                return False
-
-        @staticmethod
-        def parse_ampp_field_value(value):
-            try:
-                parsed = int(value)
-            except (TypeError, ValueError, OverflowError):
-                return None
-            if not -(2**63) <= parsed < 2**63:
-                return None
-            return parsed
+        is_valid_ampp_field_name = staticmethod(_RealAMDSMIHelpers.is_valid_ampp_field_name)
+        parse_ampp_field_value = staticmethod(_RealAMDSMIHelpers.parse_ampp_field_value)
 
     helpers_mod = types.ModuleType("amdsmi_helpers")
     helpers_mod.AMDSMIHelpers = _FakeAMDSMIHelpers
@@ -476,6 +541,103 @@ class TestSetGpuAmppConfigureCallSite(unittest.TestCase):
         ampp_configure = _AmppConfigureArgs("profile_2", [{"name": "PPT0_Limit", "value": 300}])
         with self.assertRaises(PermissionError):
             self._run_set_gpu(ampp_configure)
+
+
+class TestSetGpuAmppActivateCallSite(unittest.TestCase):
+    """Call-site tests for the ``set_gpu`` ACTIVATE dispatch branch.
+
+    Mirrors ``TestSetGpuAmppConfigureCallSite`` for the sibling
+    ``--ampp-activate`` dispatch: proves the profile name reaches
+    ``amdsmi_activate_ampp_profile`` unchanged, that a driver-side error
+    surfaces the writable-profile listing, and that NO_PERM raises
+    ``PermissionError`` instead of a stored per-GPU message.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
+        cls._saved_modules = {name: sys.modules.get(name) for name in _SAVED_MODULE_NAMES}
+        cls.interface = _install_fake_modules()
+        cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
+        cls.module = _load_module("set_value_under_test_ampp_activate", SET_VALUE_PATH)
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, saved in cls._saved_modules.items():
+            if saved is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
+
+    def _run_set_gpu(self, ampp_activate):
+        logger = _RecordingLogger()
+        cmd = self.module.SetValueCommands()
+        cmd.logger = logger
+        cmd.helpers = _StubHelpersForSetGpu()
+        cmd.group_check_printed = True
+        cmd.device_handles = ["gpu0"]
+
+        args = types.SimpleNamespace(
+            gpu="gpu0",
+            fan=None,
+            perf_level=None,
+            profile=None,
+            perf_determinism=None,
+            compute_partition=None,
+            memory_partition=None,
+            power_cap=None,
+            soc_pstate=None,
+            xgmi_plpd=None,
+            process_isolation=None,
+            clk_limit=None,
+            clk_level=None,
+            ptl_status=None,
+            ptl_format=None,
+            mem_carveout=None,
+            compute_partition_mem_alloc_mode=None,
+            ampp_activate=ampp_activate,
+            ampp_configure=None,
+        )
+        cmd.set_gpu(args)
+        return logger
+
+    def test_activate_success_calls_library_with_profile_name(self):
+        activate_calls = []
+        self.interface.amdsmi_activate_ampp_profile = lambda gpu, name: activate_calls.append(
+            (gpu, name)
+        )
+
+        logger = self._run_set_gpu("profile_2")
+
+        self.assertEqual(activate_calls, [("gpu0", "profile_2")])
+        message = logger.last_output("ampp_activate")
+        self.assertIn("Successfully activated AMPP profile profile_2", message)
+
+    def test_activate_inval_reports_writable_profiles(self):
+        def _raise(*_a, **_k):
+            raise _FakeLibraryException(_STATUS_INVAL, "Invalid parameters")
+
+        self.interface.amdsmi_activate_ampp_profile = _raise
+        self.interface.amdsmi_get_ampp_profiles = lambda _h: (
+            "1.0",
+            [
+                {"name": "profile_0", "is_writable": False},
+                {"name": "profile_2", "is_writable": True},
+            ],
+        )
+
+        logger = self._run_set_gpu("profile_2")
+        message = logger.last_output("ampp_activate")
+        self.assertIn("Unable to activate AMPP profile profile_2", message)
+
+    def test_activate_no_perm_raises_permission_error(self):
+        def _raise(*_a, **_k):
+            raise _FakeLibraryException(_STATUS_NO_PERM, "Permission denied")
+
+        self.interface.amdsmi_activate_ampp_profile = _raise
+        with self.assertRaises(PermissionError):
+            self._run_set_gpu("profile_2")
 
 
 class TestSetGpuAmppConfigureFromFile(unittest.TestCase):

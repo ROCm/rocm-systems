@@ -657,8 +657,8 @@ typedef struct {
   char name[RSMI_AMPP_MAX_STRING_LENGTH];
   char unit[RSMI_AMPP_MAX_STRING_LENGTH];
   int64_t value;
-  int64_t min_value;
-  int64_t max_value;
+  int64_t limit_min;
+  int64_t limit_max;
   bool has_limits;
   uint32_t reserved[4];
 } rsmi_ampp_field_t;

@@ -9679,9 +9679,9 @@ typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque field name (e.g. "PPT0_Limit")
   char unit[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque unit string (e.g. "W", "-")
   int64_t value;                        //!< Parsed value
-  int64_t min_value;                    //!< Guidance-only lower bound from limits/min/<field>
-  int64_t max_value;                    //!< Guidance-only upper bound from limits/max/<field>
-  bool has_limits;                      //!< True if min_value/max_value were found in limits/
+  int64_t limit_min;                    //!< Guidance-only lower bound from limits/min/<field>
+  int64_t limit_max;                    //!< Guidance-only upper bound from limits/max/<field>
+  bool has_limits;                      //!< True if limit_min/limit_max were found in limits/
   //! Reserved for future expansion. Callers MUST zero-initialize this (e.g.
   //! `= {}` or memset) before passing the struct to
   //! ::amdsmi_configure_ampp_profile -- it is forwarded to the implementation.

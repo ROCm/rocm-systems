@@ -441,11 +441,11 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
     bool has_max = read_sysfs_line(root + "limits/max/" + field_names[i], &max_line);
     if (has_min) {
       std::string unused_unit;
-      parse_field_content(min_line, &f.min_value, &unused_unit);
+      parse_field_content(min_line, &f.limit_min, &unused_unit);
     }
     if (has_max) {
       std::string unused_unit;
-      parse_field_content(max_line, &f.max_value, &unused_unit);
+      parse_field_content(max_line, &f.limit_max, &unused_unit);
     }
     f.has_limits = has_min && has_max;
   }

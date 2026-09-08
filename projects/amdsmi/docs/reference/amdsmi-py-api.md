@@ -6066,8 +6066,7 @@ Exceptions that can be thrown by `amdsmi_get_ampp_profiles` function:
   implemented on this ASIC)
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
-  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
-  profile-slot range)
+  malformed (missing `0x` prefix or unparsable)
 - `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `profiles` buffer
   is smaller than the number of published profiles
 
@@ -6113,9 +6112,9 @@ Field | Description
 `name` | Opaque field name (e.g. `"PPT0_Limit"`)
 `unit` | Opaque unit string (e.g. `"W"`, `"MHz"`, `"bool"`)
 `value` | Parsed value
-`min_value` | Guidance-only lower bound from `limits/min/<field>`
-`max_value` | Guidance-only upper bound from `limits/max/<field>`
-`has_limits` | `True` if `min_value`/`max_value` were found in `limits/`
+`limit_min` | Guidance-only lower bound from `limits/min/<field>`
+`limit_max` | Guidance-only upper bound from `limits/max/<field>`
+`has_limits` | `True` if `limit_min`/`limit_max` were found in `limits/`
 
 Exceptions that can be thrown by `amdsmi_get_ampp_fields` function:
 
@@ -6130,8 +6129,7 @@ Exceptions that can be thrown by `amdsmi_get_ampp_fields` function:
 - `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
   `profile_N` directory
 - `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
-  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
-  profile-slot range)
+  malformed (missing `0x` prefix or unparsable)
 - `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `fields` buffer is
   smaller than the number of published fields for this profile
 
@@ -6236,8 +6234,7 @@ Exceptions that can be thrown by `amdsmi_configure_ampp_profile` function:
   `profile_N`, `fields` contains a field name not recognized for this
   profile, or `fields` is `None`/empty
 - `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
-  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
-  profile-slot range)
+  malformed (missing `0x` prefix or unparsable)
 
 Example:
 

@@ -1300,7 +1300,7 @@ class StaticCommands:
                                 )
                                 if field["has_limits"]:
                                     field_line += (
-                                        f" (min={field['min_value']}, max={field['max_value']})"
+                                        f" (min={field['limit_min']}, max={field['limit_max']})"
                                     )
                                 field_lines.append(field_line)
                         formatted_profiles.append(

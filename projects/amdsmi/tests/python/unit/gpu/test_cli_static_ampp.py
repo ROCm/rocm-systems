@@ -65,8 +65,8 @@ _FIELDS_BY_PROFILE = {
             "name": "PPT0_Limit",
             "unit": "W",
             "value": 300,
-            "min_value": 0,
-            "max_value": 0,
+            "limit_min": 0,
+            "limit_max": 0,
             "has_limits": False,
         }
     ],
@@ -75,8 +75,8 @@ _FIELDS_BY_PROFILE = {
             "name": "PPT0_Limit",
             "unit": "W",
             "value": 250,
-            "min_value": 100,
-            "max_value": 400,
+            "limit_min": 100,
+            "limit_max": 400,
             "has_limits": True,
         }
     ],
@@ -387,8 +387,8 @@ class TestCliStaticAmpp(unittest.TestCase):
                 "name": "SomeCount",
                 "unit": "",
                 "value": 5,
-                "min_value": 0,
-                "max_value": 0,
+                "limit_min": 0,
+                "limit_max": 0,
                 "has_limits": False,
             }
         ]

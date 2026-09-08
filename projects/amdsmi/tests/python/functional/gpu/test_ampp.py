@@ -131,7 +131,7 @@ class TestGpuAmpp(unittest.TestCase):
                     continue
 
                 for field in fields:
-                    for key in ("name", "unit", "value", "min_value", "max_value", "has_limits"):
+                    for key in ("name", "unit", "value", "limit_min", "limit_max", "has_limits"):
                         self.assertIn(key, field)
 
     def test_set_ampp_profile_dry_run(self):

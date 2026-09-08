@@ -35,7 +35,6 @@ import sys
 import types
 import unittest
 
-
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 # tests/python/unit/gpu -> repo root is four levels up.
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
