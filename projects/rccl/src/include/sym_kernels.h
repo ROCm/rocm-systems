@@ -29,17 +29,10 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
-// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% below 256 KB since an LL epoch
-// carries one element per thread. Host code cannot test __gfx950__ so it selects on comm->archName.
+// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% at the sizes where it removes an
+// epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
+// host allocates; the kernels take both their pitch and their stride from blockDim.
 constexpr int ncclSymkGfx950LLThreads = 512;
-
-// The same width resolved at device compile time, where it also serves as the LL slot pitch. The
-// host sizes the shared slot buffer to match and never launches a reduce kernel wider than this.
-#if defined(__gfx950__)
-constexpr int ncclSymkReduceLLMaxThreads = ncclSymkGfx950LLThreads;
-#else
-constexpr int ncclSymkReduceLLMaxThreads = ncclSymkMaxThreads;
-#endif
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
@@ -145,6 +138,12 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                                 size_t nEltsTotal, size_t nEltsMax, int nWorks, ncclSymRegType_t winRegType,
                                 float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps, bool* forced);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Block width the gfx950 reduce kernels launch at, split out of ncclSymkPickKernel so the size
+// bands can be unit tested. Returns ncclSymkMaxThreads for any collective that is not tuned.
+int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
+#endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
 

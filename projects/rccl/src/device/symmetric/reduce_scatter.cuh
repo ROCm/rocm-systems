@@ -509,8 +509,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(ncclSymkArgsHa
   int const& nRanks = handler.comm.nRanks;
   int const& rank = handler.comm.rank;
   int t = threadIdx.x;
-  // The host always launches this kernel at the full width, so the stride is the pitch.
-  constexpr int tn = ncclSymkReduceLLMaxThreads;
+  int tn = blockDim.x;
   ncclCoopCta cta;
 
   NVCC_PRAGMA_UNROLL_DISABLED
@@ -554,7 +553,7 @@ template <template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
-                                      blockIdx.x, ncclSymkReduceLLMaxThreads);
+                                      blockIdx.x, ncclSymkMaxThreads);
   Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
   using Pack = BytePack<8>;
   constexpr int EltPerPack = 8 / sizeof(T);
