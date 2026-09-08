@@ -1288,9 +1288,11 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
   // Uses RaceDetector/WaveRaceState directly since the builder doesn't
   // expose registerDualOffsetLdsEvent.
   std::vector<RaceViolation> violations;
-  RaceDetector detector(/*nWaves=*/2, /*vgprCount=*/4,
+  RaceDetector detector(/*nWaves=*/
+                        2, /*vgprCount=*/4,
                         /*sgprCount=*/4, Dim3d(0),
-                        [&](RaceViolation v) { violations.push_back(v); });
+                        [&](RaceViolation v) { violations.push_back(v); },
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   auto &rs = detector.getWaveRaceState(0);
   std::vector<uint32_t> ldsAddrs(64, 0);
   ldsAddrs[0] = 100;

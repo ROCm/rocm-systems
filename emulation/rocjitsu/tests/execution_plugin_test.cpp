@@ -688,7 +688,8 @@ public:
     detector_ = std::make_unique<RaceDetector>(
         static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
         static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)),
-        [this](RaceViolation v) { violations.push_back(v); });
+        [this](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(wavefronts.front()->cu().arch()));
     wf_ = wavefronts.front();
     state_ = &detector_->getWaveRaceState(0);
   }
@@ -4584,8 +4585,9 @@ TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWork
 // -- Race trace tests --------------------------------------------------------
 
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/0x100, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/0x200,
@@ -4599,16 +4601,18 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
   EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
 }
 
 TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR,

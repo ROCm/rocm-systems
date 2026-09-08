@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
@@ -17,13 +18,37 @@ namespace rocjitsu::plugins::race_detector {
 class IntervalSet;
 class RaceDetector;
 
+struct CounterCapacities {
+  int vmcnt;
+  int lgkmcnt;
+};
+
+/// Adapt the generated architecture properties to the race core's compact
+/// counter model. A zero capacity means that the architecture has no combined
+/// counter of that type.
+[[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {
+  const auto properties = isa_properties(arch);
+  return {
+      .vmcnt = properties.vmcnt_capacity,
+      .lgkmcnt = properties.lgkmcnt_capacity,
+  };
+}
+
 /// Per-wave race detection state. Owns VGPR event lists, wave-level event
 /// queues, and provides event registration, waitcnt resolution, and VGPR
 /// race checking. Holds a pointer to the workgroup level RaceDetector for
 /// event allocation and lifecycle transitions.
 class WaveRaceState {
 public:
-  WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *);
+  WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
+
+  /// Apply the issue backpressure required before an instruction adds one
+  /// token to a finite hardware counter. This must run before checking that
+  /// instruction's operands.
+  void prepareForCounterIncrement(amdgpu::WaitCounterType);
+
+  /// Apply pre-operand backpressure to every counter incremented by an issue.
+  void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param pc The PC of the instruction that produced the event.
@@ -146,6 +171,7 @@ private:
   void applyCounterConstraint(amdgpu::WaitCounterType type, int maximumRemaining,
                               bool includeUnordered);
   void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
+  int doNotWaitValue(amdgpu::WaitCounterType type) const;
 
   void regEventCountInc(MemoryEventType type, int reg) {
     regEventCount[static_cast<int>(type)][reg]++;
@@ -165,6 +191,8 @@ private:
 
   std::vector<EventId> waveMemoryEvents;
   std::vector<EventId> barrierPendingEvents;
+
+  CounterCapacities counterCapacities;
 
   WaveId waveId;
   RaceDetector *detector;
