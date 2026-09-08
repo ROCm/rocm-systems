@@ -246,6 +246,15 @@ in the following table.
         | ``0`` (default on older ROCm versions): Disable registration of user
           buffers.
 
+    * - | ``NCCL_GRAPH_MIXING_SUPPORT``
+        | Enables support for multiple outstanding RCCL calls from parallel HIP
+          graphs, or from a HIP graph and non-captured RCCL calls. When disabled,
+          a communicator and its split-shared communicators cannot be used from
+          parallel graph launches, and a non-captured collective cannot be
+          launched while a graph using the same communicator is outstanding.
+      - | ``0``: Disable graph mixing support (default).
+        | ``1``: Enable graph mixing support.
+
     * - | ``NCCL_LAUNCH_MODE``
         | Controls how RCCL launches HIP kernels.
       - | ``PARALLEL`` (default): Use parallel launch mode.
