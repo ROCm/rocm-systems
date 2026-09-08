@@ -1956,7 +1956,9 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
       __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32,
+                                               false, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                               __MEMORY_SCOPE_DEVICE));
   return old_val.h2r;
 #endif
 }

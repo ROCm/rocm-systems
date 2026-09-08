@@ -38,13 +38,22 @@ template <typename T, typename F> struct Cond_t<false, T, F> {
 #define __HIP_MEMORY_SCOPE_SYSTEM 5
 #endif
 
-#include "amd_hip_scoped_atomic_helpers.h"
+// __HIP_MEMORY_SCOPE_* and Clang's __MEMORY_SCOPE_* are different enumerations,
+// so a scope supplied by a caller has to be translated rather than forwarded.
+constexpr int __hip_to_clang_memory_scope(int __hip_scope) {
+  return __hip_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD ? __MEMORY_SCOPE_SINGLE
+         : __hip_scope == __HIP_MEMORY_SCOPE_WAVEFRONT  ? __MEMORY_SCOPE_WVFRNT
+         : __hip_scope == __HIP_MEMORY_SCOPE_WORKGROUP  ? __MEMORY_SCOPE_WRKGRP
+         : __hip_scope == __HIP_MEMORY_SCOPE_AGENT      ? __MEMORY_SCOPE_DEVICE
+                                                        : __MEMORY_SCOPE_SYSTEM;
+}
+
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_unsafe_atomics.h"
 #endif
 
 // Atomic expanders
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __MEMORY_SCOPE_SYSTEM, typename T,
+template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
           typename Op, typename F>
 inline __attribute__((always_inline, device)) T hip_cas_expander(T* p, T x, Op op, F f) noexcept {
   using FP = __attribute__((address_space(0))) const void*;
@@ -58,18 +67,19 @@ inline __attribute__((always_inline, device)) T hip_cas_expander(T* p, T x, Op o
 
   auto q = reinterpret_cast<U*>(p);
 
-  U tmp0{__scoped_atomic_load_n(q, mem_order, mem_scope)};
+  U tmp0{__scoped_atomic_load_n(q, mem_order, __hip_to_clang_memory_scope(mem_scope))};
   U tmp1;
   do {
     tmp1 = tmp0;
 
     op(reinterpret_cast<T&>(tmp1), x);
-  } while (!__scoped_atomic_compare_exchange_n(q, &tmp0, tmp1, false, mem_order, mem_order, mem_scope));
+  } while (!__scoped_atomic_compare_exchange_n(q, &tmp0, tmp1, false, mem_order, mem_order,
+                                               __hip_to_clang_memory_scope(mem_scope)));
 
   return reinterpret_cast<const T&>(tmp0);
 }
 
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __MEMORY_SCOPE_SYSTEM, typename T,
+template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
           typename Cmp, typename F>
 inline __attribute__((always_inline, device)) T hip_cas_extrema_expander(T* p, T x, Cmp cmp,
                                                                          F f) noexcept {
@@ -84,16 +94,18 @@ inline __attribute__((always_inline, device)) T hip_cas_extrema_expander(T* p, T
 
   auto q = reinterpret_cast<U*>(p);
 
-  U tmp{__scoped_atomic_load_n(q, mem_order, mem_scope)};
+  U tmp{__scoped_atomic_load_n(q, mem_order, __hip_to_clang_memory_scope(mem_scope))};
   while (cmp(x, reinterpret_cast<const T&>(tmp)) &&
-         !__scoped_atomic_compare_exchange_n(q, &tmp, x, false, mem_order, mem_order, mem_scope));
+         !__scoped_atomic_compare_exchange_n(q, &tmp, x, false, mem_order, mem_order,
+                                             __hip_to_clang_memory_scope(mem_scope)));
 
   return reinterpret_cast<const T&>(tmp);
 }
 
 __device__ inline unsigned short int atomicCAS(unsigned short int* address,
                                                unsigned short int compare, unsigned short int val) {
-  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
@@ -101,54 +113,62 @@ __device__ inline unsigned short int atomicCAS_system(unsigned short int* addres
                                                       unsigned short int compare,
                                                       unsigned short int val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                       __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline int atomicCAS(int* address, int compare, int val) {
-  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
 __device__ inline int atomicCAS_system(int* address, int compare, int val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                       __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline unsigned int atomicCAS(unsigned int* address, unsigned int compare,
                                          unsigned int val) {
-  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
 __device__ inline unsigned int atomicCAS_system(unsigned int* address, unsigned int compare,
                                                 unsigned int val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                       __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline unsigned long atomicCAS(unsigned long* address, unsigned long compare,
                                           unsigned long val) {
-  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
 __device__ inline unsigned long atomicCAS_system(unsigned long* address, unsigned long compare,
                                                  unsigned long val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                       __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline unsigned long long atomicCAS(unsigned long long* address,
                                                unsigned long long compare, unsigned long long val) {
-  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
@@ -156,31 +176,36 @@ __device__ inline unsigned long long atomicCAS_system(unsigned long long* addres
                                                       unsigned long long compare,
                                                       unsigned long long val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange_n(address, &compare, val, false, __ATOMIC_RELAXED,
+                                       __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline float atomicCAS(float* address, float compare, float val) {
-  __hip_scoped_fp_cmpxchg(address, &compare, val, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange(address, &compare, &val, false, __ATOMIC_RELAXED,
+                                   __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
 __device__ inline float atomicCAS_system(float* address, float compare, float val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __hip_scoped_fp_cmpxchg(address, &compare, val, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange(address, &compare, &val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
 
 __device__ inline double atomicCAS(double* address, double compare, double val) {
-  __hip_scoped_fp_cmpxchg(address, &compare, val, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange(address, &compare, &val, false, __ATOMIC_RELAXED,
+                                   __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   return compare;
 }
 
 __device__ inline double atomicCAS_system(double* address, double compare, double val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    __hip_scoped_fp_cmpxchg(address, &compare, val, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_compare_exchange(address, &compare, &val, false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
   return compare;
 }
@@ -232,14 +257,14 @@ __device__ inline float atomicAdd(float* address, float val) {
   return unsafeAtomicAdd(address, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
 
 __device__ inline float atomicAdd_system(float* address, float val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 }
 
@@ -253,14 +278,14 @@ __device__ inline double atomicAdd(double* address, double val) {
   return unsafeAtomicAdd(address, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
 
 __device__ inline double atomicAdd_system(double* address, double val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_add(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 }
 
@@ -311,14 +336,14 @@ __device__ inline float atomicSub(float* address, float val) {
   return unsafeAtomicAdd(address, -val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
 
 __device__ inline float atomicSub_system(float* address, float val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 }
 
@@ -327,14 +352,14 @@ __device__ inline double atomicSub(double* address, double val) {
   return unsafeAtomicAdd(address, -val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
 
 __device__ inline double atomicSub_system(double* address, double val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_add(address, -val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 }
 
@@ -381,22 +406,30 @@ __device__ inline unsigned long long atomicExch_system(unsigned long long* addre
 }
 
 __device__ inline float atomicExch(float* address, float val) {
-  return __hip_scoped_fp_exchange(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  float old;
+  __scoped_atomic_exchange(address, &val, &old, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  return old;
 }
 
 __device__ inline float atomicExch_system(float* address, float val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_exchange(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    float old;
+    __scoped_atomic_exchange(address, &val, &old, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return old;
   }
 }
 
 __device__ inline double atomicExch(double* address, double val) {
-  return __hip_scoped_fp_exchange(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  double old;
+  __scoped_atomic_exchange(address, &val, &old, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  return old;
 }
 
 __device__ inline double atomicExch_system(double* address, double val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_exchange(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    double old;
+    __scoped_atomic_exchange(address, &val, &old, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return old;
   }
 }
 
@@ -457,7 +490,7 @@ __device__ inline float atomicMin(float* addr, float val) {
   return unsafeAtomicMin(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
@@ -467,7 +500,7 @@ __device__ inline float atomicMin_system(float* addr, float val) {
   return unsafeAtomicMin(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 #endif
 }
@@ -477,7 +510,7 @@ __device__ inline double atomicMin(double* addr, double val) {
   return unsafeAtomicMin(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
@@ -487,7 +520,7 @@ __device__ inline double atomicMin_system(double* addr, double val) {
   return unsafeAtomicMin(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 #endif
 }
@@ -548,7 +581,7 @@ __device__ inline float atomicMax(float* addr, float val) {
   return unsafeAtomicMax(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
@@ -558,7 +591,7 @@ __device__ inline float atomicMax_system(float* addr, float val) {
   return unsafeAtomicMax(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 #endif
 }
@@ -568,7 +601,7 @@ __device__ inline double atomicMax(double* addr, double val) {
   return unsafeAtomicMax(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    return __scoped_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 #endif
 }
@@ -578,7 +611,7 @@ __device__ inline double atomicMax_system(double* addr, double val) {
   return unsafeAtomicMax(addr, val);
 #else
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
-    return __hip_scoped_fp_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    return __scoped_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   }
 #endif
 }
