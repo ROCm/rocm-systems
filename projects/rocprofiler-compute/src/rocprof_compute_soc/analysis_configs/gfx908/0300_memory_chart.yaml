@@ -69,8 +69,6 @@ Panel Config:
           value: ROUND(SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom), 0)
         VL1 Hit:
           value: ROUND(100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
-        VL1 Lat:
-          value: ROUND(SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TA_TCP_STATE_READ_sum), 0)
         VL1 Coalesce:
           value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
         VL1 Stall:
@@ -124,10 +122,6 @@ Panel Config:
           value: ROUND(SUM(TCC_ATOMIC_sum) / SUM($denom), 0)
         L2 Hit:
           value: ROUND(100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum), 0)
-        L2 Rd Lat:
-          value: ROUND(SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum), 0)
-        L2 Wr Lat:
-          value: ROUND(SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), 0)
         Fabric_L2 Rd:
           value: ROUND(SUM(TCC_EA0_RDREQ_sum) / SUM($denom), 0)
         Fabric_L2 Wr:
@@ -223,8 +217,6 @@ Panel Config:
       unit after coalescing per normalization unit
     VL1 Hit: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    VL1 Lat: Calculated as the average number of cycles that a vL1D cache line request
-      spent in the vL1D cache pipeline.
     VL1 Coalesce: Indicates how well memory instructions were coalesced by the address
       processing unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated
       as the average number of thread-requests generated per instruction divided by
@@ -272,12 +264,6 @@ Panel Config:
       L2 from all clients.
     L2 Hit: The ratio of the number of L2 cache line requests that hit in the L2 cache
       over the total number of incoming cache line requests to the L2 cache.
-    L2 Rd Lat: Calculated as the average number of cycles that the vL1D cache took
-      to issue and receive read requests from the L2 Cache. This number also includes
-      requests for atomics with return values.
-    L2 Wr Lat: Calculated as the average number of cycles that the vL1D cache took
-      to issue and receive acknowledgement of a write request to the L2 Cache. This
-      number also includes requests for atomics without return values.
     Fabric_L2 Rd: Number of L2 cache - Infinity Fabric read requests (either 32-byte
       or 64-byte) summed over TCC instances per normalization unit.
     Fabric_L2 Wr: Number of L2 cache - Infinity Fabric write requests (either 32-byte
