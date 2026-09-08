@@ -1809,13 +1809,39 @@ TEST_F(GinMPIDeviceTests, Barrier_WorldTeamUsesWorldPool) {
 // Small because all CTAs must be resident at once, each waiting on its peers.
 constexpr int kWorldBarrierCtas = 4;
 
+// Per-CTA view of the slice its barrier index resolved to, and of the arrivals
+// that landed there.
+struct MultiIndexBarrierObservation {
+  uint32_t activeSignal;
+  int      completedIters;
+  int      signalMismatches;
+};
+
 // One barrier index per CTA, so the world pool's cell striding is exercised.
-__global__ void barrierWorldMultiIndexKernel(int iters, struct ncclDevComm devComm) {
+__global__ void barrierWorldMultiIndexKernel(
+    int iters, MultiIndexBarrierObservation* observations,
+    struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
   ncclGinBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), gin, ncclTeamTagWorld{}, /*barrierIndex=*/blockIdx.x};
+  ncclTeam world = ncclTeamWorld(devComm);
+
+  if (threadIdx.x == 0) observations[blockIdx.x].activeSignal = bar.signal;
+
   for (int i = 0; i < iters; i++) {
     bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
+
+  // Only peer CTA k signals this CTA's slice, once per round, so every peer
+  // cell holds exactly iters. CTAs sharing one slice inflates these instead.
+  if (threadIdx.x == 0) {
+    int mismatches = 0;
+    for (int peer = 0; peer < world.nRanks; ++peer) {
+      uint64_t expected = peer == world.rank ? 0 : static_cast<uint64_t>(iters);
+      if (gin.readSignal(bar.signal + peer) != expected) ++mismatches;
+    }
+    observations[blockIdx.x].completedIters = iters;
+    observations[blockIdx.x].signalMismatches = mismatches;
   }
 }
 
@@ -1848,12 +1874,36 @@ TEST_F(GinMPIDeviceTests, Barrier_WorldMultiIndex) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
+  constexpr size_t kObservationBytes =
+      kWorldBarrierCtas * sizeof(MultiIndexBarrierObservation);
+  MultiIndexBarrierObservation* dObservations = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservations, kObservationBytes));
+  auto observationsCleanup = makeScopeGuard([&]() {
+    if (dObservations) (void)hipFree(dObservations);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservations, 0, kObservationBytes));
+
   // All ranks finished setup before any kernel launches.
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // CTA k barriers with CTA k on every peer, and returning is the assertion.
-  barrierWorldMultiIndexKernel<<<kWorldBarrierCtas, kGinKernelThreads, 0, stream>>>(kIters, devComm);
+  // CTA k barriers with CTA k on every peer.
+  barrierWorldMultiIndexKernel<<<kWorldBarrierCtas, kGinKernelThreads, 0, stream>>>(
+      kIters, dObservations, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  MultiIndexBarrierObservation observations[kWorldBarrierCtas]{};
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(observations, dObservations, kObservationBytes,
+                                      hipMemcpyDeviceToHost));
+
+  // Completing the barrier is not enough: collapsing the pool's cell striding
+  // scales arrivals and wait targets together, so every CTA still returns.
+  for (int cta = 0; cta < kWorldBarrierCtas; ++cta) {
+    SCOPED_TRACE("barrier index " + std::to_string(cta));
+    ASSERT_MPI_EQ(devComm.worldGinBarrier.signal0 + cta * nRanks,
+                  observations[cta].activeSignal);
+    ASSERT_MPI_EQ(kIters, observations[cta].completedIters);
+    ASSERT_MPI_EQ(0, observations[cta].signalMismatches);
+  }
 
   MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -3211,8 +3261,9 @@ TEST_F(GinMPIDeviceTests, DevComm_ReturnsRequestedVersion) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t comm = getActiveCommunicator();
 
-  // 2.30.3 is the oldest version the GIN proxy backend has a GPU context layout
-  // for, and GIN is already enabled on the comm whenever NCCL_GIN_ENABLE is set.
+  // Anything below 2.30.3 maps to GIN proxy backend version 0
+  // (proxyBackendMinVersions), which ncclGinProxyGpuCtx_init does not
+  // implement, so ncclDevCommCreate fails.
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.version = NCCL_VERSION(2, 30, 3);
   ncclDevComm devComm{};
