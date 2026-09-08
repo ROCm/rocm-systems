@@ -280,15 +280,16 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
-      // gfx950/gfx1250 skip-free: leftover peer maps make AddressFree hang or
-      // double-free; leak the reservation for the OS to reclaim at exit.
-      if (!rcclSkipCuMemFree()) {
-        CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-        CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
-      } else {
-        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree (NCCL_CUMEM_SKIP_FREE)");
-      }
+      // gfx1250 only (or NCCL_CUMEM_SKIP_FREE=1): leftover peer maps can make
+      // AddressFree hang or double-free. gfx950 still frees this reservation.
+      CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
+      size_t flatBytes = devr->lsaSize * devr->bigSize;
       devr->lsaFlatBase = nullptr;
+      if (!rcclSkipLsaFlatAddressFree()) {
+        CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
+      } else {
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree (gfx1250/NCCL_CUMEM_SKIP_FREE)");
+      }
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }
@@ -2177,11 +2178,15 @@ ncclResult_t ncclDevCommDestroy(struct ncclComm* comm, struct ncclDevComm const*
 
   // Tear down GIN contexts before the resource window: signal/barrier memory lives
   // inside resourceWindow and Anvil SDMA still references it during destroyContext.
+  // Always run both steps; fold the second status so a GIN failure does not skip
+  // window deregister (finalize drain still reclaims, but this is the explicit path).
   if (devComm->ginContextCount) {
-    NCCLCHECKGOTO(ncclGinDevCommFree(comm, devComm), ret, end);
+    ncclResult_t ginRet = ncclGinDevCommFree(comm, devComm);
+    if (ginRet != ncclSuccess) ret = ginRet;
   }
   if (devComm->resourceWindow != nullptr) {
-    NCCLCHECKGOTO(ncclCommWindowDeregister(comm, devComm->resourceWindow), ret, end);
+    ncclResult_t winRet = ncclCommWindowDeregister(comm, devComm->resourceWindow);
+    if (winRet != ncclSuccess && ret == ncclSuccess) ret = winRet;
   }
 
 end:

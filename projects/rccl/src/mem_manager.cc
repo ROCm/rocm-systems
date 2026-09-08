@@ -110,7 +110,7 @@ ncclResult_t ncclMemManagerDestroy(struct ncclComm* comm) {
 
     // RCCL: release VA reservation for entries that were Suspended
     // (state == Released) but never Resumed before Destroy.
-    if (entry->state == ncclDynMemStateReleased && entry->ptr != nullptr && !rcclSkipCuMemFree()) {
+    if (entry->state == ncclDynMemStateReleased && entry->ptr != nullptr) {
       CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)entry->ptr, entry->size));
     }
 

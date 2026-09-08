@@ -798,6 +798,7 @@ static testResult_t deregisterTestWindows(
   }
   return testSuccess;
 }
+#endif
 
 static testResult_t freeTestDeviceBuffers(
     void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
@@ -841,7 +842,6 @@ static testResult_t freeTestDeviceBuffers(
   }
   return testSuccess;
 }
-#endif
 
 static testResult_t destroyTestComms(ncclComm_t* comms, int count) {
   for (int i = 0; i < count; i++) {
@@ -1854,10 +1854,8 @@ testResult_t threadInit(struct threadArgs* args) {
                                   args->biasRegHandles, args->nGpus));
 #endif
   TESTCHECK(destroyTestComms(args->comms, args->nGpus));
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   TESTCHECK(freeTestDeviceBuffers(args->sendbuffs, args->recvbuffs, args->bias, args->expected,
                                   args->nGpus));
-#endif
 
   return testSuccess;
 }
@@ -2798,29 +2796,8 @@ testResult_t run() {
                                     biasRegHandles.data(), nGpus*nThreads));
 #endif
     TESTCHECK(destroyTestComms(comms, nGpus*nThreads));
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     TESTCHECK(freeTestDeviceBuffers(sendbuffs.data(), recvbuffs.data(), bias.data(), expected.data(),
                                     nGpus*nThreads));
-#else
-    for (int i = 0; i < nGpus*nThreads; i++) {
-      if (sendbuffs[i]) {
-        CUDACHECK(cudaFree((char*)sendbuffs[i]));
-        sendbuffs[i] = nullptr;
-      }
-      if (recvbuffs[i]) {
-        CUDACHECK(cudaFree((char*)recvbuffs[i]));
-        recvbuffs[i] = nullptr;
-      }
-      if (bias[i]) {
-        CUDACHECK(cudaFree((char*)bias[i]));
-        bias[i] = nullptr;
-      }
-      if (datacheck && expected[i]) {
-        CUDACHECK(cudaFree((char*)expected[i]));
-        expected[i] = nullptr;
-      }
-    }
-#endif
   }
   free(comms);
   envstr = getenv("NCCL_TESTS_MIN_BW");

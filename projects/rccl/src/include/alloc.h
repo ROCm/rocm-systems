@@ -65,16 +65,48 @@ inline void rcclRegisterShutdownHandler() {
 // still free normally, so long-lived processes do not grow memory on every
 // ncclCommDestroy. Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
 // NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
+//
+// Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
+// LSA flat VA reservation (lsaFlatBase). That skip is gfx1250-only by default —
+// MI355 (gfx950) device-API teardown AddressFrees this reservation with
+// skip-free auto-on and does not hang. NCCL_CUMEM_SKIP_FREE=0/1 still overrides.
+inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx950") != nullptr ||
+         strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclSkipLsaFlatAddressFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclQueryDeviceProp(hipDeviceProp_t* prop) {
+  *prop = hipDeviceProp_t{};
+  int dev = 0;
+  if (hipGetDevice(&dev) != hipSuccess) return false;
+  if (hipGetDeviceProperties(prop, dev) != hipSuccess) return false;
+  return true;
+}
+
 inline bool rcclSkipCuMemFree() {
   static const bool skip = [](){
     const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
     if (e) return atoi(e) != 0;
     hipDeviceProp_t prop;
-    int dev = 0;
-    if (hipGetDevice(&dev) != hipSuccess) return false;
-    if (hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
-    return strstr(prop.gcnArchName, "gfx950") != nullptr ||
-           strstr(prop.gcnArchName, "gfx1250") != nullptr;
+    if (!rcclQueryDeviceProp(&prop)) return false;
+    return rcclSkipCuMemFreeFromArch(prop);
+  }();
+  return skip;
+}
+
+// gfx1250: leftover peer maps can make lsaFlatBase AddressFree hang/double-free.
+// gfx950: keep freeing the reservation (measured on MI355; see ROCM-30633).
+inline bool rcclSkipLsaFlatAddressFree() {
+  static const bool skip = [](){
+    const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
+    if (e) return atoi(e) != 0;
+    hipDeviceProp_t prop;
+    if (!rcclQueryDeviceProp(&prop)) return false;
+    return rcclSkipLsaFlatAddressFreeFromArch(prop);
   }();
   return skip;
 }
