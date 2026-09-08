@@ -23,7 +23,7 @@
 #ifndef VHSAKMT_VIRTIO_PROTO_H
 #define VHSAKMT_VIRTIO_PROTO_H
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 // Forward declaration for HsaKFDContext to avoid dependency issues
 typedef struct _HsaKFDContext HsaKFDContext;

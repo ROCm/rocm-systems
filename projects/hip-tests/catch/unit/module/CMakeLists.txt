@@ -20,6 +20,7 @@ set(TEST_SRC
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
     hipModuleLoadFatBinary.cc
+    test_fatbin_mixed_arch.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -38,6 +39,24 @@ else()
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
 endif()
 add_custom_target(get_function_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
+
+# Deliberately-mismatched fat binary for Unit_FatBin_NoCompatibleCodeObject_*:
+# built for gfx900+gfx906 only (fixed archs, NOT ${OFFLOAD_ARCH_LIST}) so it
+# never matches a modern (non-Vega) runner and drives ExtractFatBinaryUsingCOMGR
+# into its "no compatible code object" path.
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=gfx900 --offload-arch=gfx906 --cuda-device-only
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o fatbin_mismatch_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_mismatch_module.cc)
+  add_custom_target(fatbin_mismatch_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+endif()
 
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
@@ -191,8 +210,17 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernel.code")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
+  # copyKernel.s must be real GPU (GCN) assembly so the CheckCodeObjAttr test can
+  # find the .uniform_work_group_size metadata. That requires --cuda-device-only
+  # plus a single offload arch; without --cuda-device-only clang emits a host/IR
+  # bundle, and -S rejects -o when more than one arch is given. The metadata is
+  # arch-independent, so the first offload arch is sufficient.
+  set(COPYKERNEL_S_OFFLOAD_ARCH)
+  if(OFFLOAD_ARCH_LIST)
+    list(GET OFFLOAD_ARCH_LIST 0 COPYKERNEL_S_OFFLOAD_ARCH)
+  endif()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${COPYKERNEL_S_OFFLOAD_ARCH} -mcode-object-version=5 --cuda-device-only -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -410,10 +438,20 @@ add_dependencies(ModuleTest empty_file)
 add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
+  # SPIR-V builds compile copyKernel.s for --offload-arch=amdgcnspirv, which emits
+  # SPIR-V rather than GCN assembly, so it has no AMDGPU .uniform_work_group_size
+  # metadata. Signal the CheckCodeObjAttr test to skip itself in that case. Set the
+  # define on the source file rather than the ModuleTest target so it also reaches
+  # the per-file executable created when STANDALONE_TESTS=ON.
+  if(ENABLE_SPIRV)
+    set_source_files_properties(hipExtModuleLaunchKernel.cc PROPERTIES
+      COMPILE_DEFINITIONS HIP_TESTS_SPIRV_BUILD)
+  endif()
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
+  add_dependencies(ModuleTest fatbin_mismatch_module)
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)
