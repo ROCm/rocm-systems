@@ -17,9 +17,11 @@ from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
+    ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
+    format_operator_args,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -364,6 +366,48 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
+def format_node_args(node: CallTreeNode) -> str:
+    """Return the inline ``args=...`` segment for a node, with a leading space.
+
+    Empty when the node recorded no arguments, or when its calls used more than
+    one distinct blob; those are rendered by format_args_variant_lines.
+    """
+    variants = node.args_variants
+    if len(variants) != 1:
+        return ""
+    rendered = format_operator_args(variants[0][0])
+    return f" args={rendered}" if rendered else ""
+
+
+def format_variant_calls(count: int) -> str:
+    """Return the call-count label for one args variant, empty when the count
+    is zero."""
+    if count <= 0:
+        return ""
+    return f"{count} call" if count == 1 else f"{count} calls"
+
+
+def format_args_variant_lines(node: CallTreeNode) -> list[str]:
+    """Return the ``args variants:`` block for a node, most frequent variant
+    first. Empty for a node with fewer than two distinct argument blobs."""
+    variants = node.args_variants
+    if len(variants) < 2:
+        return []
+
+    shown = variants[:ARGS_DISPLAY_MAX_VARIANTS]
+    labels = [format_variant_calls(count) for _blob, count in shown]
+    label_width = max(len(label) for label in labels)
+    lines = ["args variants:"]
+    lines.extend(
+        f"  {label:<{label_width}}  {format_operator_args(blob)}"
+        for label, (blob, _count) in zip(labels, shown)
+    )
+    hidden = len(variants) - len(shown)
+    if hidden:
+        lines.append(f"  ... {hidden} more variant{'' if hidden == 1 else 's'}")
+    return lines
+
+
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
@@ -371,11 +415,25 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     return min(safe_width, max_width)
 
 
+def build_continuation_indent(prefix: str, continuation_prefix: str) -> str:
+    """Return the indent for lines wrapped under ``prefix``.
+
+    ``continuation_prefix`` holds the vertical pipes of the enclosing levels
+    and is padded with spaces to the width of ``prefix``. When it is empty
+    the indent is spaces alone.
+    """
+    if not continuation_prefix:
+        return " " * len(prefix)
+    padding = max(len(prefix) - len(continuation_prefix), 0)
+    return continuation_prefix + " " * padding
+
+
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
     width: Optional[int] = None,
     break_long_words: bool = False,
+    continuation_prefix: str = "",
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
     effective_width = get_tree_wrap_width() if width is None else width
@@ -384,7 +442,7 @@ def print_wrapped_tree_line(
             body,
             width=effective_width,
             initial_indent=prefix,
-            subsequent_indent=" " * len(prefix),
+            subsequent_indent=build_continuation_indent(prefix, continuation_prefix),
             break_long_words=break_long_words,
             break_on_hyphens=False,
         )
@@ -419,15 +477,7 @@ def print_wrapped_kernel_line(
         print(f"{prefix}{suffix}")
         return
 
-    # Build continuation with vertical pipes from parent levels
-    # Preserve parent pipes but replace branch character with spaces
-    if len(continuation_prefix) > 0:
-        # continuation_prefix has pipes, add spaces for branch chars
-        spaces_needed = len(prefix) - len(continuation_prefix)
-        continuation = continuation_prefix + " " * spaces_needed
-    else:
-        # No parent pipes, just use spaces matching the prefix
-        continuation = " " * len(prefix)
+    continuation = build_continuation_indent(prefix, continuation_prefix)
 
     for i, chunk in enumerate(wrapped_name):
         if i == 0:
@@ -477,8 +527,6 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
         print("\nOperator summary: (no operators with recorded dispatches)")
         return
 
-    operator_name_wrap_width = 72
-
     # (DataFrame column, display label) pairs. DataFrame names match the
     # schema produced by build_operator_summary; display labels are short
     # because the header line below explains the semantics and time cells
@@ -496,6 +544,7 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
     ]
     source_cols = [c for c, _ in column_map]
     headers = [h for _, h in column_map]
+    text_cols = {"Operator": 72}
     time_cols = (
         "Total_GPU",
         "Mean_Per_Call",
@@ -505,17 +554,18 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
     )
 
     display_df = summary_df[source_cols].copy()
-    display_df["Operator"] = (
-        display_df["Operator"]
-        .astype(str)
-        .apply(lambda s: textwrap.fill(s, width=operator_name_wrap_width))
-    )
+    for col, wrap_width in text_cols.items():
+        display_df[col] = (
+            display_df[col]
+            .astype(str)
+            .apply(lambda s, width=wrap_width: textwrap.fill(s, width=width))
+        )
     for col in time_cols:
         display_df[col] = display_df[col].apply(format_duration)
 
     # Time columns are pre-formatted strings; only % Total still needs floatfmt.
-    floatfmt = ("", "", "", "", ".2f", "", "", "", "")
-    colalign = ("left",) + ("right",) * (len(headers) - 1)
+    floatfmt = tuple(".2f" if col == "Pct_Total_GPU" else "" for col in source_cols)
+    colalign = tuple("left" if col in text_cols else "right" for col in source_cols)
 
     print(
         "\nOperator summary (Min/Max/Mean are per-dispatch over the subtree; "
@@ -544,20 +594,34 @@ def print_operator_node(
     branch_char = "└─ " if is_last else "├─ "
     node_prefix = f"{indent}{branch_char}"
 
+    # Build new parent_pipes for children and for this node's wrapped lines
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    args_segment = format_node_args(node)
     if is_branching:
-        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{node.name}{args_segment} {format_node_stats(node)}",
+            continuation_prefix=new_parent_pipes,
+        )
     else:
         if len(node.invocation_ids) > 0:
             suffix = f" (calls: {node.call_count})"
         else:
             suffix = ""
-        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{node.name}{args_segment}{suffix}",
+            continuation_prefix=new_parent_pipes,
+        )
 
-    # Build new parent_pipes for children
-    if is_last:
-        new_parent_pipes = parent_pipes + "   "  # 3 spaces
-    else:
-        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+    for variant_line in format_args_variant_lines(node):
+        print_wrapped_tree_line(
+            new_parent_pipes, variant_line, continuation_prefix=new_parent_pipes
+        )
 
     # Process child nodes
     children = sorted(
@@ -588,12 +652,13 @@ def print_operator_node(
         kernel_is_last = i == len(node.kernels) - 1
         kernel_branch_char = "└─ " if kernel_is_last else "├─ "
         kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+        kernel_pipes = new_parent_pipes + ("   " if kernel_is_last else "|  ")
 
         print_wrapped_kernel_line(
             kernel_prefix,
             display_name,
             f"{id_suffix} {stats}".strip(),
-            continuation_prefix=new_parent_pipes,
+            continuation_prefix=kernel_pipes,
         )
 
 

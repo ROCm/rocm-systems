@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/poll_reader.hpp"
@@ -92,7 +93,57 @@ constexpr size_t kMaxSessions = 64;
 // unmatched start belongs to a dispatch whose eop never arrived.
 constexpr uint64_t kLoggingIntervalNs        = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kProcessorEvictIntervalNs = 1'000'000'000ull;  // 1 s
-constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
+
+// F3: a retained START may belong to a still-running long kernel, so the eviction
+// age MUST exceed the longest real dispatch or a live kernel's START is aged out
+// before its EOP arrives (emitting it start-unknown). The old 5 s bound aged out
+// ordinary multi-second kernels; default to 30 min and let it be tuned in seconds
+// via ROCPROFILER_KFD_DISPATCH_LOG_START_MAX_AGE_SEC. Eviction still bounds
+// pending_starts growth for genuinely orphaned STARTs (queue died mid-dispatch),
+// now paired with the F7 per-GPU hub cap for the fast-churn case. Coordinated with
+// F7: the age is the slow backstop, the hub cap the hard bound.
+constexpr uint64_t kStartMaxAgeSecDefault = 1800;  // 30 min
+
+uint64_t
+start_max_age_ns()
+{
+    // Read the env once: this runs every processor batch and common::get_env
+    // scans environ, which is not thread-safe against concurrent env mutation.
+    static const uint64_t _cached = []() {
+        const uint64_t _sec = common::get_env<uint64_t>(
+            "ROCPROFILER_KFD_DISPATCH_LOG_START_MAX_AGE_SEC", uint64_t{kStartMaxAgeSecDefault});
+        // Clamp: 0 (or an unparsed 0) would evict everything immediately; an absurd
+        // value could overflow the ns multiply. Bound to [1 s, 7 days].
+        constexpr uint64_t _min_sec = 1;
+        constexpr uint64_t _max_sec = 7ull * 24 * 3600;
+        uint64_t           _use     = _sec;
+        if(_sec < _min_sec)
+            _use = kStartMaxAgeSecDefault;
+        else if(_sec > _max_sec)
+            _use = _max_sec;
+        return _use * 1'000'000'000ull;
+    }();
+    return _cached;
+}
+
+// Hard size cap on a GPU's retained-START map. start_max_age_ns() above is only
+// the slow age backstop, so this is the bound that actually holds under a
+// sustained EOP loss -- exactly the role D9's cap plays for the hub, sized the
+// same way and for the same reason (the map is per-GPU, and a workload's genuine
+// in-flight peak is hundreds of thousands of dispatches). The [1, 4194304] range
+// and the reject-and-default parse are D8/D9's shared contract; read once, forced
+// at reader start so no worker thread races a concurrent setenv.
+size_t
+pending_starts_cap()
+{
+    static const size_t _cached = []() -> size_t {
+        constexpr long _dflt = 2'000'000;
+        auto           _v =
+            env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS", 1, 4'194'304);
+        return static_cast<size_t>(_v.value_or(_dflt));
+    }();
+    return _cached;
+}
 
 // Overflow depth at which the processor is clearly not keeping up. Not a cap:
 // dropping here would lose records the ring already gave us.
@@ -126,7 +177,12 @@ struct processor_state
 {
     std::unordered_map<uint32_t, pair_state> by_gpu = {};
 
-    pair_state& for_gpu(uint32_t gpu_id) { return by_gpu[gpu_id]; }
+    pair_state& for_gpu(uint32_t gpu_id)
+    {
+        auto [it, ins] = by_gpu.try_emplace(gpu_id);
+        if(ins) it->second.max_pending_starts = pending_starts_cap();
+        return it->second;
+    }
 };
 
 // Validated before any sizing math uses it.
@@ -209,6 +265,13 @@ struct reader_state
     // `stop` only asks it to wind down; the reader still publishes a final batch
     // afterwards, so the processor must key its exit off this instead.
     std::atomic<bool> reader_done = {false};
+    // Records copied out of the ring but not yet visible in the pipe: reserved
+    // per region inside copy_pipes() before the first memcpy, discharged per batch
+    // at publish(). The processor's closed-window GC reads this (acquire) before
+    // pipe.empty() so it never expires a window whose EOP is already in the
+    // reader's hand but not yet published. Reader is the sole writer. Covers only
+    // COPIED EOPs (F4); EOPs still in the ring remain the accepted R10 residual.
+    std::atomic<uint64_t> reader_copied_unpublished = {0};
     // Read by nudge_reader() (from wait_for_reader_quiesce, ~500 Hz) while
     // stop_reader() writes them; atomic so those overlap without a data race and a
     // nudge never writes into a recycled fd.
@@ -500,18 +563,28 @@ copy_records(reader_state& st)
                                         wptr_arr,
                                         rptr_arr,
                                         _s.cursors,
-                                        _batch->records);
+                                        _batch->records,
+                                        &st.reader_copied_unpublished);
 
         if(_direct)
         {
             // Release-store inside publish() orders the copy above before the
-            // processor can observe the batch.
-            if(_copied > 0) st.pipe.publish();
+            // processor can observe the batch. Discharge the reservation this
+            // batch made (_copied == _batch->records.size() on the direct path)
+            // right after publish, so a copied EOP is counted continuously from
+            // copy_pipes' reserve until the processor can see it.
+            if(_copied > 0)
+            {
+                st.pipe.publish();
+                st.reader_copied_unpublished.fetch_sub(_copied, std::memory_order_release);
+            }
         }
         else
         {
             if(_copied == 0) _s.overflow.pop_back();
-            spill_overflow_to_pipe(st.pipe, _s.overflow);
+            // Records parked in overflow stay reserved until their spill publishes
+            // them, so window (1) is covered by the same counter.
+            spill_overflow_to_pipe(st.pipe, _s.overflow, &st.reader_copied_unpublished);
             note_overflow_depth(st, _s);
         }
         _total += _copied;
@@ -561,7 +634,7 @@ process_batch(processor_state& proc, const record_batch& batch)
     // backlogged processor ages nothing. starts_evicted is an R1 source counter.
     if(batch.now_ns - _pairing.last_evict_ns >= kProcessorEvictIntervalNs)
     {
-        _pairing.starts_evicted += _pairing.evict_stale(batch.now_ns, kStartMaxAgeNs);
+        _pairing.starts_evicted += _pairing.evict_stale(batch.now_ns, start_max_age_ns());
         _pairing.last_evict_ns = batch.now_ns;
     }
 
@@ -646,21 +719,50 @@ log_stream_status(const dlog_session& s)
                              args.status.target_exit_count);
 }
 
+// Read the STREAM_OP_STATUS flags word (F11 FATAL detection). Returns 0 on a dead
+// fd or a failed ioctl: 0 has no bits set, so the FATAL test fails and the caller
+// falls back to the recoverable-reset handling -- safe, because a genuinely fatal
+// stream also stops producing and will re-assert POLLERR (or HUP) on the next pass.
+// Unlike log_stream_status this returns the word so a data decision can be made:
+// FATAL is the one status bit that gates handling, per the driver contract.
+uint64_t
+read_stream_status_flags(const dlog_session& s)
+{
+    if(s.stream_fd < 0) return 0;
+    auto args = kfd_dlog_stream_args{};
+    args.op   = KFD_DLOG_STREAM_OP_STATUS;
+    if(ioctl(s.stream_fd, KFD_DLOG_STREAM_IOC, &args) != 0) return 0;
+    return args.status.status;
+}
+
 void
 stop_reader()
 {
     auto& st = state();
-    if(!st.running.load(std::memory_order_acquire)) return;
+
+    // setup_mu is taken BEFORE reading running: reading it first (as before) is a
+    // no-op that misses a concurrent establish_session() mid-arm before it publishes
+    // running=true, which would then create reader threads and publish a session
+    // after teardown. establish_session() re-checks get_fini_status() and
+    // reader_unavailable UNDER this same lock, so latching reader_unavailable here
+    // makes the in-flight arm refuse. The whole terminating sequence runs in this one
+    // critical section; setup_mu is a leaf (no worker thread acquires it), so holding
+    // it across the joins cannot deadlock. stop+wake precede the joins so the join is
+    // bounded rather than hanging while holding setup_mu.
+    auto _lk = std::lock_guard<std::mutex>{st.setup_mu};
+    if(!st.running.load(std::memory_order_relaxed)) return;
 
     // Latch unavailable before the join so no dispatch can acquire a correlation
-    // key against a reader that is on its way out (cleared again below).
+    // key against a reader that is on its way out (cleared again below only on a
+    // non-finalize stop).
     st.reader_unavailable.store(true, std::memory_order_release);
     st.stop.store(true, std::memory_order_release);
     const int _wake = st.wake_fd.load(std::memory_order_acquire);
     if(_wake >= 0)
     {
         uint64_t one = 1;
-        // Best-effort wake; a failed write only costs one poll interval.
+        // Best-effort wake BEFORE any join, so the reader observes stop and exits
+        // rather than the join hanging while setup_mu is held.
         [[maybe_unused]] auto _rc = ::write(_wake, &one, sizeof(one));
     }
     if(st.thread.joinable()) st.thread.join();
@@ -668,17 +770,6 @@ stop_reader()
     // only shrink. The processor then drains what is left and exits.
     if(st.processor_thread.joinable()) st.processor_thread.join();
 
-    // Teardown runs without taking setup_mu on purpose: it is only safe because the
-    // caller (registration::finalize) tears down queue interception
-    // (queue_controller_fini) BEFORE kfd::finalize(), so no interceptor thread can
-    // still be inside ensure_reader_session()/setup_session() by the time we get
-    // here, and finalize itself is std::call_once (single-threaded). If that ordering
-    // ever changes, this teardown must take st.setup_mu to serialize against a
-    // concurrent setup_session(). The reader thread is already stopped+joined above.
-    // Belt-and-suspenders against a late dispatch in the teardown window:
-    // establish_session() additionally refuses when registration::get_fini_status()
-    // != 0, so once finalization has started a dispatch can no longer re-arm the
-    // reader even if it slips past the reader_unavailable latch this function set.
     const size_t _n = st.session_count.load(std::memory_order_acquire);
     for(size_t i = 0; i < _n; ++i)
     {
@@ -687,7 +778,13 @@ stop_reader()
     }
     st.session_count.store(0, std::memory_order_release);
     st.any_session_ready.store(false, std::memory_order_release);
-    st.reader_unavailable.store(false, std::memory_order_release);
+    // Finalize-path stop: leave reader_unavailable LATCHED so a dispatch that
+    // slipped past establish_session()'s pre-lock checks cannot re-arm the reader
+    // under setup_mu after us. A non-finalize stop (a client detach that may
+    // re-attach) clears it so a later establish_session() can restart the reader.
+    if(registration::get_fini_status() == 0)
+        st.reader_unavailable.store(false, std::memory_order_release);
+
     if(st.kfd_fd >= 0)
     {
         ::close(st.kfd_fd);
@@ -701,7 +798,16 @@ stop_reader()
     ROCP_INFO << "KFD dispatch-log reader: stopped";
 }
 
-reader_state::~reader_state() { stop_reader(); }
+reader_state::~reader_state()
+{
+    // F13 part 2: in a fork child (D6's unconditional fork generation) the reader
+    // thread does not exist and setup_mu / the session containers may be mid-mutation
+    // by a vanished thread. Skip stop_reader()'s join+teardown -- the same treatment
+    // D6 gives TaskGroup (skip the dangerous thread work; the child abandoned this
+    // state via disable_reader_in_child). Value members destruct as they do there.
+    if(internal_threading::fork_stale()) return;
+    stop_reader();
+}
 
 // pthread_atfork child handler. Only the forking thread survives, so this does
 // atomic stores and fd/mapping drops only -- no lock, no allocation, no join.
@@ -723,18 +829,23 @@ disable_reader_in_child()
     // Not detach(): that would leave the handle believing a thread exists.
     new(&st.thread) std::thread{};
     new(&st.processor_thread) std::thread{};
-    // Drop the reference WITHOUT closing (§3.8): the persistent wake eventfd is
-    // owned by the parent; closing it here would corrupt the parent's descriptor. A
-    // child that later starts a reader creates its own (wake_fd < 0).
+    // Drop the reference WITHOUT closing (§3.8): the persistent wake eventfd's number
+    // must never be recycled under the parent's nudge_reader; the child sets it -1 so
+    // its own nudge is inert and a later child reader creates a fresh one.
     st.wake_fd.store(-1, std::memory_order_relaxed);
-    st.kfd_fd = -1;
-    // Dropping ownership without freeing: the parent still owns them, and a free
-    // here would corrupt its state.
+    // F13: close the inherited fds/maps. After fork the child has its own fd table,
+    // so close()/munmap() here release the child's copies WITHOUT touching the
+    // parent's descriptors (the old "corrupts the parent" comment was wrong). Both
+    // are async-signal-safe, which the atfork child handler requires.
+    if(st.kfd_fd >= 0) ::close(st.kfd_fd);
+    st.kfd_fd       = -1;
     const size_t _n = st.session_count.load(std::memory_order_relaxed);
     for(size_t i = 0; i < _n && i < kMaxSessions; ++i)
     {
         st.sessions[i].ready.store(false, std::memory_order_relaxed);
-        st.sessions[i].smap      = MAP_FAILED;
+        if(st.sessions[i].smap != MAP_FAILED) munmap(st.sessions[i].smap, st.sessions[i].smap_len);
+        st.sessions[i].smap = MAP_FAILED;
+        if(st.sessions[i].stream_fd >= 0) ::close(st.sessions[i].stream_fd);
         st.sessions[i].stream_fd = -1;
         // Same reuse hazard as teardown_session(): session_count is zeroed here, so
         // any later re-arm in the child reuses these slots. Reset the drain cursors
@@ -755,13 +866,32 @@ processor_loop()
 
     while(true)
     {
-        // GC closed-window entries on the periodic tick, ABOVE the
-        // pipe-empty continue -- an idle GPU (a queue destroyed after its work
-        // finished, the dominant case) never delivers another batch, so a GC placed
-        // after process_batch would never run and the close_grace_ns bound would be
-        // vacuous. Leaked payloads are ledgered; dropping them here is off the lock.
-        const uint64_t _gc_now = common::timestamp_ns();
-        if(_gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
+        // GC closed-window entries on the periodic tick, but ONLY when the pipe is
+        // empty: an EOP that would resolve a closed window may be sitting in a
+        // backlog behind us, and GC'ing its window first would expire it as a leak
+        // and then drop the EOP as start-unknown. Gating on an empty pipe means we
+        // only expire windows once no queued batch can still close them. The idle
+        // GPU (a queue destroyed after its work finished, the dominant case) still
+        // GCs promptly -- its pipe drains to empty and stays there, so the
+        // close_grace_ns bound is honored. Residual: a GPU whose pipe never empties
+        // (a continuous backlog) defers GC indefinitely, but a continuous backlog
+        // means the processor is actively resolving windows, so nothing is leaking.
+        // Leaked payloads are ledgered; dropping them here is off the lock.
+        // In-flight load FIRST, then pipe.empty(): reversing them is unsound. A
+        // zero read here (acquire) means every record the reader took out of the
+        // ring was published BEFORE this load, and the acquire pairs with the
+        // reader's release so the following pipe.empty() is guaranteed to see it.
+        // Covers only copied-but-unpublished EOPs (F4); an EOP still in the ring is
+        // the accepted R10 residual and is not gated here.
+        // Sequenced into named locals rather than passed inline: the order of
+        // evaluation of function arguments is UNSPECIFIED, so the required
+        // "in-flight load, THEN pipe.empty()" ordering cannot be expressed by
+        // argument position.
+        const uint64_t _gc_now      = common::timestamp_ns();
+        const uint64_t _unpublished = st.reader_copied_unpublished.load(std::memory_order_acquire);
+        const bool     _pipe_empty  = st.pipe.empty();
+        if(gc_gate_open(_unpublished, _pipe_empty) &&
+           _gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
         {
             last_gc_ns = _gc_now;
             auto _gc   = signal_less_hub().gc_closed_windows(steady_now_ns());
@@ -809,15 +939,19 @@ processor_loop()
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log pairing census (gpu_id={}): {} START record(s) drained, {} EOP "
             "record(s) drained, {} EOP(s) unmatched, {} START(s) overwritten on a live key, {} "
-            "ambiguous EOP(s) dropped, {} START(s) evicted stale, {} START(s) still retained at "
-            "exit",
+            "ambiguous EOP(s) dropped, {} equal-tick EOP(s) dropped, {} stale EOP(s) dropped, {} "
+            "START(s) evicted stale, {} START(s) evicted by the size cap, {} START(s) still "
+            "retained at exit",
             _gpu_itr.first,
             _p.starts_seen,
             _p.eops_seen,
             _p.unmatched_eops,
             _p.starts_overwritten,
             _p.ambiguous_pairs,
+            _p.equal_tick_drops,
+            _p.stale_eop_drops,
             _p.starts_evicted,
+            _p.starts_cap_evicted,
             _p.pending_starts.size());
     }
 }
@@ -998,6 +1132,16 @@ reader_loop()
                 backstop_warned = true;
             }
         }
+        else if(all_live_overflow_empty(st))
+        {
+            // No session is armed, so the ready-set is trivially drained: advance
+            // drain_epoch every pass so a fence blocked on drain progress is not made
+            // to burn its whole timeout waiting for a +2 that drain_sessions_bounded
+            // (only reached when a session IS ready) would otherwise never post. The
+            // overflow guard still holds: a copied-but-unpublished batch must reach
+            // the pipe before the epoch may advance.
+            st.drain_epoch.fetch_add(1, std::memory_order_release);
+        }
 
         // Terminal streams. POLLHUP/POLLNVAL are terminal: the stream will never
         // produce again, so it is drained first (above), then -- only once it is
@@ -1013,6 +1157,64 @@ reader_loop()
             const terminal_action _act = classify_terminal_revents(fds[k].revents);
             auto&                 _s   = st.sessions[slot_of[k - kFirstStreamPollSlot]];
             if(_s.quarantined) continue;
+
+            // F11: POLLERR alone is usually a recoverable reset, but a GPU reset
+            // raises the FATAL latch (EPOLLERR without HUP -- fatal and terminal are
+            // independent latches in the driver) after which the stream never produces
+            // again ("no live consumer, do not arm"). Read STREAM_OP_STATUS to tell
+            // them apart; FATAL is terminal.
+            //
+            // Also probed with NO revents at all while the empty-wake backstop is
+            // tripped: the backstop polls only the control fd and zeroes the stream
+            // revents, so classify_terminal_revents() reports `none` forever and a
+            // stream that went fatal underneath it would never be re-examined -- the
+            // session would stay `ready`, handing out correlation keys nothing can
+            // ever deliver. Restricted to the backstop's poll TIMEOUT so the extra
+            // ioctl runs at the poll-timeout cadence, not per wake.
+            const bool _probe_fatal =
+                (_act == terminal_action::keep_live) || (_backstop && rc == 0);
+            if(_probe_fatal && (read_stream_status_flags(_s) & KFD_DLOG_STATUS_FATAL) != 0)
+            {
+                // Drain-first: defer while records remain (the top-of-loop drain
+                // already ran this pass; firmware produces nothing more after
+                // FATAL, so this converges) so no already-published record is lost.
+                if(session_has_pending(_s) || !_s.overflow.empty()) continue;
+                log_stream_status(_s);
+                ROCP_WARNING << fmt::format(
+                    "KFD dispatch-log: gpu_id={} stream FATAL (revents=0x{:x}); GPU reset, "
+                    "draining, quarantining, and disabling signal-less process-wide",
+                    _s.gpu_id,
+                    static_cast<unsigned>(fds[k].revents));
+                // Clear ready before quarantine so find_session()/establish_session()
+                // stop handing out keys for a stream that can never deliver them.
+                _s.ready.store(false, std::memory_order_release);
+                _s.quarantined   = true;
+                _quarantined_any = true;
+                // Smallest safe containment: the reset invalidated the clock domain
+                // this stream's windows were opened against, so drop the whole
+                // signal-less path process-wide (hub disable latch drains+ledgers
+                // live entries) rather than risk mis-windowing against a reset clock.
+                //
+                // Ring and overflow are dry above, but the batches already PUBLISHED
+                // into the pipe are not: this session's final EOP, and the EOPs of
+                // every healthy GPU queued behind it, are still waiting on the
+                // processor. Draining the hub first would ledger their entries and
+                // leave those records unmatched. So latch admission closed, let the
+                // processor consume what is published (the same gate the closed-window
+                // GC uses -- copied-unpublished first, then pipe.empty), and only then
+                // ledger the residual. Bounded by the close budget so one wedged
+                // processor cannot stall the ring for the other GPUs; on timeout the
+                // disable proceeds exactly as it did before.
+                signal_less_disable_latch().store(true, std::memory_order_release);
+                const uint64_t _pipe_deadline = common::timestamp_ns() + close_drain_budget_ns();
+                while(!gc_gate_open(st.reader_copied_unpublished.load(std::memory_order_acquire),
+                                    st.pipe.empty()) &&
+                      common::timestamp_ns() < _pipe_deadline &&
+                      !st.stop.load(std::memory_order_acquire))
+                    std::this_thread::sleep_for(std::chrono::microseconds{200});
+                signal_less_disable_permanently();
+                continue;
+            }
 
             if(_act == terminal_action::none)
             {
@@ -1043,8 +1245,12 @@ reader_loop()
             }
 
             // Drain-first-then-quarantine: defer while records remain so terminal
-            // records are not discarded at the bounded-pass cap.
-            if(session_has_pending(_s)) continue;
+            // records are not discarded at the bounded-pass cap. session_has_pending
+            // only inspects the ring; a batch already copied into this session's
+            // reader-owned overflow deque but not yet spilled to the pipe would be
+            // stranded by quarantine (copy_records skips !ready sessions), so defer
+            // while overflow is non-empty too.
+            if(session_has_pending(_s) || !_s.overflow.empty()) continue;
 
             log_stream_status(_s);
             ROCP_INFO << fmt::format(
@@ -1099,7 +1305,9 @@ reader_loop()
             _pending = false;
             for(size_t i = 0; i < _n; ++i)
             {
-                if(spill_overflow_to_pipe(st.pipe, st.sessions[i].overflow)) continue;
+                if(spill_overflow_to_pipe(
+                       st.pipe, st.sessions[i].overflow, &st.reader_copied_unpublished))
+                    continue;
                 _pending = true;
             }
             if(_pending) std::this_thread::sleep_for(std::chrono::microseconds{200});
@@ -1201,6 +1409,10 @@ start_kfd_reader()
 
     st.stop.store(false, std::memory_order_release);
     st.reader_done.store(false, std::memory_order_release);
+    // Reset before any worker thread exists: teardown_session() drops a prior
+    // reader's unspilled overflow batches whose reservations never published, so a
+    // stale residual here would keep the GC gate closed for this whole instance.
+    st.reader_copied_unpublished.store(0, std::memory_order_release);
 
     // Force-construct the singletons the reader/processor hot paths touch here,
     // BEFORE the worker threads exist, so a first-use allocation cannot stall the
@@ -1212,6 +1424,15 @@ start_kfd_reader()
     // a proven completion are constructed lazily, but they run off the pipe, not
     // the ring, so a first-use allocation there cannot cause an overrun.)
     overrun_reported();
+
+    // Same reasoning for the env-backed knobs: each caches its read in a
+    // function-local static on first use, and common::get_env* scans `environ`,
+    // which races a concurrent setenv. Populate them all HERE, on the one
+    // serialized start path under setup_mu with no worker thread yet in existence,
+    // instead of letting a processor/producer/teardown thread do it lazily.
+    start_max_age_ns();
+    pending_starts_cap();
+    signal_less_prime_env();
 
     // Processor first: it must be ready to consume before the reader can publish,
     // otherwise the first batches are dropped for no reason.
@@ -1266,6 +1487,15 @@ kfd_reader_state_constructed()
 {
     // Non-constructing peek (::get(), not state()'s ::construct()).
     return common::static_object<reader_state>::get() != nullptr;
+}
+
+bool
+reader_unavailable()
+{
+    // Non-constructing: an unconstructed reader was never armed, so it is not
+    // "unavailable" in the sense N1 cares about (nothing to quiesce).
+    auto* _st = common::static_object<reader_state>::get();
+    return _st != nullptr && _st->reader_unavailable.load(std::memory_order_acquire);
 }
 
 bool
@@ -1383,6 +1613,12 @@ establish_session(uint32_t gpu_id, bool latch_retryable)
         return _existing->ready.load(std::memory_order_acquire);
 
     auto lk = std::lock_guard<std::mutex>{st.setup_mu};
+    // Re-check finalization UNDER setup_mu: the pre-lock get_fini_status() check
+    // above can pass and finalization then begin before we take the lock. stop_reader()
+    // sets reader_unavailable and tears down sessions while holding this same lock, so
+    // re-checking both here closes the window where we would setup_session() into an
+    // array stop_reader() is concurrently clearing.
+    if(registration::get_fini_status() != 0) return false;
     // Re-check under the lock: another thread may have armed this GPU meanwhile.
     if(auto* _existing = find_session(st, gpu_id))
         return _existing->ready.load(std::memory_order_relaxed);

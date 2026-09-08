@@ -1,0 +1,27 @@
+{
+  "max_args_len": 512,
+  "max_arg_items": 32,
+  "max_nested_arg_items": 8,
+  "cases": [
+    {
+      "name": "empty",
+      "plaintext": "",
+      "encoded": ""
+    },
+    {
+      "name": "unreserved",
+      "plaintext": "(self=float32[2x3], mat2=float32[3x4])",
+      "encoded": "(self=float32[2x3], mat2=float32[3x4])"
+    },
+    {
+      "name": "reserved",
+      "plaintext": "(self=float32[2x3], mat2=float32[3x4], label='conv|relu;scale=100%\n\r')",
+      "encoded": "(self=float32[2x3], mat2=float32[3x4], label='conv%7Crelu%3Bscale=100%25%0A%0D')"
+    },
+    {
+      "name": "percent_sequence",
+      "plaintext": "(self=float32[2x3], pattern='%3B vs ;')",
+      "encoded": "(self=float32[2x3], pattern='%253B vs %3B')"
+    }
+  ]
+}

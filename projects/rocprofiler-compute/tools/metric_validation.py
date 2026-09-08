@@ -65,7 +65,6 @@ class Analyzer(OmniAnalyze_Base):
             "GPU_ID",
             "Kernel_Name",
             "Metric",
-            "Channel",
         ]
 
         # Define the end columns for the final output of metrics

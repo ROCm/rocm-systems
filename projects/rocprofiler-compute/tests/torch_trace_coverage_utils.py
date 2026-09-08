@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 import pandas as pd
 import pytest
 import torch
+from common import normalize_kernel_names
 
 
 class CoverageTensorArg(NamedTuple):
@@ -47,30 +48,32 @@ class OpSpec:
 # Compact tensor factories used by builders.
 
 
-def f(device: str, *shape: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+def float_tensor(
+    device: str, *shape: int, dtype: torch.dtype = torch.float32
+) -> torch.Tensor:
     return torch.randn(shape, device=device, dtype=dtype)
 
 
-def i(device: str, *shape: int, low: int = 0, high: int = 8) -> torch.Tensor:
+def int_tensor(device: str, *shape: int, low: int = 0, high: int = 8) -> torch.Tensor:
     return torch.randint(low, high, shape, device=device, dtype=torch.int64)
 
 
-def i1(device: str, n: int = 8) -> torch.Tensor:
-    return torch.randint(0, 4, (n,), device=device, dtype=torch.int64)
+def int_vector(device: str, length: int = 8) -> torch.Tensor:
+    return torch.randint(0, 4, (length,), device=device, dtype=torch.int64)
 
 
-def b(device: str, shape: Tuple[int, ...] = (4, 4)) -> torch.Tensor:
+def bool_mask(device: str, shape: Tuple[int, ...] = (4, 4)) -> torch.Tensor:
     return torch.ones(shape, device=device, dtype=torch.bool)
 
 
-def r01(device: str, *shape: int) -> torch.Tensor:
+def unit_interval_tensor(device: str, *shape: int) -> torch.Tensor:
     return torch.rand(shape, device=device)
 
 
 # Symmetric positive-definite, for Cholesky-family ops.
-def spd(device: str, n: int = 4) -> torch.Tensor:
-    a = torch.randn(n, n, device=device)
-    return a @ a.mT + torch.eye(n, device=device) * 0.1
+def spd_matrix(device: str, size: int = 4) -> torch.Tensor:
+    factor = torch.randn(size, size, device=device)
+    return factor @ factor.mT + torch.eye(size, device=device) * 0.1
 
 
 # Multi-line builder helpers.
@@ -117,7 +120,7 @@ def lu_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
 
 
 def ldl_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    ld, pivots, _ = torch.linalg.ldl_factor_ex(spd(device))
+    ld, pivots, _ = torch.linalg.ldl_factor_ex(spd_matrix(device))
     return [ld, pivots.to(dtype=torch.int64), torch.randn(4, 2, device=device)], {}
 
 
@@ -308,48 +311,112 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
     # matmul / batched matmul / conv
     # ---------------------------------------------------------------
-    "bmm": OpSpec(build=lambda d: ([f(d, 2, 4, 4), f(d, 2, 4, 4)], {})),
-    "conv1d": OpSpec(build=lambda d: ([f(d, 1, 3, 16), f(d, 6, 3, 3)], {})),
-    "conv2d": OpSpec(build=lambda d: ([f(d, 1, 3, 8, 8), f(d, 6, 3, 3, 3)], {})),
+    "bmm": OpSpec(
+        build=lambda d: ([float_tensor(d, 2, 4, 4), float_tensor(d, 2, 4, 4)], {})
+    ),
+    "conv1d": OpSpec(
+        build=lambda d: ([float_tensor(d, 1, 3, 16), float_tensor(d, 6, 3, 3)], {})
+    ),
+    "conv2d": OpSpec(
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), float_tensor(d, 6, 3, 3, 3)], {})
+    ),
     "conv3d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 4, 4, 4), f(d, 6, 3, 3, 3, 3)], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 3, 4, 4, 4), float_tensor(d, 6, 3, 3, 3, 3)],
+            {},
+        ),
     ),
     "conv_transpose1d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 16), f(d, 3, 6, 3)], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 16), float_tensor(d, 3, 6, 3)], {}),
     ),
     "conv_transpose2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), f(d, 3, 6, 3, 3)], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 3, 8, 8), float_tensor(d, 3, 6, 3, 3)],
+            {},
+        ),
     ),
     "conv_transpose3d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 4, 4, 4), f(d, 3, 6, 3, 3, 3)], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 3, 4, 4, 4), float_tensor(d, 3, 6, 3, 3, 3)],
+            {},
+        ),
     ),
-    "addmm": OpSpec(build=lambda d: ([f(d, 4), f(d, 4, 4), f(d, 4, 4)], {})),
+    "addmm": OpSpec(
+        build=lambda d: (
+            [float_tensor(d, 4), float_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+            {},
+        )
+    ),
     "addbmm": OpSpec(
-        build=lambda d: ([f(d, 4, 4), f(d, 2, 4, 4), f(d, 2, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), float_tensor(d, 2, 4, 4), float_tensor(d, 2, 4, 4)],
+            {},
+        ),
     ),
     "addbmm_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), f(d, 2, 4, 4), f(d, 2, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), float_tensor(d, 2, 4, 4), float_tensor(d, 2, 4, 4)],
+            {},
+        ),
     ),
     "baddbmm": OpSpec(
-        build=lambda d: ([f(d, 2, 4, 4), f(d, 2, 4, 4), f(d, 2, 4, 4)], {}),
+        build=lambda d: (
+            [
+                float_tensor(d, 2, 4, 4),
+                float_tensor(d, 2, 4, 4),
+                float_tensor(d, 2, 4, 4),
+            ],
+            {},
+        ),
     ),
     "baddbmm_": OpSpec(
-        build=lambda d: ([f(d, 2, 4, 4), f(d, 2, 4, 4), f(d, 2, 4, 4)], {}),
+        build=lambda d: (
+            [
+                float_tensor(d, 2, 4, 4),
+                float_tensor(d, 2, 4, 4),
+                float_tensor(d, 2, 4, 4),
+            ],
+            {},
+        ),
     ),
-    "addmv": OpSpec(build=lambda d: ([f(d, 4), f(d, 4, 4), f(d, 4)], {})),
-    "addmv_": OpSpec(build=lambda d: ([f(d, 4), f(d, 4, 4), f(d, 4)], {})),
-    "addr": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4), f(d, 4)], {})),
-    "dot": OpSpec(build=lambda d: ([f(d, 4), f(d, 4)], {})),
-    "vdot": OpSpec(build=lambda d: ([f(d, 4), f(d, 4)], {})),
+    "addmv": OpSpec(
+        build=lambda d: (
+            [float_tensor(d, 4), float_tensor(d, 4, 4), float_tensor(d, 4)],
+            {},
+        )
+    ),
+    "addmv_": OpSpec(
+        build=lambda d: (
+            [float_tensor(d, 4), float_tensor(d, 4, 4), float_tensor(d, 4)],
+            {},
+        )
+    ),
+    "addr": OpSpec(
+        build=lambda d: (
+            [float_tensor(d, 4, 4), float_tensor(d, 4), float_tensor(d, 4)],
+            {},
+        )
+    ),
+    "dot": OpSpec(build=lambda d: ([float_tensor(d, 4), float_tensor(d, 4)], {})),
+    "vdot": OpSpec(build=lambda d: ([float_tensor(d, 4), float_tensor(d, 4)], {})),
     # ---------------------------------------------------------------
     # embedding / embedding_bag
     # ---------------------------------------------------------------
     "embedding": OpSpec(
-        build=lambda d: ([f(d, 10, 8), torch.randint(0, 10, (4,), device=d)], {}),
+        build=lambda d: (
+            [float_tensor(d, 10, 8), torch.randint(0, 10, (4,), device=d)],
+            {},
+        ),
     ),
     "embedding_dense_backward": OpSpec(
         build=lambda d: (
-            [f(d, 8, 16), torch.randint(0, 32, (8,), device=d), 32, -1, False],
+            [
+                float_tensor(d, 8, 16),
+                torch.randint(0, 32, (8,), device=d),
+                32,
+                -1,
+                False,
+            ],
             {},
         ),
     ),
@@ -358,8 +425,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_embedding_bag": OpSpec(
         build=lambda d: (
             [
-                f(d, 10, 8),
-                i1(d, 6),
+                float_tensor(d, 10, 8),
+                int_vector(d, 6),
                 torch.tensor([0, 3], device=d, dtype=torch.int64),
             ],
             {},
@@ -368,8 +435,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_embedding_bag_forward_only": OpSpec(
         build=lambda d: (
             [
-                f(d, 10, 8),
-                i1(d, 6),
+                float_tensor(d, 10, 8),
+                int_vector(d, 6),
                 torch.tensor([0, 3], device=d, dtype=torch.int64),
                 False,
                 0,
@@ -402,9 +469,11 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # Schema: _cholesky_solve_helper(self, A, bool upper).
     "_cholesky_solve_helper": OpSpec(
-        build=lambda d: ([f(d, 4, 2), spd(d).tril(), False], {}),
+        build=lambda d: ([float_tensor(d, 4, 2), spd_matrix(d).tril(), False], {}),
     ),
-    "linalg_cross": OpSpec(build=lambda d: ([f(d, 2, 3), f(d, 2, 3)], {})),
+    "linalg_cross": OpSpec(
+        build=lambda d: ([float_tensor(d, 2, 3), float_tensor(d, 2, 3)], {})
+    ),
     "linalg_ldl_solve": OpSpec(
         skip="Requires PyTorch built against the MAGMA library.",
     ),
@@ -416,7 +485,10 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Loss functions
     # ---------------------------------------------------------------
     "cross_entropy_loss": OpSpec(
-        build=lambda d: ([f(d, 4, 10), torch.randint(0, 10, (4,), device=d)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 10), torch.randint(0, 10, (4,), device=d)],
+            {},
+        ),
     ),
     "binary_cross_entropy": OpSpec(
         build=lambda _d: (
@@ -427,7 +499,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "binary_cross_entropy_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 4, 4),
+                float_tensor(d, 4, 4),
                 CoverageTensorArg((4, 4), "rand"),
                 CoverageTensorArg((4, 4), "rand"),
             ],
@@ -437,7 +509,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "nll_loss_forward": OpSpec(
         build=lambda d: (
             [
-                f(d, 4, 10).log_softmax(1),
+                float_tensor(d, 4, 10).log_softmax(1),
                 torch.randint(0, 10, (4,), device=d),
                 torch.ones(10, device=d),
                 0,
@@ -452,7 +524,7 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: (
             [
                 torch.tensor(1.0, device=d),  # grad_output
-                f(d, 4, 5).log_softmax(1),  # self
+                float_tensor(d, 4, 5).log_softmax(1),  # self
                 torch.randint(0, 5, (4,), device=d),  # target
                 None,  # weight
                 1,  # reduction (Mean)
@@ -465,7 +537,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "nll_loss2d_forward": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 5, 4, 4).log_softmax(1),
+                float_tensor(d, 2, 5, 4, 4).log_softmax(1),
                 torch.randint(0, 5, (2, 4, 4), device=d),
                 torch.ones(5, device=d),
                 0,
@@ -478,7 +550,7 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: (
             [
                 torch.tensor(1.0, device=d),  # grad_output
-                f(d, 2, 5, 4, 4).log_softmax(1),  # self
+                float_tensor(d, 2, 5, 4, 4).log_softmax(1),  # self
                 torch.randint(0, 5, (2, 4, 4), device=d),  # target
                 None,  # weight
                 1,  # reduction (Mean)
@@ -492,7 +564,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "multi_margin_loss": OpSpec(
         build=lambda d: (
             [
-                f(d, 4, 5),
+                float_tensor(d, 4, 5),
                 torch.randint(0, 5, (4,), device=d),
                 1.0,
                 1.0,
@@ -503,7 +575,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     "multilabel_margin_loss_forward": OpSpec(
         build=lambda d: (
-            [f(d, 4, 5), torch.randint(0, 5, (4, 5), device=d), 0],
+            [float_tensor(d, 4, 5), torch.randint(0, 5, (4, 5), device=d), 0],
             {},
         ),
     ),
@@ -513,11 +585,11 @@ OP_SPECS: Dict[str, OpSpec] = {
     "batch_norm": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 3, 4, 4),
-                f(d, 3),
-                f(d, 3),
-                f(d, 3),
-                f(d, 3),
+                float_tensor(d, 2, 3, 4, 4),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
                 True,
                 0.1,
                 1e-5,
@@ -529,11 +601,11 @@ OP_SPECS: Dict[str, OpSpec] = {
     "native_batch_norm": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 3, 4, 4),
-                f(d, 3),
-                f(d, 3),
-                f(d, 3),
-                f(d, 3),
+                float_tensor(d, 2, 3, 4, 4),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
+                float_tensor(d, 3),
                 True,
                 0.1,
                 1e-5,
@@ -544,7 +616,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "miopen_batch_norm": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 3, 4, 4),
+                float_tensor(d, 2, 3, 4, 4),
                 torch.ones(3, device=d),
                 torch.zeros(3, device=d),
                 torch.ones(3, device=d),
@@ -561,8 +633,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "miopen_batch_norm_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 3, 4, 4),  # input
-                f(d, 2, 3, 4, 4),  # grad_output
+                float_tensor(d, 2, 3, 4, 4),  # input
+                float_tensor(d, 2, 3, 4, 4),  # grad_output
                 torch.ones(3, device=d),  # weight
                 torch.zeros(3, device=d),  # running_mean
                 torch.ones(3, device=d),  # running_var
@@ -576,7 +648,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_batch_norm_with_update": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 3, 4, 4),
+                float_tensor(d, 2, 3, 4, 4),
                 torch.ones(3, device=d),
                 torch.zeros(3, device=d),
                 torch.ones(3, device=d),
@@ -590,7 +662,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "native_group_norm": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 6, 4, 4),
+                float_tensor(d, 2, 6, 4, 4),
                 torch.ones(6, device=d),
                 torch.zeros(6, device=d),
                 2,
@@ -605,7 +677,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "native_layer_norm": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 4, 4),
+                float_tensor(d, 2, 4, 4),
                 [4],
                 torch.ones(4, device=d),
                 torch.zeros(4, device=d),
@@ -615,14 +687,17 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "_fused_rms_norm": OpSpec(
-        build=lambda d: ([f(d, 2, 4, 4), [4], torch.ones(4, device=d), 1e-5], {}),
+        build=lambda d: (
+            [float_tensor(d, 2, 4, 4), [4], torch.ones(4, device=d), 1e-5],
+            {},
+        ),
     ),
     # Schema: (grad_out, input, normalized_shape, rstd, weight?, bool[2] output_mask).
     "_fused_rms_norm_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 4, 4),  # grad_out
-                f(d, 2, 4, 4),  # input
+                float_tensor(d, 2, 4, 4),  # grad_out
+                float_tensor(d, 2, 4, 4),  # input
                 [4],  # normalized_shape
                 torch.ones(2, 4, 1, device=d),  # rstd
                 torch.ones(4, device=d),  # weight
@@ -639,39 +714,55 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Pooling + unpooling (strict shape requirements)
     # ---------------------------------------------------------------
     "_adaptive_avg_pool2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [4, 4]], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [4, 4]], {}),
     ),
     "_adaptive_avg_pool2d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 4, 4), f(d, 1, 3, 8, 8)], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 3, 4, 4), float_tensor(d, 1, 3, 8, 8)],
+            {},
+        ),
     ),
     "_adaptive_avg_pool3d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8, 8, 8), [4, 4, 4]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 8, 8, 8), [4, 4, 4]], {}),
     ),
     "_adaptive_avg_pool3d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 4, 4, 4), f(d, 1, 1, 8, 8, 8)], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 4, 4, 4), float_tensor(d, 1, 1, 8, 8, 8)],
+            {},
+        ),
     ),
-    "adaptive_max_pool2d": OpSpec(build=lambda d: ([f(d, 1, 3, 8, 8), [2, 2]], {})),
+    "adaptive_max_pool2d": OpSpec(
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [2, 2]], {})
+    ),
     "adaptive_max_pool2d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 3, 2, 2), f(d, 1, 3, 8, 8), i(d, 1, 3, 2, 2)],
+            [
+                float_tensor(d, 1, 3, 2, 2),
+                float_tensor(d, 1, 3, 8, 8),
+                int_tensor(d, 1, 3, 2, 2),
+            ],
             {},
         ),
     ),
     "adaptive_max_pool3d": OpSpec(
-        build=lambda d: ([f(d, 1, 2, 6, 6, 6), [2, 2, 2]], {}),
+        build=lambda d: ([float_tensor(d, 1, 2, 6, 6, 6), [2, 2, 2]], {}),
     ),
     "adaptive_max_pool3d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 2, 2, 2, 2), f(d, 1, 2, 6, 6, 6), i(d, 1, 2, 2, 2, 2)],
+            [
+                float_tensor(d, 1, 2, 2, 2, 2),
+                float_tensor(d, 1, 2, 6, 6, 6),
+                int_tensor(d, 1, 2, 2, 2, 2),
+            ],
             {},
         ),
     ),
-    "avg_pool2d": OpSpec(build=lambda d: ([f(d, 1, 1, 8, 8), [2, 2]], {})),
+    "avg_pool2d": OpSpec(build=lambda d: ([float_tensor(d, 1, 1, 8, 8), [2, 2]], {})),
     "avg_pool2d_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 4, 4),
-                f(d, 1, 1, 8, 8),
+                float_tensor(d, 1, 1, 4, 4),
+                float_tensor(d, 1, 1, 8, 8),
                 [2, 2],
                 [2, 2],
                 [0, 0],
@@ -682,12 +773,14 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    "avg_pool3d": OpSpec(build=lambda d: ([f(d, 1, 1, 8, 8, 8), [2, 2, 2]], {})),
+    "avg_pool3d": OpSpec(
+        build=lambda d: ([float_tensor(d, 1, 1, 8, 8, 8), [2, 2, 2]], {})
+    ),
     "avg_pool3d_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 4, 4, 4),
-                f(d, 1, 1, 8, 8, 8),
+                float_tensor(d, 1, 1, 4, 4, 4),
+                float_tensor(d, 1, 1, 8, 8, 8),
                 [2, 2, 2],
                 [2, 2, 2],
                 [0, 0, 0],
@@ -702,7 +795,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "fractional_max_pool2d": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 3, 8, 8),
+                float_tensor(d, 1, 3, 8, 8),
                 [2, 2],
                 [4, 4],
                 torch.rand(1, 3, 2, device=d),
@@ -713,21 +806,21 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Schema: (self, kernel_size, stride, padding, dilation, ceil_mode).
     "max_pool2d_with_indices": OpSpec(
         build=lambda d: (
-            [f(d, 1, 1, 8, 8), [2, 2], [2, 2], [0, 0], [1, 1], False],
+            [float_tensor(d, 1, 1, 8, 8), [2, 2], [2, 2], [0, 0], [1, 1], False],
             {},
         ),
     ),
     "max_pool2d_with_indices_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 4, 4),  # grad_output
-                f(d, 1, 1, 8, 8),  # self
+                float_tensor(d, 1, 1, 4, 4),  # grad_output
+                float_tensor(d, 1, 1, 8, 8),  # self
                 [2, 2],
                 [2, 2],
                 [0, 0],
                 [1, 1],  # kernel, stride, padding, dilation
                 False,  # ceil_mode
-                i(d, 1, 1, 4, 4),  # indices
+                int_tensor(d, 1, 1, 4, 4),  # indices
             ],
             {},
         ),
@@ -735,7 +828,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "max_pool3d_with_indices": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 8, 8, 8),
+                float_tensor(d, 1, 1, 8, 8, 8),
                 [2, 2, 2],
                 [2, 2, 2],
                 [0, 0, 0],
@@ -748,26 +841,29 @@ OP_SPECS: Dict[str, OpSpec] = {
     "max_pool3d_with_indices_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 4, 4, 4),  # grad_output
-                f(d, 1, 1, 8, 8, 8),  # self
+                float_tensor(d, 1, 1, 4, 4, 4),  # grad_output
+                float_tensor(d, 1, 1, 8, 8, 8),  # self
                 [2, 2, 2],
                 [2, 2, 2],
                 [0, 0, 0],
                 [1, 1, 1],
                 False,
-                i(d, 1, 1, 4, 4, 4),  # indices
+                int_tensor(d, 1, 1, 4, 4, 4),  # indices
             ],
             {},
         ),
     ),
     "max_unpool2d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 4, 4), i(d, 1, 1, 4, 4), [8, 8]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 4, 4), int_tensor(d, 1, 1, 4, 4), [8, 8]],
+            {},
+        ),
     ),
     "max_unpool3d": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 2, 2, 2),
-                i(d, 1, 1, 2, 2, 2),
+                float_tensor(d, 1, 1, 2, 2, 2),
+                int_tensor(d, 1, 1, 2, 2, 2),
                 [4, 4, 4],
                 [2, 2, 2],
                 [0, 0, 0],
@@ -779,57 +875,59 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Upsample
     # ---------------------------------------------------------------
     "upsample_nearest2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [4, 4], None, None], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [4, 4], None, None], {}),
     ),
     "upsample_nearest3d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 4, 4, 4), [8, 8, 8]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 4, 4, 4), [8, 8, 8]], {}),
     ),
-    "upsample_nearest1d": OpSpec(build=lambda d: ([f(d, 1, 3, 8), [16], None], {})),
+    "upsample_nearest1d": OpSpec(
+        build=lambda d: ([float_tensor(d, 1, 3, 8), [16], None], {})
+    ),
     # Schema: (grad_output, output_size, input_size, scales_h?, scales_w?).
     "upsample_nearest2d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], None, None],
+            [float_tensor(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], None, None],
             {},
         ),
     ),
     "upsample_linear1d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8), [16], False, False], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8), [16], False, False], {}),
     ),
     "upsample_bilinear2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [16, 16], False], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [16, 16], False], {}),
     ),
     "upsample_bicubic2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [16, 16], False], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [16, 16], False], {}),
     ),
     "upsample_trilinear3d": OpSpec(
-        build=lambda d: ([f(d, 1, 2, 4, 4, 4), [8, 8, 8], False], {}),
+        build=lambda d: ([float_tensor(d, 1, 2, 4, 4, 4), [8, 8, 8], False], {}),
     ),
     "_upsample_nearest_exact1d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8), [16]], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8), [16]], {}),
     ),
     "_upsample_nearest_exact2d": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [16, 16]], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [16, 16]], {}),
     ),
     "_upsample_nearest_exact2d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], None, None],
+            [float_tensor(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], None, None],
             {},
         ),
     ),
     "_upsample_nearest_exact3d": OpSpec(
-        build=lambda d: ([f(d, 1, 2, 4, 4, 4), [8, 8, 8]], {}),
+        build=lambda d: ([float_tensor(d, 1, 2, 4, 4, 4), [8, 8, 8]], {}),
     ),
     "_upsample_bilinear2d_aa": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [16, 16], False, None], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [16, 16], False, None], {}),
     ),
     "_upsample_bicubic2d_aa": OpSpec(
-        build=lambda d: ([f(d, 1, 3, 8, 8), [16, 16], False, None], {}),
+        build=lambda d: ([float_tensor(d, 1, 3, 8, 8), [16, 16], False, None], {}),
     ),
     # Schema: (grad_output, output_size, input_size, align_corners, scales_h?,
     # scales_w?).
     "_upsample_bilinear2d_aa_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], False, None, None],
+            [float_tensor(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], False, None, None],
             {},
         ),
     ),
@@ -838,7 +936,13 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
     "grid_sampler_2d": OpSpec(
         build=lambda d: (
-            [f(d, 1, 1, 8, 8), torch.zeros(1, 8, 8, 2, device=d), 0, 0, False],
+            [
+                float_tensor(d, 1, 1, 8, 8),
+                torch.zeros(1, 8, 8, 2, device=d),
+                0,
+                0,
+                False,
+            ],
             {},
         ),
     ),
@@ -847,8 +951,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "grid_sampler_2d_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 8, 8),  # grad_output
-                f(d, 1, 1, 8, 8),  # input
+                float_tensor(d, 1, 1, 8, 8),  # grad_output
+                float_tensor(d, 1, 1, 8, 8),  # input
                 torch.zeros(1, 8, 8, 2, device=d),  # grid
                 0,
                 0,
@@ -860,15 +964,21 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     "grid_sampler_3d": OpSpec(
         build=lambda d: (
-            [f(d, 1, 1, 4, 4, 4), torch.zeros(1, 4, 4, 4, 3, device=d), 0, 0, False],
+            [
+                float_tensor(d, 1, 1, 4, 4, 4),
+                torch.zeros(1, 4, 4, 4, 3, device=d),
+                0,
+                0,
+                False,
+            ],
             {},
         ),
     ),
     "grid_sampler_3d_backward": OpSpec(
         build=lambda d: (
             [
-                f(d, 1, 1, 4, 4, 4),  # grad_output
-                f(d, 1, 1, 4, 4, 4),  # input
+                float_tensor(d, 1, 1, 4, 4, 4),  # grad_output
+                float_tensor(d, 1, 1, 4, 4, 4),  # input
                 torch.zeros(1, 4, 4, 4, 3, device=d),  # grid
                 0,
                 0,
@@ -880,12 +990,15 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # Schema: im2col(self, kernel_size, dilation, padding, stride).
     "im2col": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8, 8), [3, 3], [1, 1], [0, 0], [1, 1]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 8, 8), [3, 3], [1, 1], [0, 0], [1, 1]],
+            {},
+        ),
     ),
     # Schema: col2im(self, output_size, kernel_size, dilation, padding, stride).
     "col2im": OpSpec(
         build=lambda d: (
-            [f(d, 1, 4, 9), [4, 4], [2, 2], [1, 1], [0, 0], [1, 1]],
+            [float_tensor(d, 1, 4, 9), [4, 4], [2, 2], [1, 1], [0, 0], [1, 1]],
             {},
         ),
     ),
@@ -893,63 +1006,107 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Padding
     # ---------------------------------------------------------------
     "reflection_pad1d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8), f(d, 1, 1, 6), [1, 1]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 8), float_tensor(d, 1, 1, 6), [1, 1]],
+            {},
+        ),
     ),
     "reflection_pad2d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
     ),
     "reflection_pad2d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8, 8), f(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 8, 8), float_tensor(d, 1, 1, 6, 6), [1, 1, 1, 1]],
+            {},
+        ),
     ),
     "reflection_pad3d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 4, 4, 4), [1, 1, 1, 1, 1, 1]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 4, 4, 4), [1, 1, 1, 1, 1, 1]], {}),
     ),
     "reflection_pad3d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 2, 3, 8, 8, 8), f(d, 2, 3, 6, 6, 6), [1, 1, 1, 1, 1, 1]],
+            [
+                float_tensor(d, 2, 3, 8, 8, 8),
+                float_tensor(d, 2, 3, 6, 6, 6),
+                [1, 1, 1, 1, 1, 1],
+            ],
             {},
         ),
     ),
     "replication_pad1d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8), f(d, 1, 1, 6), [1, 1]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 8), float_tensor(d, 1, 1, 6), [1, 1]],
+            {},
+        ),
     ),
     "replication_pad2d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
     ),
     "replication_pad2d_backward": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 8, 8), f(d, 1, 1, 6, 6), [1, 1, 1, 1]], {}),
+        build=lambda d: (
+            [float_tensor(d, 1, 1, 8, 8), float_tensor(d, 1, 1, 6, 6), [1, 1, 1, 1]],
+            {},
+        ),
     ),
     "replication_pad3d": OpSpec(
-        build=lambda d: ([f(d, 1, 1, 4, 4, 4), [1, 1, 1, 1, 1, 1]], {}),
+        build=lambda d: ([float_tensor(d, 1, 1, 4, 4, 4), [1, 1, 1, 1, 1, 1]], {}),
     ),
     "replication_pad3d_backward": OpSpec(
         build=lambda d: (
-            [f(d, 1, 1, 6, 6, 6), f(d, 1, 1, 4, 4, 4), [1, 1, 1, 1, 1, 1]],
+            [
+                float_tensor(d, 1, 1, 6, 6, 6),
+                float_tensor(d, 1, 1, 4, 4, 4),
+                [1, 1, 1, 1, 1, 1],
+            ],
             {},
         ),
     ),
     # Integer / bitwise.
-    "__ilshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4, high=4)], {})),
-    "__irshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "__rshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "__lshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_and": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_and_": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_or": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_or_": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_xor": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_xor_": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_left_shift": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "bitwise_right_shift": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
+    "__ilshift__": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4, high=4)], {})
+    ),
+    "__irshift__": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "__rshift__": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "__lshift__": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_and": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_and_": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_or": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_or_": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_xor": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_xor_": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_left_shift": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
+    "bitwise_right_shift": OpSpec(
+        build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})
+    ),
     "bitwise_not": OpSpec(
         build=lambda d: (
             [torch.randint(0, 256, (4, 4), device=d, dtype=torch.int64)],
             {},
         ),
     ),
-    "bitwise_not_": OpSpec(build=lambda d: ([i(d, 4, 4)], {})),
-    "gcd": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
-    "gcd_": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
+    "bitwise_not_": OpSpec(build=lambda d: ([int_tensor(d, 4, 4)], {})),
+    "gcd": OpSpec(build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})),
+    "gcd_": OpSpec(build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})),
     "lcm": OpSpec(
         build=lambda d: (
             [
@@ -959,7 +1116,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    "lcm_": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
+    "lcm_": OpSpec(build=lambda d: ([int_tensor(d, 4, 4), int_tensor(d, 4, 4)], {})),
     # ---------------------------------------------------------------
     # Random distributions
     # ---------------------------------------------------------------
@@ -970,28 +1127,38 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda _d: ([CoverageTensorArg((4, 4), "rand_uniform", 4.0), None], {}),
     ),
     "bernoulli_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), CoverageTensorArg((4, 4), "rand")], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), CoverageTensorArg((4, 4), "rand")],
+            {},
+        ),
     ),
     "multinomial": OpSpec(
         skip="SIGSEGV under torch.profiler on ROCm.",
     ),
-    "geometric_": OpSpec(build=lambda d: ([f(d, 4, 4), 0.5], {})),
-    "repeat_interleave": OpSpec(build=lambda d: ([i1(d, 16)], {})),
-    "bincount": OpSpec(build=lambda d: ([i1(d, 32).clamp_min(0)], {})),
+    "geometric_": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), 0.5], {})),
+    "repeat_interleave": OpSpec(build=lambda d: ([int_vector(d, 16)], {})),
+    "bincount": OpSpec(build=lambda d: ([int_vector(d, 32).clamp_min(0)], {})),
     # ---------------------------------------------------------------
     # Masks / clamp
     # ---------------------------------------------------------------
-    "clamp": OpSpec(build=lambda d: ([f(d, 4, 4), 0.0, 1.0], {})),
-    "clamp_": OpSpec(build=lambda d: ([f(d, 4, 4), 0.0, 1.0], {})),
-    "masked_fill_": OpSpec(build=lambda d: ([f(d, 4, 4), b(d), 0.0], {})),
-    "masked_scatter_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), b(d), f(d, 4, 4)], {}),
+    "clamp": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), 0.0, 1.0], {})),
+    "clamp_": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), 0.0, 1.0], {})),
+    "masked_fill_": OpSpec(
+        build=lambda d: ([float_tensor(d, 4, 4), bool_mask(d), 0.0], {})
     ),
-    "masked_select": OpSpec(build=lambda d: ([f(d, 4, 4), b(d)], {})),
+    "masked_scatter_": OpSpec(
+        build=lambda d: (
+            [float_tensor(d, 4, 4), bool_mask(d), float_tensor(d, 4, 4)],
+            {},
+        ),
+    ),
+    "masked_select": OpSpec(
+        build=lambda d: ([float_tensor(d, 4, 4), bool_mask(d)], {})
+    ),
     "_masked_scale": OpSpec(
         build=lambda d: (
             [
-                f(d, 4, 4),
+                float_tensor(d, 4, 4),
                 torch.randint(0, 2, (4, 4), device=d, dtype=torch.uint8),
                 1.0,
             ],
@@ -1000,7 +1167,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # Schema: native_dropout_backward(grad_output, mask, scale).
     "native_dropout_backward": OpSpec(
-        build=lambda d: ([f(d, 4, 4), b(d), 0.5], {}),
+        build=lambda d: ([float_tensor(d, 4, 4), bool_mask(d), 0.5], {}),
     ),
     # ---------------------------------------------------------------
     # Indexing / scatter / gather
@@ -1008,72 +1175,116 @@ OP_SPECS: Dict[str, OpSpec] = {
     "index": OpSpec(
         build=lambda d: (
             [
-                f(d, 4, 4),
+                float_tensor(d, 4, 4),
                 [None, torch.randint(0, 4, (2, 2), device=d, dtype=torch.int64)],
             ],
             {},
         ),
     ),
-    "flip": OpSpec(build=lambda d: ([f(d, 4, 4), [0]], {})),
+    "flip": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), [0]], {})),
     "index_copy": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_vector(d, 2), float_tensor(d, 2, 4)],
+            {},
+        ),
     ),
     "index_copy_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_vector(d, 2), float_tensor(d, 2, 4)],
+            {},
+        ),
     ),
     "index_add": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_vector(d, 2), float_tensor(d, 2, 4)],
+            {},
+        ),
     ),
     "index_add_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_vector(d, 2), float_tensor(d, 2, 4)],
+            {},
+        ),
     ),
     "index_reduce": OpSpec(
         build=lambda d: (
-            [f(d, 4, 4), 0, i1(d, 4), f(d, 4, 4), "prod"],
+            [float_tensor(d, 4, 4), 0, int_vector(d, 4), float_tensor(d, 4, 4), "prod"],
             {"include_self": False},
         ),
     ),
     "index_reduce_": OpSpec(
         build=lambda d: (
-            [f(d, 4, 4), 0, i1(d, 4), f(d, 4, 4), "prod"],
+            [float_tensor(d, 4, 4), 0, int_vector(d, 4), float_tensor(d, 4, 4), "prod"],
             {"include_self": False},
         ),
     ),
     "index_fill_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), torch.tensor(0.0, device=d)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_vector(d, 2), torch.tensor(0.0, device=d)],
+            {},
+        ),
     ),
-    "index_select": OpSpec(build=lambda d: ([f(d, 4, 4), 0, i1(d, 2)], {})),
+    "index_select": OpSpec(
+        build=lambda d: ([float_tensor(d, 4, 4), 0, int_vector(d, 2)], {})
+    ),
     "gather": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4, low=0, high=4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_tensor(d, 4, 4, low=0, high=4)],
+            {},
+        ),
     ),
     "scatter": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+            {},
+        ),
     ),
     "scatter_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+            {},
+        ),
     ),
     "scatter_add": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+            {},
+        ),
     ),
     "scatter_add_": OpSpec(
-        build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4)], {}),
+        build=lambda d: (
+            [float_tensor(d, 4, 4), 0, int_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+            {},
+        ),
     ),
     "scatter_reduce": OpSpec(
         build=lambda d: (
-            [f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4), "sum"],
+            [
+                float_tensor(d, 4, 4),
+                0,
+                int_tensor(d, 4, 4),
+                float_tensor(d, 4, 4),
+                "sum",
+            ],
             {"include_self": False},
         ),
     ),
     "scatter_reduce_": OpSpec(
         build=lambda d: (
-            [f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4), "sum"],
+            [
+                float_tensor(d, 4, 4),
+                0,
+                int_tensor(d, 4, 4),
+                float_tensor(d, 4, 4),
+                "sum",
+            ],
             {"include_self": False},
         ),
     ),
-    "take": OpSpec(build=lambda d: ([f(d, 4, 4), i1(d, 8)], {})),
+    "take": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), int_vector(d, 8)], {})),
     "segment_reduce": OpSpec(
         build=lambda d: (
-            [f(d, 8), "sum"],
+            [float_tensor(d, 8), "sum"],
             {
                 "lengths": torch.tensor([4, 4], device=d, dtype=torch.int64),
                 "unsafe": True,
@@ -1095,31 +1306,42 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Misc shape / dtype / layout
     # ---------------------------------------------------------------
     "_chunk_cat": OpSpec(
-        build=lambda d: ([[f(d, 2, 4), f(d, 2, 4)], 0, 2], {}),
+        build=lambda d: ([[float_tensor(d, 2, 4), float_tensor(d, 2, 4)], 0, 2], {}),
     ),
     "_cdist_forward": OpSpec(
-        build=lambda d: ([f(d, 2, 4, 8), f(d, 2, 5, 8), 2.0, None], {}),
-    ),
-    "_thnn_fused_lstm_cell": OpSpec(
         build=lambda d: (
-            [f(d, 2, 16), f(d, 2, 16), f(d, 2, 4), None, None],
+            [float_tensor(d, 2, 4, 8), float_tensor(d, 2, 5, 8), 2.0, None],
             {},
         ),
     ),
-    "channel_shuffle": OpSpec(build=lambda d: ([f(d, 1, 8, 4, 4), 2], {})),
-    "bucketize": OpSpec(build=lambda d: ([f(d, 8), f(d, 5)], {})),
-    "roll": OpSpec(build=lambda d: ([f(d, 4, 4), [1], [0]], {})),
-    "unfold": OpSpec(build=lambda d: ([f(d, 2, 8), 1, 4, 2], {})),
+    "_thnn_fused_lstm_cell": OpSpec(
+        build=lambda d: (
+            [
+                float_tensor(d, 2, 16),
+                float_tensor(d, 2, 16),
+                float_tensor(d, 2, 4),
+                None,
+                None,
+            ],
+            {},
+        ),
+    ),
+    "channel_shuffle": OpSpec(build=lambda d: ([float_tensor(d, 1, 8, 4, 4), 2], {})),
+    "bucketize": OpSpec(build=lambda d: ([float_tensor(d, 8), float_tensor(d, 5)], {})),
+    "roll": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), [1], [0]], {})),
+    "unfold": OpSpec(build=lambda d: ([float_tensor(d, 2, 8), 1, 4, 2], {})),
     # Schema: unfold_backward(grad_in, input_sizes, dim, size, step).
     "unfold_backward": OpSpec(
-        build=lambda d: ([f(d, 2, 4, 4), [2, 10], 1, 4, 2], {}),
+        build=lambda d: ([float_tensor(d, 2, 4, 4), [2, 10], 1, 4, 2], {}),
     ),
-    "view_as_complex": OpSpec(build=lambda d: ([f(d, 4, 2)], {})),
+    "view_as_complex": OpSpec(build=lambda d: ([float_tensor(d, 4, 2)], {})),
     "view_as_real": OpSpec(
         build=lambda d: ([torch.randn(4, 2, device=d, dtype=torch.complex64)], {}),
     ),
-    "view": OpSpec(build=lambda d: ([f(d, 4, 4), [8, 2]], {})),
-    "glu_backward": OpSpec(build=lambda d: ([f(d, 2, 4), f(d, 2, 8), 1], {})),
+    "view": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), [8, 2]], {})),
+    "glu_backward": OpSpec(
+        build=lambda d: ([float_tensor(d, 2, 4), float_tensor(d, 2, 8), 1], {})
+    ),
     "_int_mm": OpSpec(
         build=lambda d: (
             [
@@ -1141,8 +1363,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_log_softmax_backward_data": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 8, dtype=torch.float16),
-                f(d, 2, 8, dtype=torch.float16),
+                float_tensor(d, 2, 8, dtype=torch.float16),
+                float_tensor(d, 2, 8, dtype=torch.float16),
                 1,
                 torch.float16,
             ],
@@ -1152,8 +1374,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_softmax_backward_data": OpSpec(
         build=lambda d: (
             [
-                f(d, 2, 8, dtype=torch.float16),
-                f(d, 2, 8, dtype=torch.float16),
+                float_tensor(d, 2, 8, dtype=torch.float16),
+                float_tensor(d, 2, 8, dtype=torch.float16),
                 1,
                 torch.float16,
             ],
@@ -1167,7 +1389,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_amp_foreach_non_finite_check_and_unscale_": OpSpec(
         build=lambda d: (
             [
-                [f(d, 4), f(d, 4)],
+                [float_tensor(d, 4), float_tensor(d, 4)],
                 torch.zeros(1, device=d),  # found_inf
                 torch.ones(1, device=d),  # inv_scale
             ],
@@ -1183,7 +1405,7 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "nonzero_static": OpSpec(
-        build=lambda d: ([f(d, 4, 4)], {"size": 8}),
+        build=lambda d: ([float_tensor(d, 4, 4)], {"size": 8}),
     ),
     # ---------------------------------------------------------------
     # Convolution backward (needs explicit output_sizes + masks)
@@ -1240,8 +1462,8 @@ OP_SPECS: Dict[str, OpSpec] = {
 def _register_bulk_unary_float_builders() -> None:
     """Register builders for unary float ``Tensor -> Tensor`` operators."""
 
-    def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([f(d, 8, 8)], {})
+    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+        return ([float_tensor(device, 8, 8)], {})
 
     # fmt: off
     bulk_short_names = (
@@ -1274,8 +1496,8 @@ def _register_bulk_unary_float_builders() -> None:
 def _register_bulk_whole_tensor_reduction_builders() -> None:
     """Register builders for whole-tensor reduction operators."""
 
-    def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([f(d, 8, 8)], {})
+    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+        return ([float_tensor(device, 8, 8)], {})
 
     bulk_short_names = (
         "all",
@@ -1305,8 +1527,8 @@ def _register_bulk_whole_tensor_reduction_builders() -> None:
 def _register_bulk_unary_special_builders() -> None:
     """Register builders for unary ``special_*`` functions."""
 
-    def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([torch.rand(8, 8, device=d) * 2.0], {})
+    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+        return ([torch.rand(8, 8, device=device) * 2.0], {})
 
     bulk_short_names = (
         "special_airy_ai",
@@ -1334,8 +1556,8 @@ def _register_bulk_unary_special_builders() -> None:
 def _register_bulk_binary_tensor_elementwise_builders() -> None:
     """Register builders for binary elementwise operators."""
 
-    def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([f(d, 8, 8), f(d, 8, 8)], {})
+    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+        return ([float_tensor(device, 8, 8), float_tensor(device, 8, 8)], {})
 
     bulk_short_names = (
         "add",
@@ -1367,91 +1589,111 @@ def _register_high_impact_individual_builders() -> None:
     individual = {
         # (input, value, value) — fused multiply-add variants
         "addcmul": OpSpec(
-            build=lambda d: ([f(d, 4, 4), f(d, 4, 4), f(d, 4, 4)], {}),
+            build=lambda d: (
+                [float_tensor(d, 4, 4), float_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+                {},
+            ),
         ),
         "addcdiv": OpSpec(
-            build=lambda d: ([f(d, 4, 4), f(d, 4, 4), f(d, 4, 4)], {}),
+            build=lambda d: (
+                [float_tensor(d, 4, 4), float_tensor(d, 4, 4), float_tensor(d, 4, 4)],
+                {},
+            ),
         ),
         # matmul: 2D x 2D
-        "mm": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
+        "mm": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
         # cat: list of tensors + dim
         "cat": OpSpec(
-            build=lambda d: ([[f(d, 2, 4), f(d, 2, 4)], 0], {}),
+            build=lambda d: ([[float_tensor(d, 2, 4), float_tensor(d, 2, 4)], 0], {}),
         ),
         # where.self: (condition Bool, self, other) - same shapes
         "where": OpSpec(
             build=lambda d: (
                 [
                     torch.zeros(4, 4, dtype=torch.bool, device=d),
-                    f(d, 4, 4),
-                    f(d, 4, 4),
+                    float_tensor(d, 4, 4),
+                    float_tensor(d, 4, 4),
                 ],
                 {},
             ),
         ),
         # softmax / log_softmax forward — (input, dim, half_to_float=False)
         "_softmax": OpSpec(
-            build=lambda d: ([f(d, 4, 8), -1, False], {}),
+            build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
         "_log_softmax": OpSpec(
-            build=lambda d: ([f(d, 4, 8), -1, False], {}),
+            build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
         # dim-reduction helpers — (input, dim, keepdim?)
-        "all.dim": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
-        "any.dim": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
-        "max.dim": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
-        "min.dim": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
-        "mean.dim": OpSpec(build=lambda d: ([f(d, 4, 4), [-1]], {})),
+        "all.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
+        "any.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
+        "max.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
+        "min.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
+        "mean.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), [-1]], {})),
         "prod.dim_int": OpSpec(
-            build=lambda d: ([f(d, 4, 4), -1], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), -1], {}),
         ),
         "count_nonzero.dim_IntList": OpSpec(
-            build=lambda d: ([f(d, 4, 4), [-1]], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), [-1]], {}),
         ),
         # cumulative reductions
-        "cumsum": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
-        "cumprod": OpSpec(build=lambda d: ([f(d, 4, 4), -1], {})),
+        "cumsum": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
+        "cumprod": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
         # losses: (input, target, reduction='mean')
         "mse_loss": OpSpec(
-            build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {}),
         ),
         "smooth_l1_loss": OpSpec(
-            build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {}),
         ),
         "huber_loss": OpSpec(
-            build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {}),
         ),
         # padding (1d): (input, pad)
         "reflection_pad1d": OpSpec(
-            build=lambda d: ([f(d, 1, 4, 8), [1, 1]], {}),
+            build=lambda d: ([float_tensor(d, 1, 4, 8), [1, 1]], {}),
         ),
         "replication_pad1d": OpSpec(
-            build=lambda d: ([f(d, 1, 4, 8), [1, 1]], {}),
+            build=lambda d: ([float_tensor(d, 1, 4, 8), [1, 1]], {}),
         ),
         # threshold: (self, threshold, value)
         "threshold": OpSpec(
-            build=lambda d: ([f(d, 4, 4), 0.0, 0.0], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), 0.0, 0.0], {}),
         ),
         # histc: (input, bins, min, max)
         "histc": OpSpec(
-            build=lambda d: ([f(d, 64), 10, -3.0, 3.0], {}),
+            build=lambda d: ([float_tensor(d, 64), 10, -3.0, 3.0], {}),
         ),
         # native_dropout: (input, p, train) → (Tensor, Bool mask)
         "native_dropout": OpSpec(
-            build=lambda d: ([f(d, 4, 4), 0.5, True], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), 0.5, True], {}),
         ),
         # tril / triu / *_indices: (n, k=0)
-        "tril": OpSpec(build=lambda d: ([f(d, 4, 4)], {})),
-        "triu": OpSpec(build=lambda d: ([f(d, 4, 4)], {})),
+        "tril": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
+        "triu": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         "tril_indices": OpSpec(build=lambda _d: ([4, 4], {})),
         "triu_indices": OpSpec(build=lambda _d: ([4, 4], {})),
         # comparison with explicit Scalar overload short names
-        "eq": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
-        "ne": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
-        "lt": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
-        "gt": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
-        "ge": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
-        "le": OpSpec(build=lambda d: ([f(d, 4, 4), f(d, 4, 4)], {})),
+        "eq": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
+        "ne": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
+        "lt": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
+        "gt": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
+        "ge": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
+        "le": OpSpec(
+            build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
+        ),
         # isin: needs (elements, test_elements). Short name "isin"
         # covers both .Tensor_Tensor and .Tensor_Scalar overloads.
         "isin": OpSpec(
@@ -1474,38 +1716,38 @@ def _register_high_impact_individual_builders() -> None:
         # logical_*: bool inputs
         "logical_and": OpSpec(
             build=lambda d: (
-                [b(d, (4, 4)), b(d, (4, 4))],
+                [bool_mask(d, (4, 4)), bool_mask(d, (4, 4))],
                 {},
             ),
         ),
         "logical_or": OpSpec(
             build=lambda d: (
-                [b(d, (4, 4)), b(d, (4, 4))],
+                [bool_mask(d, (4, 4)), bool_mask(d, (4, 4))],
                 {},
             ),
         ),
         "logical_xor": OpSpec(
             build=lambda d: (
-                [b(d, (4, 4)), b(d, (4, 4))],
+                [bool_mask(d, (4, 4)), bool_mask(d, (4, 4))],
                 {},
             ),
         ),
         "logical_not": OpSpec(
-            build=lambda d: ([b(d, (4, 4))], {}),
+            build=lambda d: ([bool_mask(d, (4, 4))], {}),
         ),
         # argmax / argmin: (input, dim?, keepdim?)
         "argmax": OpSpec(
-            build=lambda d: ([f(d, 4, 4)], {"dim": -1}),
+            build=lambda d: ([float_tensor(d, 4, 4)], {"dim": -1}),
         ),
         "argmin": OpSpec(
-            build=lambda d: ([f(d, 4, 4)], {"dim": -1}),
+            build=lambda d: ([float_tensor(d, 4, 4)], {"dim": -1}),
         ),
         # topk: (input, k)
-        "topk": OpSpec(build=lambda d: ([f(d, 16), 4], {})),
+        "topk": OpSpec(build=lambda d: ([float_tensor(d, 16), 4], {})),
         # sort: (input, dim?, descending?)
-        "sort": OpSpec(build=lambda d: ([f(d, 16)], {})),
+        "sort": OpSpec(build=lambda d: ([float_tensor(d, 16)], {})),
         # nonzero: (input,) → indices
-        "nonzero": OpSpec(build=lambda d: ([f(d, 4, 4)], {})),
+        "nonzero": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         # unique_consecutive / unique_dim
         "unique_consecutive": OpSpec(
             build=lambda d: (
@@ -1515,7 +1757,7 @@ def _register_high_impact_individual_builders() -> None:
         ),
         # renorm: (input, p, dim, maxnorm)
         "renorm": OpSpec(
-            build=lambda d: ([f(d, 4, 4), 2.0, 0, 5.0], {}),
+            build=lambda d: ([float_tensor(d, 4, 4), 2.0, 0, 5.0], {}),
         ),
     }
     for name, spec in individual.items():
@@ -1674,8 +1916,8 @@ if __name__ == "__main__":
 ).strip()
 
 
-def unique_get_output_param_id(prefix: str) -> str:
-    """Unique param_id (xdist worker + pid + tid + uuid) to avoid path races."""
+def unique_output_param_id(prefix: str) -> str:
+    """Return a unique ``param_id`` for ``get_output_dir``."""
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
     return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
@@ -3145,7 +3387,7 @@ def parse_roctx_markers(
 
 
 # Sentinel leaf-context labels emitted by the C++ RecordFunction tier.
-# Source of truth: roctx_recordfn.cpp ``default_leaf_context``.
+# Source of truth: leaf_context.h ``default_leaf_context``.
 C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (
     "aten:0",
     "aten.nested:0",
@@ -3471,11 +3713,11 @@ _MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
     "elementwise — Tensor overload": ("two same-shape tensors"),
     "elementwise — Scalar overload": ("tensor + python scalar"),
     "elementwise — unary float Tensor → Tensor": (
-        "single template: lambda d: ([f(d, N, N)], {}) — most accept any "
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) — most accept any "
         "float tensor (a few need x ∈ [-1, 1] or x > 0)"
     ),
     "reduction (whole-tensor)": (
-        "single template: lambda d: ([f(d, N, N)], {}) — operates over "
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) — operates over "
         "all elements (some have .dim variants which fall in the "
         "'reduction along dim' bucket)"
     ),
@@ -3772,11 +4014,10 @@ def multiline_coverage_failure_warning(
     seed: int,
     sample_budget: int,
 ) -> str:
-    """Bounded multiline text for warnings.warn when stdout is captured."""
+    """Format a bounded FAIL listing for the coverage test."""
     lines = [
-        f"{len(failure_detail)} operator(s) failed ROCTX/kernel coverage "
-        "(report only; test still passes).",
-        f"Re-run with -s: pytest tests/test_torch_trace_coverage.py -m "
+        f"{len(failure_detail)} operator(s) failed ROCTX/kernel coverage.",
+        f"Re-run with -s: pytest tests/integration/test_torch_trace_coverage.py -m "
         f"torch_trace --coverage-seed={seed} --coverage-n={sample_budget} -s",
         "",
     ]
@@ -3820,7 +4061,7 @@ def compare_single_op(
         return OpCompareOutcome("skip", reason, log_lines)
 
     profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
-    profiler_kernel_set = set(profiler_kernels)
+    profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
 
     matched_marker_leaves: List[str] = []
     roctx_kernels: Set[str] = set()
@@ -3828,6 +4069,7 @@ def compare_single_op(
         if marker_matches_op(op.name, observed_marker_leaf):
             matched_marker_leaves.append(observed_marker_leaf)
             roctx_kernels |= roctx_kernels_map.get(observed_marker_leaf, set())
+    roctx_kernels = normalize_kernel_names(roctx_kernels)
     marker_found = bool(matched_marker_leaves)
 
     def _match_verbose_lines() -> Tuple[str, ...]:
@@ -3902,10 +4144,16 @@ def compare_single_op(
             f"roctx={sorted(roctx_kernels)[:6]}"
             f"{'…' if len(roctx_kernels) > 6 else ''})"
         )
+        mismatch_lines = (
+            f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
+            *(f"      {k}" for k in sorted(profiler_kernel_set)),
+            f"    roctx correlated kernels ({len(roctx_kernels)}):",
+            *(f"      {k}" for k in sorted(roctx_kernels)),
+        )
         return OpCompareOutcome(
             "fail",
             reason,
-            coverage_log_fail(op.name, reason) + verbose_tail,
+            coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
         )
 
     if marker_found:
@@ -3954,7 +4202,7 @@ def print_torch_trace_coverage_session_header(
         )
     print()
     reproduce_cmd = (
-        "pytest tests/test_torch_trace_coverage.py -m torch_trace "
+        "pytest tests/integration/test_torch_trace_coverage.py -m torch_trace "
         f"--coverage-seed={seed} --coverage-n={sample_budget}"
     )
     warnings.warn(

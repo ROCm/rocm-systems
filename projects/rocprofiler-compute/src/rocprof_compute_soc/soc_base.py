@@ -351,12 +351,15 @@ class OmniSoC_Base:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
 
         Loaded from profiling_counter_grouping_policy.yaml for the current arch.
-        Returns an empty tuple when the arch has no grouping policy.
+        gfx115x parts share one policy block, so look the arch up by its
+        canonical config name. Returns an empty tuple when the arch has no
+        grouping policy.
         """
         arch = self.__arch
         if not arch:
             return ()
-        return _load_same_bucket_priority_policy_map().get(arch, ())
+        policy_arch = canonical_config_arch(arch)
+        return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
     def _metric_aware_coalesce_pass(
         self,
@@ -368,16 +371,16 @@ class OmniSoC_Base:
         pmc_perf bucket, else open a new one. Overflow stays for first-fit.
 
         Accepts:
-            work_set        — counters still to be placed (not modified)
-            output_files    — existing CounterFile buckets (not modified)
-            file_count      — current bucket sequence number
+            work_set        counters still to be placed (not modified)
+            output_files    existing CounterFile buckets (not modified)
+            file_count      current bucket sequence number
         Returns:
             (remaining_counters, updated_files, file_count)
         """
         if not work_set:
             return work_set, list(output_files), file_count
 
-        # Work on copies so the caller’s originals are untouched.
+        # Work on copies so the caller's originals are untouched.
         remaining = set(work_set)
         files = list(output_files)
 
@@ -401,8 +404,10 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
-            hw = self._expand_tcc_template_counters(hw)
+            formula_hw, _ = extract_counters_and_variables(
+                metric_yaml, self._mspec.gpu_series, include_supported_denom=False
+            )
+            hw = self._expand_tcc_template_counters(formula_hw)
             counters = frozenset(hw & remaining)
             if not counters:
                 continue
@@ -422,8 +427,6 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if bucket.name.endswith("_ACCUM"):
-                    continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
                     files[bucket_idx] = trial
@@ -602,11 +605,11 @@ class OmniSoC_Base:
         """Iterate analysis_configs/<arch> YAML metric_table rows.
 
         Yields:
-            stem_id     — YAML filename prefix (e.g. "2" from "2_SQ.yaml")
-            panel_id    — metric_table "id" field (may be None)
-            metric_idx  — zero-based index of the metric within its table
-            metric_name — metric key string
-            metric_yaml — metric body serialised as YAML text
+            stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
+            panel_id    metric_table "id" field (may be None)
+            metric_idx  zero-based index of the metric within its table
+            metric_name metric key string
+            metric_yaml metric body serialised as YAML text
         """
         args = self.get_args()
         arch = self.__arch

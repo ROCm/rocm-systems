@@ -100,6 +100,7 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -109,6 +110,9 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
+if(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
@@ -807,6 +811,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/profiler/accl)
   endif()
   add_subdirectory(test)
 

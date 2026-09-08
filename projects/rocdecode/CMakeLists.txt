@@ -21,7 +21,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
@@ -290,6 +290,61 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     NAMESPACE ${PROJECT_NAME}::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
+
+  # Option to build test binaries during the main build (without running them)
+  option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
+
+  if(BUILD_TESTS)
+    include(ExternalProject)
+    set(ROCDECODE_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
+    set(ROCDECODE_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
+
+    # Stage-install the library and its cmake/include artifacts into the build
+    # tree so ExternalProject find_package() works without requiring a prior
+    # sudo make install. cmake --install --prefix rewrites all install paths,
+    # and configure_package_config_file generates relocatable relative paths,
+    # so the staged config correctly resolves headers and libs.
+    add_custom_target(stage_${PROJECT_NAME}
+      COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${ROCDECODE_STAGE_DIR}
+      DEPENDS ${PROJECT_NAME}
+      COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
+    )
+
+    # Helper macro to add one ExternalProject test and register its install
+    # ROCM_PATH keeps pointing at the real ROCm tree so find_package(HIP),
+    # libva, etc. resolve correctly. CMAKE_PREFIX_PATH is prepended with the
+    # stage dir so find_package(rocdecode) picks up the staged config instead
+    # of any previously installed version.
+    macro(rocdecode_add_test_ext TEST_EXE TEST_SOURCE_DIR)
+      ExternalProject_Add(test_${TEST_EXE}
+        SOURCE_DIR ${TEST_SOURCE_DIR}
+        CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
+                   -DCMAKE_PREFIX_PATH=${ROCDECODE_STAGE_DIR}
+                   -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ""
+        DEPENDS stage_${PROJECT_NAME}
+      )
+      ExternalProject_Get_Property(test_${TEST_EXE} BINARY_DIR)
+      install(PROGRAMS ${BINARY_DIR}/${TEST_EXE} DESTINATION ${ROCDECODE_TEST_BIN_DIR} OPTIONAL)
+    endmacro()
+
+    # Samples that do NOT require FFmpeg
+    rocdecode_add_test_ext(videodecoderaw    ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRaw)
+    rocdecode_add_test_ext(rocdecdecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/rocdecDecode)
+    # Negative API test (source under test/)
+    rocdecode_add_test_ext(rocdecodenegativetest ${CMAKE_CURRENT_SOURCE_DIR}/test/rocDecodeNegativeApiTests)
+
+    # Extended tests (require FFmpeg)
+    if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
+      rocdecode_add_test_ext(videodecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecode)
+      rocdecode_add_test_ext(videodecodeperf  ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodePerf)
+      rocdecode_add_test_ext(videodecodebatch ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeBatch)
+      rocdecode_add_test_ext(videodecodergb   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRGB)
+      rocdecode_add_test_ext(videodecodemem   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeMem)
+    endif()
+  endif()
 
   # make test with CTest
   set(BUILD_FROM_SOURCE ON)

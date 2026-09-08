@@ -348,7 +348,7 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tShould be used only when profiling PyTorch applications."
+            "\t\t\tRequires PyTorch 2.13 or 2.14."
         ),
     )
     profile_group.add_argument(
@@ -566,6 +566,27 @@ Examples:
         help=(
             "\t\t\tML API Trace, enables tracing for all supported machine\n"
             "\t\t\tlearning framework backends (e.g. PyTorch, Triton)."
+        ),
+    )
+    profile_group.add_argument(
+        "--ml-trace-with-params",
+        dest="ml_trace_with_params",
+        required=False,
+        metavar="",
+        default=None,
+        choices=["off", "shapes", "values"],
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="ML API trace",
+        help=(
+            "\t\t\tControl operator argument capture for ML API tracing.\n"
+            "\t\t\tRequires a tracing flag (--torch-trace, --triton-trace,\n"
+            "\t\t\tor --ml-api-trace). One of:\n"
+            "\t\t\t   off    (do not capture operator args)\n"
+            "\t\t\t   shapes (capture input shapes and dtypes; DEFAULT)\n"
+            "\t\t\t   values (also record scalar argument values; tensor\n"
+            "\t\t\t           contents are not recorded)"
         ),
     )
     profile_group.add_argument(

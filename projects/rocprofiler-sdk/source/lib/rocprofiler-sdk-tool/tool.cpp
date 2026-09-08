@@ -70,6 +70,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
@@ -104,6 +105,7 @@
 #include <iomanip>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -115,7 +117,10 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <linux/futex.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -202,6 +207,55 @@ is_handled_signal(int signum)
     for(auto itr : rocprofv3_handled_signals)
         if(itr == signum) return true;
     return false;
+}
+
+struct signal_worker_state
+{
+    int                   eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
+    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
+    int                   signo         = {0};               // signal handled (0 == normal exit)
+    std::thread           thread        = {};                // the finalization worker
+
+    ~signal_worker_state() { join(); }
+
+    // Join the finalization worker and close the eventfd. Idempotent and self-safe (a call from the
+    // worker itself skips the join). Called from finalize_rocprofv3 (atexit/main teardown) and from
+    // the destructor, so the worker is never left joinable at static destruction
+    void join()
+    {
+        if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
+        {
+            // Wake the worker's blocking read() so it can exit
+            // closing the fd while read() blocks is UB.
+            if(eventfd >= 0)
+            {
+                uint64_t val = 1;
+                if(write(eventfd, &val, sizeof(val)) < 0)
+                    ROCP_WARNING << "signal worker: eventfd wake before join failed: "
+                                 << strerror(errno);
+            }
+            thread.join();
+            if(eventfd >= 0)
+            {
+                if(close(eventfd) < 0)
+                    ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
+                eventfd = -1;
+            }
+        }
+    }
+};
+
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "rocprofv3 signal path requires lock-free finalize_done atomic support");
+
+auto&
+get_signal_worker()
+{
+    static auto*& _v = common::static_object<signal_worker_state>::construct();
+    auto&         sw = *CHECK_NOTNULL(_v);
+    return sw;
 }
 
 struct buffer_ids
@@ -1537,11 +1591,20 @@ generate_agent_profiles()
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
 }
 
+// Shared, lazily-built per-agent profile set (one config per counter group). Used by both the
+// non-replay round-robin and the kernel-replay per-dispatch selector so they see identical groups.
+agent_profiles&
+get_agent_profiles()
+{
+    static auto profiles = generate_agent_profiles();
+    return profiles;
+}
+
 // this function creates a rocprofiler profile config on the first entry
 std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto agent_profiles = generate_agent_profiles();
+    auto& agent_profiles = get_agent_profiles();
 
     auto agent_iter = agent_profiles.current_iter.find(agent_id);
     if(agent_iter == agent_profiles.current_iter.end())
@@ -1561,6 +1624,99 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 
     uint64_t profile_pos = my_iter / agent_profiles.rotation;
     return profiles->second[profile_pos % profiles->second.size()];
+}
+
+// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
+// callback) as the single source of truth. The counter dispatch callback runs synchronously on the
+// same thread within a pass, so it reads the pass from this thread-local.
+// The (asynchronous) counter record callback receives it through the per-pass user_data. tid and
+// pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
+// (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
+// still carries.
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
+
+// The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
+// Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
+// plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
+// below rather than assumed.
+struct replay_user_data_t
+{
+    uint32_t tid  = 0;
+    uint32_t pass = 0;
+};
+
+static_assert(sizeof(replay_user_data_t) == sizeof(uint64_t),
+              "replay_user_data_t must exactly fill the 64-bit user_data slot");
+static_assert(std::is_trivially_copyable<replay_user_data_t>::value,
+              "replay_user_data_t must remain trivially copyable for memcpy pack/unpack");
+// The tid half of the slot cannot truncate: common::get_tid() returns gettid(), whose value is a
+// kernel pid_t. Asserting the width here makes that a compile-time guarantee rather than something
+// the pack path has to test for and report on every dispatch.
+static_assert(sizeof(pid_t) == 4,
+              "kernel replay packs a thread id into a uint32_t field of user_data, which assumes "
+              "the kernel's pid_t is 32-bit");
+
+inline uint64_t
+pack_replay_user_data(uint64_t tid, uint64_t pass_index)
+{
+    // The pass index has no equivalent compile-time bound -- it comes from the SDK at runtime --
+    // so it stays checked. Truncating it would put a pass that was never collected into the
+    // record, and from there into the output, so a broken invariant is reported rather than
+    // packed. ROCP_CI_LOG_IF keeps this fatal under ROCPROFILER_CI and logs at ERROR otherwise.
+    ROCP_CI_LOG_IF(ERROR, (pass_index >> 32) != 0U)
+        << "kernel replay: cannot pack pass=" << pass_index
+        << " into user_data without truncation (tid=" << tid << ")";
+
+    const auto fields =
+        replay_user_data_t{static_cast<uint32_t>(tid), static_cast<uint32_t>(pass_index)};
+    uint64_t value = 0;
+    std::memcpy(&value, &fields, sizeof(value));
+    return value;
+}
+
+inline replay_user_data_t
+unpack_replay_user_data(uint64_t value)
+{
+    auto fields = replay_user_data_t{};
+    // Cast to void* so -Wclass-memaccess does not fire: the member initializers above make the
+    // struct non-trivial, which the warning treats as unsafe to memcpy into. Trivially copyable is
+    // the property this actually needs, and it is asserted above.
+    std::memcpy(static_cast<void*>(&fields), &value, sizeof(fields));
+    return fields;
+}
+
+// Kernel replay group selection: pass i -> counter group i for the dispatch's agent. Stateless --
+// the pass index comes from the SDK (see tl_current_replay_pass), not re-derived here.
+std::optional<rocprofiler_counter_config_id_t>
+get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t pass_index)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
+
+    // SDK contract: replay_pass_count reported exactly profiles->second.size() passes for this
+    // agent, so the pass index must land in [0, #groups). A larger index means the SDK drove more
+    // passes than we asked for; scream, then fall back to the wrapped index so a non-CI build stays
+    // in-bounds.
+    ROCP_CI_LOG_IF(ERROR, pass_index >= profiles->second.size())
+        << "kernel replay: pass_index=" << pass_index
+        << " exceeds counter groups=" << profiles->second.size() << " for agent "
+        << agent_id.handle;
+
+    return profiles->second[pass_index % profiles->second.size()];
+}
+
+// Counter groups configured for an agent, or 0 when the agent has none. Lets the asynchronous
+// record path sanity-check a pass index that arrived through user_data without duplicating the
+// lookup in get_replay_profile. Safe to call from any thread: get_agent_profiles() is built once
+// and the profiles map is read-only afterwards.
+size_t
+get_replay_group_count(rocprofiler_agent_id_t agent_id)
+{
+    const auto& profiles_map = get_agent_profiles().profiles;
+    const auto  profiles     = profiles_map.find(agent_id);
+    return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
 }
 
 int64_t
@@ -1847,6 +2003,29 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     {
         return;
     }
+    else if(tool::get_config().kernel_replay)
+    {
+        // Under kernel replay every targeted dispatch selects its group deterministically by pass
+        // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
+        // non-replayed dispatch (single group) is pass 0. Thread the pass index (+ enqueuing tid)
+        // to the async record callback via user_data so replay_pass reflects the group actually
+        // collected rather than async record arrival order.
+        const auto pass    = tl_current_replay_pass.value_or(0);
+        auto       profile = get_replay_profile(agent_id, pass);
+        // If we're inside a replay pass (pass index published on this thread) the agent must have
+        // counter groups -- that's the reason the SDK is replaying this dispatch. Missing groups
+        // here is a tool/SDK mismatch that would silently drop this pass's data.
+        ROCP_CI_LOG_IF(ERROR, tl_current_replay_pass.has_value() && !profile)
+            << "kernel replay: in replay pass " << pass << " but agent " << agent_id.handle
+            << " has no counter groups configured";
+
+        // Packed unconditionally, ahead of the profile check. Without a profile the SDK collects
+        // nothing for this dispatch and the record callback should not fire, but user_data is the
+        // record path's only source of thread id and pass index, and leaving it at its default
+        // would surface as thread_id 0 with replay_pass 0 if a record ever did arrive.
+        user_data->value = pack_replay_user_data(common::get_tid(), pass);
+        if(profile) *config = *profile;
+    }
     else if(auto profile = get_device_counting_service(agent_id))
     {
         *config          = *profile;
@@ -1854,6 +2033,9 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     }
 }
 
+// rocprofv3 registers callback dispatch counting (not buffered dispatch counting), so counter
+// records arrive on this path. replay_pass is populated here; the SDK buffered counter callback
+// path is not wired in this tool.
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_counter_record_t*                record_data,
@@ -1869,8 +2051,42 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     // Must call get_ext_attribution before copying dispatch_data (rewrites external corr id).
     counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
     counter_record.dispatch_data = dispatch_data;
-    counter_record.thread_id     = user_data.value;
-    auto serialized_records      = std::vector<tool::tool_counter_value_t>{};
+
+    if(tool::get_config().kernel_replay)
+    {
+        // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
+        // replay_pass stays tied to the counter group actually collected for this pass rather than
+        // the order in which async records arrive.
+        const auto replay = unpack_replay_user_data(user_data.value);
+
+        // Both fields are validated before they reach the record, because user_data is opaque to
+        // us on the way back: a record whose dispatch never went through counter_dispatch_callback
+        // arrives with a default-constructed slot that unpacks to a plausible-looking (0, 0), which
+        // would otherwise be written out as a real thread id and a real pass index.
+        const auto group_count = get_replay_group_count(dispatch_data.dispatch_info.agent_id);
+
+        ROCP_CI_LOG_IF(ERROR, replay.tid == 0)
+            << "kernel replay: counter record on agent "
+            << dispatch_data.dispatch_info.agent_id.handle
+            << " unpacked thread id 0, so its user_data was never packed by the dispatch callback";
+
+        ROCP_CI_LOG_IF(ERROR, group_count > 0 && replay.pass >= group_count)
+            << "kernel replay: counter record unpacked pass " << replay.pass << " but agent "
+            << dispatch_data.dispatch_info.agent_id.handle << " has only " << group_count
+            << " counter groups";
+
+        counter_record.thread_id = replay.tid;
+        // Clamped so a pass index that survived the checks above cannot be emitted as a group that
+        // was never collected. With group_count == 0 there is nothing to clamp against, so the
+        // unpacked value is passed through and the log above carries the diagnosis.
+        counter_record.replay_pass = (group_count > 0) ? (replay.pass % group_count) : replay.pass;
+    }
+    else
+    {
+        counter_record.thread_id = user_data.value;
+    }
+
+    auto serialized_records = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
 
     for(size_t count = 0; count < record_count; ++count)
@@ -2085,7 +2301,13 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
 
     struct sigaction sig_act = {};
     sigemptyset(&sig_act.sa_mask);
-    sig_act.sa_flags     = (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    // No SA_RESETHAND: a one-shot handler resets the disposition to SIG_DFL the instant it fires,
+    // so a *second* delivery of the same signal (e.g. a chained app handler like LLVM/comgr
+    // re-raising) would land on SIG_DFL and terminate the process mid-flush -> data loss. Keeping
+    // our handler installed routes every re-delivery back through the re-entry guard, which
+    // swallows until the flush completes (finalize_done) and only then escalates. Termination is
+    // guaranteed by the worker restoring the real disposition and re-raising once the flush done.
+    sig_act.sa_flags     = (SA_SIGINFO | SA_NOCLDSTOP);
     sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
     for(auto signal_v : rocprofv3_handled_signals)
     {
@@ -2186,6 +2408,13 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
 void
 finalize_rocprofv3(std::string_view context)
 {
+    auto& sw = get_signal_worker();
+    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
+        return;
+    }
+
     ROCP_INFO << "invoked: finalize_rocprofv3";
     if(client_finalizer && client_identifier)
     {
@@ -2194,10 +2423,9 @@ finalize_rocprofv3(std::string_view context)
         client_finalizer  = nullptr;
         client_identifier = nullptr;
     }
-    else
-    {
-        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
-    }
+
+    // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).
+    sw.join();
 }
 
 bool
@@ -2271,6 +2499,67 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
 }
 
+// Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
+// The pass count must match the number of counter groups collectable on THIS dispatch's agent --
+// the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
+// that pass i maps to group i with no wrap/skip on agents with a different or partial group set
+// (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
+// disables replay.
+uint64_t
+kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                                  rocprofiler_user_data_t /*user_data*/)
+{
+    auto&      agent_profiles = get_agent_profiles();
+    const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
+    const auto n =
+        (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
+    return (n == 0) ? 1 : n;
+}
+
+// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
+// query the number of replay passes for each dispatch.
+void
+kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t* /*user_data*/,
+                       void* /*data*/)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        payload->replay_pass_count = kernel_replay_pass_count_callback;
+    }
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
+    {
+        // Publish the SDK's authoritative pass index for the counter dispatch callback, which runs
+        // synchronously on this same thread within the pass; clear it once the pass ends so
+        // ordinary dispatches don't observe a stale value.
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            // SDK contract: a fixed-count replay (total_passes > 0) numbers passes [0,
+            // total_passes); total_passes == 0 marks an indefinite loop with no upper bound. A pass
+            // outside that range means the SDK drove more passes than it advertised.
+            ROCP_CI_LOG_IF(
+                ERROR, payload->total_passes != 0 && payload->current_pass >= payload->total_passes)
+                << "kernel replay: SDK published current_pass=" << payload->current_pass
+                << " out of range for total_passes=" << payload->total_passes;
+            tl_current_replay_pass = payload->current_pass;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            // Enter/exit are paired per pass on this thread, so an exit with nothing published
+            // means the SDK emitted PASS phases out of order.
+            ROCP_CI_LOG_IF(ERROR, !tl_current_replay_pass)
+                << "kernel replay: PASS exit without a matching enter on this thread";
+            tl_current_replay_pass.reset();
+        }
+    }
+}
+
 struct real_callbacks_t
 {};
 
@@ -2298,6 +2587,7 @@ struct tracing_callbacks_t
     , counter_dispatch{counter_dispatch_callback}
     , counter_record{counter_record_callback}
     , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
+    , kernel_replay{kernel_replay_callback}
     {}
 
     explicit tracing_callbacks_t(dummy_callbacks_t)
@@ -2311,6 +2601,7 @@ struct tracing_callbacks_t
     , pc_sampling{dummy_buffered_tracing_callback}
     , counter_dispatch{dummy_counter_dispatch_callback}
     , counter_record{dummy_counter_record_callback}
+    , kernel_replay{dummy_callback_tracing_callback}
     {}
 
     const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
@@ -2326,6 +2617,7 @@ struct tracing_callbacks_t
     const rocprofiler_dispatch_counting_service_cb_t      counter_dispatch                = nullptr;
     const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
     const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
 };
 
 auto
@@ -3183,6 +3475,41 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     start_context(runtime_initialization_ctx, "runtime initialization");
 
+    // Kernel replay: collect every --pmc counter group within a single application run by replaying
+    // each dispatch once per group (device memory is snapshot/restored between passes). The tool
+    // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
+    // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
+    //
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
+    {
+        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        auto kernel_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
+                         "failed to create kernel replay context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             kernel_replay_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                             nullptr,
+                             0,
+                             callbacks.kernel_replay,
+                             nullptr),
+                         "kernel replay tracing configure failed");
+
+        start_context(kernel_replay_ctx, "kernel replay");
+    }
+
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
@@ -3951,6 +4278,11 @@ get_sigaction_function()
 
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
+
+// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
+int signal_abort_flush_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -4106,43 +4438,95 @@ diagnose_status(pid_t _pid, int _status)
 }
 
 void
-rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
 {
-    // Only the first fatal signal in the process runs the body below. A later one, whether it
-    // is a re-entrant abort from finalization on this thread or a signal on another thread,
-    // must not wait on the std::call_once: the first is a recursive lock, the second blocks
-    // until the finalization it is waiting on completes, and either way the process can no
-    // longer be terminated. This runs before any logging so that a stuck logger or allocator
-    // cannot get in the way.
-    static auto _handling = std::atomic_flag{};
-    if(_handling.test_and_set())
-    {
-        constexpr auto _msg =
-            std::string_view{"[rocprofv3] fatal signal while already handling one... "
-                             "terminating\n"};
-        // write() rather than the logger: async-signal-safe and takes no locks
-        auto _written = ::write(STDERR_FILENO, _msg.data(), _msg.size());
-        (void) _written;
-
-        // rocprofv3 interposes signal()/sigaction() to keep this handler installed, so the
-        // default disposition has to be restored through the real symbol before re-raising.
-        auto _default_action       = sigaction_t{};
-        _default_action.sa_handler = SIG_DFL;
-        sigemptyset(&_default_action.sa_mask);
-        if(auto* _real_sigaction = get_sigaction_function();
-           _real_sigaction != nullptr && _real_sigaction(signo, &_default_action, nullptr) == 0)
+    auto get_children = [&this_pid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
+        auto ifs      = std::ifstream{fname};
+        auto children = std::vector<pid_t>{};
+        if(!ifs.is_open())
         {
-            // the handler was entered with signo blocked, so unblock it or the raise below
-            // only marks it pending and the process exits rather than dying from the signal
-            auto _blocked = sigset_t{};
-            sigemptyset(&_blocked);
-            sigaddset(&_blocked, signo);
-            ::pthread_sigmask(SIG_UNBLOCK, &_blocked, nullptr);
-            ::raise(signo);
+            ROCP_WARNING << "signal worker: failed to open " << fname << ": " << strerror(errno);
+            return children;
         }
+        while(ifs)
+        {
+            pid_t child_pid = 0;
+            ifs >> child_pid;
+            if(ifs && !ifs.eof() && child_pid > 0) children.emplace_back(child_pid);
+        }
+        return children;
+    };
 
-        // only reached if the signal is not fatal by default or could not be restored
-        ::_exit(128 + signo);
+    auto _children = get_children();
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        this_ppid,
+        this_pid,
+        this_tid,
+        context,
+        _children.size());
+
+    for(auto itr : _children)
+    {
+        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+        if(status) diagnose_status(itr, status.value());
+    }
+}
+
+// Reinstall the disposition we wrapped for `signo`: the saved chained handler if any, else
+// SIG_DFL. Uses the real sigaction (bypasses our interceptor).
+void
+restore_signal_disposition(int signo)
+{
+    if(auto& chained = get_chained_signals().at(signo); chained)
+    {
+        if(chained->action)
+        {
+            get_sigaction_function()(signo, &(*chained->action), nullptr);
+        }
+        else
+        {
+            struct sigaction sa = {};
+            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            get_sigaction_function()(signo, &sa, nullptr);
+        }
+    }
+    else
+    {
+        struct sigaction sa = {};
+        sa.sa_handler       = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        get_sigaction_function()(signo, &sa, nullptr);
+    }
+}
+
+void
+signal_finalization_worker()
+{
+    auto& sw = get_signal_worker();
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    for(auto sig : rocprofv3_handled_signals)
+        sigaddset(&mask, sig);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+
+    // Retry across EINTR: the worker blocks only the handled signals, so any other signal delivered
+    // here (SIGCHLD, SIGALRM, ...) would otherwise abort the read and kill the worker, after which
+    // nothing flushes and every repeat signal is swallowed forever.
+    uint64_t val   = 0;
+    ssize_t  nread = 0;
+    do
+    {
+        nread = read(sw.eventfd, &val, sizeof(val));
+    } while(nread < 0 && errno == EINTR);
+
+    if(nread < 0)
+    {
+        ROCP_WARNING << "signal worker: eventfd read failed: " << strerror(errno);
+        return;
     }
 
     auto this_pid  = getpid();
@@ -4150,132 +4534,159 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     auto this_tid  = common::get_tid();
     auto this_func = std::string_view{__FUNCTION__};
 
-    ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {}...",
-                                this_ppid,
-                                this_pid,
-                                this_tid,
-                                this_func,
-                                signo);
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func,
+        sw.signo);
 
-    static auto _once = std::once_flag{};
-    std::call_once(_once, [&]() {
-        auto get_children = [&this_pid]() {
-            auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
-            auto ifs      = std::ifstream{fname};
-            auto children = std::vector<pid_t>{};
-            while(ifs)
-            {
-                pid_t val = 0;
-                ifs >> val;
-                if(ifs && !ifs.eof() && val > 0) children.emplace_back(val);
-            }
-            return children;
-        };
+    finalize_rocprofv3(this_func);
 
-        auto _children = get_children();
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            _children.size());
+    if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
-        // wait for children
-        for(auto itr : _children)
+    // Signal completion (only the SIGABRT handler path waits on this).
+    sw.finalize_done.store(1u, std::memory_order_release);
+    syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
+
+    // Re-raise BEFORE reaping children. The app's own handler needs the signal to run its
+    // coordinated shutdown, and that shutdown is what makes the children exit. Reaping first
+    // deadlocks multi-process apps (e.g. tensor-parallel servers) whose worker processes only
+    // exit once the main tells them to. signo == 0 is normal-exit finalization; SIGABRT
+    // terminates itself once its (synchronously waiting) handler returns into abort().
+    if(sw.signo != 0 && sw.signo != SIGABRT)
+    {
+        const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
+        restore_signal_disposition(sw.signo);
+
+        // Re-raise process-directed (kill, not raise) so it lands on an app thread, not this
+        // worker (which blocks these signals): the chained handler runs, or SIG_DFL exits.
+        if(!have_chained)
         {
-            auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-            if(status) diagnose_status(itr, status.value());
+            // No chained handler: also unblock here so SIG_DFL is guaranteed to terminate.
+            sigset_t unblock{};
+            sigemptyset(&unblock);
+            sigaddset(&unblock, sw.signo);
+            pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
         }
+        kill(getpid(), sw.signo);
+    }
 
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            signo);
+    // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
+    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
+    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
+    wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
-        finalize_rocprofv3(this_func);
-        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func);
+}
 
-        ROCP_INFO << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            signo);
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+{
+    (void) info;
+    (void) ucontext;
 
-        if(get_chained_signals().at(signo))
+    auto& sw = get_signal_worker();
+
+    // Our handler being installed means the app doesn't coordinate shutdown.
+    // Well-behaved apps use --disable-signal-handlers (atexit handles everything).
+    //
+    // Re-entry: a second signal arrived while we're still handling the first
+    // (a chained handler re-raising, or a double Ctrl+C).
+    // While the flush is running, swallow it. Delivering it now would cut the
+    // flush short and truncate the profile.
+    // After the flush completes (finalize_done), force SIG_DFL and re-raise.
+    // The worker re-raises on its own once done, so the process still exits.
+    uint32_t expected = 0;
+    if(sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire) == false)
+    {
+        if(sw.finalize_done.load(std::memory_order_acquire) != 0)
         {
-            ROCP_INFO << fmt::format(
-                "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for {}",
-                this_ppid,
-                this_pid,
-                this_tid,
-                this_func,
-                signo);
+            struct sigaction _dfl = {};
+            _dfl.sa_handler       = SIG_DFL;
+            sigemptyset(&_dfl.sa_mask);
+            get_sigaction_function()(signo, &_dfl, nullptr);
 
-            if(auto& _chained = *get_chained_signals().at(signo); _chained.action)
-            {
-                ROCP_TRACE << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
-                                          "signal handler for {}... executing chained sigaction",
-                                          this_ppid,
-                                          this_pid,
-                                          this_tid,
-                                          this_func,
-                                          signo);
-                if((_chained.action->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
-                   _chained.action->sa_sigaction &&
-                   _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained sigaction (SIGINFO)",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.action->sa_sigaction(signo, info, ucontext);
-                }
-                else if((_chained.action->sa_flags & SA_SIGINFO) != SA_SIGINFO &&
-                        _chained.action->sa_handler &&
-                        _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained sigaction (HANDLER)",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.action->sa_handler(signo);
-                }
-            }
-            else
-            {
-                if(_chained.handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained handler",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.handler(signo);
-                }
-            }
+            sigset_t _unblock{};
+            sigemptyset(&_unblock);
+            sigaddset(&_unblock, signo);
+            pthread_sigmask(SIG_UNBLOCK, &_unblock, nullptr);
+            raise(signo);
         }
-    });
+        return;
+    }
 
-    // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
+    // For testing: allow quick_exit path
     if(signal_handler_exit) ::quick_exit(signo);
-    ::raise(signo);
+
+    // Hand the signal number to the worker (ordered by the eventfd write/read below).
+    sw.signo = signo;
+
+    // Wake the finalization worker: the flush is NOT async-signal-safe, so it runs there.
+    bool worker_notified = false;
+    if(sw.eventfd >= 0)
+    {
+        uint64_t val    = 1;
+        worker_notified = (write(sw.eventfd, &val, sizeof(val)) == sizeof(val));
+    }
+
+    // SIGABRT can't defer: returning lets abort() re-raise SIG_DFL before the worker flushes.
+    // So wait for the flush here, then return into abort(). Unlike the async signals, this can
+    // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
+    // paths, e.g. heap-corruption detection. Bound the wait with
+    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // beats a hung process. <= 0 waits forever.
+    if(signo == SIGABRT)
+    {
+        if(worker_notified)
+        {
+            // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
+            // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
+            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            auto       deadline = timespec{};
+            if(bounded)
+            {
+                clock_gettime(CLOCK_MONOTONIC, &deadline);
+                deadline.tv_sec += signal_abort_flush_timeout_sec;
+            }
+
+            while(sw.finalize_done.load(std::memory_order_acquire) == 0)
+            {
+                if(syscall(SYS_futex,
+                           &sw.finalize_done,
+                           FUTEX_WAIT_BITSET,
+                           0,
+                           bounded ? &deadline : nullptr,
+                           nullptr,
+                           FUTEX_BITSET_MATCH_ANY) == -1 &&
+                   errno == ETIMEDOUT)
+                {
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
+    // Async signals (SIGINT/SIGQUIT/SIGTERM): don't block or re-raise here. Returning lets this
+    // thread resume and release any lock it holds, so the worker's flush can't deadlock against
+    // it; the worker terminates via kill() once the flush is done.
+    if(!worker_notified)
+    {
+        // No worker to hand off to — best-effort terminate on this thread.
+        restore_signal_disposition(signo);
+        sigset_t unblock{};
+        sigemptyset(&unblock);
+        sigaddset(&unblock, signo);
+        pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        raise(signo);
+    }
 }
 
 int
@@ -4393,14 +4804,18 @@ rocprofv3_set_main(main_func_t main_func)
 sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler)
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once,
-                   []() { get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal"); });
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_signal_function()(signum, handler);
 
     if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
-    get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+    // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
+    // rationale in rocprofv3_sigaction.
+    if(!get_chained_signals().at(signum) && handler != SIG_DFL)
+        get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
 
     return get_signal_function()(
         signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
@@ -4411,21 +4826,41 @@ rocprofv3_sigaction(int signum,
                     const struct sigaction* __restrict__ act,
                     struct sigaction* __restrict__ oldact)
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
+    if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
-    });
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_sigaction_function()(signum, act, oldact);
 
     if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
 
-    // make sure rocprofv3_error_signal_handler doesn't call itself
-    if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
-       act->sa_sigaction != &rocprofv3_error_signal_handler)
-        get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+    // Save the app's disposition so we can restore it on signal delivery.
+    // Only save the first one registered per signal. Later installs (e.g., LLVM comgr) often
+    // don't chain properly — they clobber the disposition on re-raise. Preserving the app's
+    // disposition ensures the application sees its signal as-if the profiler wasn't there.
+    if(!get_chained_signals().at(signum))
+    {
+        if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO)
+        {
+            if(act->sa_sigaction != &rocprofv3_error_signal_handler)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+        else
+        {
+            // Save SIG_IGN too (matching signal()): an app that ignores the signal — e.g. a
+            // deliberately un-interruptible process — must still see it ignored after we flush.
+            // SIG_DFL is skipped because an empty entry already restores as SIG_DFL.
+            if(act->sa_handler != SIG_DFL)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+    }
 
     struct sigaction _upd_act = *act;
-    _upd_act.sa_flags |= (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    // See initialize_signal_handler: no SA_RESETHAND so re-deliveries route back through our
+    // re-entry guard instead of hitting SIG_DFL mid-flush.
+    _upd_act.sa_flags &= ~SA_RESETHAND;
+    _upd_act.sa_flags |= (SA_SIGINFO | SA_NOCLDSTOP);
     _upd_act.sa_sigaction = &rocprofv3_error_signal_handler;
 
     return get_sigaction_function()(signum, &_upd_act, oldact);
@@ -4455,6 +4890,42 @@ rocprofv3_main(int argc, char** argv, char** envp)
     initialize_logging();
 
     initialize_rocprofv3();
+
+    // Resolve dlsym'd function pointers at init time (before interceptors run).
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+    if(!get_sigaction_function())
+        get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+
+    // fork+exec and spawn children re-init through the normal init path. Plain fork children
+    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
+    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
+    // markers still flushes if reached (covered by a test).
+    {
+        auto& sw   = get_signal_worker();
+        sw.eventfd = eventfd(0, EFD_CLOEXEC);
+        if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
+
+        // Register atfork handler so fork() children get a fresh worker thread.
+        // Without this, fork children inherit the parent's stale eventfd/thread.
+        static bool atfork_registered = false;
+        if(!atfork_registered)
+        {
+            atfork_registered = true;
+            pthread_atfork(nullptr, nullptr, []() {
+                // Child handler: reset stale state and spawn a fresh worker.
+                auto& child_sw = get_signal_worker();
+                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
+                {
+                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
+                                 << strerror(errno);
+                }
+
+                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
+                child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
+                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
+            });
+        }
+    }
 
     initialize_signal_handler(get_sigaction_function());
 
