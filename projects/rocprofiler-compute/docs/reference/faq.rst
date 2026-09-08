@@ -44,6 +44,13 @@ Hardware performance counters are collected across multiple profiling passes. Wh
 
 This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
 
+How do compute and memory partition modes affect metrics?
+=========================================================
+
+On AMD Instinct MI300 and MI350 series GPUs, the active partition modes change
+how counters are normalized and how percent-of-peak metrics are calculated. See
+:doc:`/conceptual/cdna/compute-memory-partition`.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
