@@ -2754,6 +2754,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     //     rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
     // }
 
+    LOG_DEBUG(
+        "kfd_events: buffered domain requested? page_fault={} page_migrate={} queue={} "
+        "event_queue={} event_unmap_from_gpu={} event_dropped_events={}",
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT),
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE),
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE),
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE),
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU),
+        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
+
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -2862,7 +2872,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         //     nullptr, 0, _data->kfd_event_dropped_buffer));
     }
 
-    g_domain_service->configure(domain_selection_list);
+    LOG_DEBUG("kfd_events: {} domain selection(s) queued for domain_service::configure",
+              domain_selection_list.size());
+    for(const auto& selection : domain_selection_list)
+    {
+        LOG_DEBUG("kfd_events: queued domain selection '{}'",
+                  selection.name.has_value() ? *selection.name : "<group-based>");
+    }
+
+    try
+    {
+        g_domain_service->configure(domain_selection_list);
+    } catch(const std::exception& e)
+    {
+        // An uncaught exception here would unwind across the rocprofiler-sdk C
+        // callback boundary (UB) with no diagnostic at all -- log critically
+        // (auto-flushed) before rethrowing so the failure is visible even if the
+        // process aborts immediately afterward.
+        LOG_CRITICAL("domain_service::configure failed: {}", e.what());
+        throw;
+    }
 #endif
 
     if(!_counter_events.empty())

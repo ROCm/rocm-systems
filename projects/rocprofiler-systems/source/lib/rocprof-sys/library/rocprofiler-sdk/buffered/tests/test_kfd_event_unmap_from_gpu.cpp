@@ -84,6 +84,8 @@ struct agent_t
 // default-constructed record.
 struct externals
 {
+    using agent_t = buffered::agent_t;
+
     struct pmc_info_t
     {
         int           type             = 0;

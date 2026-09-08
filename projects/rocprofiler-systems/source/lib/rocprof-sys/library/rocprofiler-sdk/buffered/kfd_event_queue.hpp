@@ -4,11 +4,13 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "logger/debug.hpp"
 
 #include <fmt/format.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 
 namespace rocprofsys::domains::buffered
 {
@@ -21,6 +23,10 @@ on_kfd_event_queue_configure()
 
     auto& agent_mgr  = Externals::get_agent_manager();
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_GPU);
+    if(gpu_agents.empty())
+    {
+        LOG_DEBUG("kfd_event_queue: no GPU agents found; no PMC info will be registered");
+    }
     for(const auto& gpu : gpu_agents)
     {
         const auto dev_idx = static_cast<std::uint32_t>(gpu->device_type_index);
@@ -62,11 +68,20 @@ on_kfd_event_queue(typename SdkBackend::kfd_event_queue_record* record, void* da
         return;
     }
 
-    const auto  name = std::string{ SdkBackend::get_buffer_tracing_names().at(
+    const auto name = std::string{ SdkBackend::get_buffer_tracing_names().at(
         SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE, record->operation) };
-    const auto  tid  = static_cast<std::uint64_t>(record->pid);
-    const auto* agent =
-        &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
+    const auto tid  = static_cast<std::uint64_t>(record->pid);
+
+    const typename Externals::agent_t* agent = nullptr;
+    try
+    {
+        agent =
+            &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
+    } catch(const std::exception& e)
+    {
+        LOG_DEBUG("kfd_event_queue: agent lookup failed for handle {} ({})",
+                  record->agent_id.handle, e.what());
+    }
 
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });

@@ -10,6 +10,7 @@
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+#include "logger/debug.hpp"
 
 #include <fmt/format.h>
 
@@ -35,6 +36,17 @@ public:
         m_available_domains.insert(m_available_domains.end(),
                                    std::make_move_iterator(callback_domains.begin()),
                                    std::make_move_iterator(callback_domains.end()));
+
+        LOG_DEBUG("domain_service: SDK reports {} available domains",
+                  m_available_domains.size());
+        for(const auto& domain : m_available_domains)
+        {
+            LOG_DEBUG("domain_service: available domain '{}' (mode={}, group={})",
+                      domain.name,
+                      static_cast<std::underlying_type_t<domains::collection_mode>>(
+                          domain.key.mode),
+                      domain.group.has_value() ? *domain.group : "<none>");
+        }
     }
 
     [[nodiscard]] std::span<const domains::domain_info> available_domains() const noexcept
@@ -44,7 +56,18 @@ public:
 
     void configure(std::span<const domain_selection> selections)
     {
+        LOG_DEBUG("domain_service: configuring {} domain selection(s)",
+                  selections.size());
+
         m_configuration = resolve_configuration(selections);
+        LOG_DEBUG("domain_service: resolved {} domain configuration(s)",
+                  m_configuration.size());
+        if(m_configuration.empty())
+        {
+            LOG_DEBUG(
+                "domain_service: no domains resolved from the requested selections; "
+                "nothing will be configured");
+        }
 
         m_buffered_domains.reserve(m_configuration.size());
         m_callback_domains.reserve(m_configuration.size());
@@ -53,6 +76,7 @@ public:
             configure_domain(config);
         }
 
+        LOG_DEBUG("domain_service: starting context (handle={})", context().handle);
         SdkBackend::start_context(context());
     }
 
@@ -106,6 +130,11 @@ private:
                 configure_callback(domain, std::move(operations));
                 break;
             default:
+                LOG_DEBUG(
+                    "domain_service: unsupported collection mode {} for domain id {}",
+                    static_cast<std::underlying_type_t<domains::collection_mode>>(
+                        domain.key.mode),
+                    domain.key.value);
                 throw std::runtime_error{ fmt::format(
                     "unsupported collection mode: {}",
                     static_cast<std::underlying_type_t<domains::collection_mode>>(
@@ -120,12 +149,22 @@ private:
         const auto& definition =
             domains::registry<SdkBackend, Externals>::get_buffered(domain.key.value);
 
+        LOG_DEBUG("domain_service: configuring buffered domain '{}' ({} operation(s))",
+                  definition.meta.name, operations.size());
+
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
 
         if(definition.on_configure)
         {
+            LOG_DEBUG("domain_service: running on_configure() for domain '{}'",
+                      definition.meta.name);
             definition.on_configure();
+        }
+        else
+        {
+            LOG_DEBUG("domain_service: domain '{}' has no on_configure() callback",
+                      definition.meta.name);
         }
     }
 
@@ -136,12 +175,22 @@ private:
         const auto& definition =
             domains::registry<SdkBackend, Externals>::get_callback(domain.key.value);
 
+        LOG_DEBUG("domain_service: configuring callback domain '{}' ({} operation(s))",
+                  definition.meta.name, operations.size());
+
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
         m_callback_domains.back().configure();
 
         if(definition.on_configure)
         {
+            LOG_DEBUG("domain_service: running on_configure() for domain '{}'",
+                      definition.meta.name);
             definition.on_configure();
+        }
+        else
+        {
+            LOG_DEBUG("domain_service: domain '{}' has no on_configure() callback",
+                      definition.meta.name);
         }
     }
 
@@ -152,7 +201,9 @@ private:
             return m_context;
         }
 
+        LOG_DEBUG("domain_service: creating new SDK context");
         SdkBackend::create_context(&m_context);
+        LOG_DEBUG("domain_service: created SDK context (handle={})", m_context.handle);
 
         return m_context;
     }
@@ -205,6 +256,9 @@ private:
     {
         if(selection.name.has_value() && selection.group.has_value())
         {
+            LOG_DEBUG(
+                "domain_service: invalid selection: both name '{}' and group '{}' set",
+                *selection.name, *selection.group);
             throw std::runtime_error{ fmt::format(
                 "selection sets both name '{}' and group '{}'; use one or the other",
                 *selection.name, *selection.group) };
@@ -212,6 +266,8 @@ private:
 
         if(selection.operations.has_value() && !selection.name.has_value())
         {
+            LOG_DEBUG("domain_service: invalid selection: operations set without a "
+                      "domain name");
             throw std::runtime_error{ "selection sets operations without a domain name" };
         }
     }
@@ -225,6 +281,8 @@ private:
             });
         if(found == available.end())
         {
+            LOG_DEBUG("domain_service: unknown domain '{}' requested ({} available)",
+                      name, available.size());
             throw std::runtime_error{ fmt::format("unknown domain '{}'", name) };
         }
         return { &*found };
@@ -244,6 +302,9 @@ private:
         }
         if(matched.empty())
         {
+            LOG_DEBUG(
+                "domain_service: unknown domain group '{}' requested ({} available)",
+                group, available.size());
             throw std::runtime_error{ fmt::format("unknown domain group '{}'", group) };
         }
         return matched;
@@ -299,6 +360,8 @@ private:
                 });
             if(found == domain.operations.end())
             {
+                LOG_DEBUG("domain_service: unknown operation '{}' in domain '{}'", name,
+                          domain.name);
                 throw std::runtime_error{ fmt::format(
                     "unknown operation '{}' in domain '{}'", name, domain.name) };
             }
