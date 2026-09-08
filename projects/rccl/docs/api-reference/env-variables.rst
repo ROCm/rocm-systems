@@ -937,6 +937,15 @@ for RCCL are collected in the following table.
       - | ``1``: Enable RAS (default).
         | ``0``: Disable RAS.
 
+    * - | ``NCCL_RAS_ADDR``
+        | Specifies the address and port on which the RAS subsystem listens for
+          client connections. Processes can share this socket, but independent
+          jobs on the same node should use different ports. Using an externally
+          accessible interface instead of ``localhost`` has security implications.
+      - | Host name or IP address followed by a port.
+        | Default: ``localhost:28028``.
+        | Enclose an IPv6 address in square brackets, for example ``[::1]``.
+
 Development and testing (advanced)
 ==================================
 
