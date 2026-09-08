@@ -250,7 +250,7 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
           int ready = 0;
           for (int r = 0; r < nRanks; r++) {
             uint32_t sv = __scoped_atomic_load_n((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], __ATOMIC_ACQUIRE,
-                                            __MEMORY_SCOPE_SYSTEM);
+                                                 __MEMORY_SCOPE_SYSTEM);
             if (sv == 1) {
               ready++;
             }
@@ -355,7 +355,7 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
       if (blockIdx.x == 0) {
         for (int r = (int)threadIdx.x; r < nRanks; r += (int)blockDim.x) {
           __scoped_atomic_store_n((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], 0, __ATOMIC_RELEASE,
-                             __MEMORY_SCOPE_SYSTEM);
+                                  __MEMORY_SCOPE_SYSTEM);
         }
       }
     }

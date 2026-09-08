@@ -258,7 +258,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         prims.patReduce(ps, shmem);
         if (tidInGroup == 0)
           __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
-                             __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
+                                  __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
         if (last) break;
         step += nGroups;
       }

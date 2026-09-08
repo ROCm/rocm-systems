@@ -192,10 +192,10 @@ struct atomic_ref {
   NCCL_DEVICE_INLINE void store(T val, memory_order order = memory_order_seq_cst) const {
     if constexpr (sizeof(T) == 4) {
       __scoped_atomic_store_n(reinterpret_cast<unsigned int*>(ptr), *reinterpret_cast<unsigned int*>(&val), order,
-                         toMemoryScope(Scope));
+                              toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
       __scoped_atomic_store_n(reinterpret_cast<unsigned long long*>(ptr), *reinterpret_cast<unsigned long long*>(&val),
-                         order, toMemoryScope(Scope));
+                              order, toMemoryScope(Scope));
     } else {
       __atomic_store_n(ptr, val, order);
     }
@@ -252,14 +252,14 @@ struct atomic_ref {
                                                   memory_order failure) const {
     if constexpr (sizeof(T) == 4) {
       return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned int*>(ptr),
-                                                  reinterpret_cast<unsigned int*>(&expected),
-                                                  *reinterpret_cast<unsigned int*>(&desired), /*weak=*/false, success,
-                                                  failure, toMemoryScope(Scope));
+                                                reinterpret_cast<unsigned int*>(&expected),
+                                                *reinterpret_cast<unsigned int*>(&desired), /*weak=*/false, success,
+                                                failure, toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
       return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned long long*>(ptr),
-                                                  reinterpret_cast<unsigned long long*>(&expected),
-                                                  *reinterpret_cast<unsigned long long*>(&desired), /*weak=*/false,
-                                                  success, failure, toMemoryScope(Scope));
+                                                reinterpret_cast<unsigned long long*>(&expected),
+                                                *reinterpret_cast<unsigned long long*>(&desired), /*weak=*/false,
+                                                success, failure, toMemoryScope(Scope));
     } else {
       return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, success, failure);
     }

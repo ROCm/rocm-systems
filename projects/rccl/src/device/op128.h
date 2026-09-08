@@ -273,7 +273,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
 
 // Used to define implementations for above prototypes.
 #define DEFINE_ld_st__size_space_scoped_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \
-                                            addr_reg_ty) \
+                                               addr_reg_ty) \
   template <> \
   __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
@@ -286,7 +286,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
     tmp = __scoped_atomic_load_n((__attribute__((address_space(1))) data_cxx_ty*)addr, __ATOMIC_RELAXED, \
-                            __MEMORY_SCOPE_SYSTEM); \
+                                 __MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
@@ -294,7 +294,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
   template <> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
     __scoped_atomic_store_n((__attribute__((address_space(1))) data_cxx_ty*)addr, value.native, __ATOMIC_RELAXED, \
-                       __MEMORY_SCOPE_SYSTEM); \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 
 #define DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \
@@ -456,15 +456,15 @@ __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t* ptr) {
 
 __device__ __forceinline__ void st_volatile_global(uint64_t* ptr, uint64_t val) {
   __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
-                     __MEMORY_SCOPE_SYSTEM);
+                          __MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t* ptr, uint64_t val) {
   __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
-                     __MEMORY_SCOPE_SYSTEM);
+                          __MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ void st_release_sys_global(uint64_t* ptr, uint64_t val) {
   __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELEASE,
-                     __MEMORY_SCOPE_SYSTEM);
+                          __MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ __forceinline__ void fence_acq_rel_sys() {

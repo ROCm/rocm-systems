@@ -22,7 +22,7 @@
 #define STORE(DST, SRC) \
   { \
     __scoped_atomic_store_n((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
-                       __MEMORY_SCOPE_SYSTEM); \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 #elif defined(__GFX9__)
 #define STORE(DST, SRC) \

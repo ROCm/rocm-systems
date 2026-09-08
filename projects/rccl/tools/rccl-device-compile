@@ -720,7 +720,13 @@ def parse_compiler_flags(argv):
             forwarded.extend(['-I', argv[i + 1]])
             i += 1
         elif arg in ('-include', '-imacros') and i + 1 < len(argv):
-            # Separate-argument forms: the value is a path, not a source file.
+            # Separate-argument forms: the value is a path, not a source file,
+            # so it must not fall through to `sources` below. RCCL's own build
+            # emits the joined --include=<file> spelling (see the poison block
+            # in src/CMakeLists.txt), which the catch-all further down already
+            # forwards; this branch is here so a hand-written or third-party
+            # flag in the separate-argument form does not silently become a
+            # source file.
             forwarded.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('-'):

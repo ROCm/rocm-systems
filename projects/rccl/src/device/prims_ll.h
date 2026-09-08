@@ -321,17 +321,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
-      u1 =
-        __scoped_atomic_load_n((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+      u1 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
       u2 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED,
-                             __MEMORY_SCOPE_SYSTEM);
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
       u4 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED,
-                             __MEMORY_SCOPE_SYSTEM);
+                                  __MEMORY_SCOPE_SYSTEM);
     else
       u8 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED,
-                             __MEMORY_SCOPE_SYSTEM);
+                                  __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1)
 #ifdef __GFX11__
@@ -381,16 +381,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
       __scoped_atomic_store_n((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
-                         __MEMORY_SCOPE_SYSTEM);
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
       __scoped_atomic_store_n((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED,
-                         __MEMORY_SCOPE_SYSTEM);
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
       __scoped_atomic_store_n((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED,
-                         __MEMORY_SCOPE_SYSTEM);
+                              __MEMORY_SCOPE_SYSTEM);
     else
       __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED,
-                         __MEMORY_SCOPE_SYSTEM);
+                              __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1) __builtin_nontemporal_store(u1, (uint8_t*)dst);
     else if (sizeof(U) == 2) __builtin_nontemporal_store(u2, (uint16_t*)dst);
