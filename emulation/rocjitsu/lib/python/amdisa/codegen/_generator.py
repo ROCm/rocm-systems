@@ -10284,18 +10284,22 @@ class CodeGenerator:
                     )
                     ctor_body_parts = list(opnd_body)
                     if (
-                        inst.name == 'V_SWAP_B16'
-                        and self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
-                    ) or (
-                        self.isa_spec.profile.renders_gfx11_image_syntax
-                        and (
-                            enc.enc_name.upper() == 'ENC_MIMG'
-                            or inst.name
-                            in self.isa_spec.profile.vop3p_absolute_source_instructions
+                        (
+                            inst.name == 'V_SWAP_B16'
+                            and self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
                         )
-                    ) or (
-                        inst_sem is not None
-                        and inst_sem.semantic_class == 'image_atomic'
+                        or (
+                            self.isa_spec.profile.renders_gfx11_image_syntax
+                            and (
+                                enc.enc_name.upper() == 'ENC_MIMG'
+                                or inst.name
+                                in self.isa_spec.profile.vop3p_absolute_source_instructions
+                            )
+                        )
+                        or (
+                            inst_sem is not None
+                            and inst_sem.semantic_class == 'image_atomic'
+                        )
                     ):
                         ctor_body_parts.append(
                             'omit_repeated_destination_sources_ = true;'
@@ -15068,6 +15072,26 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}'
         )
         if self.isa_spec.profile.split_execution_sources:
+            packed_simd_source_prefix = ''
+            packed_simd_dst_prefix = ''
+            if uses_packed_16bit_sources:
+                packed_simd_source_prefix = textwrap.dedent('''\
+                    if (auto packed = packed_16bit_vgpr_source(
+                            packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+                      return wf.vgpr_alloc().base +
+                             amdgpu::apply_gpr_idx(wf, packed->reg, vgpr_msb_role());
+                  ''')
+                packed_simd_dst_prefix = textwrap.dedent('''\
+                    if (auto packed = packed_16bit_vgpr_dst(
+                            packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+                      amdgpu::VgprMsbRole role =
+                          vgpr_msb_role() == amdgpu::VgprMsbRole::None
+                              ? amdgpu::VgprMsbRole::Dst
+                              : vgpr_msb_role();
+                      return wf.vgpr_alloc().base +
+                             amdgpu::apply_gpr_idx(wf, packed->reg, role);
+                    }
+                  ''')
             execution_code = (
                 f'namespace {{\n{packed_16bit_helper}\n}} // namespace\n\n'
                 f'{resolve_code}'
@@ -15091,7 +15115,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             execution_code += '\n\n' + textwrap.dedent('''\
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
-                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+                @@PACKED_SIMD_SOURCE_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
                     return wf.vgpr_alloc().base +
                            amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
                   return std::nullopt;
@@ -15099,7 +15123,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
-                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                @@PACKED_SIMD_DST_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     amdgpu::VgprMsbRole role =
                         vgpr_msb_role() == amdgpu::VgprMsbRole::None
                             ? amdgpu::VgprMsbRole::Dst
@@ -15299,6 +15323,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       full_execution_backend()));
                 }
                 ''')
+            execution_code = execution_code.replace(
+                '@@PACKED_SIMD_SOURCE_PREFIX@@', packed_simd_source_prefix
+            ).replace('@@PACKED_SIMD_DST_PREFIX@@', packed_simd_dst_prefix)
             execution_code = execution_code.replace(
                 'raw_compute_unit(wf.cu())',
                 'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',

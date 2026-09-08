@@ -101,6 +101,11 @@ __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *addres
   "v_mov_b32 v\\r, v\\r\n\t"                                                                       \
   ".endr\n\t"
 
+// The physical register names above are not compiler-visible operands. Mark
+// the highest one clobbered so the descriptor reserves the v0:v255 range that
+// the synthetic guest pressure actually accesses.
+#define RJ_CONSAN_FULL_VECTOR_CLOBBER "v255"
+
 __global__ __launch_bounds__(kThreadCount) void record_replay_long_range_full_pressure_for_consan(
     DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
@@ -125,7 +130,7 @@ __global__ __launch_bounds__(kThreadCount) void record_replay_long_range_full_pr
                ".endr\n\t" RJ_CONSAN_FULL_VECTOR_USES RJ_CONSAN_FULL_SCALAR_USES
                :
                : "v"(warmup_address), "v"(warmup_value)
-               : RJ_CONSAN_FULL_SCALAR_CLOBBERS, "memory");
+               : RJ_CONSAN_FULL_SCALAR_CLOBBERS, RJ_CONSAN_FULL_VECTOR_CLOBBER, "memory");
 
   state->warmup[tid] = load_lds_without_cave(&warmup[tid]);
   if (wave == 0u)
@@ -189,3 +194,4 @@ TEST(ConSanDeviceRecordReplayLongRangeFullPressureTest, Incorrect) {
 #undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT
 #undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER
 #undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER_REPEATS
+#undef RJ_CONSAN_FULL_VECTOR_CLOBBER

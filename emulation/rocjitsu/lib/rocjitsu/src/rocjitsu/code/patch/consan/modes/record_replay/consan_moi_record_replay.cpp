@@ -252,6 +252,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .access_scratch_vgpr_count = record_replay_access_scratch_vgpr_count,
     .barrier_scratch_vgpr_count = record_replay_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = record_replay_atomic_scratch_vgpr_count,
+    .relocate_atomic_polling_loop = false,
     .dynamic_stack_frame_save_sgpr_offset = 5u,
     .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
     .prologue = {},

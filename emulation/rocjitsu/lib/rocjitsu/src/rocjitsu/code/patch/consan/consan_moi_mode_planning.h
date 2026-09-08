@@ -276,6 +276,7 @@ struct MoiModeOperations {
                                         const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
   uint16_t (*barrier_scratch_vgpr_count)(const MoiBarrierScratchFacts &);
   uint16_t (*atomic_scratch_vgpr_count)(const ConSanAtomicLoweringForm &, const MoiTargetFacts &);
+  bool relocate_atomic_polling_loop;
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
   uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiTargetFacts &);
   MoiPrologueModePolicy prologue;

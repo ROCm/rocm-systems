@@ -90,6 +90,13 @@ constexpr uint32_t kManyOwnerCount = 8u;
   "v_mov_b32 v\\r, v\\r\n\t"                                                                       \
   ".endr\n\t"
 
+// Named registers in inline assembly are invisible to the compiler unless
+// they are also declared as operands or clobbers.  Tell it about the highest
+// referenced register so the descriptor reserves the complete v0:v255 range;
+// otherwise this pressure scaffold itself violates the hardware allocation
+// contract before ConSan instrumentation executes.
+#define RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER "v255"
+
 struct DeviceState {
   uint32_t synchronize;
   uint32_t warmup[kWorkgroupCount][kThreadCount];
@@ -112,7 +119,8 @@ __device__ __forceinline__ uint32_t pressured_dense_roundtrip(volatile uint32_t 
                ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_SCALAR_USES
                : "=v"(observed)
                : "v"(address_value), "v"(value)
-               : RJ_CONSAN_SPARSE_SPILL_SCALAR_CLOBBERS, "memory");
+               : RJ_CONSAN_SPARSE_SPILL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
+                 "memory");
   return observed;
 }
 
@@ -128,7 +136,8 @@ full_scalar_pressured_dense_roundtrip(volatile uint32_t *address, uint32_t value
       ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
       : "=v"(observed)
       : "v"(address_value), "v"(value)
-      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, "memory");
+      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
+        "memory");
   return observed;
 }
 
@@ -149,7 +158,8 @@ __device__ __forceinline__ uint32_t many_owner_pressured_dense_roundtrip(volatil
       ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
       : "=v"(observed)
       : "v"(address_value), "v"(value)
-      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, "memory");
+      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
+        "memory");
   return observed;
 }
 
@@ -321,3 +331,4 @@ TEST(ConSanDeviceRecordReplayManyOwnerPressureTest, Incorrect) {
 #undef RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
 #undef RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS
 #undef RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
+#undef RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER

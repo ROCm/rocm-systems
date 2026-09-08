@@ -81,6 +81,21 @@ The example above is intentionally minimal and single-threaded.
 clocked mode. If the field is omitted, set to `"functional"`, or given any
 other value, the simulator runs in functional mode.
 
+### Hardware resource enforcement
+
+RocJitsu applies the target architecture's physical per-SIMD VGPR and SGPR
+capacities during workgroup admission. Register counts decoded from the kernel
+descriptor consume those resources with the architecture's allocation
+granularity, and the resources are returned when a wavefront halts. Dispatches
+that cannot reside on the modeled hardware are not admitted while capacity is
+unavailable.
+
+Executed ordinary-VGPR accesses must also stay within the prefix allocated by
+the kernel descriptor. An access beyond that prefix terminates the simulation;
+the larger simulator backing store does not make such a kernel valid. AccVGPRs
+occupy their separate architecture-defined bank and are not treated as an
+ordinary-VGPR overflow.
+
 ### Simulation threading
 
 `num_threads` controls Simdojo engine partitions and their worker threads.

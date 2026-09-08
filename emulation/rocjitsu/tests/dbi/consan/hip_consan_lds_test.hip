@@ -389,7 +389,7 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
         [scalar_after_lo] "=&v"(scalar_after_lo), [scalar_after_hi] "=&v"(scalar_after_hi),
         [vector_after_three] "=&v"(vector_after_three), [vector_after_five] "=&v"(vector_after_five)
       : [value] "v"(value)
-      : "s14", "s15", "v0", "v1", "v3", "v5", "memory");
+      : "s14", "s15", "v0", "v1", "v3", "v5", "v255", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;
@@ -447,7 +447,7 @@ __launch_bounds__(64) void padded_dynamic_stack_full_pressure_flat_lds_store_pre
         [vector_after_five] "=&v"(vector_after_five), [vcc_survived] "+v"(vcc_survived),
         [scc_survived] "+v"(scc_survived)
       : [value] "v"(value)
-      : "s14", "s15", "v0", "v1", "v3", "v5", "vcc", "memory");
+      : "s14", "s15", "v0", "v1", "v3", "v5", "v255", "vcc", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;

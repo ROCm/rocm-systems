@@ -182,7 +182,8 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
       uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
       if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
         continue;
-      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
+      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs), entry.sgprs_per_wf,
+                                    entry.vgprs_per_wf, entry.kernel_wave_size,
                                     static_cast<uint32_t>(reserved_lds)))
         continue;
 
@@ -1581,7 +1582,9 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf =
           cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                          entry.vgprs_per_wf, entry.kernel_wave_size, entry.dispatch_id);
+                          WaveVgprAllocation{entry.vgprs_per_wf, entry.ordinary_vgprs_per_wf,
+                                             entry.accvgprs_per_wf},
+                          entry.kernel_wave_size, entry.dispatch_id);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
         free_reserved();
@@ -1705,7 +1708,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
-        if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
+        if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf,
+                                               entry.vgprs_per_wf, entry.kernel_wave_size,
                                                entry.group_segment_fixed_size)) {
           auto *cu = cus_[cu_idx];
           placement = ShaderProcessorInput::WorkgroupPlacement{
@@ -1931,8 +1935,28 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
-  dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
-  dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
+  // Preserve the descriptor's request. Dispatch admission rejects a request
+  // that exceeds either the per-wave addressable span or physical SIMD
+  // capacity; clipping here would silently turn an invalid kernel into a
+  // different, apparently runnable one.
+  dp.sgprs_per_wf = required_sgprs;
+  dp.vgprs_per_wf = vgprs > 0 ? vgprs : vgpr_limit;
+  dp.ordinary_vgprs_per_wf = dp.vgprs_per_wf;
+  dp.accvgprs_per_wf = 0;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    const uint32_t accum_offset =
+        AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+    // Compiler-produced kernels with no AccVGPR bank leave ACCUM_OFFSET zero.
+    // Treat that established descriptor value as the no-partition sentinel;
+    // otherwise every such kernel would appear to own only v0:v3 even when
+    // RSRC1 allocates a much larger ordinary-VGPR prefix.
+    if (accum_offset != 0) {
+      const uint32_t accumulator_base = (accum_offset + 1) * 4;
+      dp.ordinary_vgprs_per_wf = std::min(dp.vgprs_per_wf, accumulator_base);
+      dp.accvgprs_per_wf = dp.vgprs_per_wf - dp.ordinary_vgprs_per_wf;
+    }
+  }
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;

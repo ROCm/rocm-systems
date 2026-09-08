@@ -8,10 +8,10 @@
 
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -333,6 +333,7 @@ const MoiModeOperations kSampledModeOperations = {
     .access_scratch_vgpr_count = sampled_access_scratch_vgpr_count,
     .barrier_scratch_vgpr_count = sampled_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = sampled_atomic_scratch_vgpr_count,
+    .relocate_atomic_polling_loop = true,
     .dynamic_stack_frame_save_sgpr_offset = 8u,
     .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
     .prologue = {},

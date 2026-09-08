@@ -8,10 +8,10 @@
 
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -339,6 +339,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .access_scratch_vgpr_count = inline_shadow_access_scratch_vgpr_count,
     .barrier_scratch_vgpr_count = inline_shadow_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = inline_shadow_atomic_scratch_vgpr_count,
+    .relocate_atomic_polling_loop = false,
     .dynamic_stack_frame_save_sgpr_offset = 24u,
     .exec_save_sgpr_count = inline_shadow_exec_save_sgpr_count,
     .prologue =
