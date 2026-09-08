@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_report.h"
 
 namespace rocjitsu {
 

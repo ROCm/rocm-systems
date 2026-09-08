@@ -12,6 +12,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_preload.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_report.h"
 #include "rocjitsu/code/patch/consan/targets/consan_moi_target_ops.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/spill_manager.h"

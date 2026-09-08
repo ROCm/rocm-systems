@@ -175,15 +175,6 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
 inline constexpr uint64_t kConSanMoiOrdinaryAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
 /// G6B3 owns aggregate reservation against this process-wide ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 1024u * 1024u * 1024u;
-// Record/replay synchronization probes can execute many times per static site,
-// and a code-object-scoped report remains live across repeated dispatches.
-// Barriers publish once per wave, while atomic and fence probes publish once
-// per participating lane. Keep those two scaling domains explicit so a
-// lane-heavy workload does not multiply barrier storage by another wave.
-inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 1024u;
-inline constexpr uint64_t kConSanMoiRecordReplayDynamicLaneEventHeadroom =
-    64u * kConSanMoiRecordReplayDynamicEventHeadroom;
-
 struct ConSanMoiAutoReportProcessBudget {
   uint64_t current_live_bytes = 0;
   uint64_t peak_live_bytes = 0;

@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_HOOKS_RJ_HSA_DBI_REPLAY_PROVENANCE_H_
 #define ROCJITSU_HOOKS_RJ_HSA_DBI_REPLAY_PROVENANCE_H_
 
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_report.h"
 
 #include <algorithm>
 #include <cstdint>

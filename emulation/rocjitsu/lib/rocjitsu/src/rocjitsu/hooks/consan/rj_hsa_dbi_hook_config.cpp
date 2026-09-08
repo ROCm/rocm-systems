@@ -4,8 +4,6 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
-
 #include <cctype>
 #include <cerrno>
 #include <cstdio>

@@ -5,6 +5,7 @@
 /// @brief Target-aware planning and emission of normalized MOI atomic addresses.
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_common_contract.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"

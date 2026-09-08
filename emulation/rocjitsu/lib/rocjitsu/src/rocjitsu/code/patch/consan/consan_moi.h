@@ -6,8 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_lowering_types.h"
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 
 namespace rocjitsu {
 

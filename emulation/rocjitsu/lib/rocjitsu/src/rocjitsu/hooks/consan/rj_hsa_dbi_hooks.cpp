@@ -18,7 +18,6 @@
 #include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 #include "rocjitsu/hooks/consan/modes/record_replay/rj_hsa_dbi_replay_provenance.h"

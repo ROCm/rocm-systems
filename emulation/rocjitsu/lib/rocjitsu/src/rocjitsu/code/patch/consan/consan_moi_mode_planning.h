@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 
 #include <algorithm>
 #include <cstddef>

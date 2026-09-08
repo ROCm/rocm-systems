@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_report.h"
 
 namespace rocjitsu {
 

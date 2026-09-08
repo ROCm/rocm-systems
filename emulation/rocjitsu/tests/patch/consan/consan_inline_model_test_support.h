@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_report.h"
 
 #include <algorithm>
 #include <array>

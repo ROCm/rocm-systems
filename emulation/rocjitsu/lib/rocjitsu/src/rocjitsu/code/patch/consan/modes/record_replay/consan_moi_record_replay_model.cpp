@@ -4,7 +4,7 @@
 /// @file consan_moi_record_replay_model.cpp
 /// @brief Record/Replay host report normalization and runtime analysis.
 
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_report.h"
 
 #include <algorithm>
 #include <array>
