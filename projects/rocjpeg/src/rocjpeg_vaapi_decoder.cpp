@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "rocjpeg_vaapi_decoder.h"
-#include "rocjpeg_parse_helpers.h"
 
 #include <algorithm>
 #include <atomic>

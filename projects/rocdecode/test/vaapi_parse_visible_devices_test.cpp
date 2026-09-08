@@ -22,16 +22,15 @@ THE SOFTWARE.
 
 // Host-only table-driven test for ParseVisibleDevicesCsv (no GPU / HIP / VAAPI).
 // Build/run:
-//   c++ -std=c++17 -I projects/rocdecode/src \
-//       projects/rocdecode/test/vaapi_parse_visible_devices_test.cpp \
-//       -o t && ./t
+//   c++ -std=c++17 -I projects/rocdecode/src
+//       projects/rocdecode/test/vaapi_parse_visible_devices_test.cpp -o t && ./t
 
-#include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <vector>
 
-#include "rocdecode/vaapi/vaapi_parse_helpers.h"
+#include "commons.h"
 
 namespace {
 
@@ -74,14 +73,14 @@ int main() {
         std::vector<int> got = parse(c.input);
         if (got != c.expected) {
             ++failures;
-            std::printf("FAIL: %s (got %zu values)\n", c.description, got.size());
+            std::cout << "FAIL: " << c.description << " (got " << got.size() << " values)\n";
         }
     }
 
     // negative: nullptr -> empty
     if (!ParseVisibleDevicesCsv(nullptr).empty()) {
         ++failures;
-        std::printf("FAIL: negative: nullptr -> {}\n");
+        std::cout << "FAIL: negative: nullptr -> {}\n";
     }
 
     // regression (the bug): the parser must NOT modify its input buffer.
@@ -92,14 +91,14 @@ int main() {
         (void)ParseVisibleDevicesCsv(buf.data());
         if (std::strcmp(buf.data(), original) != 0) {
             ++failures;
-            std::printf("FAIL: regression: input buffer was mutated by the parser\n");
+            std::cout << "FAIL: regression: input buffer was mutated by the parser\n";
         }
     }
 
     if (failures != 0) {
-        std::printf("%d FAILED\n", failures);
+        std::cout << failures << " FAILED\n";
         return 1;
     }
-    std::printf("all tests passed\n");
+    std::cout << "all tests passed\n";
     return 0;
 }

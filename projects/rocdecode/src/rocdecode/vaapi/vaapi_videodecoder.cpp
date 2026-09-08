@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "vaapi_videodecoder.h"
-#include "vaapi_parse_helpers.h"
 
 #include <algorithm>
 #include <cctype>
