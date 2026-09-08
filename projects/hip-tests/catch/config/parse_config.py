@@ -42,9 +42,21 @@ def parse_args():
         "--asan",
         action="store_true",
         help="Target is an Address Sanitizer (ASAN) build. Test cases that "
-        "list 'asan' in their 'disabled' field are skipped.",
+        "list 'asan' in their 'disabled' or 'unsupported' field are skipped.",
     )
     return parser.parse_args()
+
+
+def _skip_tokens(field):
+    """Return the OS/arch/config tokens from a skip field.
+
+    Legacy form is a flat list of tokens ([amd_windows]). The structured form is
+    a mapping token -> {Reason: [...]} ({amd_windows: {Reason: [...]}}). Only the
+    tokens drive tag generation; the Reason is metadata consumed by other tooling.
+    """
+    if isinstance(field, dict):
+        return list(field.keys())
+    return field
 
 
 def create_test_definition(
@@ -53,6 +65,13 @@ def create_test_definition(
     level = case_config.get("level", 2)
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
+    unsupported = case_config.get("unsupported", [])
+    # Merge both skip fields into one ordered local (disabled first) so the match
+    # and promotion logic below is identical for either field. Do not mutate the
+    # source lists. "disabled" is temporary/regressions, "unsupported" is
+    # permanent; both produce the same [disabled] skip tag and [exclude_<entry>]
+    # promotions that CI and the compute-utils/WSL runners depend on.
+    skip_reasons = _skip_tokens(disabled) + _skip_tokens(unsupported)
 
     tags_str = ""
 
@@ -62,9 +81,9 @@ def create_test_definition(
     tags_str += f"[{group}]"
 
     if (
-        f"{platform}_{os_name}" in disabled
-        or arch in disabled
-        or (asan and "asan" in disabled)
+        f"{platform}_{os_name}" in skip_reasons
+        or arch in skip_reasons
+        or (asan and "asan" in skip_reasons)
     ):
         # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
         # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
@@ -78,7 +97,7 @@ def create_test_definition(
     # specific labels a test is disabled for (incl. OS labels dropped above).
     # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
     # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
-    for entry in disabled:
+    for entry in skip_reasons:
         tags_str += f"[exclude_{entry}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
