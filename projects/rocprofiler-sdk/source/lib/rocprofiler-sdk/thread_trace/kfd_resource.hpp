@@ -98,26 +98,24 @@ private:
     amd_signal_t*                      _signal{nullptr};
 };
 
-/// Direct KFD AQL compute queue for aqlprofile packets and CP DMA fallback copies.
+/// Direct KFD AQL compute queue for aqlprofile packets.
 class kfd_aql_queue_t
 {
 public:
-    explicit kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory, size_t max_copy_size = 0);
+    explicit kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory);
     ~kfd_aql_queue_t();
 
     kfd_aql_queue_t(const kfd_aql_queue_t&) = delete;
     kfd_aql_queue_t& operator=(const kfd_aql_queue_t&) = delete;
 
     void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion);
-    void copy(void* dst, const void* src, size_t size, kfd_signal_t& completion);
 
 private:
     struct impl;
     std::unique_ptr<impl> _impl;
 };
 
-/// KFD copy path for thread trace. SDMA is preferred and CP DMA on the existing
-/// AQL queue is the fallback.
+/// Direct KFD queue bundle for aqlprofile control packets and SDMA copies.
 class kfd_copy_queue_t
 {
 public:

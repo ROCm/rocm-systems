@@ -165,19 +165,10 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
                 std::make_shared<kfd_memory_pool_t>(*CHECK_NOTNULL(agent::get_agent(agent_id))));
         } catch(const std::exception& e)
         {
-            // Multi-buffer keeps worker threads running past ROCr shutdown, which is only
-            // safe on KFD resources. Falling back to HSA there has to be an explicit
-            // opt-in rather than something a user gets silently after a KFD failure.
-            if(multi_buffer)
-                throw std::runtime_error{
-                    std::string{"KFD thread-trace resources are unavailable: "} + e.what() +
-                    ". Set ROCPROFILER_SQTT_FORCE_HSA=1 to run multi-buffer thread trace on "
-                    "the HSA queue and signals instead."};
-
             static auto once = std::once_flag{};
             std::call_once(once, [&]() {
                 ROCP_WARNING << "KFD thread-trace resources are unavailable; falling back to the "
-                                "HSA queue and signals: "
+                                "ROCr/HSA backend: "
                              << e.what();
             });
         }
