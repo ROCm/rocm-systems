@@ -244,7 +244,7 @@ HRR_TEST_CASE(Unit_HRR_Recovery_TornPayload) {
  *     file-supplied ~4 GiB claim. The reader must refuse to allocate that and
  *     treat the record as torn, keeping the complete records already parsed.
  */
-HIP_TEST_CASE(Unit_HRR_Recovery_ImplausiblePayloadLength) {
+HRR_TEST_CASE(Unit_HRR_Recovery_ImplausiblePayloadLength) {
   TmpArchive arc("huge_payload");
   arc.write_records(2);
   hrr_event_header h = make_min_record(2);
