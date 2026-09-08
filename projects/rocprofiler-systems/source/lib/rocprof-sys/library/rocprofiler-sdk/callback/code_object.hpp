@@ -15,14 +15,15 @@ on_code_object(typename SdkBackend::callback_tracing_record_t record,
 {}
 
 template <typename SdkBackend, typename Externals>
-inline constexpr auto k_code_object =
-    callback_domain_definition{ .meta =
-                                    domain_descriptor{
-                                        .name  = "code_object",
-                                        .id    = SdkBackend::CALLBACK_TRACING_CODE_OBJECT,
-                                        .mode  = collection_mode::callback,
-                                        .group = std::nullopt,
-                                    },
-                                .on_record = on_code_object<SdkBackend, Externals> };
+inline constexpr auto k_code_object = callback_domain_definition<SdkBackend>{
+    .meta =
+        domain_descriptor{
+            .name  = "code_object",
+            .id    = SdkBackend::CALLBACK_TRACING_CODE_OBJECT,
+            .mode  = collection_mode::callback,
+            .group = std::nullopt,
+        },
+    .on_record = on_code_object<SdkBackend, Externals>
+};
 
 }  // namespace rocprofsys::domains::callback

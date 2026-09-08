@@ -111,6 +111,11 @@ private:
 
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
+
+        if(definition.on_configure)
+        {
+            definition.on_configure();
+        }
     }
 
     void configure_callback(
@@ -122,6 +127,11 @@ private:
 
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
         m_callback_domains.back().configure();
+
+        if(definition.on_configure)
+        {
+            definition.on_configure();
+        }
     }
 
     SdkBackend::context_id_t context()
@@ -181,7 +191,7 @@ private:
         return output;
     }
 
-    void validate(const domain_selection& selection)
+    void validate(const domain_selection& selection) const
     {
         if(selection.name.has_value() && selection.group.has_value())
         {
@@ -197,7 +207,7 @@ private:
     }
 
     [[nodiscard]] std::vector<const domains::domain_info*> match_by_name(
-        std::span<const domains::domain_info> available, std::string_view name)
+        std::span<const domains::domain_info> available, std::string_view name) const
     {
         const auto found =
             std::ranges::find_if(available, [name](const domains::domain_info& domain) {
@@ -211,7 +221,7 @@ private:
     }
 
     [[nodiscard]] std::vector<const domains::domain_info*> match_by_group(
-        std::span<const domains::domain_info> available, std::string_view group)
+        std::span<const domains::domain_info> available, std::string_view group) const
     {
         std::vector<const domains::domain_info*> matched;
         for(const auto& domain : available)
@@ -231,7 +241,7 @@ private:
 
     [[nodiscard]] std::vector<const domains::domain_info*> match_domains(
         std::span<const domains::domain_info> available,
-        const domain_selection&               selection)
+        const domain_selection&               selection) const
     {
         validate(selection);
 
@@ -255,7 +265,7 @@ private:
 
     [[nodiscard]] std::vector<domains::operation_id_t> resolve_operations(
         const domains::domain_info&                    domain,
-        const std::optional<std::vector<std::string>>& requested)
+        const std::optional<std::vector<std::string>>& requested) const
     {
         std::vector<domains::operation_id_t> resolved;
 
@@ -289,7 +299,7 @@ private:
 
     void merge_domain(std::vector<domains::domain_configuration>& resolved,
                       const domains::domain_info&                 domain,
-                      std::vector<domains::operation_id_t>        operations)
+                      std::vector<domains::operation_id_t>        operations) const
     {
         const auto existing =
             std::ranges::find(resolved, domain.key, &domains::domain_configuration::key);
