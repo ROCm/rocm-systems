@@ -1623,9 +1623,9 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
 TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
 {
     ncclComm_t            mockComm = nullptr;
-    struct ncclTopoSystem mockTopo;
+    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   mockGpu;
-    CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+    CreateMockComm(mockComm, *mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
     SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
     // CreateMockComm leaves archName null, which the DDA gate dereferences.
     mockComm->archName = const_cast<char*>("gfx950");
