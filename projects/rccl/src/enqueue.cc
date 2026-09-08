@@ -1372,7 +1372,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
         void* regAddr = NULL;
-        if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
+        // CE/memcpy connections stage through proxy buffers and do not provide
+        // the pointer-exchange slot required by the direct registered path.
+        if ((conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) && conn->conn.ptrExchange != nullptr) {
           // We require users registering buffers on both sides
           NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
                                                  &plan->cleanupQueue),

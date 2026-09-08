@@ -135,6 +135,11 @@
           }
         },
         {
+          "name": "P2P_RegistrationBasicBuffers",
+          "description": "Test registered send/receive buffers with the CE/memcpy P2P transport",
+          "test_filter": "P2pMPITest.P2pRegistrationBasicBuffersTest"
+        },
+        {
           "name": "P2P_AllTests",
           "description": "All peer-to-peer transport tests",
           "test_filter": "P2pMPITest.*"
