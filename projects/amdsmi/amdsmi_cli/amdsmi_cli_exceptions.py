@@ -2,7 +2,9 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import csv
 import enum
+import io
 import json
 
 # NOTE: intentionally no module-level ``from amdsmi import amdsmi_wrapper`` here.
@@ -206,6 +208,13 @@ def _get_error_name(error_code):
     return f"AMDSMI_STATUS_{code}"
 
 
+def _csv_error(message, code):
+    # Messages carry commas and newlines (option lists, multi-line hints).
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n").writerows([["error", "code"], [message, code]])
+    return buf.getvalue().rstrip("\n")
+
+
 class AmdSmiException(Exception):
     # Default: an unclassified error stops everything. Per-device failures
     # (see AmdSmiLibraryErrorException) override this to DEVICE.
@@ -219,6 +228,16 @@ class AmdSmiException(Exception):
         self.output_format = ""
         self.device_type = ""
         self.value = 0
+
+    def _build_output_messages(self, common_message):
+        """Render *common_message* into each output format __str__ selects from."""
+        # json/csv are read a line at a time, so they carry the message without
+        # the layout whitespace the human-readable hints use.
+        flat = " ".join(common_message.split())
+        self.json_message["error"] = flat
+        self.json_message["code"] = self.value
+        self.csv_message = _csv_error(flat, self.value)
+        self.stdout_message = f"{common_message} Error code: {self.value}"
 
     def __str__(self):
         # Return message according to the current output format
@@ -244,10 +263,7 @@ class AmdSmiInvalidCommandException(AmdSmiException):
         if message:
             common_message = message
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiInvalidParameterException(AmdSmiException):
@@ -266,10 +282,7 @@ class AmdSmiInvalidParameterException(AmdSmiException):
         if hint:
             common_message += f" {hint}"
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiDeviceNotFoundException(AmdSmiException):
@@ -282,10 +295,7 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
 
         common_message = f"Can not find a device: {self.device_type} '{self.command}'"
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiInvalidFilePathException(AmdSmiException):
@@ -300,10 +310,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
         if message:
             common_message = message
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
@@ -318,10 +325,7 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         if hint:
             common_message += f" {hint}"
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiMissingParameterValueException(AmdSmiException):
@@ -333,10 +337,7 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
 
         common_message = f"Parameter '{self.command}' requires a value. Run '--help' for more info."
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiCommandNotSupportedException(AmdSmiException):
@@ -353,10 +354,7 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
             f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
         )
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiRequiredCommandException(AmdSmiException):
@@ -368,10 +366,7 @@ class AmdSmiRequiredCommandException(AmdSmiException):
 
         common_message = f"Command '{self.command}' requires a target argument. Run 'amd-smi {self.command} -h' for more info."
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiInvalidSubcommandException(AmdSmiException):
@@ -383,10 +378,7 @@ class AmdSmiInvalidSubcommandException(AmdSmiException):
 
         common_message = f"AMD-SMI Command '{self.command}' is invalid. Must receive valid AMD-SMI Command first. Run 'amd-smi -h' for more info."
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiPermissionDeniedException(AmdSmiException):
@@ -404,10 +396,7 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
             f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
         )
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 class AmdSmiLibraryErrorException(AmdSmiException):
@@ -430,10 +419,7 @@ class AmdSmiLibraryErrorException(AmdSmiException):
         self.status_message = detail if detail else _get_error_message(self.amdsmi_lib_code)
         common_message = f"[{self.status_name}] {self.status_message}"
 
-        self.json_message["error"] = common_message
-        self.json_message["code"] = self.value
-        self.csv_message = f"error,code\n{common_message}, {self.value}"
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self._build_output_messages(common_message)
 
 
 def library_code_to_exit_code(error_code):
