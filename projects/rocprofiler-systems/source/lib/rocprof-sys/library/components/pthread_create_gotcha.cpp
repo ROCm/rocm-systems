@@ -514,19 +514,17 @@ pthread_create_gotcha::shutdown(std::int64_t _tid)
     }
 }
 
-std::mutex pthread_create_gotcha::s_mutex = {};
+std::atomic<bool> pthread_create_gotcha::s_is_paused = false;
 
 void
 pthread_create_gotcha::pause()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(false);
+    s_is_paused.store(true, std::memory_order_relaxed);
 }
 void
 pthread_create_gotcha::resume()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(true);
+    s_is_paused.store(false, std::memory_order_relaxed);
 }
 
 void
@@ -610,7 +608,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto _use_sampling = config::get_use_sampling();
     auto _use_causal   = config::get_use_causal();
     auto _offset       = (!_enabled || !_active || _info->is_offset);
-    auto _use_bundle   = (_active && !_coverage && !_offset);
+    auto _use_bundle   = (_active && !_coverage && !_offset && !is_paused());
     auto _enable_sampling =
         (_use_sampling && _sample_child && _active && !_coverage && !_offset);
     auto _enable_causal =

@@ -480,6 +480,17 @@ get_sampler_running(std::int64_t _tid)
 // implementation below since only those touch them.
 auto g_sampling_paused = std::atomic<bool>{ false };
 
+// Makes the paused flag and the timer state one transition. Without it
+// configure() can read "not paused", pause() can complete, and configure() then
+// arms timers inside the pause window.
+//
+// Held by configure() and by pause()/resume(). The latter run as control-session
+// subscriber callbacks, i.e. already under the session's notify mutex, so the
+// order is always session-mutex then this one - never the reverse. A subscriber
+// callback that transitively created a thread would re-enter configure() and
+// self-deadlock; none does today.
+auto g_timer_state_mutex = std::mutex{};
+
 auto&
 get_offload_file()
 {
@@ -758,24 +769,34 @@ configure(bool _setup, std::int64_t _tid)
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
-            _sampler->configure(overflow{
-                get_sampling_overflow_signal(),
-                [](int _sig, pid_t, long, std::int64_t _idx) {
-                    perf::get_instance(_idx)->set_ready_signal(_sig);
-                    return true;
-                },
-                [](int, pid_t, long, std::int64_t _idx) {
-                    return perf::get_instance(_idx)->start();
-                },
-                [](int, pid_t, long, std::int64_t _idx) {
-                    if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
-                        return true;
-                    // Disable only - keep the fd open so a later start() can
-                    // re-enable it. Closing here would leave overflow sampling
-                    // permanently dead after the first pause.
-                    return perf::get_instance(_idx)->stop();
-                },
-                _tid, threading::get_sys_tid() });
+            _sampler->configure(overflow{ get_sampling_overflow_signal(),
+                                          [](int, pid_t, long, std::int64_t) {
+                                              // set_ready_signal() already ran once on
+                                              // the owning thread at the explicit call
+                                              // above. overflow::start() re-invokes this
+                                              // initer on every start() including resume,
+                                              // which runs on the time_window worker
+                                              // thread - redoing F_SETOWN there would
+                                              // rebind signal delivery to a thread that
+                                              // exits right after.
+                                              return true;
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              return perf::get_instance(idx)->start();
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              if(!perf::get_instance(idx) ||
+                                                 !perf::get_instance(idx)->is_open())
+                                              {
+                                                  return true;
+                                              }
+                                              // Disable only - keep the fd open so a
+                                              // later start() can re-enable it. Closing
+                                              // here would leave overflow sampling
+                                              // permanently dead after the first pause.
+                                              return perf::get_instance(idx)->stop();
+                                          },
+                                          _tid, threading::get_sys_tid() });
         }
 
         if(get_use_tmp_files())
@@ -841,13 +862,23 @@ configure(bool _setup, std::int64_t _tid)
         metadata_initialize_thread_info(_tid);
         metadata_initialize_track(_tid);
 
-        *_running = true;
-        sampling::get_sampler_init(_tid)->sample();
-        // If sampling is currently paused, leave the sampler configured but
-        // unarmed - set_sampler_timers() will start it on the next resume().
-        // Starting it now would immediately begin delivering signals for a
-        // pause window this thread was created inside of.
-        if(!g_sampling_paused.load(std::memory_order_relaxed)) _sampler->start();
+        {
+            // Publishing *_running and deciding whether to arm must be one step
+            // with respect to pause()/resume(); see g_timer_state_mutex. The flag
+            // also gates set_sampler_timers(), so a sampler is never visible to
+            // it before this point.
+            const std::scoped_lock timer_lk{ g_timer_state_mutex };
+            *_running = true;
+            sampling::get_sampler_init(_tid)->sample();
+            // If sampling is currently paused, leave the sampler configured but
+            // unarmed - set_sampler_timers() will start it on the next resume().
+            // Starting it now would immediately begin delivering signals for a
+            // pause window this thread was created inside of.
+            if(!g_sampling_paused.load(std::memory_order_relaxed))
+            {
+                _sampler->start();
+            }
+        }
     }
     else if(!_setup && _sampler && _is_running)
     {
@@ -869,14 +900,28 @@ configure(bool _setup, std::int64_t _tid)
         _sampler->stop();
         _sampler->reset();
         *_running = false;
-        if(_perf_sampler) _perf_sampler->stop();
+        // close(), not stop(): pausing only disables the perf event so a later
+        // resume can re-enable it, but this is permanent teardown. The
+        // instances live in thread_data with static storage, so ~perf_event()
+        // effectively never runs and the fd and mmap would leak for the rest of
+        // the process.
+        if(_perf_sampler)
+        {
+            _perf_sampler->close();
+        }
 
         if(_tid == 0)
         {
             for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
-                if(sampling::get_sampler(i)) sampling::get_sampler(i)->stop();
-                if(perf::get_instance(i)) perf::get_instance(i)->stop();
+                if(sampling::get_sampler(i))
+                {
+                    sampling::get_sampler(i)->stop();
+                }
+                if(perf::get_instance(i))
+                {
+                    perf::get_instance(i)->close();
+                }
             }
 
             for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
@@ -1032,16 +1077,20 @@ enum class timer_state
 // firing and its signal keeps interrupting the target's sleeps. Stop the
 // timers themselves so a paused sampler is unobservable to the application.
 //
-// The CPU-time trigger is deliberately left armed. timer::stop() deletes the
-// POSIX timer and timer::start() recreates it, and CLOCK_THREAD_CPUTIME_ID
-// binds to whichever thread calls timer_create() - which here is whichever
-// thread ran pause()/resume(), not the sampler's owner. Leaving it armed is
-// safe because a CPU-time timer cannot advance while its thread is blocked in
-// a syscall, so it cannot cut the target's sleeps short the way a wall-clock
-// timer does, and parse_timer_data() already drops any sample landing inside a
-// pause interval before it reaches the trace cache.
+// Pausing is asymmetric for the CPU-time trigger. timer::stop() deletes the
+// POSIX timer, so the matching start() would call timer_create() again from
+// whichever thread ran resume() - and CLOCK_THREAD_CPUTIME_ID binds to that
+// caller, silently reattributing the timer. It is never stopped: a CPU-time
+// timer cannot advance while its thread is blocked in a syscall, so it cannot
+// cut the target's sleeps short the way a wall-clock timer does, and
+// parse_timer_data() already drops any sample landing inside a pause interval.
+//
+// Resuming still starts it, because a thread created during a pause window has
+// a timer that configure() created but never armed. start() is a no-op once
+// active, and for an unarmed timer it only calls timer_settime() on a handle
+// timer_create()'d on the owning thread, which does not rebind it.
 void
-set_sampler_timers(timer_state _state)
+set_sampler_timers(timer_state state)
 {
     for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
     {
@@ -1057,14 +1106,16 @@ set_sampler_timers(timer_state _state)
             continue;
         }
 
-        for(const auto& _trigger : sampler->get_triggers())
+        for(const auto& trigger : sampler->get_triggers())
         {
-            if(_trigger->signal() == get_sampling_cputime_signal())
+            if(state == timer_state::running)
             {
-                continue;
+                trigger->start();
             }
-
-            _state == timer_state::running ? _trigger->start() : _trigger->stop();
+            else if(trigger->signal() != get_sampling_cputime_signal())
+            {
+                trigger->stop();
+            }
         }
     }
 }
@@ -1940,6 +1991,8 @@ postfork_child_reset_pmc_sampler_lock()
 void
 pause()
 {
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
     bool _expected = false;
     if(!g_sampling_paused.compare_exchange_strong(_expected, true))
     {
@@ -1956,6 +2009,8 @@ pause()
 void
 resume()
 {
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
     bool _expected = true;
     if(!g_sampling_paused.compare_exchange_strong(_expected, false))
     {
