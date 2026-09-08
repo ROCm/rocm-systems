@@ -1413,6 +1413,33 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+
+// An unroll factor is usable only if its device function table was generated in
+// this build AND compiled for the running arch. generate.py guards some unrolls
+// behind a single arch (see ncclDevFuncUnrollArch), and a multi-arch build marks
+// every unroll as generated, so checking ncclDevFuncUnrollGenerated alone lets a
+// gfx1250-only unroll through on other GPUs and traps on the device.
+//
+// The two failure modes are kept apart because only one of them is a build choice:
+// an unroll that was never generated can be enabled by rebuilding, while one that
+// generate.py restricts to another arch cannot run here no matter how it is built.
+enum ncclUnrollAvailability {
+  ncclUnrollUsable,
+  ncclUnrollNotGenerated,
+  ncclUnrollWrongArch,
+};
+
+// Test the arch restriction first. The two conditions overlap -- a local-arch build
+// narrows the generated set, so an unroll pinned to another arch is usually also
+// ungenerated -- and the arch is the more useful answer, because no build of any
+// matrix can make that unroll run on this GPU.
+static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
+  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
+  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
+  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
+  return ncclUnrollUsable;
+}
+
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
@@ -1504,6 +1531,19 @@ ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskCol
   return ncclSuccess;
 }
 
+// Apply a tuning preference for `unroll`, but only when this build can dispatch it
+// on the running GPU. Callers here are overriding a value commSetUnrollFactor()
+// already validated, so declining to change it leaves a working unroll in place;
+// assigning unconditionally would install an all-nullptr table and trap.
+static void rcclPreferUnrollFactor(struct ncclComm* comm, int unroll) {
+  if (unrollAvailability(unroll, comm->archName) != ncclUnrollUsable) {
+    INFO(NCCL_TUNING, "Keeping RCCL unroll factor %d: preferred %d is not usable on arch %s",
+         (int)(pow(2.0, (double)comm->unroll)), (int)(pow(2.0, (double)unroll)), comm->archName);
+    return;
+  }
+  comm->unroll = unroll;
+}
+
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
@@ -1518,7 +1558,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
     }
     // TODO: Remove unroll update when all collectives are optimized
-    if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+    if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     info->useWarpSpeed = true;
   } else if (rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
     // No early return based on the algorithm at the start of the function
@@ -1530,7 +1570,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
     if (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
       // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
       // TODO: Remove unroll update when all collectives are optimized
-      if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+      if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
       // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
@@ -1659,28 +1699,6 @@ ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count,
   return ncclSuccess;
 }
 
-// An unroll factor is usable only if its device function table was generated in
-// this build AND compiled for the running arch. generate.py guards some unrolls
-// behind a single arch (see ncclDevFuncUnrollArch), and a multi-arch build marks
-// every unroll as generated, so checking ncclDevFuncUnrollGenerated alone lets a
-// gfx1250-only unroll through on other GPUs and traps on the device.
-//
-// The two failure modes are kept apart because only one of them is a build choice:
-// an unroll that was never generated can be enabled by rebuilding, while one that
-// generate.py restricts to another arch cannot run here no matter how it is built.
-enum ncclUnrollAvailability {
-  ncclUnrollUsable,
-  ncclUnrollNotGenerated,
-  ncclUnrollWrongArch,
-};
-
-static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
-  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
-  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
-  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
-  return ncclUnrollUsable;
-}
-
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if (rcclParamUnrollFactor() != -1) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
@@ -1692,10 +1710,10 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     }
     switch (unrollAvailability(comm->unroll, comm->archName)) {
     case ncclUnrollNotGenerated:
-      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build; its device function table is empty "
-           "and dispatching to it would crash. "
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build for arch %s; its device function "
+           "table is empty and dispatching to it would crash. "
            "Rebuild with this unroll factor, or select one this build generated.",
-           comm->unroll, (int)(pow(2.0, (double)comm->unroll)));
+           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
       return ncclInvalidArgument;
     case ncclUnrollWrongArch:
       WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "

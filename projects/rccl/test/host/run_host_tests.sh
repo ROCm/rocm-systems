@@ -195,9 +195,18 @@ do_host_tests() {
   return "$rc"
 }
 
-# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
-# the lean host-test image needs no system pytest. See that dir's README.
+# Run the CPU-only generator guards. The kernel-count suite (test/kernel-count)
+# runs under pytest in a local venv so the lean host-test image needs no system
+# pytest; see that dir's README. The device-table suite is plain unittest and
+# needs only python3.
+#
+# The device-table suite is also registered with add_test() in test/CMakeLists.txt,
+# but nothing in RCCL CI runs `ctest`, so that registration never gates. Running it
+# here is what actually makes it a guard.
 do_guards() {
+  echo "==> Device-table guards (unittest: src/device/test_generate_device_table.py)"
+  python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v
+
   echo "==> Kernel-count guards (pytest: test/kernel-count)"
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"

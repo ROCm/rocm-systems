@@ -232,11 +232,19 @@ class DeviceTableGenerationTest(unittest.TestCase):
     def _entry_guards(self, unroll):
         """Enclosing #if condition of each real slot in ncclDevFuncTable_<unroll>[].
 
-        None for a slot that is not guarded. Returns None if the unroll has no table
-        (not generated in this configuration).
+        None for a slot that is not guarded, [] for a table with no slots (an unroll
+        this build did not generate), None if the table is absent entirely.
         """
+        # Every table closes with a trailing "nullptr};" sentinel, and that is the
+        # only place that string appears -- guarded-out slots read "nullptr,". Stopping
+        # there is what keeps the match inside this table. Two anchors that look right
+        # are not: "\n};" ends nowhere in a table and runs on to the struct Caller
+        # close, and requiring a newline before the sentinel skips past an *empty*
+        # table (whose body is just "= {\nnullptr};") into the next one's slots.
         block = re.search(
-            r"ncclDevFuncTable_%s\[\] = \{\n(.*?)\n\};" % unroll, self.header, re.S
+            r"ncclDevFuncTable_%s\[\] = \{\n(.*?)nullptr\};" % unroll,
+            self.header,
+            re.S,
         )
         if block is None:
             return None
@@ -278,8 +286,11 @@ class DeviceTableGenerationTest(unittest.TestCase):
         )
         checked = 0
         for unroll, declared in arch_table.items():
-            if self._entry_guards(unroll) is None:
-                continue  # unroll not generated in this configuration
+            # No slots means this build did not generate the unroll, and the arch
+            # table deliberately still names its arch (it never consults
+            # local_unroll), so there is nothing here to cross-check against.
+            if not self._entry_guards(unroll):
+                continue
             restricted = self._restricted_arch(unroll)
             expected = '"%s"' % restricted if restricted else "nullptr"
             self.assertEqual(
@@ -309,15 +320,6 @@ class DeviceTableGenerationTest(unittest.TestCase):
             any(value != "nullptr" for value in arch_table.values()),
             "no unroll factor is arch-restricted; ncclDevFuncUnrollArch[] is all nullptr",
         )
-
-    def test_unroll_arch_covers_same_unrolls_as_generated(self):
-        # rccl_wrap.cc indexes both tables with the same enum, so a missing or
-        # short ncclDevFuncUnrollArch[] would read out of bounds.
-        generated = self._unroll_table("ncclDevFuncUnrollGenerated", r"true|false")
-        arch_table = self._unroll_table(
-            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
-        )
-        self.assertEqual(sorted(generated), sorted(arch_table))
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.

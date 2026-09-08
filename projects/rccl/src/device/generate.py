@@ -16,11 +16,11 @@ all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
 all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # Unroll factors whose device functions are compiled for one arch only. This is the
-# single source of truth for that restriction: it drives get_arch_guard(), the
-# specialized_files.txt guard the device linker filters on, the local_unroll set for
-# a local-arch build, and the ncclDevFuncUnrollArch[] table the host reads at runtime.
-# On any other arch these tables are all-nullptr, so accepting the unroll would trap
-# on the device.
+# single source of truth for that restriction. Its consumers are get_arch_guard(),
+# func_validate(), the specialized_files.txt guard the device linker filters on, the
+# local_unroll set for a local-arch build, and the ncclDevFuncUnrollArch[] table the
+# host reads at runtime. On any other arch these tables are all-nullptr, so accepting
+# the unroll would trap on the device.
 unroll_arch_requirement = {
   "8":  "gfx1250",
   "16": "gfx1250",
@@ -302,11 +302,14 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
     return False
   if coll == "" or algo == "":
     return False
-  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, which never
-  # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
-  # device linker would skip compiling them for gfx942 while the dispatch table still expected
-  # them (undefined-symbol link error).
-  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
+  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, and
+  # get_arch_guard() stamps it with that arch set rather than with the unroll's. For an
+  # arch-pinned unroll the two predicates can never agree: specialized_files.txt guards
+  # the shard on the pinned arch (see where it is written near the end of this file)
+  # while the dispatch table still expects the symbol on gfx942/gfx950, so the device
+  # linker leaves it undefined. Don't emit the combination at all, whichever arch the
+  # unroll is pinned to.
+  if coll == "SendRecv" and reg == "1" and unroll in unroll_arch_requirement:
     return False
   if not is_rocshmem and coll in gda_colls:
     return False

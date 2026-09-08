@@ -2668,4 +2668,53 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
     });
 }
 
+// ---------------------------------------------------------------------------
+// commSetUnrollFactor: RCCL_UNROLL_FACTOR validation against the running arch.
+//
+// Unroll factors 8, 16 and 32 are compiled for gfx1250 only (see
+// unroll_arch_requirement in src/device/generate.py). Requesting one on any
+// other GPU used to be accepted and then dispatched into a device function
+// table whose entries are all nullptr, which faults on the device.
+//
+// These assert the return code rather than which rejection branch ran, so they
+// hold for a multi-arch build (where the factor is generated but arch-locked)
+// and for a local-arch build (where it is not generated at all).
+//
+// commSetUnrollFactor reads only archName, nNodes and cuCount, so no GPU is
+// needed. RCCL_PARAM caches RCCL_UNROLL_FACTOR in a function-local static,
+// which is what the process isolation is for.
+// ---------------------------------------------------------------------------
+TEST(RcclUnrollFactor, RejectsArchRestrictedUnrollOnOtherArch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("RejectsArchRestrictedUnrollOnOtherArch",
+      []() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>("gfx1200");
+        comm.nNodes   = 1;
+        comm.cuCount  = 32;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "RCCL_UNROLL_FACTOR=5 (unroll 32) must be refused on gfx1200: its "
+             "device function table has no entries for this arch";
+      },
+      {{"RCCL_UNROLL_FACTOR", "5"}}
+    );
+}
+
+TEST(RcclUnrollFactor, RejectsOutOfRangeUnroll)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("RejectsOutOfRangeUnroll",
+      []() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>("gfx942");
+        comm.nNodes   = 1;
+        comm.cuCount  = 304;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "RCCL_UNROLL_FACTOR=99 is outside the unroll enum and must be refused";
+      },
+      {{"RCCL_UNROLL_FACTOR", "99"}}
+    );
+}
+
 } // namespace RcclUnitTesting
