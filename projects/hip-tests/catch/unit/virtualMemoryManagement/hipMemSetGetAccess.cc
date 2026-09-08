@@ -1497,9 +1497,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
 
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkVMMSupported(0);
 
   // ---- Describe a HOST-backed allocation (NUMA-unaware) ----
   hipMemAllocationProp prop{};
@@ -1573,9 +1571,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
 
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkVMMSupported(0);
 
   // ---- Describe a DEVICE-backed allocation
   hipMemAllocationProp prop{};
