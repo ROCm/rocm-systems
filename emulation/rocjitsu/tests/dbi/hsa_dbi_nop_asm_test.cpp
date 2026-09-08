@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file hsa_dbi_nop_asm_test.cpp
-/// @brief End-to-end DBI smoke: patch a real compiled gfx90a kernel with
+/// @brief End-to-end DBI smoke: patch a real compiled kernel with
 ///        Instrumentor::patch, then load and eventually dispatch the patched
 ///        ELF via HSA.
+///
+/// The fixture is parameterized by target (DbiTargetParams) so the same bodies
+/// cover every ISA the DBI trampoline path supports; the concrete suites at the
+/// bottom of this file are what CMake registers.
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -14,7 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "../test_paths.h"
-#include "hsa_dispatch_util.h"
+#include "dbi_test_fixtures.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -26,11 +30,9 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -44,24 +46,34 @@ namespace {
 
 using test::kernel_path;
 
+// probe_fixture is null: the inline-nop path calls no probe.
+constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
+                                       "vector_add_gfx90a", nullptr, "gfx90a"};
+
 } // namespace
 
-// Shared fixture: loads vector_add_gfx90a.o, decodes .text, finds the first
-// relocatable v_add_f32 anchor, and patches it via Instrumentor. Two empty
-// derived classes (HsaDbiNopAsmStatic / HsaDbiNopAsmHardware) inherit this so
-// CMake can register one CTest entry per gating policy:
-//   - HsaDbiNopAsmStatic.*   - no GPU needed, registered unconditionally
-//   - HsaDbiNopAsmHardware.* - registered only when HAS_CDNA2_GPU is set
+// Shared fixture: loads the target's vector_add build, decodes .text, finds the
+// first two relocatable anchors, and patches them via Instrumentor. The
+// concrete suites at the bottom of this file inherit it so CMake can register
+// one CTest entry per (target, gating policy) pair:
+//   - HsaDbiNopAsm<Target>Static.*   - no GPU needed, registered unconditionally
+//   - HsaDbiNopAsm<Target>Hardware.* - registered as a Sim case unconditionally,
+//                                      and bare only when the GPU is present
 class HsaDbiNopAsmFixture : public ::testing::Test {
 protected:
-  // Load a vector_add_gfx90a.o device ELF and instrument a single instruction
+  // Names this test's instrumentation mechanism in the shared dispatch-
+  // equivalence failure message (see DbiHardwareBase).
+  static constexpr const char *kPatchDescription = "the inline-nop placeholder";
+
+  explicit HsaDbiNopAsmFixture(const DbiTargetParams &params) : params_(params) {}
+
+  // Load the target's vector_add device ELF and instrument two instructions
   // with the inlined nop functionality currently available in Instrumentor
   void SetUp() override {
-    // Get gfx90a build of vector_add.
-    Executable exec(kernel_path("vector_add_gfx90a"));
-    ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add_gfx90a.o";
-    ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
-    const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
+    Executable exec(kernel_path(params_.kernel_fixture));
+    ASSERT_TRUE(exec.is_valid()) << "Failed to load " << params_.kernel_fixture << ".o";
+    ASSERT_GT(exec.num_code_objects(params_.target), 0u);
+    const auto *co = exec.code_object(params_.target, 0);
     ASSERT_NE(co, nullptr);
 
     // Snapshot the original device ELF so we can dispatch it too
@@ -73,9 +85,9 @@ protected:
     // trampoline machinery considers relocatable. Decode-and-search so the
     // test is stable across compiler revisions.
     // TODO: instrument multiple instructions
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+    auto decoder = Decoder::create(params_.arch);
     ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
+    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
     ASSERT_TRUE(block_result.succeeded());
     auto blocks = std::move(block_result).value();
 
@@ -87,7 +99,7 @@ protected:
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
+        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch)) {
           anchor_offsets_.push_back(cur); // Instrumentor will need offset
           anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
           ++anchor_count_;
@@ -99,11 +111,11 @@ protected:
       if (anchor_count_ == 2)
         break;
     }
-    ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in vector_add_gfx90a.o; "
-                                    "did the compiler change the lowering?";
+    ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in " << params_.kernel_fixture
+                                 << ".o; did the compiler change the lowering?";
 
     // Apply the inline-nop trampoline.
-    Instrumentor instrumentor(*co, ROCJITSU_CODE_ARCH_CDNA2);
+    Instrumentor instrumentor(*co, params_.arch);
     for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
       instrumentor.add_point_by_offset(anchor_offsets_[anchor_idx]);
     }
@@ -118,6 +130,12 @@ protected:
     patches_ = std::move(result.patches);
   }
 
+  // Body of the static case. It lives on the fixture rather than in the TEST_F
+  // macro so every target's suite runs the same code; the concrete suites only
+  // bind a DbiTargetParams to it.
+  void run_patched_elf_actually_contains_instrumentation();
+
+  const DbiTargetParams &params_;
   std::vector<uint8_t> original_elf_bytes_;
   std::vector<uint8_t> patched_elf_bytes_;
   std::vector<uint64_t> anchor_offsets_;
@@ -126,33 +144,15 @@ protected:
   uint64_t anchor_count_ = 0;
 };
 
-// Tests that need only HSA libs (parsing + decoding the patched ELF). Run
-// anywhere the binary is built.
-class HsaDbiNopAsmStatic : public HsaDbiNopAsmFixture {};
-
-// Tests that need to load + dispatch on a real gfx90a GPU. Gated at CMake
-// time by HAS_CDNA2_GPU; bodies also GTEST_SKIP at runtime if no agent.
-//
-// hsa_init / hsa_shut_down run once per suite (HSA tolerates per-test
-// init/shutdown but it isn't free). The gfx90a agent is enumerated once
-// in SetUpTestSuite and cached. Bodies pull the cached agent and skip if
-// initialization or enumeration didn't succeed.
-class HsaDbiNopAsmHardware : public HsaDbiNopAsmFixture {
+// Hardware suites for this test. DbiHardwareBase supplies the per-target HSA
+// setup and the two bodies both smoke tests share; the only case unique to the
+// inline-nop path is the sabotage one below.
+template <const DbiTargetParams &Params>
+class HsaDbiNopAsmHardwareBase : public DbiHardwareBase<HsaDbiNopAsmFixture, Params> {
 protected:
-  static void SetUpTestSuite() {
-    s_init_ok_ = (hsa_init() == HSA_STATUS_SUCCESS);
-    if (s_init_ok_)
-      s_gpu_ = find_gfx90a_agent();
-  }
-  static void TearDownTestSuite() {
-    if (s_init_ok_)
-      hsa_shut_down();
-    s_init_ok_ = false;
-    s_gpu_ = {};
-  }
+  using Base = DbiHardwareBase<HsaDbiNopAsmFixture, Params>;
 
-  static inline bool s_init_ok_ = false;
-  static inline hsa_agent_t s_gpu_{};
+  void run_trampoline_is_actually_executed_by_gpu();
 };
 
 // Static verification: prove the patcher actually changed the kernel before
@@ -162,7 +162,7 @@ protected:
 //     short-circuited without applying the patch)
 //   - patch landed at a different offset than anchor_offset_ records
 //   - the trampoline cave was not appended to .text
-TEST_F(HsaDbiNopAsmStatic, PatchedElfActuallyContainsInstrumentation) {
+void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
   // (a) Patcher produced different bytes from the original.
   ASSERT_NE(patched_elf_bytes_, original_elf_bytes_)
       << "Patched ELF is byte-identical to original - patcher silently no-oped?";
@@ -175,7 +175,7 @@ TEST_F(HsaDbiNopAsmStatic, PatchedElfActuallyContainsInstrumentation) {
   const Section *text = patched.text_sections().front();
   ASSERT_GT(text->size(), anchor_offsets_[0] + 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(params_.arch);
   ASSERT_NE(decoder, nullptr);
   for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
     rj_code_binary_inst_t anchor_word = 0;
@@ -200,110 +200,6 @@ TEST_F(HsaDbiNopAsmStatic, PatchedElfActuallyContainsInstrumentation) {
       << ".text must grow to hold the appended trampoline cave";
 }
 
-// Load patched ELF into an HSA executable and validate. No dispatch.
-// Gates on a real gfx90a agent because hsa_executable_load_agent_code_object
-// requires an agent whose ISA matches the code object.
-TEST_F(HsaDbiNopAsmHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
-  if (!s_init_ok_)
-    GTEST_SKIP() << "hsa_init failed (no HSA runtime at runtime)";
-  if (s_gpu_.handle == 0)
-    GTEST_SKIP() << "No gfx90a agent present";
-  hsa_agent_t gpu = s_gpu_;
-
-  hsa_code_object_reader_t reader{};
-  ASSERT_EQ(hsa_code_object_reader_create_from_memory(patched_elf_bytes_.data(),
-                                                      patched_elf_bytes_.size(), &reader),
-            HSA_STATUS_SUCCESS)
-      << "Patched ELF rejected by hsa_code_object_reader_create_from_memory";
-
-  hsa_executable_t executable{};
-  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                      nullptr, &executable),
-            HSA_STATUS_SUCCESS);
-
-  ASSERT_EQ(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS)
-      << "hsa_executable_load_agent_code_object rejected the patched ELF";
-
-  ASSERT_EQ(hsa_executable_freeze(executable, nullptr), HSA_STATUS_SUCCESS);
-
-  uint32_t validate_result = 0;
-  ASSERT_EQ(hsa_executable_validate(executable, &validate_result), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(validate_result, 0u) << "hsa_executable_validate reported error: " << validate_result;
-
-  // Sanity: the kernel symbol is still findable post-patch.
-  hsa_executable_symbol_t symbol{};
-  EXPECT_EQ(hsa_executable_get_symbol_by_name(executable, "vector_add.kd", &gpu, &symbol),
-            HSA_STATUS_SUCCESS)
-      << "kernel symbol vector_add.kd missing after patching";
-
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
-}
-
-// Dispatch both the original and patched kernels with identical
-// inputs and confirm bit-identical outputs. The inline-nop placeholder is
-// semantically a no-op, so the patched kernel must produce the same buffer
-// as the original — anything else means the patch path corrupted execution.
-TEST_F(HsaDbiNopAsmHardware, PatchedKernelDispatchMatchesOriginal) {
-  if (!s_init_ok_)
-    GTEST_SKIP() << "hsa_init failed";
-  if (s_gpu_.handle == 0)
-    GTEST_SKIP() << "No gfx90a agent present";
-  hsa_agent_t gpu = s_gpu_;
-  hsa_agent_t cpu = find_cpu_agent();
-  ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
-
-  constexpr uint32_t N = 1024;
-  std::mt19937 rng(42);
-  std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
-  std::vector<float> a(N), b(N), golden(N);
-  for (uint32_t i = 0; i < N; ++i) {
-    a[i] = dist(rng);
-    b[i] = dist(rng);
-    golden[i] = a[i] + b[i];
-  }
-
-  // Helper: assert the output buffer is non-zero somewhere. The C buffer is
-  // zeroed before each dispatch (see dispatch_vector_add), so a non-zero
-  // result proves the kernel actually executed and wrote into it \xE2\x80\x94 not just
-  // that the surrounding plumbing succeeded.
-  auto assert_kernel_wrote_output = [](const std::vector<float> &out, const char *label) {
-    bool wrote = false;
-    for (float v : out) {
-      if (v != 0.0f) {
-        wrote = true;
-        break;
-      }
-    }
-    ASSERT_TRUE(wrote) << label << " dispatch left output buffer all zeros (kernel didn't run?)";
-  };
-
-  // Sanity: original (unpatched) dispatch matches the CPU golden. If this
-  // fails the test fixture is bad, not the instrumentation.
-  auto orig_out = dispatch_vector_add(original_elf_bytes_, gpu, cpu, a, b, N);
-  ASSERT_EQ(orig_out.size(), N) << "original dispatch failed (empty result)";
-  assert_kernel_wrote_output(orig_out, "original");
-  int orig_mismatches = 0;
-  for (uint32_t i = 0; i < N; ++i) {
-    if (std::abs(orig_out[i] - golden[i]) > 1e-5f)
-      ++orig_mismatches;
-  }
-  ASSERT_EQ(orig_mismatches, 0) << "original vector_add dispatch produced " << orig_mismatches
-                                << "/" << N
-                                << " mismatches against CPU golden (test fixture problem)";
-
-  // The real check: patched dispatch must produce the same buffer as the
-  // original. Bit-identical because the trampoline body is just s_nop 0
-  // around the relocated instruction.
-  auto patched_out = dispatch_vector_add(patched_elf_bytes_, gpu, cpu, a, b, N);
-  ASSERT_EQ(patched_out.size(), N) << "patched dispatch failed (empty result)";
-  assert_kernel_wrote_output(patched_out, "patched");
-  EXPECT_EQ(patched_out, orig_out)
-      << "patched kernel output differs from original — the inline-nop placeholder "
-         "should be semantically a no-op";
-}
-
 // "Sabotage" verification: overwrite the s_nop 0 placeholders in the patched
 // trampolines with s_endpgm one at a time. If the GPU genuinely takes the trampoline
 // path, every wave terminates before reaching the relocated instruction and
@@ -314,130 +210,125 @@ TEST_F(HsaDbiNopAsmHardware, PatchedKernelDispatchMatchesOriginal) {
 // This is the only test that proves "the trampoline executes on the GPU" -
 // the other tests are statically verifiable (correct bytes, correct ELF
 // structure, semantically-equivalent dispatch output).
-TEST_F(HsaDbiNopAsmHardware, TrampolineIsActuallyExecutedByGpu) {
-  if (!s_init_ok_)
-    GTEST_SKIP() << "hsa_init failed";
-  if (s_gpu_.handle == 0)
-    GTEST_SKIP() << "No gfx90a agent present";
-  hsa_agent_t gpu = s_gpu_;
+template <const DbiTargetParams &Params>
+void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gpu() {
+  hsa_agent_t gpu = Base::s_gpu_;
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
 
   // The trampolines live inside .text at .text-relative offset
   // patches_[i].trampoline_offset. Overwrite the first 4 bytes of each
   // trampoline (the s_nop 0 placeholder) with s_endpgm.
-  std::vector<uint8_t> sabotaged = patched_elf_bytes_;
+  std::vector<uint8_t> sabotaged = this->patched_elf_bytes_;
   AmdGpuCodeObject parsed(sabotaged.data(), sabotaged.size());
   ASSERT_TRUE(parsed.is_valid());
   ASSERT_FALSE(parsed.text_sections().empty());
   const Section *text = parsed.text_sections().front();
 
-  ASSERT_EQ(anchor_count_, 2u);
-  ASSERT_EQ(patches_.size(), 2u);
-  ASSERT_GE(text->size(), patches_[1].trampoline_offset + 4);
+  ASSERT_EQ(this->anchor_count_, 2u);
+  ASSERT_EQ(this->patches_.size(), 2u);
+  ASSERT_GE(text->size(), this->patches_[1].trampoline_offset + 4);
   // File offset of the first trampoline's placeholder word.
-  const uint64_t tramp0_file_off = text->sectionOffset() + patches_[0].trampoline_offset;
+  const uint64_t tramp0_file_off = text->sectionOffset() + this->patches_[0].trampoline_offset;
   // Before sabotaging: verify the bytes we're about to overwrite are indeed
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  constexpr uint32_t kSNop0 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA2);
+  const uint32_t s_nop_0 = build_s_nop(0, Params.arch);
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off, sizeof(pre_overwrite));
-  ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
-                                   << ") at start of the trampoline cave but found 0x"
-                                   << pre_overwrite << " - trampoline body layout changed?";
+  ASSERT_EQ(pre_overwrite, s_nop_0) << "Expected s_nop 0 (0x" << std::hex << s_nop_0
+                                    << ") at start of the trampoline cave but found 0x"
+                                    << pre_overwrite << " - trampoline body layout changed?";
 
-  constexpr uint32_t kSEndpgm0 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA2);
-  std::memcpy(sabotaged.data() + tramp0_file_off, &kSEndpgm0, sizeof(kSEndpgm0));
+  const uint32_t s_endpgm_0 = build_s_endpgm(Params.arch);
+  std::memcpy(sabotaged.data() + tramp0_file_off, &s_endpgm_0, sizeof(s_endpgm_0));
 
-  // Same inputs as the dispatch test so we can compare against its golden.
-  constexpr uint32_t N = 1024;
-  std::mt19937 rng(42);
-  std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
-  std::vector<float> a(N), b(N), golden(N);
-  for (uint32_t i = 0; i < N; ++i) {
-    a[i] = dist(rng);
-    b[i] = dist(rng);
-    golden[i] = a[i] + b[i];
-  }
+  // Same inputs as the dispatch-equivalence test, so the golden matches.
+  const GoldenVectorAddInputs inputs;
+  constexpr uint32_t N = GoldenVectorAddInputs::kSize;
 
-  auto sabotaged_out_1 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  auto sabotaged_out_1 = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
   ASSERT_EQ(sabotaged_out_1.size(), N)
       << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
 
   // Trampoline-executed path: every thread that enters the trampoline hits
   // s_endpgm and terminates before reaching the relocated instruction or its
   // store-to-C. So C stays at the pre-dispatch zero pattern.
-  bool any_nonzero_1 = false;
-  for (float v : sabotaged_out_1) {
-    if (v != 0.0f) {
-      any_nonzero_1 = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(any_nonzero_1)
+  EXPECT_FALSE(kernel_wrote_output(sabotaged_out_1))
       << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
 
   // And the output must NOT match the golden (would mean the trampoline
   // wasn't hit and the kernel ran end-to-end normally).
-  int matches_golden_1 = 0;
-  for (uint32_t i = 0; i < N; ++i) {
-    if (std::abs(sabotaged_out_1[i] - golden[i]) < 1e-5f)
-      ++matches_golden_1;
-  }
+  const uint32_t matches_golden_1 = count_matching_golden(sabotaged_out_1, inputs.golden());
   EXPECT_LT(matches_golden_1, N) << "Sabotaged dispatch matched the golden in " << matches_golden_1
                                  << "/" << N << " elements - trampoline appears bypassed";
 
   // Revert first trampoline in sabotaged
-  std::memcpy(sabotaged.data() + tramp0_file_off, &kSNop0, sizeof(kSNop0));
-  auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  std::memcpy(sabotaged.data() + tramp0_file_off, &s_nop_0, sizeof(s_nop_0));
+  auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
   ASSERT_EQ(unsabotaged_out.size(), N) << "HSA error before unsabotaged run could finish";
 
-  for (uint32_t i = 0; i < N; ++i) {
-    ASSERT_LT(std::abs(unsabotaged_out[i] - golden[i]), 1e-5f)
-        << "Unsabotaged code differs from golden";
-  }
+  ASSERT_EQ(count_matching_golden(unsabotaged_out, inputs.golden()), N)
+      << "Unsabotaged code differs from golden";
 
   // Perform same change and test for second trampoline
-  int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
+  int64_t offset_between_anchors =
+      this->patches_[1].trampoline_offset - this->patches_[0].trampoline_offset;
   EXPECT_NE(offset_between_anchors, 0)
       << "Both selected trampolines have the same trampoline offset";
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off + offset_between_anchors,
               sizeof(pre_overwrite));
-  ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
-                                   << ") at start of the trampoline cave but found 0x"
-                                   << pre_overwrite << " - trampoline body layout changed?";
+  ASSERT_EQ(pre_overwrite, s_nop_0) << "Expected s_nop 0 (0x" << std::hex << s_nop_0
+                                    << ") at start of the trampoline cave but found 0x"
+                                    << pre_overwrite << " - trampoline body layout changed?";
 
-  std::memcpy(sabotaged.data() + tramp0_file_off + offset_between_anchors, &kSEndpgm0,
-              sizeof(kSEndpgm0));
+  std::memcpy(sabotaged.data() + tramp0_file_off + offset_between_anchors, &s_endpgm_0,
+              sizeof(s_endpgm_0));
 
-  auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
   ASSERT_EQ(sabotaged_out_2.size(), N)
       << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
 
   // Trampoline-executed path: every thread that enters the trampoline hits
   // s_endpgm and terminates before reaching the relocated v_add_f32 or its
   // store-to-C. So C stays at the pre-dispatch zero pattern.
-  bool any_nonzero_2 = false;
-  for (float v : sabotaged_out_2) {
-    if (v != 0.0f) {
-      any_nonzero_2 = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(any_nonzero_2)
+  EXPECT_FALSE(kernel_wrote_output(sabotaged_out_2))
       << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
 
   // And the output must NOT match the golden (would mean the trampoline
   // wasn't hit and the kernel ran end-to-end normally).
-  int matches_golden_2 = 0;
-  for (uint32_t i = 0; i < N; ++i) {
-    if (std::abs(sabotaged_out_2[i] - golden[i]) < 1e-5f)
-      ++matches_golden_2;
-  }
+  const uint32_t matches_golden_2 = count_matching_golden(sabotaged_out_2, inputs.golden());
   EXPECT_LT(matches_golden_2, N) << "Sabotaged dispatch matched the golden in " << matches_golden_2
                                  << "/" << N << " elements - trampoline appears bypassed";
+}
+
+// The concrete suites CMake registers. Availability is handled by
+// DbiHardwareBase::SetUp(), so these bodies are ordinary calls.
+
+// gfx90a / CDNA2.
+
+class HsaDbiNopAsmCdna2Static : public HsaDbiNopAsmFixture {
+protected:
+  HsaDbiNopAsmCdna2Static() : HsaDbiNopAsmFixture(kCdna2Params) {}
+};
+
+class HsaDbiNopAsmCdna2Hardware : public HsaDbiNopAsmHardwareBase<kCdna2Params> {};
+
+TEST_F(HsaDbiNopAsmCdna2Static, PatchedElfActuallyContainsInstrumentation) {
+  run_patched_elf_actually_contains_instrumentation();
+}
+
+TEST_F(HsaDbiNopAsmCdna2Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopAsmCdna2Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopAsmCdna2Hardware, TrampolineIsActuallyExecutedByGpu) {
+  run_trampoline_is_actually_executed_by_gpu();
 }
 
 #endif // HAS_HOST_AMDGPU

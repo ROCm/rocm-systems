@@ -62,7 +62,7 @@ struct P2pChannelsComm
     P2pChannelsComm& operator=(const P2pChannelsComm&) = delete;
 
     void initCommon(const char* gcn, int nRanks, int nNodes, int localGpus, int nChannels,
-                    int seedP2pPerPeer)
+                    int seedP2pPerPeer, int cu = 0)
     {
         ncclTopoNode gpuNode{};
         memset(comm, 0, sizeof(*comm));
@@ -74,6 +74,7 @@ struct P2pChannelsComm
 
         strncpy(gpuNode.gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
         gpuNode.gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
+        gpuNode.gpu.cu = cu;
 
         topo->nodes[GPU].count      = localGpus;
         topo->nRanks                = nRanks;
@@ -93,9 +94,9 @@ struct P2pChannelsComm
         comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
     }
 
-    void initSingleNode(const char* gcn, int nRanks, int nChannels, int seedP2pPerPeer)
+    void initSingleNode(const char* gcn, int nRanks, int nChannels, int seedP2pPerPeer, int cu = 0)
     {
-        initCommon(gcn, nRanks, /*nNodes=*/1, /*localGpus=*/nRanks, nChannels, seedP2pPerPeer);
+        initCommon(gcn, nRanks, /*nNodes=*/1, /*localGpus=*/nRanks, nChannels, seedP2pPerPeer, cu);
     }
 
     void initMultiNode(const char* gcn, int nNodes, int nRanks, int localGpus, int nChannels,
@@ -265,6 +266,69 @@ TEST(P2pMaxNchannelsSingleNodeGfx1250Test, UnsetEnv_TakesFullPool)
             ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
             // Seeded pool is 256, below MAXCHANNELS in either build, so it is the bound.
             checkSingleNodeCompute("gfx1250", 256);
+        });
+}
+
+// The gfx1250 pool is clamped by CU count, which varies by SKU and partition mode.
+// The driver reports 32 per active XCD: 8 XCD on MI455X, 6 on MI450-MC. pow2Down
+// keeps ncclP2pChannelForPart's (n-1) mask valid, so 192 must land on 128.
+TEST(P2pMaxNchannelsSingleNodeGfx1250Test, UpperBoundClampsToCuCount)
+{
+    RUN_ISOLATED_TEST(
+        "UpperBoundClampsToCuCount_gfx1250",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            struct { int cu; int expected; } cases[] = {
+                {256, std::min(256, (int)MAXCHANNELS)},  // MI455X SPX, 8 XCD x 32
+                {192, 128},                              // MI450-MC SPX, 6 XCD x 32
+                {96, 64},                                // MI450-MC DPX
+                {32, 32},                                // CPX-style fraction
+            };
+            for(const auto& c : cases)
+            {
+                P2pChannelsComm fixture;
+                fixture.initSingleNode("gfx1250", /*nRanks=*/8, /*nChannels=*/256,
+                                       /*seedP2pPerPeer=*/128, /*cu=*/c.cu);
+                bool optedHigher = true;
+                EXPECT_EQ(ncclP2pChannelsUpperBound(fixture.comm, &optedHigher), c.expected)
+                    << "cu=" << c.cu;
+                EXPECT_FALSE(optedHigher) << "cu=" << c.cu;
+            }
+        });
+}
+
+// A topology that never reported cu must not collapse the pool to a single channel.
+TEST(P2pMaxNchannelsSingleNodeGfx1250Test, UnreportedCuLeavesPoolUnclamped)
+{
+    RUN_ISOLATED_TEST(
+        "UnreportedCuLeavesPoolUnclamped_gfx1250",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            P2pChannelsComm fixture;
+            fixture.initSingleNode("gfx1250", /*nRanks=*/8, /*nChannels=*/256,
+                                   /*seedP2pPerPeer=*/128, /*cu=*/0);
+            EXPECT_EQ(ncclP2pChannelsUpperBound(fixture.comm, nullptr), (int)MAXCHANNELS);
+        });
+}
+
+// The CU clamp is gfx1250 single-node only; other arches keep the historical bound.
+TEST(P2pMaxNchannelsSingleNodeTests, CuCountDoesNotClampOtherArches)
+{
+    RUN_ISOLATED_TEST(
+        "CuCountDoesNotClampOtherArches",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            for(const char* gcn : {"gfx942", "gfx950"})
+            {
+                P2pChannelsComm fixture;
+                fixture.initSingleNode(gcn, /*nRanks=*/8, /*nChannels=*/256,
+                                       /*seedP2pPerPeer=*/128, /*cu=*/168);
+                EXPECT_EQ(ncclP2pChannelsUpperBound(fixture.comm, nullptr), 4 * CHANNEL_LIMIT)
+                    << "arch=" << gcn;
+            }
         });
 }
 

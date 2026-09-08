@@ -86,6 +86,10 @@ TEST(ApiTrace, DispatchTable_all_function_pointers_populated)
     EXPECT_NE(t->pfn_hipfile_set_parameter_size_t, nullptr);
     EXPECT_NE(t->pfn_hipfile_set_parameter_bool, nullptr);
     EXPECT_NE(t->pfn_hipfile_set_parameter_string, nullptr);
+    // HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 1
+    EXPECT_NE(t->pfn_hipfile_get_stats_l1, nullptr);
+    EXPECT_NE(t->pfn_hipfile_get_stats_l2, nullptr);
+    EXPECT_NE(t->pfn_hipfile_get_stats_l3, nullptr);
 }
 
 // Smoke test the call-through. With no profiler attached, going through the

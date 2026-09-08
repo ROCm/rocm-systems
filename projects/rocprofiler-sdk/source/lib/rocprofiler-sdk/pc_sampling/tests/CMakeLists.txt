@@ -8,7 +8,8 @@ set(ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES
     # samples_processing.cpp
     pc_sampling_vs_counter_collection.cpp
     query_configuration.cpp
-    multiple_contexts_one_per_agent.cpp)
+    multiple_contexts_one_per_agent.cpp
+    local_context.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_HEADERS pc_sampling_internals.hpp)
 
 add_executable(pcs-test)
@@ -19,7 +20,9 @@ target_sources(pcs-test PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES}
 target_link_libraries(
     pcs-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            GTest::gtest
             GTest::gtest_main)
 
 rocprofiler_add_unit_test(

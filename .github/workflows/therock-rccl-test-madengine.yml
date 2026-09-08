@@ -1,0 +1,176 @@
+name: TheRock Test MADEngine Workloads for rccl
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+      workload:
+        type: string
+        default: 'llama-3.1-70b-training'
+      nodes:
+        type: string
+        default: '2'
+      notify_email:
+        type: string
+        default: ''
+      teams_webhook:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+        default: 'ruby-linux-slurm-scale-runner'
+      artifact_run_id:
+        description: 'Reuse artifacts from a previous build run ID'
+        type: string
+      workload:
+        description: 'MADEngine workload to run'
+        type: string
+        default: 'llama-3.1-70b-training'
+      nodes:
+        description: 'Number of SLURM nodes to allocate'
+        type: string
+        default: '2'
+      notify_email:
+        description: 'Email address to send test summary report'
+        type: string
+        default: ''
+      teams_webhook:
+        description: 'Teams webhook URL for notifications'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  test_madengine:
+    name: 'Test MADEngine ${{ inputs.workload }} (${{ inputs.nodes }}N)'
+    runs-on: ${{ inputs.test_runs_on }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      RESULTS_DIR: "/apps/rccl-ci/perf"
+      WORK_DIR: "/apps/rccl-ci/workdir/${{ github.run_id }}"
+      OUTPUT_ARTIFACTS_DIR: "/apps/cvs_tests/dist_new/dist/rocm"
+      AWS_SHARED_CREDENTIALS_FILE: "/apps/cvs_tests/awsconfig/credentials.ini"
+      CLUSTER: "ruby"
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: a30607adeaf0306b8d8edcbf4f1f1bc8299d3e1e # 2026-08-24
+
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: projects/rccl/ci/scripts
+          path: rocm-systems
+
+      - name: Validate arch
+        run: |
+          if [ "${{ inputs.amdgpu_families }}" != "gfx950-dcgpu" ]; then
+            echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
+            exit 1
+          fi
+
+      - name: Install TheRock dependencies
+        run: python3 -m pip install -r requirements.txt
+
+      - name: Resolve TheRock artifact run
+        if: ${{ inputs.artifact_run_id == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          run_id="$(python3 -c "
+          import sys, contextlib
+          sys.path.insert(0, 'build_tools')
+          from find_latest_artifacts import find_latest_artifacts
+          with contextlib.redirect_stdout(sys.stderr):
+              results = find_latest_artifacts(
+                  artifact_groups=['${{ inputs.artifact_group }}'],
+                  verbose=True,
+              )
+          if not results:
+              print('No artifacts found for ${{ inputs.artifact_group }}', file=sys.stderr)
+              sys.exit(1)
+          print(results[0].workflow_run_id)
+          ")"
+          echo "Resolved TheRock run_id=${run_id}"
+          echo "ARTIFACT_RUN_ID=${run_id}" >> $GITHUB_ENV
+
+      - name: Fetch RCCL artifacts
+        run: |
+          python3 build_tools/install_rocm_from_artifacts.py \
+            --run-id="${ARTIFACT_RUN_ID}" \
+            --artifact-group="${{ inputs.artifact_group }}" \
+            --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+            --rccl
+
+      - name: Setup Python environment
+        run: |
+          mkdir -p "${WORK_DIR}"
+          python3 -m venv "${WORK_DIR}/venv"
+          source "${WORK_DIR}/venv/bin/activate"
+          pip install --upgrade pip
+
+      - name: Run MADEngine workload
+        timeout-minutes: 210
+        env:
+          NCCL_DEBUG: WARN
+          MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
+        run: |
+          source "${WORK_DIR}/venv/bin/activate"
+          export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
+
+          NOTIFY_ARGS=""
+          if [ -n "${{ inputs.notify_email }}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          fi
+          if [ -n "${{ inputs.teams_webhook }}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
+          fi
+
+          python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
+            --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
+            --workload "${{ inputs.workload }}" \
+            --cluster "${CLUSTER}" \
+            --nodes "${{ inputs.nodes }}" \
+            --results-dir "${RESULTS_DIR}" \
+            --work-dir "${WORK_DIR}" \
+            $NOTIFY_ARGS
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: madengine-results-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          path: |
+            ${{ env.WORK_DIR }}/perf.csv
+            ${{ env.WORK_DIR }}/perf_entry_super.csv
+            ${{ env.WORK_DIR }}/perf_entry_super.json
+            ${{ env.WORK_DIR }}/perf_super.csv
+            ${{ env.WORK_DIR }}/madengine_summary.txt
+            ${{ env.WORK_DIR }}/manifest.json
+          retention-days: 30
+
+      - name: Cleanup work directory
+        if: always()
+        run: |
+          rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/venv" "${WORK_DIR}/rccl_libs"

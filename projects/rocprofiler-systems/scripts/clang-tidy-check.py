@@ -32,7 +32,6 @@ _ANSI = {
     "red": "\033[31m",
     "yellow": "\033[33m",
     "green": "\033[32m",
-    "cyan": "\033[36m",
 }
 
 
@@ -244,8 +243,8 @@ def run_clang_tidy(
     return proc.stdout + proc.stderr, True
 
 
-def get_enabled_checks(args: argparse.Namespace) -> list[str]:
-    """Resolve the effective check list clang-tidy will apply."""
+def has_enabled_checks(args: argparse.Namespace) -> bool:
+    """Report whether clang-tidy will apply at least one check."""
     result = _clang_tidy(args, "-list-checks")
 
     if result.returncode != 0:
@@ -254,27 +253,17 @@ def get_enabled_checks(args: argparse.Namespace) -> list[str]:
             _color(f"warning: could not resolve check list: {detail}", "yellow"),
             file=sys.stderr,
         )
-        return []
+        return False
 
-    checks = []
     in_list = False
     for line in result.stdout.splitlines():
         stripped = line.strip()
         if stripped == "Enabled checks:":
             in_list = True
             continue
-        if in_list:
-            if not stripped:
-                break
-            checks.append(stripped)
-    return checks
-
-
-def print_enabled_checks(checks: list[str]) -> None:
-    print(_color(f"Rules to apply ({len(checks)}):", "bold"))
-    for check in checks:
-        print(f"  {_color(check, 'cyan')}")
-    print()
+        if in_list and stripped:
+            return True
+    return False
 
 
 def print_changed_files(changed_files: list[ChangedFile]) -> None:
@@ -392,13 +381,10 @@ def main() -> int:
         print("No relevant changes found.")
         return 0
 
-    enabled_checks = get_enabled_checks(args)
-
-    if not enabled_checks:
+    if not has_enabled_checks(args):
         print("No checks enabled.")
         return 0
 
-    print_enabled_checks(enabled_checks)
     print_changed_files(changed_files)
 
     print(f"Running clang-tidy on {len(changed_files)} files ...")

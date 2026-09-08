@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
 )
@@ -623,6 +626,14 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Fmt
+#
+# ----------------------------------------------------------------------------------------#
+
+include(FmtLib)
+
+# ----------------------------------------------------------------------------------------#
+#
 # Spdlog
 #
 # ----------------------------------------------------------------------------------------#
@@ -646,23 +657,6 @@ include(NlohmannJson)
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
     include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#
