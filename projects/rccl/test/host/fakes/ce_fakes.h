@@ -14,7 +14,8 @@ extern bool g_ceImplemented;  // UNDRIVEN
 extern bool g_ceAvailable;  // UNDRIVEN
 extern bool g_ceScratchAvailable;  // UNDRIVEN
 extern bool g_hierCeAvailable;  // UNDRIVEN
-extern bool g_ceAlltoAllEligible;  // ncclCeAlltoAllEligible() -- CE-vs-DDA tie-break for AllToAll
+extern bool g_ceAlltoAllServes;  // ncclCeAlltoAllServes() -- core CE-vs-kernel predicate (taskAppend)
+extern bool g_ceAlltoAllEligible;  // ncclCeAlltoAllEligible() -- CE-vs-DDA tie-break for AllToAll (collectives.cc)
 
 void ResetCeFakes();
 
