@@ -180,9 +180,10 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // Mitigation (AICOMRCCL-2275): zeroing the device buffers at teardown removes the
-    // pooled-worker corruption. Timing, not contents: prep rewrites them before use.
-    // The cap bounds the cost per buffer; smaller buffers are zeroed whole.
+    // Mitigation (AICOMRCCL-2275): zeroing device buffers at teardown removes the pooled-worker
+    // corruption. Volume, not contents: scrubbing an unrelated scratch buffer of the same size
+    // works just as well (60/0, against 40/20 unscrubbed), so cap is a traffic target and buffers
+    // larger than it are deliberately left partly untouched.
     size_t const cap = 4u << 20;
     hipError_t errIn  = hipSuccess;
     hipError_t errOut = hipSuccess;
