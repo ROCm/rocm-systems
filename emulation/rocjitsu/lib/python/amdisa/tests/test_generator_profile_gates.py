@@ -343,6 +343,35 @@ def _generated_inline_method_body(header: str, class_name: str, signature: str) 
     )
 
 
+@pytest.mark.parametrize('arch_name', ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'))
+def test_packed_true16_simd_bases_use_physical_vgpr_indices(
+    amdgpu_generated_root: Path, arch_name: str
+) -> None:
+    operand_exec = (amdgpu_generated_root / arch_name / 'operand_exec.cpp').read_text()
+    read_base = _generated_function_body(operand_exec, 'Operand::simd_vgpr_base_exec')
+    write_base = _generated_function_body(
+        operand_exec, 'Operand::simd_vgpr_base_mut_exec'
+    )
+
+    # In true16 e32 encodings, selector 128 + N names the high half of vN,
+    # not v(128 + N). Strict allocation checks consume these physical bases,
+    # so packed selectors must be normalized before generic VGPR resolution.
+    assert read_base.index('packed_16bit_vgpr_source') < read_base.index(
+        'resolved_vgpr_offset_for_operand'
+    )
+    assert read_base.index('packed_16bit_vgpr_dst') < read_base.index(
+        'resolved_vgpr_offset_for_operand'
+    )
+    assert write_base.index('packed_16bit_vgpr_dst') < write_base.index(
+        'resolved_vgpr_offset_for_operand'
+    )
+    assert write_base.index('packed_16bit_vgpr_source') < write_base.index(
+        'resolved_vgpr_offset_for_operand'
+    )
+    assert 'uint32_t off = packed->reg +' in read_base
+    assert 'uint32_t off = packed->reg +' in write_base
+
+
 def test_gfx1250_addtid_uses_m0_byte_base_addresses(
     gfx1250_generated_root: Path,
 ) -> None:
