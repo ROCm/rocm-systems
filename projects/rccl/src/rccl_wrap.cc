@@ -1319,7 +1319,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   }
 #endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  const size_t arDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
+  const size_t arDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncAllReduce, winRegType, ceCapturing);
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
