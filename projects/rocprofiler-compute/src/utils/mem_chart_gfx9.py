@@ -11,12 +11,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import (
     COLORS,
-    CachePanelRow,
     build_arch_notes,
-    build_bw_edges,
+    build_bw_edge_column,
     build_cache_panel,
     build_ip_block,
     build_kernel_panel,
@@ -71,7 +69,6 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     ("VL1 Wr", 480),
     ("VL1 Atomic", 12),
     ("VL1 Hit", 92),
-    ("VL1 Lat", 180),
     ("VL1 Coalesce", 87),
     ("VL1 Stall", 5),
     ("VL1_L2 Rd", 256),
@@ -96,8 +93,6 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     ("L2 Wr", 52),
     ("L2 Atomic", 12),
     ("L2 Hit", 85),
-    ("L2 Rd Lat", 220),
-    ("L2 Wr Lat", 180),
     ("Fabric_L2 Rd", 45),
     ("Fabric_L2 Wr", 8),
     ("Fabric_L2 Atomic", 1),
@@ -319,81 +314,14 @@ def _build_request_edges(
     return Text.from_markup("\n".join(lines))
 
 
-# --- Membw guided analysis annotations (gfx950 only) ---
-
-
-def _format_supporting_display(
-    supporting: tuple,
-) -> tuple[Any, str]:
-    """Format the single supporting metric for chart annotation."""
-    if not supporting:
-        return (None, "%")
-    return (supporting[0].value, "%")
-
-
-def _collect_stall_rows(
-    membw: Optional[MemBwAnalysisResult],
-    level: str,
-) -> list[CachePanelRow]:
-    """Extract active bottleneck rows for a memory level.
-
-    No per-level cap -- all active leaves are shown. Consider capping
-    if busy kernels produce too many rows in a single panel.
-    """
-    if membw is None:
-        return []
-    rows: list[CachePanelRow] = []
-    for node in membw.nodes:
-        _collect_active_leaves(node, level, rows)
-    return rows
-
-
-def _collect_active_leaves(
-    node: BottleneckNode,
-    level: str,
-    rows: list[CachePanelRow],
-) -> None:
-    """Recursively collect active leaf nodes at a given level."""
-    if node.state != "active":
-        return
-    if node.level == level and not any(c.state == "active" for c in node.children):
-        value, unit = _format_supporting_display(node.supporting)
-        rows.append((f"[!] {node.label}", value, unit, COLORS["stall"], False))
-    for child in node.children:
-        _collect_active_leaves(child, level, rows)
-
-
-def _build_ea_stall_content(
-    membw: Optional[MemBwAnalysisResult],
-) -> str:
-    """Build EA stall indicator content for the Data Fabric panel."""
-    stall_rows = _collect_stall_rows(membw, "EA")
-    if not stall_rows:
-        return ""
-    return "\n".join(
-        metric_line(label, value, unit, color)
-        for label, value, unit, color, *_ in stall_rows
-    )
-
-
-def _build_l1_stack(
-    metrics: dict[str, Any],
-    membw: Optional[MemBwAnalysisResult] = None,
-) -> Group:
+def _build_l1_stack(metrics: dict[str, Any]) -> Group:
     """Build vertically stacked L1 cache panels: VL1D, LDS, sL1D, L1I."""
-    vl1_rows: list[CachePanelRow] = [
-        ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
-    ]
-    gl1_stall_rows = _collect_stall_rows(membw, "GL1")  # gfx950 membw
-    vl1_rows.extend(gl1_stall_rows)
 
-    vl1_border = COLORS["stall"] if gl1_stall_rows else COLORS["block"]
     vl1_panel = build_cache_panel(
         "VL1D",
-        vl1_rows,
+        [("Hit", metrics["vl1_hit"], "%", COLORS["hit"])],
         width=_IP_BLOCK_W,
         height=_VL1D_H,
-        border_style=vl1_border,
     )
     lds_util_line = (
         f"{metric_line('Util', metrics['lds_util'], '%', COLORS['util'])}\n"
@@ -598,8 +526,8 @@ def create_mem_chart_diagram(
     show_debug: bool = False,
     chart_title: str = "",
     gpu_arch: Optional[str] = None,
-    membw: Optional[MemBwAnalysisResult] = None,
 ) -> None:
+    """Create the CDNA memory diagram matching the reference PNG layout."""
     metrics = _extract_metrics(metric_dict)
     kernel_arrows = make_arrows(_KERNEL_ARROW_LEN)
     std_arrows = make_arrows(_STD_ARROW_LEN)
@@ -609,43 +537,33 @@ def create_mem_chart_diagram(
     # Build main diagram grid first (needed to measure width for scope bar)
     kernel = build_kernel_panel(_TOTAL_H, padding_lines=13)
     req_edges = _build_request_edges(metrics, kernel_arrows)
-    l1_stack = _build_l1_stack(metrics, membw=membw)
+    l1_stack = _build_l1_stack(metrics)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)
-    l2_rows: list[CachePanelRow] = [
-        ("Hit", metrics["l2_hit"], "%", COLORS["hit"]),
-    ]
-    gl2_stall_rows = _collect_stall_rows(membw, "GL2")  # gfx950 membw
-    l2_rows.extend(gl2_stall_rows)
-    l2_border = COLORS["stall"] if gl2_stall_rows else COLORS["block"]
     l2 = build_cache_panel(
         "L2",
-        l2_rows,
+        [("Hit", metrics["l2_hit"], "%", COLORS["hit"])],
         width=_IP_BLOCK_W,
         height=_TOTAL_H,
-        border_style=l2_border,
     )
-    l2_fab_edges = build_bw_edges(
+    l2_fab_edges = build_bw_edge_column(
         [
-            ("Read BW", metrics["l2_fabric_read_bw"], "left", COLORS["read"]),
+            (
+                "Read BW",
+                format_value(metrics["l2_fabric_read_bw"], "Bytes/s", 1),
+                "left",
+                COLORS["read"],
+            ),
             (
                 "Write/Atomic BW",
-                metrics["l2_fabric_wr_at_bw"],
+                format_value(metrics["l2_fabric_wr_at_bw"], "Bytes/s", 1),
                 "right",
                 COLORS["write"],
             ),
         ],
         std_arrows,
     )
-    if is_gfx950:  # gfx950 membw: EA stall annotations in Data Fabric
-        ea_content = _build_ea_stall_content(membw)
-        ea_border = COLORS["stall"] if ea_content else COLORS["block"]
-        fabric = build_ip_block(
-            "Data Fabric",
-            _IP_BLOCK_W,
-            _TOTAL_H,
-            ea_content,
-            border_style=ea_border,
-        )
+    if is_gfx950:
+        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H)
         hbm_content = _build_hbm_content(metrics)
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H, hbm_content)
     else:
@@ -710,9 +628,8 @@ def create_mem_chart_diagram(
             )
         )
 
-    has_stalls = membw is not None and any(n.state == "active" for n in membw.nodes)
     sections.append("")
-    sections.append(build_legend(include_stall=has_stalls))
+    sections.append(build_legend())
 
     if show_debug:
         notes: list[tuple[str, str]] = [
@@ -755,7 +672,6 @@ def plot_mem_chart(
     *,
     chart_title: str,
     gpu_arch: Optional[str] = None,
-    membw: Optional[MemBwAnalysisResult] = None,
 ) -> str:
     """Render the CDNA memory chart and return as a string."""
     return render_chart_to_string(
@@ -765,7 +681,6 @@ def plot_mem_chart(
         console_width=_CONSOLE_WIDTH,
         chart_title=chart_title,
         gpu_arch=gpu_arch,
-        membw=membw,
     )
 
 

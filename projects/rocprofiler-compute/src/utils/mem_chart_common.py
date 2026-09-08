@@ -301,10 +301,10 @@ def build_bw_edges(
     for label, value, arrow_key, color in entries:
         value_str = format_value(value, "Bytes/s")
         resolved.append((label, value_str, arrow_key, color))
-    return _build_bw_edge_column(resolved, arrows)
+    return build_bw_edge_column(resolved, arrows)
 
 
-def _build_bw_edge_column(
+def build_bw_edge_column(
     entries: list[tuple[str, str, str, str]],
     arrows: dict[str, str],
 ) -> Text:
