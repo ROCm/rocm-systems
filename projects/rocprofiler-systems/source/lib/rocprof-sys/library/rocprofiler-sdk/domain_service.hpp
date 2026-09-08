@@ -24,7 +24,18 @@ template <typename SdkBackend, typename Externals>
 class domain_service
 {
 public:
-    explicit domain_service();
+    explicit domain_service()
+    {
+        auto callback_domains = filter_supported_domains(
+            SdkBackend::get_callback_tracing_names(), domains::collection_mode::callback);
+        auto buffered_domains = filter_supported_domains(
+            SdkBackend::get_buffer_tracing_names(), domains::collection_mode::buffered);
+
+        m_available_domains = std::move(buffered_domains);
+        m_available_domains.insert(m_available_domains.end(),
+                                   std::make_move_iterator(callback_domains.begin()),
+                                   std::make_move_iterator(callback_domains.end()));
+    }
 
     [[nodiscard]] std::span<const domains::domain_info> available_domains() const noexcept
     {

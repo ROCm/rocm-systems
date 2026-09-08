@@ -2661,6 +2661,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
 
 #if(ROCPROFILER_VERSION >= 10202)
+    g_domain_service =
+        std::make_shared<domain_service<production_backend, external_dependencies>>();
+
     std::vector<domain_selection> domain_selection_list;
 
     // // Initialize KFD event metadata
