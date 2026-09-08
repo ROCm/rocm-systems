@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from membw.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import (
     COLORS,
     CachePanelRow,

@@ -17,7 +17,7 @@ from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from membw.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
