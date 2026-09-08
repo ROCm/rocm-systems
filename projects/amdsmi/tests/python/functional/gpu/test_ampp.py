@@ -19,10 +19,8 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """GPU AMPP (amdsmi power profile): get_ampp_profiles, get_ampp_fields,
-activate_ampp_profile, and configure_ampp_profile (exercised via
-AMDSMI_DRY_RUN)."""
+activate_ampp_profile, and configure_ampp_profile."""
 
-import os
 import unittest
 
 import common.common as common
@@ -134,14 +132,10 @@ class TestGpuAmpp(unittest.TestCase):
                     for key in ("name", "unit", "value", "limit_min", "limit_max", "has_limits"):
                         self.assertIn(key, field)
 
-    def test_set_ampp_profile_dry_run(self):
-        """Test ACTIVATE and CONFIGURE write paths in DRY_RUN mode"""
+    def test_set_ampp_profile(self):
+        """Test AMPP activation and configuration validation."""
         self.common.print_func_name("")
         processors = amdsmi.amdsmi_get_processor_handles()
-
-        # Enable DRY_RUN mode; ensure cleanup even if test fails
-        os.environ["AMDSMI_DRY_RUN"] = "1"
-        self.addCleanup(os.environ.pop, "AMDSMI_DRY_RUN", None)
 
         for i in range(0, len(processors)):
             self.common.print_device_header(i)
@@ -158,20 +152,20 @@ class TestGpuAmpp(unittest.TestCase):
                 continue
 
             # ACTIVATE the currently-active profile is a no-op but must
-            # still succeed in DRY_RUN.
+            # still succeed when activating the already-active profile.
             active_profile = next((p for p in profiles if p["is_active"]), profiles[0])
             msg = (
-                f"\t### amdsmi_activate_ampp_profile(gpu={i}, {active_profile['name']}) (DRY_RUN):"
+                f"\t### amdsmi_activate_ampp_profile(gpu={i}, {active_profile['name']}):"
             )
             try:
                 amdsmi.amdsmi_activate_ampp_profile(processors[i], active_profile["name"])
                 self.common.print(msg, "OK")
             except amdsmi.AmdSmiLibraryException as e:
-                self.fail(f"Failed to ACTIVATE {active_profile['name']} in DRY_RUN mode: {e}")
+                self.fail(f"Failed to ACTIVATE {active_profile['name']}: {e}")
 
             # ACTIVATE of an unpublished/invalid name must fail with INVAL,
             # not silently succeed.
-            msg = f"\t### amdsmi_activate_ampp_profile(gpu={i}, ../../etc) (DRY_RUN):"
+            msg = f"\t### amdsmi_activate_ampp_profile(gpu={i}, ../../etc):"
             with self.assertRaises(amdsmi.AmdSmiLibraryException, msg=msg) as ctx:
                 amdsmi.amdsmi_activate_ampp_profile(processors[i], "../../etc")
             self.assertEqual(
@@ -186,7 +180,7 @@ class TestGpuAmpp(unittest.TestCase):
             if writable is not None:
                 msg = (
                     f"\t### amdsmi_configure_ampp_profile(gpu={i}, {writable['name']}, "
-                    "no fields) (DRY_RUN):"
+                    "no fields):"
                 )
                 with self.assertRaises(amdsmi.AmdSmiLibraryException, msg=msg) as ctx:
                     amdsmi.amdsmi_configure_ampp_profile(processors[i], writable["name"], [])
@@ -197,7 +191,7 @@ class TestGpuAmpp(unittest.TestCase):
                 # CONFIGURE with an unrecognized field name must fail INVAL.
                 msg = (
                     f"\t### amdsmi_configure_ampp_profile(gpu={i}, {writable['name']}, "
-                    "bogus field) (DRY_RUN):"
+                    "bogus field):"
                 )
                 with self.assertRaises(amdsmi.AmdSmiLibraryException, msg=msg) as ctx:
                     amdsmi.amdsmi_configure_ampp_profile(

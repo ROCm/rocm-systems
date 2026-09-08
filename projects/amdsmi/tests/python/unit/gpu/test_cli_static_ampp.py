@@ -24,7 +24,7 @@
 Covers ``StaticCommands.static_gpu``'s ``--ampp`` block: JSON output shape,
 human-readable formatting (including a per-profile fields-fetch failure), and
 the NOT_SUPPORTED fallback. Follows the same load-from-source-tree / stub the
-``amdsmi`` package pattern as ``test_cli_vram_type_lpddr5.py``.
+``amdsmi`` package pattern used by the other source-loaded CLI tests.
 """
 
 import copy

@@ -34,44 +34,13 @@
 #include "amd_smi/amdsmi.h"
 #include "test_common.h"
 
-namespace {
-
-// RAII helper to set and automatically restore an environment variable,
-// mirroring the pattern already used by memory_read_write_test.cc for
-// exercising AMDSMI_DRY_RUN-gated write paths without root/hardware access.
-class ScopedEnvVar {
- public:
-  ScopedEnvVar(const char* name, const char* value) : name_(name) {
-    const char* old_val = std::getenv(name);
-    if (old_val) {
-      old_value_ = old_val;
-      has_old_value_ = true;
-    } else {
-      has_old_value_ = false;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnvVar() {
-    if (has_old_value_) {
-      setenv(name_.c_str(), old_value_.c_str(), 1);
-    } else {
-      unsetenv(name_.c_str());
-    }
-  }
-
- private:
-  std::string name_;
-  std::string old_value_;
-  bool has_old_value_;
-};
-
-}  // namespace
+namespace {}  // namespace
 
 TestAmppReadWrite::TestAmppReadWrite() : TestBase() {
   set_title("AMDSMI AMPP (Power Profile) Read/Write Test");
   set_description(
       "The AMPP tests verify that power profile recipes can be enumerated, "
-      "queried, and activated/configured (via AMDSMI_DRY_RUN) properly.");
+      "queried, activated, and configured properly.");
 }
 
 TestAmppReadWrite::~TestAmppReadWrite(void) {}
@@ -281,70 +250,38 @@ void TestAmppReadWrite::Run(void) {
       ASSERT_EQ(num_fields, 0u);
     }
 
-    // --- Write-path exercised only via AMDSMI_DRY_RUN, matching the
-    // precedent in memory_read_write_test.cc / test_memory.py for
-    // privileged sysfs writes that would otherwise require root. ---
-    {
-      ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
+    // ACTIVATE of a name that doesn't resolve to a published profile_N must
+    // fail with INVAL, not touch sysfs.
+    DISPLAY_AMDSMI_API("amdsmi_activate_ampp_profile",
+                       "gpu=" + std::to_string(dv_ind) + ", ACTIVATE ../../etc", VERB(STANDARD));
+    ret = amdsmi_activate_ampp_profile(handle, "../../etc");
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
-      if (!profiles.empty()) {
-        DISPLAY_AMDSMI_API(
-            "amdsmi_activate_ampp_profile",
-            "gpu=" + std::to_string(dv_ind) + ", ACTIVATE " + profiles[0].name + " (DRY_RUN)",
-            VERB(STANDARD));
-        ret = amdsmi_activate_ampp_profile(handle, profiles[0].name);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-        CHK_ERR_ASRT(ret)
-      }
-
-      // ACTIVATE / CONFIGURE of a name that doesn't resolve to a published
-      // profile_N must fail with INVAL, not silently succeed.
-      DISPLAY_AMDSMI_API("amdsmi_activate_ampp_profile",
-                         "gpu=" + std::to_string(dv_ind) + ", ACTIVATE ../../etc (DRY_RUN)",
+    if (!unconfigured_writable_profile_name.empty()) {
+      // CONFIGURE with fields == nullptr but num_fields > 0 must be
+      // rejected with INVAL rather than dereferencing a null pointer.
+      DISPLAY_AMDSMI_API("amdsmi_configure_ampp_profile",
+                         "gpu=" + std::to_string(dv_ind) + ", CONFIGURE " +
+                             unconfigured_writable_profile_name + " fields=NULL,num=1",
                          VERB(STANDARD));
-      ret = amdsmi_activate_ampp_profile(handle, "../../etc");
+      ret = amdsmi_configure_ampp_profile(handle, unconfigured_writable_profile_name.c_str(),
+                                          nullptr, 1);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
-      if (!unconfigured_writable_profile_name.empty()) {
-        // CONFIGURE with fields == nullptr but num_fields > 0 must be
-        // rejected with INVAL rather than dereferencing a null pointer.
-        DISPLAY_AMDSMI_API("amdsmi_configure_ampp_profile",
-                           "gpu=" + std::to_string(dv_ind) + ", CONFIGURE " +
-                               unconfigured_writable_profile_name + " fields=NULL,num=1 (DRY_RUN)",
-                           VERB(STANDARD));
-        ret = amdsmi_configure_ampp_profile(handle, unconfigured_writable_profile_name.c_str(),
-                                            nullptr, 1);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
-        // A commit with nothing ever staged (fields == nullptr, num_fields
-        // == 0) must be rejected with INVAL: the driver's config/commit
-        // rejects -EINVAL in this case, and AMDSMI defensively requires at
-        // least one staged field before issuing any sysfs writes at all.
-        DISPLAY_AMDSMI_API("amdsmi_configure_ampp_profile",
-                           "gpu=" + std::to_string(dv_ind) + ", CONFIGURE " +
-                               unconfigured_writable_profile_name + " (empty commit, DRY_RUN)",
-                           VERB(STANDARD));
-        ret = amdsmi_configure_ampp_profile(handle, unconfigured_writable_profile_name.c_str(),
-                                            nullptr, 0);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
-        // A CONFIGURE with at least one staged field must succeed.
-        amdsmi_ampp_field_t stage_field;
-        memset(&stage_field, 0, sizeof(stage_field));
-        snprintf(stage_field.name, sizeof(stage_field.name), "%s", "PPT0_Limit");
-        stage_field.value = 300;
-        DISPLAY_AMDSMI_API("amdsmi_configure_ampp_profile",
-                           "gpu=" + std::to_string(dv_ind) + ", CONFIGURE " +
-                               unconfigured_writable_profile_name + " PPT0_Limit=300 (DRY_RUN)",
-                           VERB(STANDARD));
-        ret = amdsmi_configure_ampp_profile(handle, unconfigured_writable_profile_name.c_str(),
-                                            &stage_field, 1);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-        CHK_ERR_ASRT(ret)
-      }
+      // A commit with nothing ever staged (fields == nullptr, num_fields
+      // == 0) must be rejected with INVAL: the driver's config/commit
+      // rejects -EINVAL in this case, and AMDSMI defensively requires at
+      // least one staged field before issuing any sysfs writes at all.
+      DISPLAY_AMDSMI_API("amdsmi_configure_ampp_profile",
+                         "gpu=" + std::to_string(dv_ind) + ", CONFIGURE " +
+                             unconfigured_writable_profile_name + " (empty commit)",
+                         VERB(STANDARD));
+      ret = amdsmi_configure_ampp_profile(handle, unconfigured_writable_profile_name.c_str(),
+                                          nullptr, 0);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     }
   }
 }

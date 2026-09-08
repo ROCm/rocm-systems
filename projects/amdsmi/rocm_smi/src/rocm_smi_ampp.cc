@@ -96,17 +96,21 @@ rsmi_status_t convert_ampp_errno(int errno_val) {
   }
 }
 
-bool app_modes_supported(const std::string& root) { return fs::exists(root); }
+bool app_modes_supported(const std::string& root) {
+  std::error_code ec;
+  return fs::exists(root, ec) && !ec;
+}
 
-// Reads a single line from a sysfs file. Returns false (with errno left
-// from the failed open) if the file does not exist / cannot be opened.
-bool read_sysfs_line(const std::string& path, std::string* out) {
+// Reads a single line from a sysfs file. ENOENT is preserved so callers can
+// distinguish an optional file from a permission or I/O failure.
+rsmi_status_t read_sysfs_line(const std::string& path, std::string* out) {
+  errno = 0;
   std::ifstream f(path);
   if (!f.good()) {
-    return false;
+    return errno == ENOENT ? RSMI_STATUS_NO_DATA : convert_ampp_errno(errno);
   }
   std::getline(f, *out);
-  return true;
+  return f ? RSMI_STATUS_SUCCESS : RSMI_STATUS_FILE_ERROR;
 }
 
 // Reads app_modes/profile_abi (e.g. "1.0\n") verbatim, trimmed of the
@@ -114,13 +118,14 @@ bool read_sysfs_line(const std::string& path, std::string* out) {
 // driver's internal recipe-blob version (currently v3) is not surfaced
 // here and has no SMI-visible impact. Returns false if profile_abi does
 // not exist, leaving *version untouched.
-bool read_profile_abi(const std::string& root, std::string* version) {
+rsmi_status_t read_profile_abi(const std::string& root, std::string* version) {
   std::string line;
-  if (!read_sysfs_line(root + "profile_abi", &line)) {
-    return false;
+  rsmi_status_t status = read_sysfs_line(root + "profile_abi", &line);
+  if (status != RSMI_STATUS_SUCCESS) {
+    return status;
   }
   *version = trim(line);
-  return true;
+  return RSMI_STATUS_SUCCESS;
 }
 
 // Parses "<value> <unit...>" sysfs field content generically: first
@@ -152,12 +157,14 @@ bool parse_field_content(const std::string& content, int64_t* value, std::string
 // needing sysfs, root, or a mock-sysfs overlay.
 rsmi_status_t read_writable_slots(const std::string& root, std::vector<uint32_t>* out_slots) {
   std::string line;
-  if (!read_sysfs_line(root + "config/writable_slot_mask", &line)) {
+  rsmi_status_t status = read_sysfs_line(root + "config/writable_slot_mask", &line);
+  if (status == RSMI_STATUS_NO_DATA) {
     // No config/writable_slot_mask file at all -- nothing is writable, not
     // a parse error.
     out_slots->clear();
     return RSMI_STATUS_SUCCESS;
   }
+  if (status != RSMI_STATUS_SUCCESS) return status;
   return amd::smi::parse_ampp_writable_slot_mask(trim(line), out_slots);
 }
 
@@ -171,18 +178,22 @@ bool is_writable_slot(const std::vector<uint32_t>& writable_slots, uint32_t inde
 // A profile_N directory is "configured" if it contains at least one
 // regular field file. Empty custom slots (before first configure)
 // enumerate to zero entries.
-bool directory_has_entries(const std::string& dir_path) {
+bool directory_has_entries(const std::string& dir_path, bool* has_entries) {
+  *has_entries = false;
   std::error_code ec;
   if (!fs::exists(dir_path, ec) || !fs::is_directory(dir_path, ec)) {
-    return false;
+    return !ec;
   }
   for (const auto& entry : fs::directory_iterator(dir_path, ec)) {
-    if (ec) break;
-    if (entry.is_regular_file()) {
-      return true;
+    if (ec) return false;
+    std::error_code entry_ec;
+    if (entry.is_regular_file(entry_ec)) {
+      *has_entries = true;
+      break;
     }
+    if (entry_ec) return false;
   }
-  return false;
+  return !ec;
 }
 
 // Resolves a profile_name (e.g. "profile_2") to its numeric slot index.
@@ -234,14 +245,20 @@ struct AmppProfileInternal {
   bool configured;
 };
 
-std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root) {
+std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root,
+                                                    rsmi_status_t* status) {
   std::vector<AmppProfileInternal> profiles;
+  *status = RSMI_STATUS_SUCCESS;
   std::error_code ec;
   if (!fs::exists(root, ec) || !fs::is_directory(root, ec)) {
+    if (ec) *status = convert_ampp_errno(ec.value());
     return profiles;
   }
   for (const auto& entry : fs::directory_iterator(root, ec)) {
-    if (ec) break;
+    if (ec) {
+      *status = convert_ampp_errno(ec.value());
+      return {};
+    }
     if (!entry.is_directory()) {
       continue;
     }
@@ -250,7 +267,12 @@ std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root) {
     if (!parse_profile_index(name, &idx)) {
       continue;
     }
-    profiles.push_back({idx, name, directory_has_entries(entry.path().string())});
+    bool configured = false;
+    if (!directory_has_entries(entry.path().string(), &configured)) {
+      *status = RSMI_STATUS_FILE_ERROR;
+      return {};
+    }
+    profiles.push_back({idx, name, configured});
   }
   std::sort(
       profiles.begin(), profiles.end(),
@@ -261,24 +283,25 @@ std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root) {
 // Enumerates the field files that currently exist directly under
 // app_modes/<profile_name>/. Field names are opaque strings -- whatever
 // the driver happens to expose is what gets returned.
-std::vector<std::string> enumerate_field_names(const std::string& profile_dir) {
+std::vector<std::string> enumerate_field_names(const std::string& profile_dir,
+                                               rsmi_status_t* status) {
   std::vector<std::string> names;
+  *status = RSMI_STATUS_SUCCESS;
   std::error_code ec;
   if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
+    if (ec) *status = convert_ampp_errno(ec.value());
     return names;
   }
   for (const auto& entry : fs::directory_iterator(profile_dir, ec)) {
-    if (ec) break;
+    if (ec) {
+      *status = convert_ampp_errno(ec.value());
+      return {};
+    }
     if (entry.is_regular_file()) {
       names.push_back(entry.path().filename().string());
     }
   }
   return names;
-}
-
-bool is_dry_run() {
-  const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
-  return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
 }  // namespace
@@ -338,19 +361,17 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
 
   if (version != nullptr) {
     std::string abi_version_str;
-    if (read_profile_abi(root, &abi_version_str)) {
-      snprintf(version, RSMI_AMPP_MAX_STRING_LENGTH, "%s", abi_version_str.c_str());
-    } else {
-      version[0] = '\0';
-    }
+    rsmi_status_t abi_status = read_profile_abi(root, &abi_version_str);
+    if (abi_status != RSMI_STATUS_SUCCESS) return abi_status;
+    snprintf(version, RSMI_AMPP_MAX_STRING_LENGTH, "%s", abi_version_str.c_str());
   }
 
   uint32_t active_index = 0;
   std::string active_line;
-  if (read_sysfs_line(root + "active_profile", &active_line)) {
-    if (!parse_active_profile(active_line, &active_index)) {
-      return RSMI_STATUS_UNEXPECTED_DATA;
-    }
+  rsmi_status_t active_status = read_sysfs_line(root + "active_profile", &active_line);
+  if (active_status != RSMI_STATUS_SUCCESS) return active_status;
+  if (!parse_active_profile(active_line, &active_index)) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   std::vector<uint32_t> writable_slots;
@@ -358,7 +379,9 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
   if (writable_slots_ret != RSMI_STATUS_SUCCESS) {
     return writable_slots_ret;
   }
-  std::vector<AmppProfileInternal> found = enumerate_profiles(root);
+  rsmi_status_t enumerate_status = RSMI_STATUS_SUCCESS;
+  std::vector<AmppProfileInternal> found = enumerate_profiles(root, &enumerate_status);
+  if (enumerate_status != RSMI_STATUS_SUCCESS) return enumerate_status;
 
   const uint32_t required = static_cast<uint32_t>(found.size());
 
@@ -419,11 +442,13 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
   std::string profile_dir = root + profile_name;
   std::error_code ec;
   if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
-    // Not a currently published profile_N directory.
+    if (ec) return convert_ampp_errno(ec.value());
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  std::vector<std::string> field_names = enumerate_field_names(profile_dir);
+  rsmi_status_t enumerate_status = RSMI_STATUS_SUCCESS;
+  std::vector<std::string> field_names = enumerate_field_names(profile_dir, &enumerate_status);
+  if (enumerate_status != RSMI_STATUS_SUCCESS) return enumerate_status;
 
   if (field_names.empty()) {
     // Distinguish "writable but unconfigured" (NO_DATA) from a profile
@@ -461,17 +486,25 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
     snprintf(f.name, sizeof(f.name), "%s", field_names[i].c_str());
 
     std::string content;
-    if (read_sysfs_line(profile_dir + "/" + field_names[i], &content)) {
-      std::string unit;
-      if (!parse_field_content(content, &f.value, &unit)) {
-        return RSMI_STATUS_UNEXPECTED_DATA;
-      }
-      snprintf(f.unit, sizeof(f.unit), "%s", unit.c_str());
+    rsmi_status_t field_status = read_sysfs_line(profile_dir + "/" + field_names[i], &content);
+    if (field_status != RSMI_STATUS_SUCCESS) return field_status;
+    std::string unit;
+    if (!parse_field_content(content, &f.value, &unit)) {
+      return RSMI_STATUS_UNEXPECTED_DATA;
     }
+    snprintf(f.unit, sizeof(f.unit), "%s", unit.c_str());
 
     std::string min_line, max_line;
-    bool has_min = read_sysfs_line(root + "limits/min/" + field_names[i], &min_line);
-    bool has_max = read_sysfs_line(root + "limits/max/" + field_names[i], &max_line);
+    rsmi_status_t min_status = read_sysfs_line(root + "limits/min/" + field_names[i], &min_line);
+    rsmi_status_t max_status = read_sysfs_line(root + "limits/max/" + field_names[i], &max_line);
+    if (min_status != RSMI_STATUS_SUCCESS && min_status != RSMI_STATUS_NO_DATA) {
+      return min_status;
+    }
+    if (max_status != RSMI_STATUS_SUCCESS && max_status != RSMI_STATUS_NO_DATA) {
+      return max_status;
+    }
+    bool has_min = min_status == RSMI_STATUS_SUCCESS;
+    bool has_max = max_status == RSMI_STATUS_SUCCESS;
     if (has_min) {
       std::string unused_unit;
       if (!parse_field_content(min_line, &f.limit_min, &unused_unit)) {
@@ -521,6 +554,7 @@ rsmi_status_t resolve_ampp_profile_dir(const std::shared_ptr<amd::smi::Device>& 
   std::string profile_dir = *out_root + profile_name;
   std::error_code ec;
   if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
+    if (ec) return convert_ampp_errno(ec.value());
     return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -549,12 +583,6 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
     return resolve_ret;
   }
 
-  if (is_dry_run()) {
-    ss << "[DRY_RUN] Would write active_profile=" << index << " to " << root << "active_profile";
-    LOG_INFO(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
-
   std::ofstream active_file(root + "active_profile");
   if (!active_file.good()) {
     return RSMI_STATUS_PERMISSION;
@@ -573,6 +601,7 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
     return convert_ampp_errno(err);
   }
   active_file.close();
+  if (!active_file) return RSMI_STATUS_FILE_ERROR;
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -624,7 +653,10 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
   // Validate requested field names against whatever fields the driver
   // currently recognizes for staging (config/<field> mirrors the field
   // set of a fully-configured profile of this generation).
-  std::vector<std::string> stageable_fields = enumerate_field_names(root + "config");
+  rsmi_status_t enumerate_status = RSMI_STATUS_SUCCESS;
+  std::vector<std::string> stageable_fields =
+      enumerate_field_names(root + "config", &enumerate_status);
+  if (enumerate_status != RSMI_STATUS_SUCCESS) return enumerate_status;
   // config/ also contains non-field control files; filter those out.
   auto is_control_file = [](const std::string& name) {
     return name == "profile" || name == "writable_slot_mask" || name == "commit";
@@ -645,13 +677,6 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
     }
   }
 
-  if (is_dry_run()) {
-    ss << "[DRY_RUN] Would select config/profile=" << index << ", stage " << num_fields
-       << " field(s), and write config/commit=1 under " << root;
-    LOG_INFO(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
-
   // Select the target slot.
   {
     std::ofstream profile_file(root + "config/profile");
@@ -665,6 +690,8 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
       profile_file.close();
       return convert_ampp_errno(err);
     }
+    profile_file.close();
+    if (!profile_file) return RSMI_STATUS_FILE_ERROR;
   }
 
   // Stage only the fields the caller asked for -- partial staging is
@@ -686,6 +713,8 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
       field_file.close();
       return convert_ampp_errno(err);
     }
+    field_file.close();
+    if (!field_file) return RSMI_STATUS_FILE_ERROR;
   }
 
   // Commit.
@@ -701,6 +730,8 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
       commit_file.close();
       return convert_ampp_errno(err);
     }
+    commit_file.close();
+    if (!commit_file) return RSMI_STATUS_FILE_ERROR;
   }
 
   return RSMI_STATUS_SUCCESS;
