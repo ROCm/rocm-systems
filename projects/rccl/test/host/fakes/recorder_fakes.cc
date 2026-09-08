@@ -45,4 +45,11 @@ ncclResult_t Recorder::record(rcclCall_t, ncclRedOp_t, ncclComm_t, ncclDataType_
                               ncclScalarResidence_t, void*) {
   return g_recorderResult;
 }
+// recorder.h:124 -- the sendrecv/collective overload with defaulted trailing
+// args (root, sendcounts, sdispls, recvcounts, rdispls). ncclAlltoAll_impl calls
+// it on entry (rrAllToAll), so collectives-test.cc needs it defined.
+ncclResult_t Recorder::record(rcclCall_t, const void*, void*, size_t, ncclDataType_t, ncclComm_t, hipStream_t, int,
+                              const size_t*, const size_t*, const size_t*, const size_t*) {
+  return g_recorderResult;
+}
 }  // namespace rccl

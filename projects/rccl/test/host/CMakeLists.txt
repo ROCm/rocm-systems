@@ -277,6 +277,8 @@ if(BUILD_TESTS)
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
     collectives-test.cc
+    fakes/dda_alltoall_fakes.cc          # DDA AllToAll dispatch seams (collectives-test)
+    fakes/collectives_stubs.cc           # link floor for the retained enqueue subtree (collectives-test)
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -770,6 +772,8 @@ endforeach()
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/collectives-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dda_alltoall_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
