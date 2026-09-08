@@ -1,0 +1,52 @@
+{
+  "paths": [
+    {
+      "prefix": "projects/cuid",
+      "build_projects": ["rdc"],
+      "test_projects": ["projects/cuid"],
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "projects/rocprof-trace-decoder",
+      "build_projects": ["rocprof-trace-decoder"],
+      "test_projects": ["rocprof-trace-decoder"],
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "shared/amdgpu-windows-interop",
+      "build_projects": ["hip"],
+      "test_projects": ["hip-clr"],
+      "platforms": ["windows"]
+    },
+    {
+      "prefix": "shared/ctest",
+      "build_all": true,
+      "test_all": true,
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "shared/kpack",
+      "build_all": true,
+      "test_projects": ["rocm-kpack"],
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "shared/machine-readable-isa",
+      "build_projects": ["rocjitsu"],
+      "test_projects": ["rocjitsu"],
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "emulation/mirage",
+      "build_projects": ["mirage"],
+      "test_projects": ["emulation/mirage"],
+      "platforms": ["linux"]
+    },
+    {
+      "prefix": "emulation/rocjitsu",
+      "build_projects": ["rocjitsu"],
+      "test_projects": ["emulation/rocjitsu"],
+      "platforms": ["linux"]
+    }
+  ]
+}

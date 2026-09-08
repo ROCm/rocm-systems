@@ -117,8 +117,14 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      build_changed_projects: ${{ steps.multi_arch_paths.outputs.build_changed_projects || steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      test_changed_projects: ${{ steps.multi_arch_paths.outputs.test_changed_projects || steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
+      build_run_all_tests: ${{ steps.multi_arch_paths.outputs.build_run_all_tests || 'false' }}
+      test_run_all_tests: ${{ steps.multi_arch_paths.outputs.test_run_all_tests || 'false' }}
       skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
+      linux_enabled: ${{ steps.multi_arch_paths.outputs.linux_enabled }}
+      windows_enabled: ${{ steps.multi_arch_paths.outputs.windows_enabled }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
     steps:
@@ -126,8 +132,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
+            .github/multi-arch-ci-paths.json
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
+            .github/scripts/configure_multi_arch_ci_paths.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -168,6 +176,18 @@ jobs:
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
           echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
 
+      - name: Configure multi-arch path selectors
+        id: multi_arch_paths
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/configure_multi_arch_ci_paths.py \
+            --github-repo "${{ github.repository }}" \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --original-changed-projects "${{ steps.configure-pr.outputs.changed_projects }}"
+
       # Map the changed projects to the minimal allowlist of TheRock build
       # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
       # this only reads it). Empty output = build all (fan-out / unknown project
@@ -176,8 +196,8 @@ jobs:
         id: build_stages
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
-            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --changed-projects "${{ steps.multi_arch_paths.outputs.build_changed_projects || steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests == 'true' || steps.configure-manual.outputs.run_all_tests == 'true' || steps.multi_arch_paths.outputs.build_run_all_tests == 'true' }}" \
             --therock-path "_therock"
 
   setup:
@@ -188,8 +208,8 @@ jobs:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
+      linux_amdgpu_families: ${{ needs.configure.outputs.linux_enabled == 'false' && 'none' || inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
+      windows_amdgpu_families: ${{ needs.configure.outputs.windows_enabled == 'false' && 'none' || inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Per-PR selective build: the configure job maps the changed projects to
@@ -247,7 +267,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ (needs.configure.outputs.run_all_tests == 'true' || needs.configure.outputs.test_run_all_tests == 'true') && '' || needs.configure.outputs.test_changed_projects }}
       repository: ROCm/TheRock
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
@@ -271,7 +291,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ (needs.configure.outputs.run_all_tests == 'true' || needs.configure.outputs.test_run_all_tests == 'true') && '' || needs.configure.outputs.test_changed_projects }}
       repository: ROCm/TheRock
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
