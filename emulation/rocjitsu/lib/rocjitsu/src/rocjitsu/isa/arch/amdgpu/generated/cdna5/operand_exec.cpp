@@ -342,12 +342,36 @@ void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
+  if (auto packed =
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+  }
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+  }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
     return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
   return std::nullopt;
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
+  }
+  if (auto packed =
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
+  }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
     amdgpu::VgprMsbRole role =
         vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
