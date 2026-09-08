@@ -193,7 +193,12 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
-  /// @brief Set the shared host-thread budget for CU dispatch across this SoC.
+  /// @brief Set the shared host-thread budget for functional CU execution.
+  ///
+  /// @details This controls host acceleration rather than modeled GPU
+  /// resources or timing. The count includes the command-processor thread that
+  /// calls the pool. One pool is shared across the SoC, and its current
+  /// single-submission implementation serializes batches from different CPs.
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
 

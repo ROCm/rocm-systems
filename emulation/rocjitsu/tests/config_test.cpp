@@ -51,6 +51,10 @@ public:
   static uint32_t dispatch_pool_threads(const SoC &soc) {
     return soc.dispatch_pool_ ? soc.dispatch_pool_->thread_count() : 0;
   }
+
+  static const amdgpu::CpuDispatchPool *dispatch_pool(const SoC &soc) {
+    return soc.dispatch_pool_.get();
+  }
 };
 
 } // namespace rocjitsu::test
@@ -292,6 +296,8 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
       config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
+  const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
+  ASSERT_NE(pool, nullptr);
 
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(group->add(std::make_unique<SerializedHotHookPlugin>()));
@@ -299,6 +305,7 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
 
   EXPECT_EQ(soc->dispatch_threads(), 8u);
   EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool(*soc), pool);
   soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
 }
 
