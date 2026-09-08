@@ -7,8 +7,6 @@
 #include "common/delimit.hpp"
 #include <fmt/format.h>
 
-#include <timemory/utility/filepath.hpp>
-
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
