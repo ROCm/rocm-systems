@@ -46,9 +46,7 @@ local_shared_library_resolver(void) ROCPROFILER_HIDDEN_API;
 
 void
 local_shared_library_resolver(void)
-{
-    rocprofiler::registration::init_logging();
-}
+{}
 
 namespace
 {
@@ -148,7 +146,7 @@ lifetime::lifetime()
         else
         {
             ROCP_INFO << fmt::format(
-                "Skipping rocprofiler-sdk shared library initialization within it is already "
+                "Skipping rocprofiler-sdk shared library initialization because it is already "
                 "initialized in the global context. Local: [{}], Global: [{}]",
                 _this.as_string(),
                 _glob.as_string());
