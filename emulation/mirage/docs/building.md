@@ -22,6 +22,63 @@ Rust is the only toolchain the mirage build itself needs. Everything
 below that is about rocjitsu, which is a separate C++ project mirage
 merely loads at runtime.
 
+### Upgrading Existing Agents
+
+The complete builtin `vm` and component `topology` are read from the matching
+RocJITsu configs and validated at build time. MI300X, MI350X and MI450X
+use `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`,
+respectively, including their 320, 288 and 256 CU topologies. Mirage no
+longer maintains separate hardware values or uniform 256-CU layouts.
+
+On startup, Mirage automatically refreshes an existing builtin
+agent that matches the shipped definition except for a missing
+`vm.gpu.device.num_sdma_queues_per_engine` field. User-edited agents are
+left untouched; agents with nonzero `num_sdma_engines` must specify a
+nonzero queue count. The shipped MI300X and MI350X presets use 8 queues
+per engine, and MI450X uses 2.
+
+Agents with older or customized layouts are not overwritten. Missing fields
+are reported against the selected RocJITsu preset during profile validation
+and config synthesis. Preserve any customizations before deleting an old
+builtin agent; the next invocation recreates a missing builtin from the
+current preset.
+
+### Profile Compatibility
+
+Additional JSON fields on an agent are preserved recursively and passed to
+RocJITsu. Additional profile fields may be placed inside `emulator` or at the
+profile root; root extras are normalized into `emulator` when saved. For example:
+
+```json
+{
+  "name": "custom",
+  "emulator": {
+    "emulator": "rocjitsu",
+    "plugins": {},
+    "exec_mode": "Functional",
+    "options": {},
+    "topology": "MI350X-1x1",
+    "max_ticks": 200000,
+    "vm": { "gpu": { "device": { "capability2": 1 } } }
+  }
+}
+```
+
+Objects are merged recursively over the agent configuration; scalar values
+and arrays replace the corresponding values. Mirage's per-node GPU count
+and explicitly selected plugins remain authoritative. Duplicate root and
+emulator overrides are rejected. Mirage-only container and system-topology
+controls still reject unknown fields. RocJITsu remains responsible for
+validating passthrough fields; unsupported keys are not silently discarded.
+
+Missing profile fields produce warnings on stderr. Omitted `plugins`,
+`exec_mode` and `options` use their defaults; required structural fields
+still cause a parse error. Missing agent fields stay absent in the generated
+JSON so RocJITsu's schema defaults apply. Warnings identify fields present
+in the matching preset, including component config entries; they do not
+replace RocJITsu validation. Explicit zeroes are preserved, not mistaken
+for missing values. `--config` continues to use the supplied file verbatim.
+
 ## Prerequisites
 
 | Tool | Version | Needed for | Notes |
@@ -49,9 +106,8 @@ cargo build --release    # optimized
 This builds the `mirage` binary at `target/debug/mirage` (or
 `target/release/mirage`). The build embeds:
 
-- the **builtin agents, topologies and profiles** — Rust constructors in
-  the `builtin` crate, so the data is validated by the compiler rather
-  than by a runtime parse, and
+- the **builtin agents** from RocJITsu configs, validated by the `builtin`
+  build script, plus Mirage's system topologies and profiles, and
 - the **third-party dependency manifest** that `mirage about` prints,
   distilled from `cargo metadata` by the root `build.rs`.
 
@@ -234,6 +290,14 @@ Because a session only exists while the `mirage run` that owns it is
 alive, every one of those tests is bounded by a process it started: a
 suite that crashes cannot leave a session behind for the next one to
 trip over.
+
+The release lane of [RocJITsu CI](../../../.github/workflows/rocjitsu-corpus-tests.yml)
+runs `cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture`
+against that job's freshly built RocJITsu libraries, with missing-emulator
+skips disabled. Changes to either project trigger the workflow. This
+includes daemon startup for every builtin agent, legacy-agent upgrades,
+the container and lifecycle suites, and the software-emulator matrix.
+Hardware-dependent DBT cases remain capability-gated.
 
 ## Linting
 

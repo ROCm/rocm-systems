@@ -548,6 +548,7 @@ mod tests {
 
     fn def_with(topology: MaybeRef<TopologyDef>) -> EmulatorDef {
         EmulatorDef {
+            extra: Default::default(),
             emulator: NAME.to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,

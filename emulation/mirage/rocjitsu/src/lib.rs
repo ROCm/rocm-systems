@@ -749,15 +749,31 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // (deriving per-GPU identities from the single `device` template).
     // Each node's host process emulates the GPUs local to that node, so
     // the per-node `gpus_per_node` is what the config requests.
-    let mut vm = agent.vm;
-    vm.gpu.num_gpus = topology.gpus_per_node.max(1);
     let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
         "num_threads": 1u32,
         "exec_mode": exec_mode,
-        "vm": vm,
-        "topology": agent.topology,
     });
+    merge_config(
+        &mut sim,
+        serde_json::to_value(&agent).map_err(|error| MirageError::Other(error.to_string()))?,
+    );
+    merge_config(&mut sim, serde_json::Value::Object(def.extra.clone()));
+    if !sim["vm"].is_object() {
+        return Err(MirageError::Other("rocjitsu vm must be an object".into()));
+    }
+    if sim["vm"].get("gpu").is_none() {
+        sim["vm"]["gpu"] = serde_json::json!({});
+    }
+    let gpu = sim["vm"]["gpu"]
+        .as_object_mut()
+        .ok_or_else(|| MirageError::Other("rocjitsu vm.gpu must be an object".into()))?;
+    gpu.insert("num_gpus".into(), topology.gpus_per_node.max(1).into());
+    for path in missing_config_fields(&sim)? {
+        tracing::warn!(
+            "profile's RocJITsu configuration is missing field {path}; RocJITsu schema defaults apply"
+        );
+    }
     // Carry the profile's plugin selection into the synthesised rocjitsu
     // config so the interposer (local path) and the per-node daemon both
     // enable them through the rocjitsu plugin loader. `def.plugins` maps a
@@ -774,6 +790,86 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
     Ok(SimConfig::Synthesised(bytes))
+}
+
+fn merge_config(base: &mut serde_json::Value, overrides: serde_json::Value) {
+    match (base, overrides) {
+        (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
+            for (key, value) in overrides {
+                merge_config(base.entry(key).or_insert(serde_json::Value::Null), value);
+            }
+        }
+        (base, value) => *base = value,
+    }
+}
+
+fn missing_config_fields(config: &serde_json::Value) -> Result<Vec<String>> {
+    let source = match config["vm"]["arch"].as_str() {
+        Some("cdna3") => Some(include_str!("../../../rocjitsu/configs/gfx942_cdna3.json")),
+        Some("cdna4") => Some(include_str!("../../../rocjitsu/configs/gfx950_mi355x.json")),
+        Some("cdna5") => Some(include_str!(
+            "../../../rocjitsu/configs/gfx1250_mi455x.json"
+        )),
+        _ => None,
+    };
+    let expected = match source {
+        Some(source) => serde_json::from_str(source).map_err(|error| {
+            MirageError::Other(format!("invalid embedded RocJITsu preset: {error}"))
+        })?,
+        None => {
+            serde_json::json!({"vm": {"arch": "", "gpu": {"device": {}}}, "topology": {"root": {}}})
+        }
+    };
+    let mut missing = Vec::new();
+    for key in ["vm", "topology"] {
+        collect_missing_fields(
+            config.get(key),
+            &expected[key],
+            &format!("/{key}"),
+            &mut missing,
+        );
+    }
+    Ok(missing)
+}
+
+fn collect_missing_fields(
+    actual: Option<&serde_json::Value>,
+    expected: &serde_json::Value,
+    path: &str,
+    missing: &mut Vec<String>,
+) {
+    let Some(actual) = actual else {
+        missing.push(path.to_string());
+        return;
+    };
+    if let Some(object) = expected.as_object() {
+        for (key, value) in object {
+            collect_missing_fields(actual.get(key), value, &format!("{path}/{key}"), missing);
+        }
+    } else if let (Some(actual), Some(expected)) = (actual.as_array(), expected.as_array()) {
+        if path.ends_with("/config") {
+            for entry in expected {
+                if let Some(key) = entry["key"].as_str()
+                    && !actual.iter().any(|entry| entry["key"] == key)
+                {
+                    missing.push(format!("{path}/{key}"));
+                }
+            }
+        } else if path.ends_with("/children") {
+            for (index, child) in actual.iter().enumerate() {
+                if let Some(reference) =
+                    expected.iter().find(|entry| entry["type"] == child["type"])
+                {
+                    collect_missing_fields(
+                        Some(child),
+                        reference,
+                        &format!("{path}/{index}"),
+                        missing,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Materialise the rocjitsu `SimulationConfig` for `def` in
@@ -994,6 +1090,7 @@ mod tests {
     /// GPUs on a default agent, resolvable without touching the stores.
     fn def_with_gpus(gpus_per_node: u32) -> EmulatorDef {
         EmulatorDef {
+            extra: Default::default(),
             emulator: "rocjitsu".to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,
@@ -1007,11 +1104,86 @@ mod tests {
     }
 
     #[test]
+    fn additional_profile_fields_reach_rocjitsu() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut json = serde_json::to_value(def_with_gpus(2)).unwrap();
+        json["max_ticks"] = serde_json::json!(7654321);
+        json["topology"]["agent"]["vm"]["gpu"]["device"]["capability2"] = serde_json::json!(9);
+        let def: EmulatorDef = serde_json::from_value(json).unwrap();
+        let config = kmd_config(&def, tmp.path()).unwrap();
+        let emitted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+        assert_eq!(emitted["max_ticks"], 7654321);
+        assert_eq!(emitted["vm"]["gpu"]["device"]["capability2"], 9);
+        assert_eq!(emitted["vm"]["gpu"]["num_gpus"], 2);
+    }
+
+    #[test]
+    fn missing_config_fields_name_omissions_not_zeroes() {
+        let mut config: serde_json::Value =
+            serde_json::from_str(include_str!("../../../rocjitsu/configs/gfx950_mi355x.json"))
+                .unwrap();
+        assert!(missing_config_fields(&config).unwrap().is_empty());
+        config["vm"]["gpu"]["device"]["num_sdma_engines"] = 0.into();
+        assert!(missing_config_fields(&config).unwrap().is_empty());
+        config["vm"]["gpu"]["device"]
+            .as_object_mut()
+            .unwrap()
+            .remove("num_sdma_queues_per_engine");
+        assert_eq!(
+            missing_config_fields(&config).unwrap(),
+            vec!["/vm/gpu/device/num_sdma_queues_per_engine"]
+        );
+        let mut missing = Vec::new();
+        collect_missing_fields(
+            Some(&serde_json::json!([])),
+            &serde_json::json!([{"key": "num_wf_slots", "value": "32"}]),
+            "/topology/root/config",
+            &mut missing,
+        );
+        assert_eq!(missing, vec!["/topology/root/config/num_wf_slots"]);
+    }
+
+    #[test]
+    fn malformed_vm_overrides_return_errors() {
+        for value in [serde_json::json!(null), serde_json::json!({"gpu": 7})] {
+            let mut def = def_with_gpus(1);
+            def.extra.insert("vm".into(), value);
+            assert!(check_config(&def).is_err());
+        }
+    }
+
+    #[test]
+    fn omitted_agent_fields_keep_rocjitsu_defaults() {
+        let original = serde_json::json!({
+            "vm": {"arch": "cdna4", "gpu": {"device": {"num_sdma_engines": 0}}},
+            "topology": {"root": {"name": "soc", "type": "soc", "future": {"enabled": true}}},
+            "future_option": [1, 2]
+        });
+        let agent: AgentDef = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&agent).unwrap(), original);
+        let mut def = def_with_gpus(1);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(agent);
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let path = kmd_config(&def, tmp.path()).unwrap();
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            config["vm"]["gpu"]["device"],
+            original["vm"]["gpu"]["device"]
+        );
+        assert_eq!(config["future_option"], original["future_option"]);
+    }
+
+    #[test]
     fn kmd_config_requires_resolvable_topology() {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
         let def = EmulatorDef {
+            extra: Default::default(),
             emulator: "rocjitsu".to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,

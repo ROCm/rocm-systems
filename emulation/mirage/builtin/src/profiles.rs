@@ -32,6 +32,7 @@ fn profile(name: &str, emulator: &str, agent: &str) -> ProfileDef {
         name: name.to_string(),
         description: None,
         emulator: EmulatorDef {
+            extra: Default::default(),
             emulator: EmulatorKind::from(emulator),
             plugins: Default::default(),
             exec_mode: ExecMode::default(),

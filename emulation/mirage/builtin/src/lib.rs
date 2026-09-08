@@ -1,11 +1,9 @@
 //! Built-in agents, topologies and profiles that mirage preloads into
 //! `<MIRAGE_CONFIG>/{agent,topology,profile}/`.
 //!
-//! Historically these shipped as `agents/*.json` files embedded into
-//! `mirage_core` at build time and parsed at runtime. They now live
-//! here as strongly-typed [`mirage_core::agent::AgentDef`] /
-//! [`mirage_core::topology::TopologyDef`] constructors so the data is
-//! validated by the compiler instead of by a runtime parse.
+//! Agent hardware and component topologies are embedded from RocJITsu's
+//! configs and validated against [`mirage_core::agent::AgentDef`] at build
+//! time. System layouts and profiles remain Mirage-owned constructors.
 //!
 //! This crate owns both the builtin *data* and the policy for writing
 //! it to disk. It relies on `mirage_core` only for the low-level path
@@ -131,8 +129,8 @@ pub fn ensure_profiles(force: bool) -> Result<Ensured> {
 /// document.
 ///
 /// Without `force` — the startup path, run before every command — only
-/// missing documents are written, so a fresh config directory fills
-/// itself in and an existing one is left exactly as it is.
+/// missing documents are written, except for an unchanged legacy agent
+/// missing its SDMA queue count, which is upgraded to the shipped definition.
 ///
 /// With `force` — `mirage state builtins`, which exists so a mirage
 /// upgrade can bring its new definitions with it — every document that is
@@ -156,7 +154,7 @@ fn ensure<T: Serialize>(
     let mut out = Ensured::default();
     for (name, document) in documents {
         let path = kind.path(name);
-        if path.exists() {
+        if path.exists() && !is_legacy_sdma_agent(kind, &path, &document) {
             if !force {
                 out.documents.push((name.to_string(), false));
                 continue;
@@ -171,6 +169,23 @@ fn ensure<T: Serialize>(
         out.documents.push((name.to_string(), true));
     }
     Ok(out)
+}
+
+fn is_legacy_sdma_agent<T: Serialize>(kind: DocKind, path: &std::path::Path, document: &T) -> bool {
+    if !matches!(kind, DocKind::Agent) {
+        return false;
+    }
+    let Ok(mut legacy) = serde_json::to_value(document) else {
+        return false;
+    };
+    let Some(device) = legacy
+        .pointer_mut("/vm/gpu/device")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return false;
+    };
+    device.remove("num_sdma_queues_per_engine");
+    mirage_core::state::read_json::<serde_json::Value>(path).is_ok_and(|stored| stored == legacy)
 }
 
 #[cfg(test)]
@@ -219,6 +234,39 @@ mod tests {
                 "{name} should be readable"
             );
         }
+    }
+
+    #[test]
+    fn legacy_sdma_upgrade_preserves_user_edits() {
+        let _guard = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        for (name, agent) in agents() {
+            let path = mirage_core::paths::agent_path(name);
+            for explicit_zero in [false, true] {
+                let mut edited = serde_json::to_value(&agent).unwrap();
+                if explicit_zero {
+                    edited["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"] = 0.into();
+                } else {
+                    edited["vm"]["gpu"]["device"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("num_sdma_queues_per_engine");
+                    edited["vm"]["gpu"]["device"]["marketing_name"] = "custom GPU".into();
+                }
+                mirage_core::state::write_json(&path, &edited).unwrap();
+                for force in [false, true] {
+                    ensure_agents(force).unwrap();
+                    assert_eq!(
+                        mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
+                        edited
+                    );
+                }
+            }
+        }
+
+        mirage_core::paths::clear_test_root();
     }
 
     #[test]

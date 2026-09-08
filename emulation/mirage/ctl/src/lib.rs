@@ -3305,6 +3305,7 @@ mod tests {
             name: "mi450x".to_string(),
             description: None,
             emulator: EmulatorDef {
+                extra: Default::default(),
                 emulator: EmulatorKind::from("rocjitsu"),
                 plugins: Default::default(),
                 exec_mode: ExecMode::Functional,

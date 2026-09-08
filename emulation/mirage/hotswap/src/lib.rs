@@ -700,6 +700,7 @@ mod tests {
                 name: "hotswap-test".to_string(),
                 description: None,
                 emulator: mirage_core::emulator::EmulatorDef {
+                    extra: Default::default(),
                     emulator: "hotswap".to_string(),
                     plugins: Default::default(),
                     exec_mode: mirage_core::emulator::ExecMode::Functional,

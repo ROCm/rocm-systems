@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/**"
+      - "emulation/mirage/**"
       - ".github/scripts/rocjitsu_corpus_translation_comment*.py"
       - ".github/workflows/rocjitsu-*.yml"
   push:
@@ -16,6 +17,7 @@ on:
       - develop
     paths:
       - "emulation/rocjitsu/**"
+      - "emulation/mirage/**"
       - ".github/workflows/rocjitsu-*.yml"
   workflow_dispatch:
     inputs:
@@ -156,6 +158,7 @@ jobs:
             build-essential \
             ca-certificates \
             cmake \
+            curl \
             git \
             libclang-rt-dev \
             libdrm-dev \
@@ -168,6 +171,7 @@ jobs:
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
+            emulation/mirage
             .github
             shared/machine-readable-isa/isa
 
@@ -331,6 +335,29 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Install Rust for Mirage
+        if: matrix.name == 'release'
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal --default-toolchain 1.88.0
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Test Mirage against this RocJITsu build
+        if: matrix.name == 'release'
+        working-directory: ${{ github.workspace }}/rocm-systems/emulation/mirage
+        timeout-minutes: 15
+        shell: bash
+        env:
+          ROCJITSU_LIB: ${{ env.ROCJITSU_BUILD_DIR }}/librocjitsu.so
+          ROCJITSU_HOOKS_LIB: ${{ env.ROCJITSU_BUILD_DIR }}/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_hooks.so
+          ROCJITSU_INCLUDE_DIR: ${{ env.ROCJITSU_SOURCE_DIR }}/lib/rocjitsu/include
+        run: |
+          test -f "${ROCJITSU_LIB}"
+          test -f "${ROCJITSU_HOOKS_LIB}"
+          unset MIRAGE_E2E_ALLOW_SKIP
+          cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch
