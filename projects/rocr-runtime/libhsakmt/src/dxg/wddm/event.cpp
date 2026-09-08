@@ -9,6 +9,12 @@
 #include <cstddef>
 #include <chrono>
 
+#if !defined(WIN32)
+#include <sys/eventfd.h>
+#include <poll.h>
+#include <unistd.h>
+#endif
+
 #include "impl/wddm/device.h"
 #include "impl/wddm/event.h"
 
@@ -119,50 +125,98 @@ bool Event::Wait(std::chrono::duration<float> timeout  // max time to wait
   return true;
 }
 #else
+
+static int EventFd(void* h) { return static_cast<int>(reinterpret_cast<intptr_t>(h)); }
+static void* FdToHandle(int fd) { return reinterpret_cast<void*>(static_cast<intptr_t>(fd)); }
+
 // ================================================================================================
 Event::~Event() {
   // Force device 0, since KMD should handle multiple devices.
-  WDDMDevice* device = WddmDevice(0);  // Event->EventData.HWData3
-  assert(device && "Couldn't obtain a device!");
-  if (EventId != 0) {
-    os_event_ = nullptr;
+  int fd = EventFd(os_event_);
+  if (fd >= 0) {
+    WDDMDevice* device = WddmDevice(0);  // Event->EventData.HWData3
+    if (device && EventId != 0) {
+      device->UnregisterEvent(EventId, os_event_);
+    }
+    close(fd);
   }
-  assert(!"Unimplemented!");
+  os_event_ = FdToHandle(-1);
 }
 
 // ================================================================================================
 bool Event::Init(const HsaEventDescriptor& event_desc, const wchar_t* pName) {
   // Allocate OS specific events to handle HSA event, force device 0 and KMD should handle
-  // multiiple devices.
+  // multiple devices.
   WDDMDevice* device = WddmDevice(0);  // EventDesc->NodeId
   assert(device && "Couldn't obtain a device!");
-  assert(!"Unimplemented!");
+
+  int fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (fd < 0) {
+    pr_err("eventfd() call failed\n");
+    return false;
+  }
+  os_event_ = FdToHandle(fd);
+
+  // Register OS event in KMD
+  EventId = device->RegisterEvent(event_desc.EventType, os_event_, &EventData.HWData2);
+  if (EventId == 0) {
+    pr_debug("RegisterEvent returned 0 (KMD event registration unavailable on Linux)\n");
+  }
+  EventData.EventType = event_desc.EventType;
+  EventData.HWData3 = event_desc.NodeId;
+
+  EventData.EventData.SyncVar.SyncVar.UserData = event_desc.SyncVar.SyncVar.UserData;
+  EventData.EventData.SyncVar.SyncVarSize = event_desc.SyncVar.SyncVarSize;
   return true;
 }
 
 // ================================================================================================
 bool Event::Set() const {
-  assert(!"Unimplemented!");
-  return true;
+  int fd = EventFd(os_event_);
+  if (fd < 0) {
+    pr_err("OS set event failed!");
+    return false;
+  }
+  uint64_t val = 1;
+  return write(fd, &val, sizeof(val)) == sizeof(val);
 }
 
 // ================================================================================================
 bool Event::Reset() const {
-  assert(!"Unimplemented!");
+  int fd = EventFd(os_event_);
+  if (fd < 0) return false;
+  uint64_t val;
+  while (read(fd, &val, sizeof(val)) == sizeof(val)) {}
   return true;
 }
 
 // ================================================================================================
 bool Event::Open(EventHandle handle, bool isReference) {
-  assert(!"Unimplemented!");
+  os_event_ = handle;
+  is_reference_ = isReference;
   return true;
 }
 
 // ================================================================================================
 bool Event::Wait(std::chrono::duration<float> timeout  // max time to wait
   ) const {
-  assert(!"Unimplemented!");
-  return true;
+  int fd = EventFd(os_event_);
+  if (fd < 0) return false;
+
+  const int timeout_ms = static_cast<int>(
+      duration_cast<milliseconds>(timeout).count());
+
+  struct pollfd pfd = {};
+  pfd.fd = fd;
+  pfd.events = POLLIN;
+
+  int ret = poll(&pfd, 1, timeout_ms);
+  if (ret > 0 && (pfd.revents & POLLIN)) {
+    uint64_t val;
+    read(fd, &val, sizeof(val));
+    return true;
+  }
+  return false;
 }
 #endif
 

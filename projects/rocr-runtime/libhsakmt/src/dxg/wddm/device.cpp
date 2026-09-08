@@ -48,6 +48,7 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#include <poll.h>
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -1228,9 +1229,8 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 
 // ================================================================================================
 uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
-#if defined(WIN32)
-  // Reset maibox locaiton to 0
   *mailbox = 0;
+#if defined(WIN32)
   // Start from 1, since 0 is the default state and can't be identified in KMD
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
     // Check if the current slot is free and assing the mailbox
@@ -1256,6 +1256,9 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
       }
     }
   }
+#else
+  // KMD event registration unavailable on Linux; fault detection polls error_reason_.
+  pr_debug("RegisterEvent: KMD event registration not available on Linux\n");
 #endif
   return 0;
 }
@@ -1321,6 +1324,43 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
       }
       size_to_process -= MAXIMUM_WAIT_OBJECTS;
     }
+  }
+#else
+  // Linux: poll() on eventfds
+  auto* pfds = reinterpret_cast<struct pollfd*>(alloca(sizeof(struct pollfd) * num_elems));
+  for (uint32_t i = 0; i < num_elems; ++i) {
+    void* handle = reinterpret_cast<Event*>(events[i])->GetHandle();
+    pfds[i].fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+    pfds[i].events = POLLIN;
+    pfds[i].revents = 0;
+  }
+
+  uint32_t kWaitTimeout = 6000;
+  if (!dxg_runtime->disable_wait_timeout_ && (msec > kWaitTimeout)) {
+    msec = kWaitTimeout;
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(msec);
+  uint32_t signaled_count = 0;
+
+  while (true) {
+    auto now = std::chrono::steady_clock::now();
+    int remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    if (remaining_ms < 0) remaining_ms = 0;
+
+    int ret = poll(pfds, num_elems, remaining_ms);
+    if (ret > 0) {
+      for (uint32_t i = 0; i < num_elems; ++i) {
+        if (pfds[i].revents & POLLIN) {
+          uint64_t val;
+          read(pfds[i].fd, &val, sizeof(val));
+          if (!wait_all) return HSAKMT_STATUS_SUCCESS;
+          signaled_count++;
+        }
+      }
+      if (wait_all && signaled_count >= num_elems) return HSAKMT_STATUS_SUCCESS;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) break;
   }
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
