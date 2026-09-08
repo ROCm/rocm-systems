@@ -27,6 +27,7 @@ fn sim_config_round_trip() {
             .next()
             .expect("at least one builtin agent");
         let def = EmulatorDef {
+            extra: Default::default(),
             emulator: "rocjitsu".to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,
@@ -62,6 +63,7 @@ fn gpus_per_node_drives_num_gpus() {
         .expect("at least one builtin agent");
 
     let def = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,
@@ -104,6 +106,7 @@ fn injection_emits_rccl_env_defaults() {
         .expect("at least one builtin agent");
 
     let emulator = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,
@@ -180,6 +183,7 @@ fn dropin_config_keeps_its_runtime_dir_inside_the_session() {
     std::fs::write(&user_config, b"{}\n").unwrap();
 
     let mut emulator = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,

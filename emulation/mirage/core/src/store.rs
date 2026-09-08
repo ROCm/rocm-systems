@@ -888,6 +888,7 @@ mod tests {
             name: name.to_string(),
             description: None,
             emulator: EmulatorDef {
+                extra: Default::default(),
                 emulator: TEST_EMULATOR.to_string(),
                 plugins: Default::default(),
                 exec_mode: ExecMode::Functional,
@@ -1151,17 +1152,14 @@ mod tests {
 
     #[test]
     fn an_unknown_field_is_reported_rather_than_dropped() {
-        // A typo'd key used to be discarded in silence, so the emulated
-        // machine was quietly not the one the file described.
-        let err = serde_json::from_str::<ProfileDef>(
+        let profile = serde_json::from_str::<ProfileDef>(
             r#"{"name":"p","descriptoin":"typo",
                 "emulator":{"emulator":"test","plugins":{},
                             "exec_mode":"Functional","options":{},
                             "topology":"t"}}"#,
         )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("descriptoin"), "{err}");
+        .unwrap();
+        assert_eq!(profile.emulator.extra["descriptoin"], "typo");
 
         let err = serde_json::from_str::<TopologyDef>(
             r#"{"num_nodes":2,"gpus_pernode":8,"agent":"MI350X"}"#,
@@ -1170,12 +1168,14 @@ mod tests {
         .to_string();
         assert!(err.contains("gpus_pernode"), "{err}");
 
-        let err = serde_json::from_str::<AgentDef>(
+        let agent = serde_json::from_str::<AgentDef>(
             r#"{"vm":{"arch":"cdna4","gpu":{"num_xdcs":8}},"topology":{"root":{"name":"soc","type":"soc"}}}"#,
         )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("num_xdcs"), "{err}");
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(agent).unwrap()["vm"]["gpu"]["num_xdcs"],
+            8
+        );
     }
 
     fn topology() -> TopologyDef {

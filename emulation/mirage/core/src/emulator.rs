@@ -31,23 +31,28 @@ pub type EmulatorKind = String;
 /// The emulator half of a profile: which backend, how it runs, and the
 /// system it emulates.
 ///
-/// Unknown fields are rejected; see [`crate::profile`] for why.
+/// Additional fields are passed to the selected emulator's configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EmulatorDef {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+
     /// Which emulator backend runs this profile, by its canonical
     /// lowercase name.
     pub emulator: EmulatorKind,
 
     /// Which of the backend's plugins to enable, each with its argument
     /// object. See [`PluginsDef`] for what an empty object means.
+    #[serde(default)]
     pub plugins: PluginsDef,
 
     /// Functional or clocked emulation.
+    #[serde(default)]
     pub exec_mode: ExecMode,
 
     /// Backend-specific configuration overrides, e.g.
     /// `{"gpu_model": "cdna3"}`.
+    #[serde(default)]
     pub options: SimpleMap,
 
     /// System topology (rack/node/GPU layout plus the per-GPU agent).

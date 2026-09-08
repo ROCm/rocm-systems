@@ -1930,7 +1930,7 @@ impl Drop for RealContainer {
 
 #[test]
 fn a_real_engine_creates_and_removes_the_container_with_the_run() {
-    let env = Env::new();
+    let env = BaseEnv::with_host_xdg();
     if skip_without_emulator() {
         return;
     }
@@ -1948,7 +1948,7 @@ fn a_real_engine_creates_and_removes_the_container_with_the_run() {
     // playing both sides. This is the same claim against a real engine:
     // mirage asks for the container, a real `podman`/`docker` creates it,
     // and a Ctrl-C in the run's terminal has to be enough to remove it.
-    env.base.ok(&[
+    env.ok(&[
         "profile",
         "create",
         "real",
@@ -1962,7 +1962,7 @@ fn a_real_engine_creates_and_removes_the_container_with_the_run() {
     ]);
     let tag = marker("real-container");
 
-    let mut run = env.base.spawn_run(
+    let mut run = env.spawn_run(
         &["--profile", "real"],
         &["/bin/sh", "-c", &tagged_sleep(&tag)],
     );

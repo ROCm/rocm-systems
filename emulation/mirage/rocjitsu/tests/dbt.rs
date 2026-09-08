@@ -36,6 +36,7 @@ fn def_for_guest(gfx_target_version: u32) -> EmulatorDef {
     let mut agent = mirage_core::agent::AgentDef::default();
     agent.vm.gpu.device.gfx_target_version = gfx_target_version;
     EmulatorDef {
+        extra: Default::default(),
         emulator: dbt::NAME.to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,

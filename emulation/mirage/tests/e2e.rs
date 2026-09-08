@@ -259,6 +259,122 @@ fn the_builtin_agents_are_unpacked_on_first_use() {
 }
 
 #[test]
+fn profile_extra_fields_reach_the_daemon_config() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    let mut profile: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "mi350x"])).unwrap();
+    profile["name"] = "extended".into();
+    profile["max_ticks"] = 7654321.into();
+    profile["emulator"]["vm"] = serde_json::json!({"gpu": {"device": {"capability2": 9}}});
+    let source = env.root().join("extended.json");
+    std::fs::write(&source, serde_json::to_vec(&profile).unwrap()).unwrap();
+    env.ok(&["profile", "import", source.to_str().unwrap()]);
+    let mut run = env.spawn_run(&["--profile", "extended"], &["/bin/sh", "-c", "sleep 300"]);
+    let id = run.await_ready(Duration::from_secs(90));
+    let config: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(env.session_scratch(&id).join("rj_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(config["max_ticks"], 7654321);
+    assert_eq!(config["vm"]["gpu"]["device"]["capability2"], 9);
+    assert_eq!(
+        config["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"],
+        8
+    );
+    run.signal(Signal::SIGINT);
+    let output = run.wait(Duration::from_secs(60));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("missing field"));
+}
+
+#[test]
+fn incomplete_profiles_warn_without_losing_extra_fields() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    let mut profile: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "mi350x"])).unwrap();
+    let mut agent: serde_json::Value =
+        serde_json::from_str(&env.ok(&["agent", "show", "mi350x"])).unwrap();
+    agent["vm"]["gpu"]["device"]
+        .as_object_mut()
+        .unwrap()
+        .remove("mem_clk_max");
+    agent["vm"]["gpu"]["device"]["future_field"] = serde_json::json!({"values": [1, true]});
+    profile["name"] = "incomplete".into();
+    profile["emulator"]["topology"]["agent"] = agent;
+    profile["emulator"]
+        .as_object_mut()
+        .unwrap()
+        .remove("plugins");
+    let source = env.root().join("incomplete.json");
+    std::fs::write(&source, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let output = env.run(&["profile", "import", source.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("missing field /emulator/plugins"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("missing field /vm/gpu/device/mem_clk_max"),
+        "{stderr}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "incomplete"])).unwrap();
+    let device = &stored["emulator"]["topology"]["agent"]["vm"]["gpu"]["device"];
+    assert!(device.get("mem_clk_max").is_none());
+    assert_eq!(
+        device["future_field"],
+        serde_json::json!({"values": [1, true]})
+    );
+}
+
+#[test]
+fn every_builtin_agent_starts_the_rocjitsu_daemon() {
+    if skip_without_emulator() {
+        return;
+    }
+    for agent in ["mi300x", "mi350x", "mi450x"] {
+        let env = Env::new();
+        let output = env.run(&["run", "--profile", agent, "--", "/bin/true"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{agent}: {stderr}");
+        assert!(!stderr.contains("missing field"), "{agent}: {stderr}");
+        assert!(env.live_runs().is_empty(), "{agent} left a live run");
+    }
+}
+
+#[test]
+fn builtin_agents_without_sdma_queue_counts_are_upgraded() {
+    if skip_without_emulator() {
+        return;
+    }
+    for agent in ["mi300x", "mi350x", "mi450x"] {
+        let env = Env::new();
+        let mut old: serde_json::Value =
+            serde_json::from_str(&env.ok(&["agent", "show", agent])).unwrap();
+        old["vm"]["gpu"]["device"]
+            .as_object_mut()
+            .unwrap()
+            .remove("num_sdma_queues_per_engine");
+        let path = env.root().join(format!("config/mirage/agent/{agent}.json"));
+        std::fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
+        env.ok(&["run", "--profile", agent, "--", "/bin/true"]);
+        let upgraded: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(
+            upgraded["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"]
+                .as_u64()
+                .is_some_and(|queues| queues > 0)
+        );
+    }
+}
+
+#[test]
 fn run_streams_output_and_propagates_the_exit_code() {
     let env = Env::new();
     if skip_without_emulator() {
@@ -2983,8 +3099,9 @@ fn an_exec_joins_the_running_job_rather_than_standing_up_a_new_one() {
             "/bin/sh",
             "-c",
             &format!(
-                "if [ \"$RANK\" = 0 ]; then {report} > {}; fi; sleep 300",
-                recorded.display()
+                "if [ \"$RANK\" = 0 ]; then {report} > '{recorded}.tmp' && \
+                 mv '{recorded}.tmp' '{recorded}'; fi; sleep 300",
+                recorded = recorded.display()
             ),
         ],
     );

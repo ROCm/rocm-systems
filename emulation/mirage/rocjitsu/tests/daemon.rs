@@ -79,6 +79,7 @@ fn daemon_serves_handshake() {
         .next()
         .expect("at least one builtin agent");
     let def = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,
@@ -164,6 +165,7 @@ fn dropping_the_handle_stops_the_daemon() {
     let agent_report = mirage_builtin::ensure_agents(false).unwrap();
     let agent_name = agent_report.iter().map(|(n, _)| n.clone()).next().unwrap();
     let def = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,
@@ -208,6 +210,7 @@ fn daemon_serves_multiple_clients() {
     let agent_report = mirage_builtin::ensure_agents(false).unwrap();
     let agent_name = agent_report.iter().map(|(n, _)| n.clone()).next().unwrap();
     let def = EmulatorDef {
+        extra: Default::default(),
         emulator: "rocjitsu".to_string(),
         plugins: Default::default(),
         exec_mode: ExecMode::Functional,
