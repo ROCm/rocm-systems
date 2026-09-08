@@ -197,11 +197,18 @@ def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
 def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
-    Returns 0 if unknown (no host list / file), so callers skip the insufficient-nodes
-    check when topology cannot be determined.
+
+    An empty dict is not an unknown topology: it means neither a hostfile nor a
+    SLURM allocation was found, so mpirun is invoked with no host argument and
+    places every rank on the local host. That is exactly one host, and reporting
+    it as such lets the insufficient-nodes check below skip a multi-node test
+    instead of launching it oversubscribed on a single node.
+
+    Returns 0 only when a host source exists but cannot be read, so callers skip
+    the insufficient-nodes check when topology genuinely cannot be determined.
     """
     if not mpi_hosts:
-        return 0
+        return 1
     if "host_list" in mpi_hosts:
         seen = set()
         for part in mpi_hosts["host_list"].split(","):
