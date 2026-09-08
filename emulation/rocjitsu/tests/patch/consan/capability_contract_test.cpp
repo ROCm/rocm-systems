@@ -43,12 +43,6 @@ struct ExpectedTargetProfile {
   ConSanMoiPlacementCapability moi_placement;
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
   bool moi_access_reports_need_explicit_dispatch_identity;
-  bool supports_wave32;
-  bool supports_wave64;
-  uint8_t exec_register_width_bits;
-  uint8_t global_address_width_bits;
-  uint8_t lds_address_width_bits;
-  uint8_t vgpr_allocation_granularity_wave32;
   uint8_t vgpr_allocation_granularity_wave64;
   uint8_t sgpr_allocation_granularity;
   uint8_t accumulator_offset_granularity;
@@ -121,12 +115,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
-        .supports_wave32 = false,
-        .supports_wave64 = true,
-        .exec_register_width_bits = 64,
-        .global_address_width_bits = 64,
-        .lds_address_width_bits = 32,
-        .vgpr_allocation_granularity_wave32 = 0,
         .vgpr_allocation_granularity_wave64 = 8,
         .sgpr_allocation_granularity = 8,
         .accumulator_offset_granularity = 4,
@@ -197,12 +185,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
         .moi_access_reports_need_explicit_dispatch_identity = true,
-        .supports_wave32 = false,
-        .supports_wave64 = true,
-        .exec_register_width_bits = 64,
-        .global_address_width_bits = 64,
-        .lds_address_width_bits = 32,
-        .vgpr_allocation_granularity_wave32 = 0,
         .vgpr_allocation_granularity_wave64 = 8,
         .sgpr_allocation_granularity = 8,
         .accumulator_offset_granularity = 4,
@@ -266,12 +248,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
         .moi_access_reports_need_explicit_dispatch_identity = true,
-        .supports_wave32 = true,
-        .supports_wave64 = true,
-        .exec_register_width_bits = 64,
-        .global_address_width_bits = 64,
-        .lds_address_width_bits = 32,
-        .vgpr_allocation_granularity_wave32 = 8,
         .vgpr_allocation_granularity_wave64 = 4,
         .sgpr_allocation_granularity = 8,
         .accumulator_offset_granularity = 0,
@@ -348,12 +324,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             },
         .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
         .moi_access_reports_need_explicit_dispatch_identity = true,
-        .supports_wave32 = true,
-        .supports_wave64 = true,
-        .exec_register_width_bits = 64,
-        .global_address_width_bits = 64,
-        .lds_address_width_bits = 32,
-        .vgpr_allocation_granularity_wave32 = 8,
         .vgpr_allocation_granularity_wave64 = 4,
         .sgpr_allocation_granularity = 8,
         .accumulator_offset_granularity = 0,
@@ -435,12 +405,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .moi_dispatch_identity_placement =
             ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
         .moi_access_reports_need_explicit_dispatch_identity = false,
-        .supports_wave32 = true,
-        .supports_wave64 = true,
-        .exec_register_width_bits = 64,
-        .global_address_width_bits = 64,
-        .lds_address_width_bits = 32,
-        .vgpr_allocation_granularity_wave32 = 16,
         .vgpr_allocation_granularity_wave64 = 8,
         .sgpr_allocation_granularity = 8,
         .accumulator_offset_granularity = 0,
@@ -488,12 +452,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
   EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
             expected.moi_access_reports_need_explicit_dispatch_identity);
-  EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
-  EXPECT_EQ(actual.supports_wave64, expected.supports_wave64);
-  EXPECT_EQ(actual.exec_register_width_bits, expected.exec_register_width_bits);
-  EXPECT_EQ(actual.global_address_width_bits, expected.global_address_width_bits);
-  EXPECT_EQ(actual.lds_address_width_bits, expected.lds_address_width_bits);
-  EXPECT_EQ(actual.vgpr_allocation_granularity_wave32, expected.vgpr_allocation_granularity_wave32);
   EXPECT_EQ(actual.vgpr_allocation_granularity_wave64, expected.vgpr_allocation_granularity_wave64);
   EXPECT_EQ(actual.sgpr_allocation_granularity, expected.sgpr_allocation_granularity);
   EXPECT_EQ(actual.accumulator_offset_granularity, expected.accumulator_offset_granularity);
@@ -505,10 +463,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.private_allocation_granularity_bytes,
             expected.private_allocation_granularity_bytes);
   EXPECT_EQ(actual.max_group_segment_bytes, expected.max_group_segment_bytes);
-  EXPECT_EQ(actual.direct_branch_min_displacement_bytes,
-            expected.direct_branch_min_displacement_bytes);
-  EXPECT_EQ(actual.direct_branch_max_displacement_bytes,
-            expected.direct_branch_max_displacement_bytes);
   EXPECT_EQ(actual.supports_kernarg_preload_overflow_recovery,
             expected.supports_kernarg_preload_overflow_recovery);
   EXPECT_EQ(actual.has_cluster_facilities, expected.has_cluster_facilities);
@@ -549,18 +503,8 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].target = ROCJITSU_CODE_TARGET_INVALID; });
   expect_invalid("invalid architecture",
                  [](auto &profiles) { profiles[0].arch = ROCJITSU_CODE_ARCH_INVALID; });
-  expect_invalid("wave64 unsupported", [](auto &profiles) { profiles[0].supports_wave64 = false; });
-  expect_invalid("EXEC width", [](auto &profiles) { profiles[0].exec_register_width_bits = 32u; });
-  expect_invalid("global address width",
-                 [](auto &profiles) { profiles[0].global_address_width_bits = 32u; });
-  expect_invalid("LDS address width",
-                 [](auto &profiles) { profiles[0].lds_address_width_bits = 64u; });
   expect_invalid("missing wave64 allocation granularity",
                  [](auto &profiles) { profiles[0].vgpr_allocation_granularity_wave64 = 0u; });
-  expect_invalid("wave32 support without allocation granularity",
-                 [](auto &profiles) { profiles[0].supports_wave32 = true; });
-  expect_invalid("wave32 allocation granularity without support",
-                 [](auto &profiles) { profiles[2].supports_wave32 = false; });
   expect_invalid("missing SGPR allocation granularity",
                  [](auto &profiles) { profiles[0].sgpr_allocation_granularity = 0u; });
   expect_invalid("missing ordinary SGPR limit",
@@ -626,10 +570,6 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   });
   expect_invalid("unsupported FLAT compare-swap data-pair alignment",
                  [](auto &profiles) { profiles[0].flat_compare_swap_data_pair_alignment = 4u; });
-  expect_invalid("nonnegative minimum branch displacement",
-                 [](auto &profiles) { profiles[0].direct_branch_min_displacement_bytes = 0; });
-  expect_invalid("nonpositive maximum branch displacement",
-                 [](auto &profiles) { profiles[0].direct_branch_max_displacement_bytes = 0; });
   expect_invalid("resident-wave HWREG ID outside encoding",
                  [](auto &profiles) { profiles[0].resident_wave_identity.hwreg_id = 64u; });
   expect_invalid("resident-wave HWREG offset outside encoding",
@@ -755,16 +695,12 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
   }
 }
 
-TEST(ConSanCapabilityContract, TargetProfileOwnsWaveSupportAndAllocationFacts) {
+TEST(ConSanCapabilityContract, TargetProfileOwnsWave64AllocationGranularity) {
   for (size_t index = 0; index < kExpectedTargetProfiles.size(); ++index) {
     const ExpectedTargetProfile &expected = kExpectedTargetProfiles[index];
     const ConSanTargetProfile &profile = kConSanTargetProfiles[index];
     SCOPED_TRACE(rj_code_target_name(expected.target));
 
-    EXPECT_EQ(profile.supports_wave32, expected.supports_wave32);
-    EXPECT_TRUE(profile.supports_wave64);
-    EXPECT_EQ(profile.vgpr_allocation_granularity_wave32,
-              expected.vgpr_allocation_granularity_wave32);
     EXPECT_EQ(profile.vgpr_allocation_granularity_wave64,
               expected.vgpr_allocation_granularity_wave64);
   }

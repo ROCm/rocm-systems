@@ -28,8 +28,6 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
       .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,
       .maximum_lanes = 64,
   };
-  profile.supports_wave32 = true;
-  profile.vgpr_allocation_granularity_wave32 = 16;
   profile.vgpr_allocation_granularity_wave64 = 8;
   profile.ordinary_sgpr_limit = 106;
   profile.reserved_ordinary_sgpr_base = 102;

@@ -66,10 +66,6 @@ build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
     const ConSanMoiWorkgroupSources &workgroup_sources, rj_code_arch_t arch,
     std::vector<std::string> &errors, std::string_view patch_name);
 
-[[nodiscard]] uint64_t
-moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
-                                          bool has_cluster_workgroup_id = false);
-
 [[nodiscard]] bool append_moi_runtime_workgroup_residue_compare(std::vector<uint32_t> &words,
                                                                 uint16_t residue_sgpr,
                                                                 uint16_t temporary_sgpr,

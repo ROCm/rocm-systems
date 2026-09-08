@@ -35,64 +35,11 @@ struct ConSanMoiRecordReplayResult {
   bool conflict = false;
 };
 
-struct ConSanMoiSampledPublishResult {
-  uint32_t processed_access_count = 0;
-  uint32_t eligible_window_count = 0;
-  uint32_t selected_window_count = 0;
-  uint32_t published_window_count = 0;
-  uint32_t published_entry_count = 0;
-  uint32_t malformed_window_count = 0;
-  bool sampled_capacity_exhausted = false;
-  bool window_capacity_exhausted = false;
-  bool invalid_selection = false;
-};
-
-struct ConSanMoiSampledReplayResult {
-  uint32_t processed_window_count = 0;
-  uint32_t processed_entry_count = 0;
-  uint32_t emitted_diagnostic_count = 0;
-  uint32_t empty_entry_count = 0;
-  uint32_t stale_generation_entry_count = 0;
-  uint32_t incomplete_publication_entry_count = 0;
-  uint32_t changed_during_read_entry_count = 0;
-  uint32_t malformed_entry_count = 0;
-  bool diagnostic_capacity_exhausted = false;
-  bool invalid_causal_metadata = false;
-  bool conflict = false;
-};
-
 enum class ConSanMoiSampledCausalPublicationState : uint32_t {
   Empty = 0,
   Publishing = 1,
   Ready = 2,
   Malformed = 3,
-};
-
-struct ConSanMoiSampledCausalKey {
-  uint64_t generation = 0;
-  uint64_t dispatch_id = 0;
-  uint32_t workgroup_x = 0;
-  uint32_t workgroup_y = 0;
-  uint32_t workgroup_z = 0;
-  uint32_t epoch = 0;
-  uint32_t cluster_workgroup_id = 0;
-
-  [[nodiscard]] constexpr bool operator==(const ConSanMoiSampledCausalKey &) const = default;
-};
-
-enum class ConSanMoiSampledClaimOutcome : uint32_t {
-  Claimed,
-  Existing,
-  Busy,
-  CapacityExhausted,
-  Invalid,
-};
-
-struct ConSanMoiSampledClaimResult {
-  ConSanMoiSampledClaimOutcome outcome = ConSanMoiSampledClaimOutcome::Invalid;
-  uint32_t slot = 0;
-  uint32_t collision_count = 0;
-  uint32_t malformed_slot_count = 0;
 };
 
 /// Synchronization metadata is parallel to, and bounded by, the selected
@@ -282,21 +229,6 @@ classify_consan_moi_sampled_sync_snapshot(ConSanMoiSampledSyncSnapshotWords word
 struct ConSanMoiSampledSyncEncodeResult {
   ConSanMoiSampledSyncClassification classification = ConSanMoiSampledSyncClassification::Malformed;
   ConSanMoiSampledSyncMetadataPacked packed;
-};
-
-enum class ConSanMoiSampledSyncPublishOutcome : uint8_t {
-  Published,
-  Existing,
-  Collision,
-  CapacityExhausted,
-  Rejected,
-  MalformedSlot,
-};
-
-struct ConSanMoiSampledSyncPublishResult {
-  ConSanMoiSampledSyncPublishOutcome outcome = ConSanMoiSampledSyncPublishOutcome::Rejected;
-  ConSanMoiSampledSyncClassification classification = ConSanMoiSampledSyncClassification::Malformed;
-  uint32_t slot = 0;
 };
 
 struct ConSanMoiAtomicReleaseRecord {

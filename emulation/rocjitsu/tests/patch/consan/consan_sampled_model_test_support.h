@@ -7,6 +7,74 @@
 
 namespace rocjitsu {
 
+struct ConSanMoiSampledPublishResult {
+  uint32_t processed_access_count = 0;
+  uint32_t eligible_window_count = 0;
+  uint32_t selected_window_count = 0;
+  uint32_t published_window_count = 0;
+  uint32_t published_entry_count = 0;
+  uint32_t malformed_window_count = 0;
+  bool sampled_capacity_exhausted = false;
+  bool window_capacity_exhausted = false;
+  bool invalid_selection = false;
+};
+
+struct ConSanMoiSampledReplayResult {
+  uint32_t processed_window_count = 0;
+  uint32_t processed_entry_count = 0;
+  uint32_t emitted_diagnostic_count = 0;
+  uint32_t empty_entry_count = 0;
+  uint32_t stale_generation_entry_count = 0;
+  uint32_t incomplete_publication_entry_count = 0;
+  uint32_t changed_during_read_entry_count = 0;
+  uint32_t malformed_entry_count = 0;
+  bool diagnostic_capacity_exhausted = false;
+  bool invalid_causal_metadata = false;
+  bool conflict = false;
+};
+
+struct ConSanMoiSampledCausalKey {
+  uint64_t generation = 0;
+  uint64_t dispatch_id = 0;
+  uint32_t workgroup_x = 0;
+  uint32_t workgroup_y = 0;
+  uint32_t workgroup_z = 0;
+  uint32_t epoch = 0;
+  uint32_t cluster_workgroup_id = 0;
+
+  [[nodiscard]] constexpr bool operator==(const ConSanMoiSampledCausalKey &) const = default;
+};
+
+enum class ConSanMoiSampledClaimOutcome : uint32_t {
+  Claimed,
+  Existing,
+  Busy,
+  CapacityExhausted,
+  Invalid,
+};
+
+struct ConSanMoiSampledClaimResult {
+  ConSanMoiSampledClaimOutcome outcome = ConSanMoiSampledClaimOutcome::Invalid;
+  uint32_t slot = 0;
+  uint32_t collision_count = 0;
+  uint32_t malformed_slot_count = 0;
+};
+
+enum class ConSanMoiSampledSyncPublishOutcome : uint8_t {
+  Published,
+  Existing,
+  Collision,
+  CapacityExhausted,
+  Rejected,
+  MalformedSlot,
+};
+
+struct ConSanMoiSampledSyncPublishResult {
+  ConSanMoiSampledSyncPublishOutcome outcome = ConSanMoiSampledSyncPublishOutcome::Rejected;
+  ConSanMoiSampledSyncClassification classification = ConSanMoiSampledSyncClassification::Malformed;
+  uint32_t slot = 0;
+};
+
 /// Independent host reference for the device-side causal-window selector.
 [[nodiscard]] constexpr uint64_t consan_moi_sampled_causal_mix(uint64_t hash, uint64_t value) {
   hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u);

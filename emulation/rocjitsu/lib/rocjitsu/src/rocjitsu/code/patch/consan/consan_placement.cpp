@@ -23,72 +23,6 @@
 
 namespace rocjitsu {
 
-[[nodiscard]] std::optional<uint64_t>
-text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_offset,
-                           uint64_t byte_count) {
-  for (const Section *section : code_object.text_sections()) {
-    if (text_offset > section->size())
-      continue;
-    if (byte_count > section->size() - text_offset)
-      continue;
-    return section->sectionOffset() + text_offset;
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] bool ranges_overlap(ByteRange lhs, ByteRange rhs) {
-  return lhs.begin < rhs.end && rhs.begin < lhs.end;
-}
-
-[[nodiscard]] bool overlaps_reserved_range(std::span<const ByteRange> ranges, ByteRange range) {
-  for (ByteRange reserved : ranges) {
-    if (ranges_overlap(reserved, range))
-      return true;
-  }
-  return false;
-}
-
-[[nodiscard]] bool reserve_byte_range(std::vector<ByteRange> &ranges, ByteRange range) {
-  if (range.begin >= range.end || overlaps_reserved_range(ranges, range))
-    return false;
-  ranges.push_back(range);
-  return true;
-}
-
-[[nodiscard]] std::optional<std::vector<ByteRange>>
-reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
-                                     std::span<const ConSanPatchInfo> patches) {
-  std::vector<ByteRange> ranges;
-  for (const ConSanCommittedPatchGeometry &patch : patches) {
-    // Some structural records describe appended dispatch machinery without
-    // replacing pristine text.  Their zero-byte anchors are identities, not
-    // reservations, and must not make a later composed patch fail closed.
-    if (patch.original_size != 0) {
-      const auto anchor_file_offset =
-          text_offset_to_file_offset(code_object, patch.anchor_offset, patch.original_size);
-      if (!anchor_file_offset)
-        return std::nullopt;
-      if (!reserve_byte_range(ranges,
-                              {*anchor_file_offset, *anchor_file_offset + patch.original_size}))
-        return std::nullopt;
-    }
-
-    if (patch.trampoline_size == 0)
-      continue;
-    const auto trampoline_file_offset =
-        text_offset_to_file_offset(code_object, patch.trampoline_offset, patch.trampoline_size);
-    // Appended bodies are outside the pristine image and cannot overlap the
-    // inline/local-only flat selector. They are reserved later against the
-    // current composed text image.
-    if (!trampoline_file_offset)
-      continue;
-    if (!reserve_byte_range(
-            ranges, {*trampoline_file_offset, *trampoline_file_offset + patch.trampoline_size}))
-      return std::nullopt;
-  }
-  return ranges;
-}
-
 struct TextRange {
   uint64_t begin = 0;
   uint64_t end = 0;
@@ -230,7 +164,7 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInven
     const uint64_t run_end = run_begin + static_cast<uint64_t>(run_words) * sizeof(uint32_t);
     const LocalCaveOwnerRange *owner = owner_of_uncovered_text_range(run_begin, run_end, owners);
     if (owner != nullptr) {
-      caves.push_back({run_begin, text->sectionOffset() + run_begin, run_words, owner->entry});
+      caves.push_back({run_begin, text->sectionOffset() + run_begin, run_words});
     }
   }
 

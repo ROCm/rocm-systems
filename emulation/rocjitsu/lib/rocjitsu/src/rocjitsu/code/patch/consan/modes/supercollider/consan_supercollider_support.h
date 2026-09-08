@@ -13,12 +13,10 @@
 
 namespace rocjitsu {
 
-[[nodiscard]] bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
-                                                     ConSanFlatProvenanceMode mode);
-[[nodiscard]] std::optional<uint16_t>
-flat_check_trap_compare_vgpr(const ConSanProgramSite &access);
-[[nodiscard]] std::optional<uint16_t>
-check_trap_compare_vgpr(const ConSanProgramSite &access, uint16_t chunk_index,
-                        rj_code_arch_t arch, uint16_t selectable_vgpr_bank_mode);
+[[nodiscard]] std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanProgramSite &access);
+[[nodiscard]] std::optional<uint16_t> check_trap_compare_vgpr(const ConSanProgramSite &access,
+                                                              uint16_t chunk_index,
+                                                              rj_code_arch_t arch,
+                                                              uint16_t selectable_vgpr_bank_mode);
 
 } // namespace rocjitsu

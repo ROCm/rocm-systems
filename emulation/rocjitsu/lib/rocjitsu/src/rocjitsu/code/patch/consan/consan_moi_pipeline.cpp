@@ -8,10 +8,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
-#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
-#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled.h"
-#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
-
 #include <algorithm>
 #include <array>
 #include <iterator>

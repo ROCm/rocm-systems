@@ -170,15 +170,10 @@ order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
                                    const ConSanObservationPlan &observation_plan,
                                    bool track_atomics);
 
-[[nodiscard]] std::span<const ConSanPreappliedReservedRange>
-moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
-
 /// Reserve a placement-owned text range unless an existing reservation
 /// already covers its anchor. Returns true when a new reservation is added.
 [[nodiscard]] bool moi_resource_reserve_range_if_uncovered(MoiResourcePlanningState &state,
                                                            ConSanPreappliedReservedRange range);
-
-[[nodiscard]] Decoder *moi_resource_decoder(MoiResourcePlanningState &state);
 
 [[nodiscard]] bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state,
                                                     uint64_t first_offset, uint64_t second_offset);
@@ -200,10 +195,6 @@ moi_cfg_forward_distance(const MoiCfgForwardDistanceIndex &index, uint64_t from_
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
-
-[[nodiscard]] bool
-moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
-                                             std::span<const uint64_t> owner_descriptor_offsets);
 
 [[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
     const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
@@ -303,7 +294,6 @@ void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
 
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);
-[[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &descriptor);
 [[nodiscard]] ConSanMoiDispatchIdPreloadPlan
 moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arch);
 
@@ -352,11 +342,6 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requirements,
                                         const ResolvedMoiScratchPlan &plan,
                                         const VgprSpillSequence &spill);
-
-void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
-                                     rj_code_arch_t arch);
-
-[[nodiscard]] bool write_word_bytes(std::vector<uint8_t> &bytes, uint64_t offset, uint32_t word);
 
 void note_dynamic_stack_private_requirement(ConSanPatchAbiEffects &effects,
                                             const VgprSpillSequence *spill);

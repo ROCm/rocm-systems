@@ -22,11 +22,6 @@ class BasicBlock;
 class Instruction;
 class LivenessAnalysis;
 
-struct ByteRange {
-  uint64_t begin = 0;
-  uint64_t end = 0;
-};
-
 struct BarrierSite {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
@@ -39,19 +34,12 @@ struct LocalNopCave {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t word_count = 0;
-  uint64_t owner_entry_text_offset = 0;
 };
 
 struct KernelMaxRegisterRefs {
   std::optional<uint16_t> sgpr;
   std::optional<uint16_t> vgpr;
 };
-
-[[nodiscard]] bool ranges_overlap(ByteRange lhs, ByteRange rhs);
-[[nodiscard]] bool overlaps_reserved_range(std::span<const ByteRange> ranges, ByteRange range);
-[[nodiscard]] std::optional<std::vector<ByteRange>>
-reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
-                                     std::span<const ConSanPatchInfo> patches);
 
 [[nodiscard]] std::vector<LocalNopCave>
 find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
@@ -73,14 +61,13 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInven
 required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
                                                 uint16_t scratch_vgpr, uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access,
-                    std::optional<uint16_t> requested_scratch_vgpr,
+choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *instruction, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs);
-[[nodiscard]] std::optional<uint16_t>
-choose_spill_scratch_vgpr(const ConSanProgramSite &access, uint16_t allocation_count,
-                          uint16_t required_vgprs);
+[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
+                                                                uint16_t allocation_count,
+                                                                uint16_t required_vgprs);
 
 [[nodiscard]] std::vector<BasicBlock *>
 block_ptrs_for(const std::vector<std::unique_ptr<BasicBlock>> &blocks);

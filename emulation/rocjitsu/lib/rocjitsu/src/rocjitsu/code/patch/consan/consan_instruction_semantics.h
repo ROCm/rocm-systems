@@ -17,7 +17,6 @@ class Instruction;
 
 // Target encoding sentinels used while normalizing FLAT/VGLOBAL operands.
 inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
-inline constexpr uint32_t kRdna3FlatNoSaddrEncoding = 0x7cu;
 inline constexpr uint32_t kRdna3GlobalNoSaddrEncoding = 0x7cu;
 
 /// Interpret the low 13 bits as a signed VGLOBAL/SCRATCH displacement.

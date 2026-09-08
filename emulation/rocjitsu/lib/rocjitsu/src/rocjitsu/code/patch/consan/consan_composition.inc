@@ -500,21 +500,11 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
           ConSanOptions flat_options = redundant_options;
           flat_options.max_patches = 0u;
           try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result);
-        } else if (auto reserved_ranges =
-                       reserved_ranges_for_existing_patches(*code_object, result.patches)) {
+        } else {
           ConSanOptions flat_options = redundant_options;
           if (flat_options.max_patches_is_expert_limit)
             flat_options.max_patches = max_patches - access_patches;
-          try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result,
-                                          *reserved_ranges);
-        } else {
-          ConSanOptions flat_options = redundant_options;
-          flat_options.max_patches = 0u;
-          flat_options.max_patches_is_expert_limit = true;
           try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result);
-          result.warnings.emplace_back(
-              "ConSan flat check/trap proof skipped after native LDS patching: "
-              "existing patch ranges could not be mapped in the original code object");
         }
       }
     }

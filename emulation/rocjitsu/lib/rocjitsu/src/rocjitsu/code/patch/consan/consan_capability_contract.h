@@ -429,12 +429,6 @@ struct ConSanTargetProfile {
   ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::Unsupported;
   bool moi_access_reports_need_explicit_dispatch_identity = true;
-  bool supports_wave32 = false;
-  bool supports_wave64 = true;
-  uint8_t exec_register_width_bits = 64;
-  uint8_t global_address_width_bits = 64;
-  uint8_t lds_address_width_bits = 32;
-  uint8_t vgpr_allocation_granularity_wave32 = 0;
   uint8_t vgpr_allocation_granularity_wave64 = 0;
   uint8_t sgpr_allocation_granularity = 8;
   uint8_t accumulator_offset_granularity = 0;
@@ -446,9 +440,6 @@ struct ConSanTargetProfile {
   uint32_t address_free_private_limit_bytes = 0;
   uint32_t private_allocation_granularity_bytes = 1;
   uint32_t max_group_segment_bytes = 0;
-  int32_t direct_branch_min_displacement_bytes = -131068;
-  int32_t direct_branch_max_displacement_bytes = 131072;
-
   bool supports_kernarg_preload_overflow_recovery = false;
   bool has_cluster_facilities = false;
   bool has_selectable_vgpr_bank = false;
@@ -581,20 +572,14 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
     const auto &workgroup_identity = profile.command_processor_workgroup_identity;
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
         profile.arch == ROCJITSU_CODE_ARCH_INVALID || profile.program_analysis == nullptr ||
-        !profile.supports_wave64 ||
         (profile.flat_compare_swap_data_pair_alignment != 1u &&
          profile.flat_compare_swap_data_pair_alignment != 2u) ||
-        profile.exec_register_width_bits != 64u || profile.global_address_width_bits != 64u ||
-        profile.lds_address_width_bits != 32u || profile.vgpr_allocation_granularity_wave64 == 0u ||
-        (profile.supports_wave32 != (profile.vgpr_allocation_granularity_wave32 != 0u)) ||
+        profile.vgpr_allocation_granularity_wave64 == 0u ||
         profile.sgpr_allocation_granularity == 0u || profile.ordinary_sgpr_limit == 0u ||
         profile.user_sgpr_initialization_limit == 0u ||
         profile.address_free_private_limit_bytes == 0u ||
         profile.private_allocation_granularity_bytes == 0u ||
-        profile.max_group_segment_bytes == 0u ||
-        profile.direct_branch_min_displacement_bytes >= 0 ||
-        profile.direct_branch_max_displacement_bytes <= 0 ||
-        profile.resident_wave_identity.hwreg_id > 63u ||
+        profile.max_group_segment_bytes == 0u || profile.resident_wave_identity.hwreg_id > 63u ||
         profile.resident_wave_identity.bit_offset > 31u ||
         profile.resident_wave_identity.bit_width == 0u ||
         profile.resident_wave_identity.bit_width > 32u ||

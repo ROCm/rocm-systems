@@ -61,21 +61,6 @@ first_admitted_moi_register_range(uint32_t begin, uint16_t width, uint16_t limit
   return std::nullopt;
 }
 
-void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
-                                     rj_code_arch_t arch) {
-  if (alignment == 0)
-    return;
-  while (bytes.size() % alignment != 0)
-    append_word_bytes(bytes, build_s_nop(0, arch));
-}
-
-[[nodiscard]] bool write_word_bytes(std::vector<uint8_t> &bytes, uint64_t offset, uint32_t word) {
-  if (offset > bytes.size() || sizeof(word) > bytes.size() - offset)
-    return false;
-  std::memcpy(bytes.data() + offset, &word, sizeof(word));
-  return true;
-}
-
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &desc) {
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
@@ -106,10 +91,6 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER) != 0,
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0,
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0, false);
-}
-
-[[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
 }
 
 [[nodiscard]] ConSanMoiDispatchIdPreloadPlan
@@ -248,12 +229,12 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
                                               /*low_bit_count=*/16u),
         .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_yz_ttmp),
                                               /*right_shift=*/16u),
-        .cluster_workgroup_id = uses_cluster_workgroup_id && identity.cluster_workgroup_id_ttmp
-                                    ? ConSanMoiWorkgroupSource::scalar(
-                                          ttmp_scalar_operand(*identity.cluster_workgroup_id_ttmp),
-                                          /*right_shift=*/0u,
-                                          identity.cluster_workgroup_id_low_bit_count)
-                                    : ConSanMoiWorkgroupSource{},
+        .cluster_workgroup_id =
+            uses_cluster_workgroup_id && identity.cluster_workgroup_id_ttmp
+                ? ConSanMoiWorkgroupSource::scalar(
+                      ttmp_scalar_operand(*identity.cluster_workgroup_id_ttmp),
+                      /*right_shift=*/0u, identity.cluster_workgroup_id_low_bit_count)
+                : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
@@ -499,17 +480,6 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
     point.moi_branch_only_spill.reset();
   }
   return true;
-}
-
-[[nodiscard]] bool
-moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
-                                             std::span<const uint64_t> owner_descriptor_offsets) {
-  return !owner_descriptor_offsets.empty() &&
-         std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
-           const ConSanMoiTransientSgprAssignment *assignment =
-               moi_transient_sgpr_assignment(assignments, descriptor_offset);
-           return assignment != nullptr && assignment->branch_only_spill;
-         });
 }
 
 [[nodiscard]] bool
@@ -941,11 +911,6 @@ struct MoiCfgForwardDistanceIndex {
   std::unordered_map<BasicBlock *, uint32_t> block_edges;
 };
 
-std::span<const ConSanPreappliedReservedRange>
-moi_resource_reserved_ranges(const MoiResourcePlanningState &state) {
-  return state.reserved_ranges;
-}
-
 bool moi_resource_reserve_range_if_uncovered(MoiResourcePlanningState &state,
                                              ConSanPreappliedReservedRange range) {
   if (range.size == 0u)
@@ -960,8 +925,6 @@ bool moi_resource_reserve_range_if_uncovered(MoiResourcePlanningState &state,
   state.reserved_ranges.push_back(range);
   return true;
 }
-
-Decoder *moi_resource_decoder(MoiResourcePlanningState &state) { return state.decoder.get(); }
 
 bool moi_resource_is_valid(const MoiResourcePlanningState &state) { return state.valid; }
 
@@ -3329,8 +3292,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
       persistent_facts.has_operational_dynamic_lds_owner |=
           kernel != nullptr && kernel->has_dynamic_lds;
-      if (kernel != nullptr && kernel->has_text_range &&
-          kernel->text_file_offset <= bytes.size() &&
+      if (kernel != nullptr && kernel->has_text_range && kernel->text_file_offset <= bytes.size() &&
           kernel->entry_text_offset <= bytes.size() - kernel->text_file_offset) {
         const uint64_t begin = kernel->text_file_offset + kernel->entry_text_offset;
         if (kernel->code_size <= bytes.size() - begin) {

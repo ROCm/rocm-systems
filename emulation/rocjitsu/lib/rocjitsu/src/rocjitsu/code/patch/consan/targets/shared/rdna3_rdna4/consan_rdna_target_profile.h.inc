@@ -8,8 +8,6 @@
   profile.resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10};
   profile.moi_dispatch_identity_placement =
       ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred;
-  profile.supports_wave32 = true;
-  profile.vgpr_allocation_granularity_wave32 = 8;
   profile.vgpr_allocation_granularity_wave64 = 4;
   profile.ordinary_sgpr_limit = 106;
   profile.user_sgpr_initialization_limit = 16;

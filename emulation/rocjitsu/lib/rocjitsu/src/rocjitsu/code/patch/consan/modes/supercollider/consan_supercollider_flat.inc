@@ -10,8 +10,8 @@
 
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      const ConSanTargetProfile &target,
-                                     const ConSanOptions &options, ConSanTransformArtifacts &result,
-                                     std::span<const ByteRange>) {
+                                     const ConSanOptions &options,
+                                     ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
 
   const std::unordered_set<uint64_t> admitted_file_offsets = sc_admitted_access_file_offsets(

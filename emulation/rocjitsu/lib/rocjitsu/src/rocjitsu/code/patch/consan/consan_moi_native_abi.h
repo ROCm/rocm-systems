@@ -25,7 +25,6 @@ inline constexpr uint16_t kScalarOperandTtmpBase = 108u;
 inline constexpr uint16_t kScalarOperandSharedBase = 235u;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106u;
-inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256u;
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);

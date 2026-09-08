@@ -19,13 +19,6 @@ namespace {
 
 } // namespace
 
-bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
-                                       ConSanFlatProvenanceMode mode) {
-  return hint == ConSanFlatAddressSpaceHint::Group ||
-         (mode == ConSanFlatProvenanceMode::Likely &&
-          hint == ConSanFlatAddressSpaceHint::MaybeGroup);
-}
-
 std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanProgramSite &access) {
   if (access.kind == ConSanLdsAccessKind::Read)
     return access.operands.destination_vgpr;
