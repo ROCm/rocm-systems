@@ -349,11 +349,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
-    def _is_command_supported(self, user_input, acceptable_values):
+    def _is_command_supported(self, user_input, acceptable_values, hint=None):
         if str(user_input).upper() not in acceptable_values:
-            print(f"Valid inputs are {acceptable_values}")
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                sys.argv[1], str(user_input).upper(), self.helpers.get_output_format()
+                sys.argv[1], str(user_input).upper(), self.helpers.get_output_format(), hint=hint
             )
         else:
             return str(user_input).upper()
@@ -2417,6 +2416,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices)
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                set_compute_partition_hint = f"\nValid inputs are: {accelerator_set_choices_str}.\nUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
@@ -2530,7 +2530,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "--accelerator-partition",
                     action="store",
                     choices=accelerator_set_choices,
-                    type=lambda value: self._is_command_supported(value, accelerator_set_choices),
+                    type=lambda value: self._is_command_supported(
+                        value, accelerator_set_choices, hint=set_compute_partition_hint
+                    ),
                     required=False,
                     help=set_compute_partition_help,
                     metavar=("TYPE/INDEX"),
