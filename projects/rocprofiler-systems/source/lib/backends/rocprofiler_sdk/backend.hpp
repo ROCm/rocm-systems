@@ -194,17 +194,20 @@ struct backend
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
-    static status_t create_context(context_id_t* ctx)
+    static void create_context(context_id_t* ctx)
     {
-        return Wrapper::create_context(ctx);
+        sdk_check<Wrapper>(Wrapper::create_context(ctx));
     }
 
-    static status_t start_context(context_id_t ctx)
+    static void start_context(context_id_t ctx)
     {
-        return Wrapper::start_context(ctx);
+        sdk_check<Wrapper>(Wrapper::start_context(ctx));
     }
 
-    static status_t stop_context(context_id_t ctx) { return Wrapper::stop_context(ctx); }
+    static void stop_context(context_id_t ctx)
+    {
+        sdk_check<Wrapper>(Wrapper::stop_context(ctx));
+    }
 
     static status_t sample_device_counting_service(context_id_t      ctx,
                                                    user_data_t       user_data,

@@ -53,7 +53,7 @@ public:
             configure_domain(config);
         }
 
-        SdkBackend::start_context(context());  // start context should throw if it fails
+        SdkBackend::start_context(context());
     }
 
     void flush() const
@@ -152,7 +152,6 @@ private:
             return m_context;
         }
 
-        // TODO: create_context should throw upon failure
         SdkBackend::create_context(&m_context);
 
         return m_context;

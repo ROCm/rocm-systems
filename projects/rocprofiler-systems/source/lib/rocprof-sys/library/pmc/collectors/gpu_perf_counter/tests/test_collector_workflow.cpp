@@ -166,7 +166,6 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
     EXPECT_CALL(*mock, create_context(_))
         .WillOnce([context_handle_out](MockBackend::context_id_t* ctx) {
             ctx->handle = context_handle_out;
-            return MockBackend::status_success;
         });
 
     EXPECT_CALL(*mock, configure_device_counting_service(
@@ -177,11 +176,11 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
 
     EXPECT_CALL(*mock, start_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                       context_handle_out)))
-        .WillOnce(Return(MockBackend::status_success));
+        .WillOnce(Return());
 
     EXPECT_CALL(*mock, stop_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                      context_handle_out)))
-        .WillOnce(Return(MockBackend::status_success));
+        .WillOnce(Return());
 }
 
 // ============================================================================
@@ -335,25 +334,15 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         });
 
     EXPECT_CALL(*mock, create_context(_))
-        .WillOnce([](MockBackend::context_id_t* ctx) {
-            ctx->handle = 50;
-            return MockBackend::status_success;
-        })
-        .WillOnce([](MockBackend::context_id_t* ctx) {
-            ctx->handle = 51;
-            return MockBackend::status_success;
-        });
+        .WillOnce([](MockBackend::context_id_t* ctx) { ctx->handle = 50; })
+        .WillOnce([](MockBackend::context_id_t* ctx) { ctx->handle = 51; });
 
     EXPECT_CALL(*mock, configure_device_counting_service(_, _, _, _, _))
         .Times(2)
         .WillRepeatedly(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock, start_context(_))
-        .Times(2)
-        .WillRepeatedly(Return(MockBackend::status_success));
-    EXPECT_CALL(*mock, stop_context(_))
-        .Times(2)
-        .WillRepeatedly(Return(MockBackend::status_success));
+    EXPECT_CALL(*mock, start_context(_)).Times(2).WillRepeatedly(Return());
+    EXPECT_CALL(*mock, stop_context(_)).Times(2).WillRepeatedly(Return());
 
     EXPECT_CALL(
         *mock, sample_device_counting_service(
