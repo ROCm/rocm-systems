@@ -8,7 +8,8 @@
 #
 .PHONY=test
 
-INC:= -I$(CURDIR)/nccl
+NCCL_PLUGINS:=../..
+INC:= -I$(NCCL_PLUGINS)/net/example/nccl -I$(NCCL_PLUGINS)/tuner/example/nccl
 
 ifeq ($(shell uname -s), Linux)
   CFLAGS += -DNCCL_OS_LINUX

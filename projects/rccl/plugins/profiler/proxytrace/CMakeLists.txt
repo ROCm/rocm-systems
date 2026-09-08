@@ -16,6 +16,9 @@ else()
     set(PROXYTRACE_STANDALONE OFF)
 endif()
 
+# RCCL source root (this file lives at plugins/profiler/proxytrace).
+get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+
 add_library(rccl-profiler-proxytrace SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/proxytrace_plugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/proxy_trace.cc
@@ -24,6 +27,7 @@ add_library(rccl-profiler-proxytrace SHARED
 target_include_directories(rccl-profiler-proxytrace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
+    ${RCCL_ROOT}/src/include/plugin
     ${ROCM_PATH}/include
 )
 

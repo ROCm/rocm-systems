@@ -7,7 +7,6 @@
 # See LICENSE.txt for more license information
 #
 .DEFAULT_GOAL: build
-include ../../../makefiles/common.mk
 BUILDDIR ?= .
 NCCLDIR  := $(BUILDDIR)
 
