@@ -181,10 +181,8 @@ namespace RcclUnitTesting
   ErrCode CollectiveArgs::DeallocateMem()
   {
     // Mitigation (AICOMRCCL-2275): zeroing device buffers at teardown removes the pooled-worker
-    // corruption. Volume, not contents: scrubbing an unrelated scratch buffer of the same size
-    // works just as well (60/0, against 40/20 unscrubbed), so cap is a traffic target and buffers
-    // larger than it are deliberately left partly untouched.
-    size_t const cap = 4u << 20;
+    // corruption (60/0, against 40/20 unscrubbed). Neither the contents nor the size of the write
+    // tracks the effect, so no mechanism is claimed here; just zero what was allocated.
     hipError_t errIn  = hipSuccess;
     hipError_t errOut = hipSuccess;
     // In-place attaches one buffer as an interior alias of the other, so there is a
@@ -200,18 +198,18 @@ namespace RcclUnitTesting
                                  : (inOwns ? this->numInputBytesAllocated : this->numOutputBytesAllocated);
       if (own && bytes)
       {
-        errIn = hipMemset(own, 0, std::min(bytes, cap));
+        errIn = hipMemset(own, 0, bytes);
       }
     }
     else
     {
       if (this->inputGpu.ptr && this->numInputBytesAllocated)
       {
-        errIn = hipMemset(this->inputGpu.ptr, 0, std::min(this->numInputBytesAllocated, cap));
+        errIn = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
       }
       if (this->outputGpu.ptr && this->numOutputBytesAllocated)
       {
-        errOut = hipMemset(this->outputGpu.ptr, 0, std::min(this->numOutputBytesAllocated, cap));
+        errOut = hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated);
       }
     }
 
