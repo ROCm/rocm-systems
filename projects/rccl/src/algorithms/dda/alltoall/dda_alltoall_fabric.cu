@@ -39,10 +39,10 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   }
 
   const int nRanks = comm->nRanks;
-  const size_t totalCount = count * nRanks;
-  if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
-    WARN("DDA fabric alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes", totalCount,
-         totalCount * sizeof(T), comm->ddaScratchBytes);
+  const size_t totalBytes = count * nRanks;
+  if (totalBytes > comm->ddaScratchBytes) {
+    WARN("DDA fabric alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes,
+         comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -64,7 +64,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   // Stage sendbuff into this rank's scratch before the peer exchange. A single
   // host-launched cudaMemcpyAsync avoids the per-block in-kernel copy race on
   // the fabric path.
-  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
 
   switch (nRanks) {
   case 4:

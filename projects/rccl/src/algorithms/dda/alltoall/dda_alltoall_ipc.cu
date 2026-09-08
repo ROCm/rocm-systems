@@ -43,14 +43,13 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
     return ncclInvalidUsage;
   }
 
-  const size_t totalCount = count * comm->nRanks;
-  if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
-    WARN("DDA IPC alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes", totalCount,
-         totalCount * sizeof(T), comm->ddaScratchBytes);
+  const size_t totalBytes = count * comm->nRanks;
+  if (totalBytes > comm->ddaScratchBytes) {
+    WARN("DDA IPC alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes,
+         comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
-  // For alltoall, we use count for grid calculation (data per rank pair)
   auto gridBlock = ddaAllToAllIpcGeom(count);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
@@ -65,7 +64,7 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
     dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
-    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
     dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false><<<grid, block, 0, stream>>>(
       d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   }
