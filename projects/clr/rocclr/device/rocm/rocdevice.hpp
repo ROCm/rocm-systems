@@ -396,6 +396,9 @@ class Device : public NullDevice {
   }
 
   void setupCpuAgent();  // Setup the CPU agent which has the least NUMA distance to this GPU
+  //! Whether the agent shares physical memory with the CPU. Distinct from a FULL profile:
+  //! MI300A reports BASE while still being an APU.
+  static bool agentIsAPU(hsa_agent_t agent);
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
@@ -824,6 +827,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 
