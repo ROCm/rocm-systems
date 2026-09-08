@@ -162,6 +162,19 @@ add_dbgapi_unit_test(dbgapi_memory_test
   SOURCES memory_test.cpp
   LIBS amd-dbgapi-internal)
 
+# amd_dbgapi_read_memory() and amd_dbgapi_write_memory() C API entry
+# points at the argument-validation layer: NOT_INITIALIZED before
+# initialize, INVALID_ARGUMENT for null pointers, INVALID_PROCESS_ID /
+# INVALID_WAVE_ID / INVALID_LANE_ID / INVALID_ADDRESS_SPACE_ID for bad
+# handles, and PROCESS_FROZEN for writes to a frozen process.  Success
+# paths delegate to process xfer_segment_memory for process-dependent
+# address spaces (global/host) with wave_id == WAVE_NONE.  Wave-bound
+# transfers and workgroup/lane-specific memory are deferred to feature
+# tests.
+add_dbgapi_unit_test(dbgapi_memory_io_test
+  SOURCES memory_io_test.cpp
+  LIBS amd-dbgapi-internal)
+
 # Per-OS notifier_t implementation.  The factory notifier_t::create()
 # lives in src/utils_linux.cpp on Linux and src/utils_windows.cpp on
 # Windows; each implementation has different semantics (pipe vs Event)
