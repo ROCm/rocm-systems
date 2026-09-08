@@ -26,8 +26,7 @@ def main():
     configs_path = args.configs_path
 
     missing = []
-    bad_type = []
-    bad_reason = []
+    invalid_skip_fields = []
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
@@ -42,18 +41,14 @@ def main():
                     # the broader migration; do not force list entries to carry one.
                     continue
                 if isinstance(value, dict):
-                    # Structured form: each token maps to {Reason: [...]} where the
-                    # Reason must be a non-empty YAML flow list (mirrors the
-                    # compute-utils blacklist idiom). Bare scalars are rejected.
-                    for token, meta in value.items():
-                        reason = meta.get("Reason") if isinstance(meta, dict) else None
-                        if not isinstance(reason, list) or not reason:
-                            bad_reason.append(
-                                f"  {group}/{case_name}: '{field}' token '{token}' "
-                                "missing non-empty bracketed Reason"
-                            )
+                    # Structured form: each token maps to {Reason: [...]}. Accept it
+                    # as valid, but do NOT enforce that tokens carry a non-empty
+                    # Reason yet. The ~1,100 existing configs have not been migrated
+                    # to the reason-bearing form, so Reason enforcement is
+                    # intentionally deferred to a later phase (AIRUNTIME-2744):
+                    # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
                     continue
-                bad_type.append(f"  {group}/{case_name}: '{field}'")
+                invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -64,21 +59,12 @@ def main():
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 
-    if bad_type:
+    if invalid_skip_fields:
         print(
             f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is neither a YAML list nor a mapping:{RESET}",
             file=sys.stderr,
         )
-        for entry in bad_type:
-            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
-        sys.exit(1)
-
-    if bad_reason:
-        print(
-            f"[check_config] {ERROR}ERROR: The following structured 'disabled'/'unsupported' tokens are missing a non-empty bracketed Reason:{RESET}",
-            file=sys.stderr,
-        )
-        for entry in bad_reason:
+        for entry in invalid_skip_fields:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 
