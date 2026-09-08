@@ -14,8 +14,12 @@ import unittest
 import consan_fault_runner as runner
 import consan_validation as validation
 from consan_validation_support import RESULT_SCHEMA_VERSION, read_row_result
-from consan_validation_test_support import temporary_root
-from test_consan_coverage_gate import coverage as coverage_line, log, verdict
+from consan_validation_test_support import (
+    coverage as coverage_line,
+    log,
+    temporary_root,
+    verdict,
+)
 
 RUNNER = Path(__file__).with_name("consan_fault_runner.py")
 

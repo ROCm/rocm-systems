@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import gc
 import io
 import json
@@ -22,6 +22,8 @@ import unittest
 from unittest import mock
 
 import consan_validation as validation
+import consan_validation_catalog as validation_catalog
+import consan_validation_diagnostics as validation_diagnostics
 import consan_llama_validation as llama_validation
 import consan_rdna4_matmul_validation as rdna4_matmul_validation
 import consan_sharktank_validation as sharktank_validation
@@ -91,22 +93,6 @@ def complete_coverage_log(*extra_lines: str) -> str:
             *extra_lines,
         )
     )
-
-
-def manifest_with_workload_contract(target: str, workload: validation.Workload) -> dict:
-    manifest = validation._manifest(target)
-    matches = 0
-    rows = []
-    for row in manifest["workloads"]:
-        if row["id"] == workload.id:
-            rows.append(asdict(workload))
-            matches += 1
-        else:
-            rows.append(row)
-    if matches != 1:
-        raise AssertionError(f"manifest does not contain {workload.id}")
-    manifest["workloads"] = rows
-    return manifest
 
 
 def fault_reservation_evidence(
@@ -1037,7 +1023,7 @@ class ConSanValidationTest(unittest.TestCase):
             command_environment=(("RJ_CONSAN_MAX_PATCHES", "1"),),
         )
         with (
-            mock.patch.object(validation, "WORKLOADS", (invalid,)),
+            mock.patch.object(validation_catalog, "WORKLOADS", (invalid,)),
             self.assertRaisesRegex(
                 RuntimeError,
                 "hip-matmul-m128-n128-k128 has an invalid command environment",
@@ -4828,7 +4814,7 @@ class ConSanValidationTest(unittest.TestCase):
             original.write_bytes(b"a" * 10)
             patched.write_bytes(b"b" * 15)
             with mock.patch.object(
-                validation,
+                validation_diagnostics,
                 "_amdgpu_kernel_metadata",
                 side_effect=(
                     {
