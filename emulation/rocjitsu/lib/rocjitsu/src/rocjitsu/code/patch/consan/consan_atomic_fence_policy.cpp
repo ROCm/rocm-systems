@@ -49,13 +49,13 @@ namespace {
          });
 }
 
-[[nodiscard]] bool sampled_access_window_available(std::span<const ConSanExecutionOwner> owners,
+[[nodiscard]] bool directional_access_window_available(std::span<const ConSanExecutionOwner> owners,
                                                    ConSanSyncMemoryRole role,
                                                    const ConSanAtomicFencePolicyRequest &request) {
   return std::ranges::any_of(owners, [&](const ConSanExecutionOwner &owner) {
-    const auto availability = std::ranges::find(request.sampled_access_windows, owner.kernel,
-                                                &ConSanSampledAccessWindowAvailability::owner);
-    if (availability == request.sampled_access_windows.end())
+    const auto availability = std::ranges::find(request.directional_access_windows, owner.kernel,
+                                                &ConSanDirectionalAccessAvailability::owner);
+    if (availability == request.directional_access_windows.end())
       return false;
     switch (role) {
     case ConSanSyncMemoryRole::Release:
@@ -360,10 +360,10 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
     } else if (synchronization.execution_owners(event).empty()) {
       reason = ConSanAtomicPolicyReason::MissingExecutionOwner;
-    } else if (request.engine == ConSanCapabilityEngine::Sampled && sequence != nullptr &&
-               !sampled_access_window_available(synchronization.execution_owners(event),
+    } else if (vocabulary->ordering_requires_directional_access_window && sequence != nullptr &&
+               !directional_access_window_available(synchronization.execution_owners(event),
                                                 sequence->memory_role, request)) {
-      reason = ConSanAtomicPolicyReason::MissingSampledAccessWindow;
+      reason = ConSanAtomicPolicyReason::MissingDirectionalAccessWindow;
     } else if (!form || (capability != ConSanCapabilityDisposition::Supported &&
                          capability != ConSanCapabilityDisposition::AssociatedOnly)) {
       reason = ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
@@ -508,7 +508,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       } else if (communication_decision != result.plan.atomic_site_decisions.end() &&
                  communication_decision->kind == ConSanSiteDecisionKind::NotApplicable &&
                  communication_decision->reason ==
-                     ConSanAtomicPolicyReason::MissingSampledAccessWindow) {
+                     ConSanAtomicPolicyReason::MissingDirectionalAccessWindow) {
         decision.reason = ConSanFencePolicyReason::CommunicationNotApplicable;
       } else if (fence_event == nullptr || communication == nullptr || !association ||
                  !communication_admitted) {

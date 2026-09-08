@@ -335,7 +335,7 @@ ordinary_fence_inventory(ConSanFenceAssociation association = ConSanFenceAssocia
 
 ConSanAtomicFencePolicyRequest atomic_request(ConSanCapabilityEngine engine) {
   static constexpr std::array kSampledWindows = {
-      ConSanSampledAccessWindowAvailability{
+      ConSanDirectionalAccessAvailability{
           .owner = ConSanProgramContainerId{},
           .read = true,
           .write = true,
@@ -344,7 +344,7 @@ ConSanAtomicFencePolicyRequest atomic_request(ConSanCapabilityEngine engine) {
   return {
       .engine = engine,
       .tracking_enabled = true,
-      .sampled_access_windows = kSampledWindows,
+      .directional_access_windows = kSampledWindows,
       .container_filter = {},
       .kernel_name_allowlist = {},
   };
@@ -440,8 +440,8 @@ TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents)
            [](auto &request) { request.container_filter = "different"; },
            ConSanAtomicPolicyReason::ContainerFilterExcluded},
           {"sampled-window", ConSanCapabilityEngine::Sampled,
-           [](auto &request) { request.sampled_access_windows = {}; },
-           ConSanAtomicPolicyReason::MissingSampledAccessWindow},
+           [](auto &request) { request.directional_access_windows = {}; },
+           ConSanAtomicPolicyReason::MissingDirectionalAccessWindow},
       };
   for (const auto &[name, engine, mutate, expected] : cases) {
     SCOPED_TRACE(name);
@@ -460,14 +460,14 @@ TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents)
 
 TEST(ConSanAtomicFencePolicy, SampledExcludesReleaseWithoutOwnerLocalWriteWindow) {
   static constexpr std::array kReadOnlyWindows = {
-      ConSanSampledAccessWindowAvailability{
+      ConSanDirectionalAccessAvailability{
           .owner = ConSanProgramContainerId{},
           .read = true,
           .write = false,
       },
   };
   ConSanAtomicFencePolicyRequest request = atomic_request(ConSanCapabilityEngine::Sampled);
-  request.sampled_access_windows = kReadOnlyWindows;
+  request.directional_access_windows = kReadOnlyWindows;
 
   const ConSanAtomicFencePolicyResult policy =
       plan_consan_atomic_fence_observation(ordinary_fence_inventory(), request);
@@ -476,7 +476,7 @@ TEST(ConSanAtomicFencePolicy, SampledExcludesReleaseWithoutOwnerLocalWriteWindow
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::MissingSampledAccessWindow);
+            ConSanAtomicPolicyReason::MissingDirectionalAccessWindow);
   ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
   EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
   EXPECT_EQ(policy.plan.fence_site_decisions.front().reason,
@@ -517,7 +517,7 @@ TEST(ConSanAtomicFencePolicy, AssembledSampledPolicyDerivesDirectionalOwnerLocal
   EXPECT_EQ(read_only.plan().atomic_site_decisions.front().kind,
             ConSanSiteDecisionKind::NotApplicable);
   EXPECT_EQ(read_only.plan().atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::MissingSampledAccessWindow);
+            ConSanAtomicPolicyReason::MissingDirectionalAccessWindow);
   ASSERT_EQ(read_only.plan().fence_site_decisions.size(), 1u);
   EXPECT_EQ(read_only.plan().fence_site_decisions.front().kind,
             ConSanSiteDecisionKind::NotApplicable);

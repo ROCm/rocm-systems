@@ -197,8 +197,8 @@ enum class ConSanAtomicPolicyReason : uint8_t {
   ContainerFilterExcluded,
   /// No inventoried kernel can execute the operation.
   MissingExecutionOwner,
-  /// Sampled has no admitted LDS access window that can consume ordering.
-  MissingSampledAccessWindow,
+  /// The engine has no admitted directional access window that can consume ordering.
+  MissingDirectionalAccessWindow,
   /// The target/engine capability contract excludes this atomic form.
   TargetCapabilityUnavailable,
   /// No unique qualified synchronization sequence owns this event.
@@ -238,7 +238,7 @@ inline constexpr auto kConSanAtomicPolicyReasons = [] {
       consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
       consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
       consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
-      consan_enum(E::MissingSampledAccessWindow, "missing-sampled-access-window"),
+      consan_enum(E::MissingDirectionalAccessWindow, "missing-directional-access-window"),
       consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
       consan_enum(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
       consan_enum(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
@@ -397,6 +397,9 @@ struct ConSanEngineProbeVocabulary {
   ConSanProbeIntentKind fence;
   bool sticky_access_evidence;
   bool address_capture;
+  /// Ordered communication is meaningful only when one admitted access probe
+  /// owned by the same kernel can consume the corresponding direction.
+  bool ordering_requires_directional_access_window;
   bool barrier_elements_per_semantic_site;
 };
 
@@ -405,16 +408,16 @@ inline constexpr std::array<ConSanEngineProbeVocabulary,
     kConSanEngineProbeVocabularies = {{
         {ConSanCapabilityEngine::SuperCollider, ConSanProbeIntentKind::RedundantAccessObservation,
          ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count,
-         true, false, false},
+         true, false, false, false},
         {ConSanCapabilityEngine::RecordReplay, ConSanProbeIntentKind::AccessRecord,
          ConSanProbeIntentKind::BarrierRecord, ConSanProbeIntentKind::AtomicRecord,
-         ConSanProbeIntentKind::FenceRecord, false, true, false},
+         ConSanProbeIntentKind::FenceRecord, false, true, false, false},
         {ConSanCapabilityEngine::Sampled, ConSanProbeIntentKind::SampledAccess,
          ConSanProbeIntentKind::SampledBarrierEpoch, ConSanProbeIntentKind::SampledAtomicOrdering,
-         ConSanProbeIntentKind::Count, false, true, true},
+         ConSanProbeIntentKind::Count, false, true, true, true},
         {ConSanCapabilityEngine::InlineShadow, ConSanProbeIntentKind::ExactShadowAccess,
          ConSanProbeIntentKind::ExactBarrierEpoch, ConSanProbeIntentKind::ExactAtomicOrdering,
-         ConSanProbeIntentKind::Count, false, true, true},
+         ConSanProbeIntentKind::Count, false, true, false, true},
     }};
 
 [[nodiscard]] constexpr const ConSanEngineProbeVocabulary *
@@ -665,12 +668,12 @@ struct ConSanBarrierPolicyResult {
 /// Immutable request parameters consumed by pure atomic/fence policy.
 ///
 /// `tracking_enabled` selects the atomic-ordering feature as a whole.
-/// `sampled_access_windows` is a semantic dependency of Sampled: an acquire
-/// needs an owner-local read window and a release needs an owner-local write
-/// window to consume ordering metadata. Other engines ignore that field. The
-/// request contains no report address, register assignment, capacity, or
+/// `directional_access_windows` is a generic coupling between ordered
+/// communication and admitted access evidence. An engine vocabulary may
+/// require an owner-local read window for acquire or write window for release.
+/// The request contains no report address, register assignment, capacity, or
 /// mutable result state.
-struct ConSanSampledAccessWindowAvailability {
+struct ConSanDirectionalAccessAvailability {
   /// Kernel that can execute the admitted access window.
   ConSanProgramContainerId owner;
   /// At least one selected read window exists for this owner.
@@ -678,7 +681,7 @@ struct ConSanSampledAccessWindowAvailability {
   /// At least one selected write window exists for this owner.
   bool write = false;
 
-  bool operator==(const ConSanSampledAccessWindowAvailability &) const = default;
+  bool operator==(const ConSanDirectionalAccessAvailability &) const = default;
 };
 
 struct ConSanAtomicFencePolicyRequest {
@@ -686,8 +689,8 @@ struct ConSanAtomicFencePolicyRequest {
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Whether atomic and associated-fence tracking belongs to this request.
   bool tracking_enabled = false;
-  /// Directional, owner-local Sampled windows able to consume ordering metadata.
-  std::span<const ConSanSampledAccessWindowAvailability> sampled_access_windows;
+  /// Directional, owner-local access windows able to consume ordering metadata.
+  std::span<const ConSanDirectionalAccessAvailability> directional_access_windows;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
   /// Production exact kernel-entry allowlist.

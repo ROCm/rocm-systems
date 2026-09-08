@@ -200,31 +200,35 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
   product.barrier_fragment_appended = plan.append(barrier.plan);
 
   if (request.include_atomic_fence_policy) {
-    std::vector<ConSanSampledAccessWindowAvailability> sampled_access_windows;
-    for (const ConSanProbeIntent &intent : plan.probe_intents) {
-      if (intent.kind != ConSanProbeIntentKind::SampledAccess)
-        continue;
-      for (const ConSanProgramSite &site : inventory.access_sites()) {
-        if (site.physical_id != intent.physical_site)
+    std::vector<ConSanDirectionalAccessAvailability> directional_access_windows;
+    const ConSanEngineProbeVocabulary *vocabulary =
+        consan_engine_probe_vocabulary(request.engine);
+    if (vocabulary && vocabulary->ordering_requires_directional_access_window) {
+      for (const ConSanProbeIntent &intent : plan.probe_intents) {
+        if (intent.kind != vocabulary->access)
           continue;
-        for (ConSanProgramContainerId owner : inventory.execution_owner_kernels(site)) {
-          auto availability = std::ranges::find(sampled_access_windows, owner,
-                                                &ConSanSampledAccessWindowAvailability::owner);
-          if (availability == sampled_access_windows.end()) {
-            sampled_access_windows.push_back({.owner = owner});
-            availability = std::prev(sampled_access_windows.end());
+        for (const ConSanProgramSite &site : inventory.access_sites()) {
+          if (site.physical_id != intent.physical_site)
+            continue;
+          for (ConSanProgramContainerId owner : inventory.execution_owner_kernels(site)) {
+            auto availability = std::ranges::find(
+                directional_access_windows, owner, &ConSanDirectionalAccessAvailability::owner);
+            if (availability == directional_access_windows.end()) {
+              directional_access_windows.push_back({.owner = owner});
+              availability = std::prev(directional_access_windows.end());
+            }
+            availability->read |=
+                site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Atomic;
+            availability->write |= site.kind == ConSanLdsAccessKind::Write ||
+                                   site.kind == ConSanLdsAccessKind::Atomic;
           }
-          availability->read |=
-              site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Atomic;
-          availability->write |=
-              site.kind == ConSanLdsAccessKind::Write || site.kind == ConSanLdsAccessKind::Atomic;
         }
       }
     }
     ConSanAtomicFencePolicyResult atomic_fence = plan_consan_atomic_fence_observation(
         inventory, {.engine = request.engine,
                     .tracking_enabled = request.atomic_fence_tracking_enabled,
-                    .sampled_access_windows = sampled_access_windows,
+                    .directional_access_windows = directional_access_windows,
                     .container_filter = request.container_filter,
                     .kernel_name_allowlist = request.kernel_name_allowlist});
     product.atomic_errors = std::move(atomic_fence.atomic_errors);

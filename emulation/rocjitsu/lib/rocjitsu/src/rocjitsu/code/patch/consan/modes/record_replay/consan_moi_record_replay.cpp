@@ -41,6 +41,7 @@
 namespace rocjitsu {
 
 using consan_detail::MoiAtomicEvidenceSitePlan;
+using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_moi_detail::append_words_bytes;
@@ -282,6 +283,8 @@ const MoiModeOperations kRecordReplayModeOperations = {
 #include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_atomic.inc"
 
 #include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_fence.inc"
+
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_barrier.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

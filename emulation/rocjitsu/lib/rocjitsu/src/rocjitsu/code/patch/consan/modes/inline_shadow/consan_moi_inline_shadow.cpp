@@ -35,6 +35,7 @@
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
@@ -68,6 +69,7 @@ using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
 using consan_detail::MoiAtomicEvidenceSitePlan;
+using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
@@ -76,8 +78,10 @@ using consan_detail::range_overlaps;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
+using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
+using consan_moi_detail::MoiVisibleEvidencePublicationResult;
 using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
@@ -377,6 +381,13 @@ const MoiModeOperations kInlineShadowModeOperations = {
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.inc"
 
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic.inc"
+
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier_planning.inc"
+
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier_transaction.inc"
+
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

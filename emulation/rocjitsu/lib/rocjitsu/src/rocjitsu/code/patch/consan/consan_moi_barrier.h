@@ -9,6 +9,15 @@
 #include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 
+#include <string>
+#include <vector>
+
 namespace rocjitsu::consan_moi_impl {
+
+[[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
+build_moi_barrier_evidence_site_plans(const ProgramInventory &inventory,
+                                      const ConSanObservationPlan &observation,
+                                      ConSanProbeIntentKind evidence_kind,
+                                      std::vector<std::string> &errors);
 
 } // namespace rocjitsu::consan_moi_impl

@@ -217,7 +217,7 @@ void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
   ConSanMoiOperatingPoint barrier_point = operating_point;
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
-  try_apply_shared_barrier_patch(
-      bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch, plan_inline_shadow_barrier_body,
-      plan_inline_shadow_private_barrier, barrier_point, arch, semantics, result);
+  try_apply_inline_shadow_barrier_transaction(
+      bytes, options, plan_inline_shadow_barrier_body, plan_inline_shadow_private_barrier,
+      barrier_point, arch, semantics, result);
 }
