@@ -1414,7 +1414,8 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
       optionsVec.push_back(clext.str());
     }
 
-    // ROCM-24914 - Convert incompatible pointer types error to warning for some Adobe apps.
+    // ROCM-24914 - Convert incompatible pointer types error to warning for some apps.
+    // ROCM-25211 - Baikal sample hits the same failure in its OpenCL kernels.
     // This change was made upstream but the kernels used by these apps are still affected.
     // Refer: https://github.com/llvm/llvm-project/pull/157364
     std::string appName = {};
@@ -1422,7 +1423,8 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
     amd::Os::getAppPathAndFileName(appName, appPathAndName);
     if ((appName == "Indigo Benchmark.exe") ||
         (appName == "Adobe Premiere Pro.exe") ||
-        (appName == "AfterFX.exe")) {
+        (appName == "AfterFX.exe") ||
+        (appName == "BaikalStandalone.exe")) {
       optionsVec.push_back("-Xclang");
       optionsVec.push_back("-Wno-error=incompatible-pointer-types");
     }
