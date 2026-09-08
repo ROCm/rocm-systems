@@ -84,7 +84,7 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
-RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(32) * 1024 * 1024); // 32 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
@@ -1503,7 +1503,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  const size_t agDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllGather);
+  const size_t agDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncAllGather, winRegType, ceCapturing);
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       const size_t agDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllGather);
@@ -1743,7 +1743,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  const size_t rsDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncReduceScatter);
+  const size_t rsDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
   if (!symEligible &&
       rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {

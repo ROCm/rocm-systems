@@ -1765,8 +1765,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
-    4ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
-    16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
+    4ULL*1024*1024,      // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
+    32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB (two-shot path; kDdaLLMaxBytes=32MiB)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -1879,7 +1879,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    512ULL*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
+    2ULL*1024*1024,          // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
     1ULL*1024,            // [3] ReduceScatter   -- no suppression (placeholder)
     256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
     0,                    // [5] SendRecv        -- not used

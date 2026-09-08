@@ -220,7 +220,7 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 // checks derive their per-message caps from it.
 // Footprint = 2 banks * nRanks * (kDdaLLMaxBytes)
 // example: 128 MiB at 16 MiB for 4 ranks
-constexpr size_t kDdaLLMaxBytes = (size_t)(16) * 1024 * 1024;      // 16M
+constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;      // 16M
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
