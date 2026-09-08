@@ -653,7 +653,13 @@ def lvm_over_nvme(devno):
 
         prefix = dm_uuid_prefix(node)
         if prefix is None:
-            # Not a device-mapper node: a physical leaf that must be NVMe.
+            # A device-mapper node always carries a dm/ directory in sysfs. If
+            # one is present but its uuid couldn't be read (permissions or a
+            # transient error), the layer's target type is unknown and the
+            # topology is unresolvable rather than a leaf.
+            if os.path.isdir(os.path.join(node, "dm")):
+                return None
+            # Otherwise it's a physical leaf, which must be NVMe.
             if not os.path.basename(node).startswith("nvme"):
                 return False
             saw_leaf = True
