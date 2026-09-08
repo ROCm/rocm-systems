@@ -145,6 +145,63 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Regression test: --kernel-iteration-range selects host-observed launches, so replay
+# passes must not consume iterations. The filter advances a per-kernel counter on every
+# consultation; consulting it once per pass instead of once per dispatch charged a single
+# launch N iterations, so with a range of [1] the first pass was collected and the
+# remaining N-1 were rejected and silently dropped. The dispatches that survive the filter
+# must still carry all REPLAY_PASSES passes.
+add_test(
+    NAME rocprofv3-test-kernel-replay-iteration-range-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
+        SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
+        SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
+        --kernel-iteration-range "[1]" --output-format csv json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-iteration-range-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-iteration-range-data)
+
+# Filtering to iteration [1] deliberately skips the later launches of a kernel, so the
+# contiguous dispatch-id run the unfiltered validation asserts does not hold here and is
+# the one check deselected. Everything else, including the pass-completeness assertion
+# this test exists for, applies unchanged.
+add_test(
+    NAME rocprofv3-test-kernel-replay-iteration-range-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range/out_results.json
+        --passes ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU -k
+        "not dispatch_ids_increment_sequentially")
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-iteration-range-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-iteration-range-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 add_test(
     NAME rocprofv3-test-kernel-replay-baseline-generate
