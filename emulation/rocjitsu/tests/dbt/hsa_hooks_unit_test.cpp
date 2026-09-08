@@ -1916,9 +1916,6 @@ void reset_core_memory_observations() {
 void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed) {
   setenv("RJ_CONSAN_MODE", profile.mode, 1);
   unsetenv("RJ_CONSAN_POLICY");
-  unsetenv("RJ_CONSAN_FLAVOR");
-  unsetenv("RJ_CONSAN_MOI_ENGINE");
-  unsetenv("RJ_CONSAN_MOI_BACKEND");
   setenv("RJ_CONSAN_FAIL_CLOSED", fail_closed ? "1" : "0", 1);
   unsetenv("RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT");
   unsetenv("RJ_CONSAN_MOI_TRACK_BARRIERS");
@@ -2030,9 +2027,6 @@ rocjitsu::ConSanTransformArtifacts process_growth_replacement_result(size_t repl
 TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
-  ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
   ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
@@ -3984,39 +3978,8 @@ TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapa
   EXPECT_EQ(decoded.access_records.back().claim_token, 7u);
 }
 
-TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", "record_replay");
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
-
-  reset_code_object_observations();
-  rocjitsu::ConSanTransformArtifacts unchanged;
-  unchanged.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
-  g_transform_override_result = unchanged;
-  FakeApiTable api;
-  InstalledDbiHook hook(api);
-  ASSERT_TRUE(hook.installed()) << hook.error();
-
-  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  hsa_code_object_reader_t reader{};
-  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
-                                                                  &reader),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                              reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(g_transform_override_flavors.size(), 1u);
-  EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
-  ASSERT_EQ(g_transform_override_engines.size(), 1u);
-  EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
-}
-
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "magic");
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
-  ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
 
   reset_code_object_observations();
   FakeApiTable api;
@@ -4145,23 +4108,6 @@ TEST(HsaHooksUnitTest, ConSanRejectsZeroFaultReservationTimeout) {
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidPolicy) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "fatal-races");
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
-  ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
-
-  reset_code_object_observations();
-  FakeApiTable api;
-  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
-  InstalledDbiHook hook(api);
-  EXPECT_FALSE(hook.installed());
-  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
-}
-
-TEST(HsaHooksUnitTest, ConSanRejectsModeCombinedWithLegacySelection) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
-  ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
 
   reset_code_object_observations();
   FakeApiTable api;
@@ -4424,8 +4370,6 @@ sampled_atomic(rocjitsu::ConSanMoiSampledSyncRole role, rocjitsu::ConSanMoiSampl
 TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);

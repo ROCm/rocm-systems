@@ -13,34 +13,31 @@ For a hands-on walkthrough, see [Detect an LDS data race with ConSan](/tutorials
 
 ## Enabling ConSan
 
-ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation flavor with the `RJ_CONSAN_FLAVOR` environment variable. If `RJ_CONSAN_FLAVOR` is unset, ConSan does not instrument the application.
+ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset, it defaults to `record-replay`.
 
 ``` bash
 env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
-  RJ_CONSAN_FLAVOR=supercollider \
+  RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
 ### Instrumentation profiles
 
-ConSan exposes two top-level flavors. The MOI flavor contains three engines.
+ConSan exposes four modes.
 
 | Selection | Behavior |
 | --- | --- |
-| `RJ_CONSAN_FLAVOR=supercollider` | Duplicate or read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=record_replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=sampled` | Patch all admitted supported sites; use automatic runtime stride 16,384 and offset zero; retain bounded sampled causal windows and synchronization metadata. |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=inline_shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. |
-
-`RJ_CONSAN_MOI_ENGINE` defaults to `record_replay` when the flavor is `moi`. Legacy `RJ_CONSAN_MOI_BACKEND=context|sampled_watchpoint` aliases map to `record_replay|sampled` only when the engine selector is absent.
+| `RJ_CONSAN_MODE=supercollider` | Duplicate or read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. |
+| `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. |
+| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime sampling; retain bounded sampled causal windows and synchronization metadata. |
+| `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. |
 
 ### Core environment variables
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_FLAVOR` | unset | Select instrumentation: `supercollider` or `moi`. |
-| `RJ_CONSAN_MOI_ENGINE` | `record_replay` | Select the MOI engine: `record_replay`, `sampled`, or `inline_shadow`. |
+| `RJ_CONSAN_MODE` | `record-replay` | Select `record-replay`, `sampled`, `inline-shadow`, or `supercollider`. |
 | `RJ_CONSAN_LOG` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED` | `0` | Reject unsupported or invalid transformation outcomes instead of loading the original code object. |
 | `RJ_CONSAN_REQUIRE_PATCH` | `0` | Reject an applicable code object when no real access, barrier, atomic, or fence instrumentation patch is emitted. |
@@ -226,4 +223,3 @@ Flat support is in scope because compiled HIP helper code can access LDS through
 -   `Private`, `MaybePrivate`, `Global`, `Unknown`.
 
 `RJ_CONSAN_FLAT_PROVENANCE=likely` (the default) admits both `Group` and `MaybeGroup`. `strict` admits only `Group`.
-

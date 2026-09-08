@@ -435,6 +435,3 @@ consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutco
 [[nodiscard]] const char *
 consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] const char *consan_barrier_scope_name(ConSanBarrierSite::Scope scope);
-
-[[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
-[[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);

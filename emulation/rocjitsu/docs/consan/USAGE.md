@@ -245,9 +245,6 @@ outside the hook lifetime and cannot be reconciled on reload. Teardown reports
 the live and peak values for all three controls, including baseline runs where
 the ceilings are unlimited.
 
-The old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
-`RJ_CONSAN_MOI_BACKEND` selection variables are deprecated but accepted with
-warnings. Do not combine them with `RJ_CONSAN_MODE`.
 The absolute and percentage growth variables are mutually exclusive. A
 growth-policy rejection reports the exact alignment-inclusive bytes required,
 the effective total limit, and the selected policy. Successive ConSan stages

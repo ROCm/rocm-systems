@@ -461,9 +461,6 @@ function(rj_add_consan_device_conformance_cases)
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE="
             "RJ_CONSAN_POLICY="
-            "RJ_CONSAN_FLAVOR="
-            "RJ_CONSAN_MOI_ENGINE="
-            "RJ_CONSAN_MOI_BACKEND="
             "RJ_CONSAN_LOG=1"
             "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
         )

@@ -820,37 +820,6 @@ TEST(ConSan, StagedModificationStateCannotOverwriteFailureOutcome) {
   EXPECT_FALSE(artifacts.modified());
 }
 
-TEST(ConSan, ParsesFlavorNames) {
-  EXPECT_EQ(parse_consan_flavor("supercollider"), ConSanFlavor::SuperCollider);
-  EXPECT_EQ(parse_consan_flavor("SUPERCOLLIDER"), ConSanFlavor::SuperCollider);
-  EXPECT_EQ(parse_consan_flavor("moi"), ConSanFlavor::Moi);
-  EXPECT_EQ(parse_consan_flavor("MOI"), ConSanFlavor::Moi);
-  EXPECT_EQ(consan_flavor_name(ConSanFlavor::None), std::string_view("none"));
-  EXPECT_EQ(consan_flavor_name(ConSanFlavor::SuperCollider), std::string_view("supercollider"));
-  EXPECT_EQ(consan_flavor_name(ConSanFlavor::Moi), std::string_view("moi"));
-  EXPECT_FALSE(parse_consan_flavor(""));
-  EXPECT_FALSE(parse_consan_flavor("context"));
-}
-
-TEST(ConSan, ParsesMoiEngineNamesAndAliases) {
-  EXPECT_EQ(parse_consan_moi_engine("record_replay"), ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(parse_consan_moi_engine("record-replay"), ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(parse_consan_moi_engine("context"), ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(parse_consan_moi_engine("CONTEXT"), ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(parse_consan_moi_engine("inline_shadow"), ConSanMoiEngine::InlineShadow);
-  EXPECT_EQ(parse_consan_moi_engine("inline-shadow"), ConSanMoiEngine::InlineShadow);
-  EXPECT_EQ(parse_consan_moi_engine("sampled_watchpoint"), ConSanMoiEngine::Sampled);
-  EXPECT_EQ(parse_consan_moi_engine("sampled-watchpoint"), ConSanMoiEngine::Sampled);
-  EXPECT_EQ(parse_consan_moi_engine("sampled"), ConSanMoiEngine::Sampled);
-  EXPECT_EQ(consan_moi_engine_name(ConSanMoiEngine::RecordReplay),
-            std::string_view("record_replay"));
-  EXPECT_EQ(consan_moi_engine_name(ConSanMoiEngine::InlineShadow),
-            std::string_view("inline_shadow"));
-  EXPECT_EQ(consan_moi_engine_name(ConSanMoiEngine::Sampled), std::string_view("sampled"));
-  EXPECT_FALSE(parse_consan_moi_engine(""));
-  EXPECT_FALSE(parse_consan_moi_engine("moi"));
-}
-
 TEST(ConSan, PatchedImageGrowthPolicyPreservesAbsoluteDefault) {
   ConSanPatchedImageGrowthLimit policy;
   EXPECT_EQ(policy.kind, ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);

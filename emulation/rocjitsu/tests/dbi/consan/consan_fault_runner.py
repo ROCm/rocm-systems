@@ -107,10 +107,7 @@ def _selection_from_environment(environment: dict[str, str]) -> tuple[str, str]:
     mode = environment.get("RJ_CONSAN_MODE", "").strip().lower()
     if mode in _MODE_SELECTIONS:
         return _MODE_SELECTIONS[mode]
-    return (
-        environment.get("RJ_CONSAN_FLAVOR", UNSPECIFIED),
-        environment.get("RJ_CONSAN_MOI_ENGINE", UNSPECIFIED),
-    )
+    return UNSPECIFIED, UNSPECIFIED
 
 
 def _key_values(text: str) -> dict[str, str]:

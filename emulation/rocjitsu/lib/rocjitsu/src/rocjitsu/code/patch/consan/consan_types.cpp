@@ -3,25 +3,12 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
-#include <cctype>
 #include <string>
 #include <string_view>
 
 namespace rocjitsu {
 
 namespace {
-
-[[nodiscard]] bool ascii_iequals(std::string_view lhs, std::string_view rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    const auto l = static_cast<unsigned char>(lhs[i]);
-    const auto r = static_cast<unsigned char>(rhs[i]);
-    if (std::tolower(l) != std::tolower(r))
-      return false;
-  }
-  return true;
-}
 
 constexpr auto kConSanFlavors =
     make_consan_enum_vocabulary("unknown", consan_enum(ConSanFlavor::None, "none"),
@@ -195,26 +182,6 @@ const char *consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlterna
 const char *
 consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome outcome) {
   return kConSanResourcePlanAlternativeOutcomes.name(outcome).data();
-}
-
-std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value) {
-  for (ConSanFlavor flavor : kConSanFlavors)
-    if (flavor != ConSanFlavor::None && ascii_iequals(value, kConSanFlavors.name(flavor)))
-      return flavor;
-  return std::nullopt;
-}
-
-std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value) {
-  for (ConSanMoiEngine engine : kConSanMoiEngines)
-    if (ascii_iequals(value, kConSanMoiEngines.name(engine)))
-      return engine;
-  if (ascii_iequals(value, "record-replay") || ascii_iequals(value, "context"))
-    return ConSanMoiEngine::RecordReplay;
-  if (ascii_iequals(value, "inline-shadow"))
-    return ConSanMoiEngine::InlineShadow;
-  if (ascii_iequals(value, "sampled_watchpoint") || ascii_iequals(value, "sampled-watchpoint"))
-    return ConSanMoiEngine::Sampled;
-  return std::nullopt;
 }
 
 } // namespace rocjitsu

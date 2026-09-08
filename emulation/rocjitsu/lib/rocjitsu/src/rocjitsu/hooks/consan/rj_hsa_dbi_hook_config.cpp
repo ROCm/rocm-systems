@@ -258,56 +258,6 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         "any, release, or acquire");
 }
 
-[[nodiscard]] bool parse_flavor_env(std::optional<rocjitsu::ConSanFlavor> *out) {
-  const char *value = std::getenv("RJ_CONSAN_FLAVOR");
-  if (value == nullptr || *value == '\0') {
-    out->reset();
-    return true;
-  }
-  if (auto parsed = rocjitsu::parse_consan_flavor(value)) {
-    *out = *parsed;
-    return true;
-  }
-
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FLAVOR='%s'; "
-               "expected supercollider|moi\n",
-               value);
-  return false;
-}
-
-[[nodiscard]] bool parse_moi_engine_env(rocjitsu::ConSanMoiEngine *out) {
-  const char *value = std::getenv("RJ_CONSAN_MOI_ENGINE");
-  if (value != nullptr && *value != '\0') {
-    if (auto parsed = rocjitsu::parse_consan_moi_engine(value)) {
-      *out = *parsed;
-      return true;
-    }
-
-    std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_ENGINE='%s'; "
-                 "expected record_replay|inline_shadow|sampled\n",
-                 value);
-    return false;
-  }
-
-  const char *legacy_value = std::getenv("RJ_CONSAN_MOI_BACKEND");
-  if (legacy_value == nullptr || *legacy_value == '\0') {
-    *out = rocjitsu::ConSanMoiEngine::RecordReplay;
-    return true;
-  }
-  if (auto parsed = rocjitsu::parse_consan_moi_engine(legacy_value)) {
-    *out = *parsed;
-    return true;
-  }
-
-  std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_BACKEND='%s'; "
-               "expected record_replay|sampled or legacy context|sampled_watchpoint\n",
-               legacy_value);
-  return false;
-}
-
 [[nodiscard]] bool parse_moi_owner_source_env(rocjitsu::ConSanMoiOwnerSource *out) {
   using E = rocjitsu::ConSanMoiOwnerSource;
   return parse_enum_env("RJ_CONSAN_MOI_OWNER_SOURCE", E::Automatic, out,
@@ -394,38 +344,12 @@ void warn_env(const char *name, const char *message) {
   std::fprintf(stderr, "[rocjitsu-dbi-hooks] warning: %s: %s\n", name, message);
 }
 
-void warn_deprecated_env(const char *name, const char *replacement) {
-  std::fprintf(stderr, "[rocjitsu-dbi-hooks] warning: %s is deprecated; use %s instead\n", name,
-               replacement);
-}
-
 [[nodiscard]] bool parse_mode_env(HookConfig *config) {
   const char *value = std::getenv("RJ_CONSAN_MODE");
   if (value == nullptr || *value == '\0') {
-    if (env_has_value("RJ_CONSAN_FLAVOR"))
-      warn_deprecated_env("RJ_CONSAN_FLAVOR", "RJ_CONSAN_MODE");
-    if (env_has_value("RJ_CONSAN_MOI_ENGINE"))
-      warn_deprecated_env("RJ_CONSAN_MOI_ENGINE", "RJ_CONSAN_MODE");
-    if (env_has_value("RJ_CONSAN_MOI_BACKEND"))
-      warn_deprecated_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MODE");
-
-    if (!parse_flavor_env(&config->flavor))
-      return false;
-    if (!config->flavor)
-      config->flavor = rocjitsu::ConSanFlavor::Moi;
-    return parse_moi_engine_env(&config->moi_engine);
-  }
-
-  constexpr const char *kLegacySelectionVariables[] = {
-      "RJ_CONSAN_FLAVOR",
-      "RJ_CONSAN_MOI_ENGINE",
-      "RJ_CONSAN_MOI_BACKEND",
-  };
-  for (const char *name : kLegacySelectionVariables) {
-    if (env_has_value(name)) {
-      std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s and RJ_CONSAN_MODE cannot both be set\n", name);
-      return false;
-    }
+    config->flavor = rocjitsu::ConSanFlavor::Moi;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+    return true;
   }
 
   if (ascii_iequals(value, "record-replay") || ascii_iequals(value, "record_replay")) {
@@ -463,9 +387,6 @@ void warn_deprecated_env(const char *name, const char *replacement) {
 }
 
 void warn_irrelevant_env_combinations(const HookConfig &config) {
-  if (env_has_value("RJ_CONSAN_MOI_ENGINE") && env_has_value("RJ_CONSAN_MOI_BACKEND"))
-    warn_ignored_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MOI_ENGINE takes precedence");
-
   if (config.process_concurrent_transform_limit_bytes) {
     const std::optional<ConSanTransformReservationEstimate> minimum_reservation =
         consan_transform_major_image_reservation(1, config.patched_image_growth_limit);
@@ -533,8 +454,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
 
   constexpr const char *kMoiOnlyKnobs[] = {
-      "RJ_CONSAN_MOI_ENGINE",
-      "RJ_CONSAN_MOI_BACKEND",
       "RJ_CONSAN_MOI_REPORT_BUFFER",
       "RJ_CONSAN_MOI_REPORT_BUFFER_SIZE",
       "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE",

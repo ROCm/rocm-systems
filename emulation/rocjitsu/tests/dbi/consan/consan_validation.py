@@ -3044,8 +3044,6 @@ def _setting_metadata(name: str) -> dict:
     elif name in {
         "RJ_CONSAN_MODE",
         "RJ_CONSAN_POLICY",
-        "RJ_CONSAN_FLAVOR",
-        "RJ_CONSAN_MOI_ENGINE",
         "RJ_CONSAN_MOI_TRACK_BARRIERS",
         "RJ_CONSAN_MOI_TRACK_ATOMICS",
     }:

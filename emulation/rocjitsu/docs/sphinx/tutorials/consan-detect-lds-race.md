@@ -91,13 +91,13 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx1201
 ## Run under ConSan
 
 Load the hook through the `HSA_TOOLS_LIB` environment variable and
-select a ConSan flavor. SuperCollider is the simplest profile---it
+select a ConSan mode. SuperCollider is the simplest profile---it
 repeats or reads back each supported LDS access and sets an automatic
 marker on mismatch:
 
 ``` bash
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_FLAVOR=supercollider \
+  RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
 ```
@@ -107,8 +107,7 @@ the three MOI engines for structured race detection:
 
 ``` bash
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_FLAVOR=moi \
-  RJ_CONSAN_MOI_ENGINE=inline_shadow \
+  RJ_CONSAN_MODE=inline-shadow \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
 ```
@@ -182,8 +181,7 @@ Recompile and rerun:
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx1201
 
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_FLAVOR=moi \
-  RJ_CONSAN_MOI_ENGINE=inline_shadow \
+  RJ_CONSAN_MODE=inline-shadow \
   RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1 \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example

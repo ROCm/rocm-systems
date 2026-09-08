@@ -2471,8 +2471,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", environment)
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
         self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
-        self.assertNotIn("RJ_CONSAN_FLAVOR", environment)
-        self.assertNotIn("RJ_CONSAN_MOI_ENGINE", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
         self.assertEqual(
