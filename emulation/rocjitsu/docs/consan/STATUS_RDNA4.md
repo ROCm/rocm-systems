@@ -1,6 +1,6 @@
 # ConSan RDNA4 (`gfx1201`) status
 
-Status snapshot: 2026-08-24. All rows use physical gfx1201 evidence. The production-matmul cells retain the frozen [empirical-study](GFX1201_EMPIRICAL_STUDY.md) denominator; other greens retain their accepted clean, coverage, reviewed-fault, containment, overhead, health, and provenance bundles.
+Status snapshot: 2026-08-24. All rows use physical gfx1201 evidence. Green rows retain accepted clean, coverage, reviewed-fault, containment, overhead, health, and provenance bundles.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 

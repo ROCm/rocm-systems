@@ -122,10 +122,5 @@ point, not a claim of exhaustive history.
 - Choose **SuperCollider** for complementary value-instability evidence,
   particularly when causal attribution is unnecessary.
 
-The physical `gfx1201` [empirical study](GFX1201_EMPIRICAL_STUDY.md) recommends
-Sampled for ordinary barrier/LDS triage on that target and Record/Replay for
-expert atomic-order/scope investigation. Other targets need their own empirical
-qualification.
-
 Commands and defaults are in [USAGE.md](USAGE.md). Implementation ownership and
 extension rules are in [DESIGN.md](DESIGN.md).

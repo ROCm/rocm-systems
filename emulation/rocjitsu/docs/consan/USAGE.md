@@ -113,11 +113,6 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-On gfx1201, the [empirical study](GFX1201_EMPIRICAL_STUDY.md) recommends
-Sampled for ordinary barrier/LDS triage, with multiple runtime offsets when
-confidence matters. Record/Replay remains the coded default until the public
-supported-mode policy is updated.
-
 SuperCollider:
 
 ```sh

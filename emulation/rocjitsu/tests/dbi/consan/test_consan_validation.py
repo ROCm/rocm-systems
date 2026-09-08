@@ -2687,7 +2687,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("d128-pressure", "clip-bf16"),
             validation.PROFILE_IDS,
             None,
-            allow_reference=False,
         )
         for workload in audit["workloads"]:
             with self.subTest(workload=workload["id"]):
@@ -2708,7 +2707,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("pytorch-scatter-reduce",),
             validation.PROFILE_IDS,
             None,
-            allow_reference=False,
         )
         workload = audit["workloads"][0]
         self.assertEqual(workload["fault_families"], ("atomic-weaken-order",))
@@ -3246,7 +3244,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("pytorch-rdna4-llm-topk",),
             validation.PROFILE_IDS,
             None,
-            allow_reference=False,
         )
         workload = audit["workloads"][0]
         record_replay = next(
@@ -3306,7 +3303,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("pytorch-rdna4-llm-topk",),
             validation.PROFILE_IDS,
             None,
-            allow_reference=False,
         )
         output = io.StringIO()
         with redirect_stdout(output):
@@ -4936,7 +4932,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("qwen-prefill",),
             validation.PROFILE_IDS,
             None,
-            allow_reference=False,
         )
         workload = audit["workloads"][0]
         expected = validation._workload_command(
@@ -5008,50 +5003,6 @@ class ConSanValidationTest(unittest.TestCase):
             "65536",
         )
 
-    def test_explain_audits_reference_fault_outcomes_and_trial_knobs(self) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_reference.json"
-        )
-        audit = validation._explain_contract(
-            Path("/workspace"),
-            "gfx1201",
-            ("qwen-prefill",),
-            validation.PROFILE_IDS,
-            path,
-            allow_reference=True,
-        )
-        fault = audit["workloads"][0]["faults"][0]
-        sampled = next(
-            item
-            for item in fault["profile_expectations"]
-            if item["profile"] == "sampled"
-        )
-        self.assertEqual(sampled["detector"], "statistical")
-        self.assertEqual(sampled["oracle"], "fail")
-        self.assertEqual(sampled["trial_count"], 32)
-        self.assertEqual(
-            sampled["trials"][0]["overrides"][0]["name"],
-            "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
-        )
-        self.assertIn("at least 1", sampled["required_diagnostic"])
-        inline = next(
-            item
-            for item in fault["profile_expectations"]
-            if item["profile"] == "inline-shadow"
-        )
-        effective = {
-            setting["name"]: setting["value"]
-            for setting in inline["trials"][0]["effective_settings"]
-        }
-        implicit = {
-            setting["name"]: setting["value"]
-            for setting in inline["trials"][0]["implicit_runtime_defaults"]
-        }
-        self.assertEqual(effective["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1")
-        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", effective)
-        self.assertEqual(implicit, validation.ORDINARY_MOI_RUNTIME_DEFAULTS)
-        self.assertIn("$FAULT_SPEC", fault["validator_argv_template"])
-
     def test_explain_discloses_fault_only_kernel_filter_exception(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         audit = validation._explain_contract(
@@ -5060,7 +5011,6 @@ class ConSanValidationTest(unittest.TestCase):
             ("qwen-prefill",),
             ("inline-shadow",),
             path,
-            allow_reference=False,
         )
         [exception] = audit["usability_audit"]["fault_policy_exceptions"]
         self.assertEqual(exception["workload"], "qwen-prefill")
@@ -7364,142 +7314,6 @@ class ConSanValidationTest(unittest.TestCase):
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(validation.ValidationError, "site_provenance"):
                 validation._load_fault(path, "gfx1201", workload, "drop")
-
-    def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_reference.json"
-        )
-        document = json.loads(path.read_text(encoding="utf-8"))
-        with self.assertRaisesRegex(validation.ValidationError, "reference-only"):
-            validation._load_fault(
-                path,
-                "gfx1201",
-                validation.WORKLOAD_BY_ID["qwen-prefill"],
-                "barrier-drop",
-            )
-        manifest_ids = {
-            workload.id for workload in validation._workloads_for_target("gfx1201")
-        }
-        self.assertLessEqual(set(document["workloads"]), manifest_ids)
-        for workload_id, workload_document in document["workloads"].items():
-            workload = validation.WORKLOAD_BY_ID[workload_id]
-            for fault_document in workload_document["faults"]:
-                fault_id = fault_document["id"]
-                fault = validation._load_fault(
-                    path,
-                    "gfx1201",
-                    workload,
-                    fault_id,
-                    allow_reference=True,
-                )
-                for profile in validation.PROFILE_IDS:
-                    policy, trials = validation._fault_trials(fault, profile)
-                    self.assertTrue(trials)
-                    self.assertIn(
-                        policy.get("detector"),
-                        {"detected", "not_detected", "statistical"},
-                    )
-        qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
-        fault = validation._load_fault(
-            path,
-            "gfx1201",
-            qwen,
-            "barrier-drop",
-            allow_reference=True,
-        )
-        policy, trials = validation._fault_trials(fault, "sampled")
-        self.assertEqual(policy["minimum_detections"], 1)
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
-            "256",
-        )
-        self.assertEqual(len(trials), 32)
-        self.assertEqual(trials[0], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"})
-        self.assertEqual(trials[-1], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "31"})
-
-    def test_checked_in_gfx1201_native_record_replay_fault_is_runnable(self) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_native_record_replay.json"
-        )
-        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
-        policy, trials = validation._fault_trials(fault, "record-replay")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "any")
-        self.assertEqual(trials, [{}])
-        self.assertIn(
-            "pc=0x000000000000b8cc",
-            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-        )
-
-    def test_gfx1201_reference_retains_repeated_d128_record_replay_detection(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_reference.json"
-        )
-        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
-        fault = validation._load_fault(
-            path,
-            "gfx1201",
-            workload,
-            "barrier-drop",
-            allow_reference=True,
-        )
-        policy, trials = validation._fault_trials(fault, "record-replay")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "fail")
-        self.assertEqual(trials, [{}, {}, {}, {}, {}])
-        self.assertIn(
-            "pc=0x000000000000a51c",
-            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-        )
-
-    def test_checked_in_gfx1201_native_matvec_miss_is_runnable(self) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_native_matvec_miss.json"
-        )
-        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
-        for profile in ("supercollider", "record-replay", "sampled"):
-            policy, trials = validation._fault_trials(fault, profile)
-            self.assertEqual(policy["detector"], "not_detected")
-            self.assertEqual(policy["oracle"], "pass")
-            self.assertEqual(trials, [{}])
-        self.assertIn(
-            "pc=0x000000000000b8cc",
-            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-        )
-
-    def test_checked_in_gfx1201_native_matvec_effective_fault_is_runnable(self) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_native_matvec_rr_effective.json"
-        )
-        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
-        for profile in ("record-replay", "sampled"):
-            policy, trials = validation._fault_trials(fault, profile)
-            self.assertEqual(policy["detector"], "not_detected")
-            self.assertEqual(policy["oracle"], "fail")
-            self.assertEqual(trials, [{}])
-
-    def test_checked_in_gfx1201_native_rms_fault_is_runnable(self) -> None:
-        path = Path(__file__).with_name(
-            "consan_validation_faults_gfx1201_native_rms_norm.json"
-        )
-        workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
-        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
-        for profile in validation.PROFILE_IDS:
-            policy, trials = validation._fault_trials(fault, profile)
-            self.assertEqual(policy["detector"], "detected")
-            self.assertEqual(policy["oracle"], "any")
-            self.assertEqual(trials, [{}])
-        self.assertIn(
-            "pc=0x0000000000001824",
-            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-        )
 
     def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
         path = Path(__file__).with_name(

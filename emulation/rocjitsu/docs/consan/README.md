@@ -42,11 +42,8 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
 ```
 
 Loading the hook is itself the activation action; no separate enable variable
-is required. It selects MOI Record/Replay by default. On gfx1201, the
-empirical recommendation is to select Sampled for ordinary barrier/LDS triage
-and reserve Record/Replay for expert synchronization investigations. The coded
-default has not yet changed. Add `RJ_CONSAN_LOG=1` for instrumentation and
-completeness summaries.
+is required. It selects MOI Record/Replay by default. Add `RJ_CONSAN_LOG=1` for
+instrumentation and completeness summaries.
 
 When enabled, the same hook always runs waitcheck over each supported original
 code object before ConSan DBI. It reports missing waits or analysis failures,
@@ -87,13 +84,8 @@ or GPU reset is not by itself a ConSan diagnostic.
   [gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md).
 - [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
-- [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md): the audience-facing
-  physical-gfx1201 recommendation comparing engine overhead, detection yield,
-  and implementation complexity.
 - [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): the reusable admission,
   GPU-timing, fault-detection, provenance, and recommendation contract.
-- [GFX1201_EMPIRICAL_RESULTS.md](GFX1201_EMPIRICAL_RESULTS.md): generated
-  performance, detection, structural, and complexity tables for that study.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and

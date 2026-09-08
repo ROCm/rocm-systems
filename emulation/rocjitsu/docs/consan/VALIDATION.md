@@ -521,17 +521,7 @@ user setting.
 
 Without `--spec`, `explain` shows inventory templates and prints
 `REVIEW_REQUIRED` instead of pretending that detector outcomes have been
-chosen. Historical gfx1201 evidence can be inspected, but never executed, with:
-
-```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target gfx1201 explain --workload all --profile all \
-  --spec emulation/rocjitsu/tests/dbi/consan/consan_validation_faults_gfx1201_reference.json \
-  --allow-reference --json > gfx1201-historical-audit.json
-```
-
-`--allow-reference` only permits read-only explanation. The `fault` subcommand
-continues to reject the cumulative reference file.
+chosen.
 
 The current gfx1201 manifest covers Qwen3-0.6B prefill; native
 PyTorch/Inductor compact and split online-softmax clients, collision-heavy
@@ -760,18 +750,6 @@ gfx1201 policy uses `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1` for deterministic
 Inline catches and unsets the clean overflow guard only for the two accepted
 fault rows whose useful diagnostic is intentionally retained in a bounded
 buffer with disclosed duplicate-report drops.
-
-The cumulative gfx1201 ledger is checked in as
-`consan_validation_faults_gfx1201_reference.json`. It records the historical
-selectors, deterministic qualified misses/detections, oracle outcomes, and
-32-offset Qwen Sampled campaign behind the current table. That historical
-fault campaign explicitly retains stride 256 in its profile policy; this does
-not alter the untuned clean profile. It is reference data, not a runnable
-default: its rows came from different frozen checkpoints, and a later analyzer
-may deliberately reject an old association. Copy the relevant values into the
-generated template only after a fresh inventory proves that every identity and
-expectation still applies. The runner refuses the reference-only file itself;
-exact-one mutation makes stale reviewed identities fail closed.
 
 Example reviewed profile policy:
 

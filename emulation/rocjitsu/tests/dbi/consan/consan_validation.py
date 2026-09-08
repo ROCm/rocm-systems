@@ -6689,18 +6689,12 @@ def _load_fault(
     target: str,
     workload: Workload,
     fault_id: str,
-    *,
-    allow_reference: bool = False,
 ) -> dict:
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("schema_version") != SCHEMA_VERSION:
         raise ValidationError("fault spec has unsupported schema_version")
     if document.get("target") != target:
         raise ValidationError("fault spec target does not match --target")
-    if document.get("reference_only") is True and not allow_reference:
-        raise ValidationError(
-            "reference-only fault data must be copied and reviewed against inventory"
-        )
     if "workloads" in document:
         workloads = document.get("workloads")
         if not isinstance(workloads, dict) or workload.id not in workloads:
@@ -6898,8 +6892,6 @@ def _faults_from_spec(
     path: Path,
     target: str,
     workload: Workload,
-    *,
-    allow_reference: bool,
 ) -> list[dict]:
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("target") != target:
@@ -6920,13 +6912,7 @@ def _faults_from_spec(
         if not isinstance(fault, dict) or not isinstance(fault.get("id"), str):
             raise ValidationError("every fault in the spec must have a string id")
         loaded.append(
-            _load_fault(
-                path,
-                target,
-                workload,
-                fault["id"],
-                allow_reference=allow_reference,
-            )
+            _load_fault(path, target, workload, fault["id"])
         )
     return loaded
 
@@ -7039,11 +7025,7 @@ def _explain_contract(
     workload_ids: tuple[str, ...],
     profiles: tuple[str, ...],
     spec_path: Path | None,
-    *,
-    allow_reference: bool,
 ) -> dict:
-    if allow_reference and spec_path is None:
-        raise ValidationError("--allow-reference requires --spec")
     spec_document = None
     spec_metadata = None
     if spec_path is not None:
@@ -7052,7 +7034,6 @@ def _explain_contract(
         spec_metadata = {
             "path": str(spec_path),
             "sha256": sha256_file(spec_path),
-            "reference_only": spec_document.get("reference_only") is True,
             "review_required": spec_document.get("review_required"),
         }
     workloads = []
@@ -7149,17 +7130,8 @@ def _explain_contract(
             fault_source = "unreviewed-template"
             faults = _fault_template(target, workload)["faults"]
         else:
-            fault_source = (
-                "reference-only"
-                if spec_document.get("reference_only")
-                else "reviewed-spec"
-            )
-            faults = _faults_from_spec(
-                spec_path,
-                target,
-                workload,
-                allow_reference=allow_reference,
-            )
+            fault_source = "reviewed-spec"
+            faults = _faults_from_spec(spec_path, target, workload)
         workloads.append(
             {
                 **asdict(effective_workload),
@@ -7287,10 +7259,7 @@ def _print_explain(document: dict) -> None:
     if document["fault_spec"] is None:
         print("fault expectations: REVIEW_REQUIRED templates (no --spec supplied)")
     else:
-        source = (
-            "reference-only" if document["fault_spec"]["reference_only"] else "reviewed"
-        )
-        print(f"fault expectations: {source} {document['fault_spec']['path']}")
+        print(f"fault expectations: reviewed {document['fault_spec']['path']}")
     usability = document["usability_audit"]
     print(
         "ordinary coverage-limiting controls: "
@@ -8619,11 +8588,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     explain.add_argument(
         "--spec", type=Path, help="reviewed fault spec to include in the audit"
     )
-    explain.add_argument(
-        "--allow-reference",
-        action="store_true",
-        help="audit, but never execute, a reference-only historical spec",
-    )
     explain.add_argument("--json", action="store_true")
 
     run = subparsers.add_parser("run", help="run clean correctness or overhead rows")
@@ -8816,7 +8780,6 @@ def main(argv: list[str] | None = None) -> int:
                 workload_ids,
                 profiles,
                 args.spec,
-                allow_reference=args.allow_reference,
             )
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
