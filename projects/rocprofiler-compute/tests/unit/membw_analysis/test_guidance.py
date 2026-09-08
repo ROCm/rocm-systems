@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from membw.guidance import render_guidance_blocks
+from membw_analysis.guidance import render_guidance_blocks
 
 
 class TestRenderGuidanceBlocks:

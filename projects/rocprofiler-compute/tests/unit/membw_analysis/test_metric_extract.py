@@ -5,7 +5,7 @@ import math
 
 import pandas as pd
 
-from membw.metric_extract import extract_membw_metrics
+from membw_analysis.metric_extract import extract_membw_metrics
 
 
 def make_table_df(metrics_and_values):

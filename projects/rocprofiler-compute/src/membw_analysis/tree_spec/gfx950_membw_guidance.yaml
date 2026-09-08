@@ -93,25 +93,7 @@ guidance_templates:
       Measured  : {metric:L2 Remote Access Pressure (GMI)}% (threshold: {threshold:stall_pct_high}%)
       Impact    : Remote memory access bottleneck -- multi-GPU or multi-socket traffic saturated
 
-  # --- EA templates (7) ---
-
-  ea_hbm_read: |
-    [EA] HBM read bandwidth bound
-      Condition : HBM read credit stall >= {threshold:stall_pct_high}%
-      Measured  : {metric:EA HBM BW Bound - Read Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
-      Impact    : EA read path saturated by HBM bandwidth
-
-  ea_hbm_write: |
-    [EA] HBM write bandwidth bound
-      Condition : HBM write credit stall >= {threshold:stall_pct_high}%
-      Measured  : {metric:EA HBM BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
-      Impact    : EA write path saturated by HBM bandwidth
-
-  ea_hbm_other: |
-    [EA] HBM bandwidth bound (balanced read/write)
-      Condition : Combined EA HBM stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant
-      Measured  : {metric:EA HBM BW Bound - Combined}% (threshold: {threshold:stall_pct_high}%)
-      Impact    : EA stalled on HBM bandwidth from balanced read/write pressure -- neither path individually exceeds the threshold
+  # --- EA templates (4) ---
 
   ea_gmi_bw_bound: |
     [EA] GMI bandwidth bound

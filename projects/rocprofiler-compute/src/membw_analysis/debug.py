@@ -5,7 +5,7 @@
 
 from typing import Optional
 
-from membw.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.logger import console_debug
 
 

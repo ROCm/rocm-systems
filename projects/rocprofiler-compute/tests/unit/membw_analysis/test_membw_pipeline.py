@@ -10,9 +10,9 @@ regressions when the spec, extraction, or evaluation logic changes.
 import pandas as pd
 import pytest
 
-from membw.engine import evaluate_membw_tree
-from membw.metric_extract import extract_membw_metrics
-from membw.tree_spec import collect_metric_keys, load_tree_spec
+from membw_analysis.engine import evaluate_membw_tree
+from membw_analysis.metric_extract import extract_membw_metrics
+from membw_analysis.tree_spec import collect_metric_keys, load_tree_spec
 
 # Representative metric values for a UTCL1-stall + HBM-BW-bound workload
 UTCL1_HBM_WORKLOAD = {
@@ -30,9 +30,6 @@ UTCL1_HBM_WORKLOAD = {
     "L2 Internal Resource Pressure - Source FIFO": 1.0,
     "L2 Cache Efficiency": 80.0,
     "L2 Remote Access Pressure (GMI)": 0.5,
-    "EA HBM BW Bound - Combined": 14.0,
-    "EA HBM BW Bound - Read Credit Pressure": 11.0,
-    "EA HBM BW Bound - Write Credit Pressure": 3.0,
     "EA GMI BW Bound - Combined": 0.1,
     "EA IO BW Bound - Combined": 0.0,
     "EA Write Backpressure": 1.0,
@@ -102,9 +99,6 @@ class TestFullPipeline:
         assert states["gl2_mem_bw_bound"] == "active"
         assert states["gl2_mem_bw_read"] == "active"
         assert states["gl2_mem_bw_other"] == "inactive"
-        assert states["ea_hbm_bw_bound"] == "active"
-        assert states["ea_hbm_read"] == "active"
-        assert states["ea_hbm_other"] == "inactive"
 
         assert len(result.guidance_blocks) > 0
         guidance_text = "\n".join(result.guidance_blocks)
@@ -117,9 +111,6 @@ class TestFullPipeline:
         balanced["L2 Memory BW Bound - Combined Credit Pressure"] = 12.0
         balanced["L2 Memory BW Bound - Read Credit Pressure"] = 6.0
         balanced["L2 Memory BW Bound - Write Credit Pressure"] = 6.0
-        balanced["EA HBM BW Bound - Combined"] = 14.0
-        balanced["EA HBM BW Bound - Read Credit Pressure"] = 7.0
-        balanced["EA HBM BW Bound - Write Credit Pressure"] = 7.0
 
         metric_keys = collect_metric_keys(gfx950_spec)
         dfs = build_mock_dfs(balanced)
@@ -139,11 +130,6 @@ class TestFullPipeline:
         assert states["gl2_mem_bw_read"] == "inactive"
         assert states["gl2_mem_bw_write"] == "inactive"
         assert states["gl2_mem_bw_other"] == "active"
-
-        assert states["ea_hbm_bw_bound"] == "active"
-        assert states["ea_hbm_read"] == "inactive"
-        assert states["ea_hbm_write"] == "inactive"
-        assert states["ea_hbm_other"] == "active"
 
         guidance_text = "\n".join(result.guidance_blocks)
         assert "balanced" in guidance_text.lower()
@@ -191,4 +177,3 @@ class TestFullPipeline:
         states = collect_node_states(result.nodes)
         assert states["gl1_tcp_stall"] == "active"
         assert states["gl2_back_pressure"] == "indeterminate"
-        assert states["ea_hbm_bw_bound"] == "indeterminate"

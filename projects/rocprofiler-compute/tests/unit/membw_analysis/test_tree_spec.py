@@ -3,7 +3,7 @@
 
 import pytest
 
-from membw.tree_spec import (
+from membw_analysis.tree_spec import (
     _parse_tree_spec,
     _validate_tree_spec,
     collect_metric_keys,
@@ -18,7 +18,7 @@ class TestLoadTreeSpec:
         """Load the real gfx950 spec -- verifies YAML parses and validates."""
         spec = load_tree_spec("gfx950")
         assert len(spec.thresholds) == 2
-        assert len(spec.guidance_templates) == 21
+        assert len(spec.guidance_templates) == 18
         assert len(spec.schema_hash) == 16
 
     def test_missing_arch_raises(self):
@@ -33,10 +33,10 @@ class TestLoadTreeSpec:
 
 
 class TestCollectMetricKeys:
-    def test_gfx950_has_21_metric_keys(self):
+    def test_gfx950_has_18_metric_keys(self):
         spec = load_tree_spec("gfx950")
         keys = collect_metric_keys(spec)
-        assert len(keys) == 21
+        assert len(keys) == 18
 
     def test_keys_span_all_three_tables(self):
         """Metric keys should reference L1 (3001), L2 (3012), EA (3018)."""
