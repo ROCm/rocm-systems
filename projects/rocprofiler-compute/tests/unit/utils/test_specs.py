@@ -232,8 +232,11 @@ def test_cdna_hbm_channels_nps_divisors(memory_partition, expected_channels):
         memory_partition=memory_partition,
         compute_partition="CPX",
     )
-    with patch.object(specs.mi_gpu_specs, "get_num_xcds", return_value=8):
+    with patch.object(
+        specs.mi_gpu_specs, "get_num_xcds", return_value=8
+    ) as get_num_xcds_mock:
         assert spec._get_hbm_channels() == expected_channels
+        get_num_xcds_mock.assert_called_once_with("gfx942", "mi300x_a1", "SPX")
 
 
 @pytest.mark.misc
