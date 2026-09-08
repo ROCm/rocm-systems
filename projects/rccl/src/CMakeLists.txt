@@ -1219,7 +1219,10 @@ endif()
 # compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
 # this does and does not give.
 if(RCCL_POISON_HIP_ATOMICS)
-  target_compile_options(rccl PRIVATE -include ${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  # Joined --include=<file> rather than separate-argument -include <file>: the
+  # flag has to survive rccl-device-compile, which forwards unrecognized tokens
+  # one at a time and would take the path for a source file.
+  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
   message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
 endif()
 
