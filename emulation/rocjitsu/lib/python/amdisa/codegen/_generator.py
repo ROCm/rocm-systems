@@ -15072,24 +15072,45 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}'
         )
         if self.isa_spec.profile.split_execution_sources:
-            packed_simd_source_prefix = ''
-            packed_simd_dst_prefix = ''
+            packed_simd_read_prefix = ''
+            packed_simd_write_prefix = ''
             if uses_packed_16bit_sources:
-                packed_simd_source_prefix = textwrap.dedent('''\
+                packed_simd_read_prefix = textwrap.dedent('''\
                     if (auto packed = packed_16bit_vgpr_source(
-                            packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+                            packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+                      uint32_t off = packed->reg +
+                                     (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
                       return wf.vgpr_alloc().base +
-                             amdgpu::apply_gpr_idx(wf, packed->reg, vgpr_msb_role());
+                             amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+                    }
+                    if (auto packed = packed_16bit_vgpr_dst(
+                            packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+                      uint32_t off = packed->reg +
+                                     (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                      return wf.vgpr_alloc().base +
+                             amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
+                    }
                   ''')
-                packed_simd_dst_prefix = textwrap.dedent('''\
+                packed_simd_write_prefix = textwrap.dedent('''\
                     if (auto packed = packed_16bit_vgpr_dst(
                             packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
                       amdgpu::VgprMsbRole role =
                           vgpr_msb_role() == amdgpu::VgprMsbRole::None
                               ? amdgpu::VgprMsbRole::Dst
                               : vgpr_msb_role();
-                      return wf.vgpr_alloc().base +
-                             amdgpu::apply_gpr_idx(wf, packed->reg, role);
+                      uint32_t off = packed->reg +
+                                     (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                      return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
+                    }
+                    if (auto packed = packed_16bit_vgpr_source(
+                            packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+                      amdgpu::VgprMsbRole role =
+                          vgpr_msb_role() == amdgpu::VgprMsbRole::None
+                              ? amdgpu::VgprMsbRole::Dst
+                              : vgpr_msb_role();
+                      uint32_t off = packed->reg +
+                                     (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                      return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, off, role);
                     }
                   ''')
             execution_code = (
@@ -15115,7 +15136,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             execution_code += '\n\n' + textwrap.dedent('''\
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
-                @@PACKED_SIMD_SOURCE_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+                @@PACKED_SIMD_READ_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
                     return wf.vgpr_alloc().base +
                            amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
                   return std::nullopt;
@@ -15123,7 +15144,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
                 std::optional<uint32_t>
                 Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
-                @@PACKED_SIMD_DST_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                @@PACKED_SIMD_WRITE_PREFIX@@  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     amdgpu::VgprMsbRole role =
                         vgpr_msb_role() == amdgpu::VgprMsbRole::None
                             ? amdgpu::VgprMsbRole::Dst
@@ -15324,8 +15345,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 }
                 ''')
             execution_code = execution_code.replace(
-                '@@PACKED_SIMD_SOURCE_PREFIX@@', packed_simd_source_prefix
-            ).replace('@@PACKED_SIMD_DST_PREFIX@@', packed_simd_dst_prefix)
+                '@@PACKED_SIMD_READ_PREFIX@@', packed_simd_read_prefix
+            ).replace('@@PACKED_SIMD_WRITE_PREFIX@@', packed_simd_write_prefix)
             execution_code = execution_code.replace(
                 'raw_compute_unit(wf.cu())',
                 'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',

@@ -4230,6 +4230,7 @@ constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
 }
 constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
+constexpr uint32_t v_mov_b16(uint32_t vdst, uint32_t src0) { return vop1(28, vdst, src0); }
 
 constexpr std::array<uint32_t, 2> vop3_cdna(uint32_t op, uint32_t vdst, uint32_t src0,
                                             uint32_t src1, uint32_t src2 = 0, uint32_t opsel = 0) {
@@ -4351,6 +4352,35 @@ TEST(AqlDispatchTest, PackedHighHalfVgprUsesItsUnderlyingDescriptorRegister) {
   const simdojo::ExitStatus status = f.engine->run();
   EXPECT_EQ(status.code, 0) << status.message;
   EXPECT_EQ(f.cu()->register_allocation_violation_count(), 0u);
+}
+
+TEST(AqlDispatchTest, True16HighHalfUsesUnderlyingVgprAllocation) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+    auto *snapshots = f.capture_halts();
+    const uint32_t code[] = {
+        // A true16 destination selector 128 + N names the high half of vN.
+        // It must not be validated as an access to the unrelated v(128 + N).
+        enc::v_mov_b16(/*vdst=*/128 + 6, enc::INLINE_CONST(1)),
+        // A true16 source selector 256 + 128 + N likewise names the high half
+        // of vN, rather than the unrelated v(128 + N).
+        enc::v_mov_b16(/*vdst=*/7, /*src0=*/256 + 128 + 6),
+        enc::S_ENDPGM,
+    };
+    const uint64_t kernel_object =
+        f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/48);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/32, /*grid_size=*/32);
+
+    const simdojo::ExitStatus status = f.engine->run();
+    EXPECT_EQ(status.code, 0) << status.message;
+    EXPECT_EQ(f.cu()->register_allocation_violation_count(), 0u);
+    ASSERT_EQ(snapshots->snapshots().size(), 1u);
+    EXPECT_EQ(snapshots->snapshots().front().vgpr(6, 0), 0x00010000u);
+    EXPECT_EQ(snapshots->snapshots().front().vgpr(7, 0), 0x00000001u);
+  }
 }
 
 TEST(AqlDispatchTest, CdnaUnifiedAllocationRejectsOrdinaryVgprInAccumulatorWindow) {
