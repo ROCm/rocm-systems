@@ -1,6 +1,14 @@
 # AMD SMI (amdsmitst) Test Categories Configuration
 # Aligned with Test Filter Standardization (quick/standard/comprehensive/full).
 #
+# ============================================================================
+# KEEP IN SYNC: the per-ASIC exclusions here and in amdsmitst.exclude are
+# maintained by hand and MUST be updated together until the two are
+# consolidated into a single source. If you change one file, change the other.
+#   - amdsmitst.exclude       (legacy detect_asic_filter.sh runtime path)
+#   - test_categories.yaml    (this file; ctest label path used by TheRock CI)
+# ============================================================================
+#
 # The amdsmitst gtest suites follow the naming scheme
 # `<Component><Type>[<Operation>]` (see docs/conceptual/test-design.md):
 #   Component : Gpu*, System*, Ifoe*   (Cpu*, Nic* reserved)
@@ -63,6 +71,10 @@ test_categories:
       - "nightly"
       - "extended"
 
+  # NOTE: `full` currently equals `comprehensive` (same "*" patterns and
+  # excludes; only the labels and timeout differ). It is a placeholder for the
+  # standardized 4-tier contract, reserved for future stress / long-haul
+  # additions -- it is not buying extra coverage today.
   full:
     description: "P3 - Full - all tests (P0-P2)"
     test_patterns:
@@ -89,6 +101,7 @@ exclude_gpu:
       - "GpuFunctionalReadOnly.TestFrequenciesRead"
       - "GpuFunctionalReadOnly.TestProcInfoRead"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
@@ -101,6 +114,7 @@ exclude_gpu:
       - "GpuFunctionalReadOnly.TestProcInfoRead"
       - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
@@ -117,33 +131,28 @@ exclude_gpu:
       - "GpuFunctionalReadWrite.TestPciReadWrite"
       - "GpuFunctionalReadWrite.TestPowerReadWrite"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx90a"
 
-  # gfx94X (MI300, gfx_target_version 90400-90402).
-  #   - TestVoltCurvRead: gfx94X (90400-90402) filter in amdsmitst.exclude.
-  #   - The remaining entries are the `virtualization` (SRIOV/VF) block plus
-  #     TestPerfLevelReadWrite / TestPerfDeterminism. TheRock's gfx94X-dcgpu
-  #     test lane runs on SR-IOV MI300X (MI300X_HW_SRIOV_CVS_1VF), where these
-  #     return AMDSMI_STATUS_NO_PERM. detect_asic_filter.sh applies the
-  #     virtualization set via runtime SRIOV detection; the ctest label path
-  #     can only key on GPU arch, so they are folded into the gfx94X block here.
-  #     NOTE: this intentionally diverges from amdsmitst.exclude, which keeps the
-  #     virtualization excludes in a separate runtime-detected block.
+  # gfx94X (MI300, gfx_target_version 90400-90402): volt-curve read
+  # (amdsmitst.exclude 90400-90402 filter).
+  #
+  # NOTE: SR-IOV/virtualization-only failures are intentionally NOT excluded by
+  # arch here. TheRock's gfx94X-dcgpu lane currently runs on SR-IOV MI300X
+  # (MI300X_HW_SRIOV_CVS_1VF), where a few write/perf tests return
+  # AMDSMI_STATUS_NO_PERM, but those APIs are supported on bare-metal MI3x, so
+  # excluding them by arch would drop bare-metal coverage. detect_asic_filter.sh
+  # already skips them via runtime SR-IOV detection on the legacy path; the
+  # proper ctest-path fix (runtime virtualization detection) is tracked as a
+  # follow-up.
   exclude_gpu_gfx94X:
     test_patterns:
       - "GpuFunctionalReadOnly.TestVoltCurvRead"
-      - "GpuFunctionalReadOnly.TestOverdriveRead"
-      - "GpuFunctionalReadOnly.TestGPUBusyRead"
-      - "GpuFunctionalReadWrite.FanReadWrite"
-      - "GpuFunctionalReadWrite.TestOverdriveReadWrite"
-      - "GpuFunctionalReadWrite.TestPowerReadWrite"
-      - "GpuFunctionalReadWrite.TestPowerCapReadWrite"
-      - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
-      - "GpuFunctionalReadWrite.TestPerfDeterminism"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
@@ -154,18 +163,24 @@ exclude_gpu:
     test_patterns:
       - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
     labels:
+      - "quick"
+      - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx103X"
 
-  # gfx110X (RDNA3) and gfx115X (RDNA3.5 APU): temperature + frequency.
-  # detect_asic_filter.sh maps gfx1100 and gfx115X to the strix_point filter.
+  # gfx110X (RDNA3 / RDNA3.5 APU): temperature + frequency.
+  # Covers gfx1100 (strix_point filter) and gfx1103 (hawk_point filter, added in
+  # develop #10695) -- both resolve to ex_gpu_gfx110X via prefix back-off in
+  # test_runner.py (find_matching_gpu_arch) and the parser's gpu_arch_matches(),
+  # so no separate gfx1103 block is needed.
   exclude_gpu_gfx110X:
     test_patterns:
       - "GpuFunctionalReadOnly.TempRead"
       - "GpuFunctionalReadOnly.TestFrequenciesRead"
       - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
@@ -177,6 +192,7 @@ exclude_gpu:
       - "GpuFunctionalReadOnly.TestFrequenciesRead"
       - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
     labels:
+      - "quick"
       - "standard"
       - "comprehensive"
       - "full"
@@ -185,8 +201,15 @@ exclude_gpu:
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
+  # These become per-suite ctest TIMEOUT properties. They are kept under the
+  # amdsmi job's GitHub step timeout (timeout_minutes: 10 in TheRock's
+  # fetch_test_configurations.py) so a hung suite is killed and reported by
+  # ctest (with --output-on-failure) instead of the whole job dying with an
+  # opaque "exceeded max execution time". The amdsmitst suites currently run in
+  # well under a minute; raise both this and timeout_minutes together if a
+  # category ever needs a larger budget.
   category_timeouts:
     quick: 300            # 5 minutes
-    standard: 2700        # 45 minutes
-    comprehensive: 25200  # 7 hours
-    full: 28800           # 8 hours
+    standard: 540         # 9 minutes
+    comprehensive: 540    # 9 minutes
+    full: 540             # 9 minutes
