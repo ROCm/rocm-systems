@@ -68,6 +68,11 @@ def validate() -> list[str]:
             errors.append(f"[{arch}] tree spec failed to load")
             continue
 
+        print(
+            f"[{arch}] schema hash: {tree_spec.schema_hash}",
+            file=sys.stderr,
+        )
+
         tree_keys = collect_metric_keys(tree_spec)
         analysis_metrics = load_analysis_metrics(arch)
 
