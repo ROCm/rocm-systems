@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_report.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_pipeline.h"
 
 #include <array>

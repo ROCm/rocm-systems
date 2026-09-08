@@ -3,6 +3,8 @@
 
 #include "rj_hsa_dbi_moi_record_replay_report_decoder.h"
 
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_report.h"
+
 #include <algorithm>
 
 namespace rocjitsu::consan_hook {
