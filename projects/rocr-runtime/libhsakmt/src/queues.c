@@ -170,6 +170,9 @@ static uint32_t get_num_waves(HsaNodeProperties *node, uint32_t gfxv,
 
 	if (gfxv < GFX_VERSION_NAVI10)
 		wave_num = MIN(cu_num * 40, node->NumShaderBanks / node->NumArrays * 512);
+	else if (gfxv < GFX_VERSION_GFX1250)
+		/* Match KFD's CWSR/debug-area sizing, not physical wave capacity. */
+		wave_num = cu_num * 32;
 	else
 		wave_num = cu_num * node->NumSIMDPerCU * node->MaxWavesPerSIMD;
 
