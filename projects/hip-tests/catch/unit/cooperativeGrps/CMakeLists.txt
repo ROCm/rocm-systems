@@ -51,6 +51,10 @@ if(HIP_PLATFORM STREQUAL "nvidia")
   set_target_properties(coopGrpTest PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 else()
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
+  # Workaround: the reassociate pass crashes in
+  # GenericUniformityAnalysisImpl::isTemporalDivergent when optimizing the
+  # coalesced reduce kernels in this file. Build it unoptimized.
+  set_source_files_properties(thread_block_tile.cc PROPERTIES COMPILE_FLAGS "-O0")
   set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
   set_source_files_properties(cg_any_all.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
   set_source_files_properties(binary_partition.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
