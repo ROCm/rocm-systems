@@ -817,6 +817,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         continue;
       }
       site->probe_index = *index;
+      site->probe_args = pt.probe_args;
     }
 
     sites.push_back(std::move(*site));
@@ -964,6 +965,35 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
 
+      // The kernel must likewise own the argument VGPRs. Only asked of a call
+      // that passes arguments, so a zero-argument probe call stays independent
+      // of the VGPR allocation entirely.
+      if (probe.abi.num_arg_vgprs != 0) {
+        // vgpr_bounds stays all-zero when no single kernel descriptor was
+        // discovered, so `kernels.size() != 1` is the guard, matching every other
+        // use. Same fail-closed case as the SGPR bound above: the allocation the
+        // argument VGPRs must fit inside is unknown. The zero state would reject
+        // any non-zero count anyway; asking here is what makes the diagnostic say
+        // which of the two things went wrong.
+        if (kernels.size() != 1) {
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) +
+                                  " passes arguments, which requires a discovered kernel "
+                                  "descriptor to bound VGPR selection, but none was found");
+          continue;
+        }
+        if (!probe_args_fit_in_kernel(vgpr_bounds.ordinary_bound, probe.abi)) {
+          const uint16_t last =
+              static_cast<uint16_t>(probe.abi.arg_vgpr_base + probe.abi.num_arg_vgprs - 1);
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) + " needs argument VGPRs v" +
+                                  std::to_string(probe.abi.arg_vgpr_base) + "..v" +
+                                  std::to_string(last) + " but the kernel allocates only " +
+                                  std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
+          continue;
+        }
+      }
+
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
       // resource selection and the no-spill policy gate.
       auto summary = build_probe_clobber_summary(probe, &err);
@@ -1006,6 +1036,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
       plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.probe_args = site.probe_args;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
@@ -1059,9 +1090,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         }
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
+        // Defensively exclude the argument VGPRs from bridge selection as well
+        // as the live set.
+        const RegisterSet bridge_unavailable = live | arg_registers(probe.abi);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds.ordinary_bound,
-                              *spills, arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, bridge_unavailable, plan.vgpr_spills,
+                              vgpr_bounds.ordinary_bound, *spills, arch_, plan.sgpr_spills,
+                              plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }

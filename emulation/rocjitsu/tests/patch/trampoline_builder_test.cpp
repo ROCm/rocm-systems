@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -543,6 +544,98 @@ TEST(TrampolineBuilderPlan, LinkPairBaseTheConventionDoesNotChooseFails) {
   EXPECT_FALSE(plan.is_probe_call);
 }
 
+// The ABI for a call passing @p n argument dwords.
+ProbeAbi arg_abi(uint8_t n) {
+  return *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, n);
+}
+
+RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::VGPR, i, 1});
+  return set;
+}
+
+// Each argument costs a v_mov_b32 plus its literal word. The count is what the
+// orchestrator sizes the trampoline from, and what the emit-time drift guard
+// checks the synthesized envelope against.
+TEST(TrampolineBuilderPlan, EachArgumentAddsTwoEnvelopeWords) {
+  TrampolinePlan none;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(none, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan three;
+  three.probe_args = {1u, 2u, 3u};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(three, arg_abi(3), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_EQ(three.before_word_count, none.before_word_count + 6);
+}
+
+// The envelope writes the argument VGPRs, so they are builder clobbers and the
+// orchestrator's spill set picks them up when they are live.
+TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
+  TrampolinePlan plan;
+  plan.probe_args = {7u, 8u};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_EQ(plan.arg_vgpr_base, 0u);
+  EXPECT_TRUE(plan.builder_clobbers.contains(RegisterRef{RegClass::VGPR, 0, 2}));
+  EXPECT_FALSE(plan.builder_clobbers.contains(RegisterRef{RegClass::VGPR, 2, 1}));
+}
+
+// Unlike the SGPR temps, the argument VGPRs are fixed by the ABI rather than
+// chosen dead, so one can be live at the anchor. That has to force the EXEC save
+// that bracketing the spill stores requires -- the probe body clobbering nothing
+// is not enough to conclude the site does not spill.
+TEST(TrampolineBuilderPlan, LiveArgumentVgprForcesTheExecSave) {
+  auto exec_saved = [](const TrampolinePlan &plan) {
+    for (const SpecialStateSlot &s : plan.special_state_saves)
+      if (s.operand == scalar_operand_exec_lo(plan.arch))
+        return true;
+    return false;
+  };
+
+  std::string err;
+  TrampolinePlan dead_arg;
+  dead_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  dead_arg.probe_args = {1u};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(dead_arg, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_FALSE(exec_saved(dead_arg));
+
+  TrampolinePlan live_arg;
+  live_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  live_arg.probe_args = {1u};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(live_arg, arg_abi(1), make_vgpr_set({0}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_TRUE(exec_saved(live_arg));
+}
+
+// The orchestrator derives the values and the count from one request, so a
+// disagreement means a direct caller built the two independently.
+TEST(TrampolineBuilderPlan, ArgumentCountDisagreeingWithTheAbiFails) {
+  TrampolinePlan plan;
+  plan.probe_args = {1u, 2u};
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), /*live_at_anchor=*/{},
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("ABI declares"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+
+  // And the other direction: values missing for a declared argument.
+  TrampolinePlan fewer;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(fewer, arg_abi(1), /*live_at_anchor=*/{},
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_FALSE(fewer.is_probe_call);
+}
+
 //==============================================================================
 // Probe-call emission (emit_probe_call)
 //
@@ -614,6 +707,51 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
   EXPECT_EQ(decode_sop1_sdst(swappc), plan.link_pair_base);
   // ssrc0 is the materialized target pair.
   EXPECT_EQ(decode_sop1_ssrc0(swappc), plan.target_pair_base);
+}
+
+// Arguments are materialized in the words immediately preceding the call, in
+// declaration order from the ABI's base VGPR. Position matters: after the spill
+// stores and after the anchor-EXEC restore, so a live argument VGPR is already
+// saved and the writes land under the guest's mask.
+TEST(TrampolineBuilderEmit, MaterializesArgumentsImmediatelyBeforeTheCall) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {0xAAAA0000u, 0xBBBB1111u};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+           decode_sop1_sdst(word) == plan.link_pair_base;
+  });
+  ASSERT_NE(swappc, w.end());
+
+  // Two arguments, two words each, ending where the call begins.
+  const auto args_begin = swappc - 4;
+  ASSERT_GE(args_begin - w.begin(), 0);
+  const auto arg0 = build_v_mov_b32_imm(0, 0xAAAA0000u, plan.arch);
+  const auto arg1 = build_v_mov_b32_imm(1, 0xBBBB1111u, plan.arch);
+  EXPECT_EQ(args_begin[0], arg0[0]);
+  EXPECT_EQ(args_begin[1], arg0[1]);
+  EXPECT_EQ(args_begin[2], arg1[0]);
+  EXPECT_EQ(args_begin[3], arg1[1]);
+}
+
+// A call passing nothing emits no argument words at all -- the v0 write that a
+// zero-width register range would produce would corrupt the guest's v0.
+TEST(TrampolineBuilderEmit, NoArgumentsEmitsNoArgumentWords) {
+  const TrampolinePlan plan = make_probe_plan();
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t v_mov_v0 = build_v_mov_b32_imm(0, 0, plan.arch)[0];
+  EXPECT_EQ(std::count(w.begin(), w.end(), v_mov_v0), 0);
 }
 
 // The relocated original appears exactly once, after the call.

@@ -6,6 +6,7 @@
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/error_report.h"
 
 #include <algorithm>
@@ -193,6 +194,17 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   }
   const uint16_t kLinkPairBase = abi.link_pair_base;
 
+  // The orchestrator derives both sides from one request, so a mismatch means a
+  // direct caller built the two independently and they disagree about how many
+  // VGPRs the call writes.
+  if (plan.probe_args.size() != abi.num_arg_vgprs) {
+    report(error_out, ("probe-call resource planning: " + std::to_string(plan.probe_args.size()) +
+                       " argument values but the ABI declares " + std::to_string(abi.num_arg_vgprs))
+                          .c_str());
+    return false;
+  }
+  const RegisterSet arg_regs = arg_registers(abi);
+
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
   if (live_at_anchor.intersects(probe_link_pair(abi))) {
@@ -267,10 +279,13 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     special_saves.push_back(SpecialStateSlot{operand, *temp, width});
     return true;
   };
-  // A spilled register is live at the anchor and clobbered by the probe (builder
-  // clobbers are dead, so never in the spill set). Spilling forces EXEC=-1 around
-  // the store/load, so EXEC must be saved even if the probe never touches it.
-  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers);
+  // A spilled register is live at the anchor and clobbered by the probe or by
+  // the envelope's argument writes. The argument VGPRs are the one builder
+  // clobber that is not chosen dead -- the ABI fixes them at arg_vgpr_base --
+  // so unlike the SGPR temps they can be live and need spilling. Spilling forces
+  // EXEC=-1 around the store/load, so EXEC must be saved even if the probe never
+  // touches it.
+  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers | arg_regs);
 
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
@@ -291,6 +306,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   before_words += 1;     // s_getpc_b64
   before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
   before_words += 1;     // s_swappc_b64
+  // Each argument is one v_mov_b32 plus its literal word.
+  before_words += static_cast<uint32_t>(plan.probe_args.size()) * 2;
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
@@ -302,13 +319,14 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
+  plan.arg_vgpr_base = abi.arg_vgpr_base;
   plan.target_pair_base = *target_pair;
   if (scc_temp)
     plan.scc_temp = *scc_temp;
   plan.special_state_saves = std::move(special_saves);
   plan.before_word_count = before_words;
 
-  plan.builder_clobbers = link_pair | target_pair_set;
+  plan.builder_clobbers = link_pair | target_pair_set | arg_regs;
   if (scc_temp)
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -411,6 +429,22 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   env.push_back(static_cast<uint32_t>(delta & 0xFFFFFFFFu));
   env.push_back(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch));
   env.push_back(static_cast<uint32_t>(delta >> 32));
+
+  // Argument materialization, immediately before the call. Arguments occupy
+  // consecutive VGPRs from the ABI's base, in order.
+  //
+  // Two constraints fix this position: it must follow the spill stores, so an
+  // argument VGPR that was live at the anchor is saved before it is overwritten,
+  // and v_mov_b32 does not write SCC, so it cannot disturb the save/restore pair
+  // straddling it.
+  //
+  // It also follows the anchor-EXEC restore, so arguments are written under the
+  // guest's mask rather than the full mask the stores run under.
+  for (size_t i = 0; i < plan.probe_args.size(); ++i) {
+    const auto words = build_v_mov_b32_imm(static_cast<uint16_t>(plan.arg_vgpr_base + i),
+                                           plan.probe_args[i], plan.arch);
+    env.insert(env.end(), words.begin(), words.end());
+  }
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.

@@ -94,8 +94,16 @@ struct TrampolinePlan {
   /// the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
 
+  /// Immediate argument dwords to materialize into the ABI's argument VGPRs
+  /// before the call, in order from arg_vgpr_base. An emit-time input rather
+  /// than a resource decision: plan_probe_call only counts the words it takes
+  /// and reserves the registers, and requires the size to match the ABI's
+  /// declared count. Empty for a probe called with no arguments.
+  std::vector<uint32_t> probe_args;
+
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
+  uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
   bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.

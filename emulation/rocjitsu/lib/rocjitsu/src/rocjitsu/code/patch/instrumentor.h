@@ -121,6 +121,11 @@ struct ResolvedInstrumentationSite {
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
 
+  // Argument values for this site, copied from the request. Per-site, unlike the
+  // ProbeCallable the probe_index names: two sites can call one probe body with
+  // different values, and only the count is shared.
+  std::vector<uint32_t> probe_args;
+
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
 
@@ -320,6 +325,23 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 [[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
                                                             uint16_t link_base) {
   return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
+}
+
+/// @brief Does a kernel whose ordinary VGPRs end at @p ordinary_vgpr_bound own
+///        the argument VGPRs @p abi names?
+///
+/// The same coarse ownership question as probe_link_pair_fits_in_kernel, for the
+/// other set of registers the ABI fixes rather than picks. An index at or past
+/// the bound is either unallocated or aliases an AGPR, and the envelope would
+/// write it before the call. Renaming the probe's argument registers would mean
+/// rewriting the probe body, and growing the allocation is deferred, so a site
+/// that does not fit fails closed.
+///
+/// An @p abi passing no arguments always fits.
+[[nodiscard]] constexpr bool probe_args_fit_in_kernel(uint32_t ordinary_vgpr_bound,
+                                                      const ProbeAbi &abi) {
+  return ordinary_vgpr_bound >=
+         static_cast<uint32_t>(abi.arg_vgpr_base) + static_cast<uint32_t>(abi.num_arg_vgprs);
 }
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
