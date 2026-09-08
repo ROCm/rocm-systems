@@ -1308,10 +1308,10 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         return status;
     }
 
-    // Reaching here means init_status < 0 (currently initializing); an already
-    // initialized SDK (init_status > 0) took the anytime-initialization path
-    // above. The configuration window is closed, so we ignore this call and
-    // return CONFIGURATION_LOCKED with an explanatory warning.
+    // An already initialized SDK (init_status > 0) took the anytime-initialization
+    // path above, so a non-zero status here means init_status < 0: initialization
+    // is in progress and the configuration window is closed. init_status == 0 is
+    // the normal first forced configure and falls through to the code below.
     if(auto _init_status = rocprofiler::registration::get_init_status(); _init_status != 0)
     {
         ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
