@@ -394,21 +394,23 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     endif()
 
     # RPATH for the installed test binaries. They install under
-    # ${ROCJPEG_TEST_BIN_DIR} (share/<project>/bin) while librocjpeg, HIP and
-    # the bundled sysdeps install to ${CMAKE_INSTALL_LIBDIR} -- so at runtime they
-    # must load the installed librocjpeg (whose own RPATH resolves its sysdeps),
-    # not the build-tree stage copy the nested configure links against. Derive the
-    # $ORIGIN-relative hop from the bin dir to the lib dir from the install
-    # variables themselves, so the RPATH tracks either path if it changes instead
-    # of hard-coding '../../..'. This keeps the tree relocatable as a whole -- the
-    # same $ORIGIN scheme librocjpeg itself uses; relocating an individual binary
-    # out of the tree is unsupported, as for any $ORIGIN-relative ROCm binary.
-    # BUILD_WITH_INSTALL_RPATH bakes it into the built binary, which the macro
-    # copies verbatim (install(PROGRAMS) does no RPATH rewriting). '|' is the
-    # LIST_SEPARATOR restored to ';' in the sub-build.
+    # share/<project>/bin while librocjpeg, HIP and the bundled sysdeps install
+    # to the lib dir -- so at runtime they must load the installed librocjpeg
+    # (whose own RPATH resolves its sysdeps), not the build-tree stage copy the
+    # nested configure links against. Derive the $ORIGIN-relative hop from the bin
+    # dir to the lib dir so the RPATH tracks either path if it changes instead of
+    # hard-coding '../../..'. Use GNUInstallDirs' absolute CMAKE_INSTALL_FULL_*
+    # forms (not prefix + CMAKE_INSTALL_*, which is wrong if a *DIR is overridden
+    # with an absolute path) so file(RELATIVE_PATH) gets two real absolute paths.
+    # This keeps the tree relocatable as a whole -- the same $ORIGIN scheme
+    # librocjpeg itself uses; relocating an individual binary out of the tree is
+    # unsupported, as for any $ORIGIN-relative ROCm binary. BUILD_WITH_INSTALL_RPATH
+    # bakes it into the built binary, which the macro copies verbatim
+    # (install(PROGRAMS) does no RPATH rewriting). '|' is the LIST_SEPARATOR
+    # restored to ';' in the sub-build.
     file(RELATIVE_PATH ROCJPEG_TEST_BIN_TO_LIB
-      "${CMAKE_INSTALL_PREFIX}/${ROCJPEG_TEST_BIN_DIR}"
-      "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+      "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/bin"
+      "${CMAKE_INSTALL_FULL_LIBDIR}")
     set(ROCJPEG_TEST_INSTALL_RPATH
       "$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}|$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}/rocm_sysdeps/lib")
 
