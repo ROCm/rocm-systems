@@ -38,6 +38,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -125,14 +126,23 @@ bool read_profile_abi(const std::string& root, std::string* version) {
 // Parses "<value> <unit...>" sysfs field content generically: first
 // whitespace-delimited token is the numeric value, the remainder (verbatim,
 // trimmed) is an opaque unit string. Never enumerates known unit types.
-void parse_field_content(const std::string& content, int64_t* value, std::string* unit) {
+bool parse_field_content(const std::string& content, int64_t* value, std::string* unit) {
   std::istringstream iss(content);
   std::string first_token;
-  iss >> first_token;
-  *value = std::strtoll(first_token.c_str(), nullptr, 10);
+  if (!(iss >> first_token)) {
+    return false;
+  }
+  char* end = nullptr;
+  errno = 0;
+  int64_t parsed_value = std::strtoll(first_token.c_str(), &end, 10);
+  if (errno == ERANGE || end == first_token.c_str() || *end != '\0') {
+    return false;
+  }
+  *value = parsed_value;
   std::string rest;
   std::getline(iss, rest);
   *unit = trim(rest);
+  return true;
 }
 
 // Reads and parses config/writable_slot_mask into the set of writable
@@ -189,7 +199,26 @@ bool parse_profile_index(const std::string& profile_name, uint32_t* index) {
   for (char c : suffix) {
     if (!std::isdigit(static_cast<unsigned char>(c))) return false;
   }
-  *index = static_cast<uint32_t>(std::strtoul(suffix.c_str(), nullptr, 10));
+  char* end = nullptr;
+  errno = 0;
+  unsigned long parsed_index = std::strtoul(suffix.c_str(), &end, 10);
+  if (errno == ERANGE || end == suffix.c_str() || *end != '\0' ||
+      parsed_index > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  *index = static_cast<uint32_t>(parsed_index);
+  return true;
+}
+
+bool parse_active_profile(const std::string& content, uint32_t* index) {
+  char* end = nullptr;
+  errno = 0;
+  unsigned long parsed_index = std::strtoul(content.c_str(), &end, 10);
+  if (errno == ERANGE || end == content.c_str() || *end != '\0' ||
+      parsed_index > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  *index = static_cast<uint32_t>(parsed_index);
   return true;
 }
 
@@ -319,7 +348,9 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
   uint32_t active_index = 0;
   std::string active_line;
   if (read_sysfs_line(root + "active_profile", &active_line)) {
-    active_index = static_cast<uint32_t>(std::strtoul(active_line.c_str(), nullptr, 10));
+    if (!parse_active_profile(active_line, &active_index)) {
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    }
   }
 
   std::vector<uint32_t> writable_slots;
@@ -432,7 +463,9 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
     std::string content;
     if (read_sysfs_line(profile_dir + "/" + field_names[i], &content)) {
       std::string unit;
-      parse_field_content(content, &f.value, &unit);
+      if (!parse_field_content(content, &f.value, &unit)) {
+        return RSMI_STATUS_UNEXPECTED_DATA;
+      }
       snprintf(f.unit, sizeof(f.unit), "%s", unit.c_str());
     }
 
@@ -441,11 +474,15 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
     bool has_max = read_sysfs_line(root + "limits/max/" + field_names[i], &max_line);
     if (has_min) {
       std::string unused_unit;
-      parse_field_content(min_line, &f.limit_min, &unused_unit);
+      if (!parse_field_content(min_line, &f.limit_min, &unused_unit)) {
+        return RSMI_STATUS_UNEXPECTED_DATA;
+      }
     }
     if (has_max) {
       std::string unused_unit;
-      parse_field_content(max_line, &f.limit_max, &unused_unit);
+      if (!parse_field_content(max_line, &f.limit_max, &unused_unit)) {
+        return RSMI_STATUS_UNEXPECTED_DATA;
+      }
     }
     f.has_limits = has_min && has_max;
   }
