@@ -466,7 +466,6 @@ struct ConSanTargetProfile {
   /// about whether the target supports two-address LDS operations.
   bool requires_split_two_address_lds_relocation = false;
   uint16_t semantic_form_mask = 0;
-  bool supports_sc_inline_flat_trap_rewrite = false;
   bool requires_sc_runtime_flat_group_gate = false;
   /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
   bool requires_raw_memory_order_qualifier = false;
@@ -643,8 +642,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
         (profile.requires_split_two_address_lds_relocation &&
          profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
-        (profile.supports_sc_inline_flat_trap_rewrite &&
-         profile.arch != ROCJITSU_CODE_ARCH_RDNA4) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
         profile.moi_dispatch_identity_placement ==
             ConSanMoiDispatchIdentityPlacement::Unsupported ||

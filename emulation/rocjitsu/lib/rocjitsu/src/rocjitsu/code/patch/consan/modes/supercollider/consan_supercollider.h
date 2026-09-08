@@ -26,8 +26,5 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      const ConSanTargetProfile &target,
                                      const ConSanOptions &options, ConSanTransformArtifacts &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {});
-void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
-                               const ConSanTargetProfile &target, const ConSanOptions &options,
-                               ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu

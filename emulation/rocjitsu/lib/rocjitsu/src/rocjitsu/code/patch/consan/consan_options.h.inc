@@ -574,20 +574,10 @@ struct ConSanRequest {
 /// Focused-test, diagnostic, and early-development controls that are outside
 /// ConSan's supported semantic request.
 ///
-/// Keeping this type separate makes a call site visibly opt into prototype
+/// Keeping this type separate makes a call site visibly opt into diagnostic
 /// probes, forced allocation paths, or explicit registers. None of these
 /// fields may influence the meaning of a normal `ConSanRequest`.
 struct ConSanDebugOverrides {
-  /// Replace a selected instruction with a NOP for focused patch testing.
-  bool probe_nop = false;
-  /// Route a selected instruction through a NOP trampoline.
-  bool probe_trampoline_nop = false;
-  /// Replace a selected instruction with program termination.
-  bool probe_endpgm = false;
-  /// Apply the termination probe only to native LDS instructions.
-  bool probe_lds_endpgm = false;
-  /// Replace a selected group-FLAT site with a direct trap probe.
-  bool probe_flat_trap = false;
   /// Turn a statically unique unmatched barrier wait into a fail-fast probe.
   bool abort_unmatched_barrier_wait = false;
   /// Force the legacy VGPR spill path even when a cheaper plan exists.

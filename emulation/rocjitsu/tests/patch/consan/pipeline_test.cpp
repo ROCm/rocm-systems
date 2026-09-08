@@ -473,7 +473,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.resource_plans.emplace_back().candidate_index = 7u;
   mechanism.warnings.emplace_back("published-warning");
   ConSanPatchInfo shared_segments;
-  shared_segments.kind = ConSanPatchKind::InlineNopRewrite;
+  shared_segments.kind = ConSanPatchKind::InlineBarrierNopRewrite;
   shared_segments.required_private_segment_size = 40u;
   shared_segments.dynamic_private_segment_addend = 8u;
   shared_segments.workgroup_shadow.emplace().required_group_segment_size = 100u;
@@ -553,7 +553,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
             (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
   EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
   ASSERT_EQ(published_diagnostics.patches.size(), 3u);
-  EXPECT_EQ(published_diagnostics.patches.front().kind, "inline-nop-rewrite");
+  EXPECT_EQ(published_diagnostics.patches.front().kind, "inline-barrier-nop-rewrite");
   EXPECT_EQ(published_diagnostics.patches[1].required_private_segment_size, 64u);
   EXPECT_EQ(published_diagnostics.patches[1].dynamic_private_segment_addend, 16u);
   EXPECT_EQ(published_diagnostics.patches[2].anchor_offset, 12u);

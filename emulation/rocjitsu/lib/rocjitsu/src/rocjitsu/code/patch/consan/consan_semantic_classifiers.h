@@ -28,11 +28,4 @@ class Instruction;
 [[nodiscard]] bool is_fence_like(std::string_view mnemonic);
 [[nodiscard]] bool is_atomic_instruction(const Instruction &instruction);
 
-/// Exclude instructions whose relocation would carry memory, synchronization,
-/// matrix, accumulator, or predicated-definition semantics into a proof cave.
-[[nodiscard]] bool has_unsafe_proof_trampoline_flags(const Instruction &instruction);
-
-/// Prefer simple one-word floating-point ALU instructions as proof anchors.
-[[nodiscard]] bool is_preferred_proof_anchor(const Instruction &instruction);
-
 } // namespace rocjitsu

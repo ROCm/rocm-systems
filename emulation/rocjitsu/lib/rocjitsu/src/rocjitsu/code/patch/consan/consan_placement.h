@@ -27,17 +27,6 @@ struct ByteRange {
   uint64_t end = 0;
 };
 
-struct InPlaceNopSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-};
-
-struct InPlaceInstructionSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-};
-
 struct BarrierSite {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
@@ -67,15 +56,6 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
 [[nodiscard]] std::vector<LocalNopCave>
 find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
                          rj_code_arch_t arch);
-[[nodiscard]] std::optional<InPlaceNopSite>
-find_existing_nop_site(const AmdGpuCodeObject &code_object, rj_code_arch_t arch);
-[[nodiscard]] std::optional<InPlaceInstructionSite>
-find_preferred_in_place_instruction_site(const AmdGpuCodeObject &code_object, rj_code_arch_t arch);
-[[nodiscard]] bool rewrite_word_in_place(const AmdGpuCodeObject &code_object, uint64_t file_offset,
-                                         uint32_t replacement, ConSanTransformArtifacts &result);
-[[nodiscard]] std::optional<uint64_t>
-find_first_relocatable_anchor(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                              std::string *error_out);
 [[nodiscard]] bool is_relocatable_consan_barrier_destination(const Instruction &instruction,
                                                              uint64_t offset,
                                                              std::span<const uint8_t> text,

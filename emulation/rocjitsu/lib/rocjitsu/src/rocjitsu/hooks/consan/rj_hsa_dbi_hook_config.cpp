@@ -326,9 +326,7 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
 }
 
 [[nodiscard]] bool has_explicit_primary_probe(const HookConfig &config) {
-  return config.probe_nop || config.probe_trampoline_nop || config.probe_endpgm ||
-         config.probe_lds_endpgm || config.probe_lds_check_trap || config.probe_flat_check_trap ||
-         config.probe_flat_trap;
+  return config.probe_lds_check_trap || config.probe_flat_check_trap;
 }
 
 [[nodiscard]] bool env_has_value(const char *name) {
@@ -519,14 +517,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_envs({
           {"RJ_CONSAN_FAIL_CLOSED", strict_policy, &config.fail_closed},
           {"RJ_CONSAN_REQUIRE_PATCH", strict_policy, &config.require_patch},
-          {"RJ_CONSAN_PROBE_NOP", false, &config.probe_nop},
-          {"RJ_CONSAN_PROBE_TRAMPOLINE_NOP", false, &config.probe_trampoline_nop},
-          {"RJ_CONSAN_PROBE_ENDPGM", false, &config.probe_endpgm},
-          {"RJ_CONSAN_PROBE_LDS_ENDPGM", false, &config.probe_lds_endpgm},
           {"RJ_CONSAN_PROBE_LDS_CHECK_TRAP", false, &config.probe_lds_check_trap},
           {"RJ_CONSAN_PROBE_FLAT_CHECK_TRAP", false, &config.probe_flat_check_trap},
           {"RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT", false, &config.abort_unmatched_barrier_wait},
-          {"RJ_CONSAN_PROBE_FLAT_TRAP", false, &config.probe_flat_trap},
           {"RJ_CONSAN_FAULT_DROP_BARRIER", false, &config.fault_drop_barrier},
           {"RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP", false,
            &config.fault_allow_destructive_incomplete_barrier_drop},

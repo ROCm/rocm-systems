@@ -85,14 +85,10 @@ enum class ConSanInstallAction : uint8_t {
 };
 
 enum class ConSanPatchKind : uint8_t {
-  InlineNopRewrite,
-  InlineEndpgmRewrite,
-  InlineLdsEndpgmRewrite,
   LdsLoadCheckTrap,
   LdsStoreCheckTrap,
   FlatLoadCheckTrap,
   FlatStoreCheckTrap,
-  InlineFlatTrapRewrite,
   InlineBarrierNopRewrite,
   InlineBarrierIdScopeRewrite,
   InlineBarrierParticipantCountRewrite,
@@ -121,7 +117,6 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineMoiFenceRecord,
   InlineMalformedBarrierAbort,
   TrampolineScPerturbation,
-  TrampolineNop,
   /// An s_clause scheduling hint neutralized because one of its covered
   /// memory instructions is replaced by an instrumentation trampoline.
   InlineScalarClauseNopRewrite,
@@ -435,7 +430,7 @@ struct ConSanProgramContainer {
 /// slice needed to publish an intent-bound lowering location.
 struct ConSanCommittedPatchGeometry {
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
-  ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
+  ConSanPatchKind kind = ConSanPatchKind::LdsLoadCheckTrap;
   uint64_t anchor_offset = 0;
   uint64_t trampoline_offset = 0;
   uint32_t original_size = 0;

@@ -106,18 +106,4 @@ bool is_atomic_instruction(const Instruction &instruction) {
       mnemonic, {"flat_atomic", "global_atomic", "scratch_atomic", "buffer_atomic", "s_atomic"});
 }
 
-bool has_unsafe_proof_trampoline_flags(const Instruction &instruction) {
-  const uint64_t unsafe_flags = MEMORY_OP | WAITCNT | BARRIER | MFMA | ACCVGPR | PREDICATED_DEF;
-  return (instruction.flags() & unsafe_flags) != 0;
-}
-
-bool is_preferred_proof_anchor(const Instruction &instruction) {
-  if (instruction.size() != static_cast<int>(sizeof(uint32_t)) ||
-      has_unsafe_proof_trampoline_flags(instruction))
-    return false;
-  const std::string_view mnemonic = instruction.mnemonic();
-  return mnemonic.starts_with("v_add_f") || mnemonic.starts_with("v_mul_f") ||
-         mnemonic.starts_with("v_fmac");
-}
-
 } // namespace rocjitsu

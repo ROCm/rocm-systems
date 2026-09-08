@@ -141,7 +141,7 @@ struct FinalValidationEnvironment {
 struct InventoryRange {
   ValidationByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
-  ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
+  ConSanPatchKind kind = ConSanPatchKind::LdsLoadCheckTrap;
   bool must_be_original = false;
   bool is_trampoline = false;
   size_t patch_index = 0;

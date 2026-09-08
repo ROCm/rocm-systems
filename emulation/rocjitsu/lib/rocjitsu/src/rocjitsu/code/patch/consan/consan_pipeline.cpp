@@ -86,14 +86,11 @@ namespace {
 [[nodiscard]] constexpr const char *patch_diagnostic_kind_name(ConSanPatchKind kind) {
   using E = ConSanPatchKind;
   constexpr auto vocabulary = make_consan_enum_vocabulary(
-      "unknown", consan_enum(E::InlineNopRewrite, "inline-nop-rewrite"),
-      consan_enum(E::InlineEndpgmRewrite, "inline-endpgm-rewrite"),
-      consan_enum(E::InlineLdsEndpgmRewrite, "inline-lds-endpgm-rewrite"),
+      "unknown",
       consan_enum(E::LdsLoadCheckTrap, "inline-lds-load-check-trap"),
       consan_enum(E::LdsStoreCheckTrap, "inline-lds-store-check-trap"),
       consan_enum(E::FlatLoadCheckTrap, "inline-flat-load-check-trap"),
       consan_enum(E::FlatStoreCheckTrap, "inline-flat-store-check-trap"),
-      consan_enum(E::InlineFlatTrapRewrite, "inline-flat-trap-rewrite"),
       consan_enum(E::InlineBarrierNopRewrite, "inline-barrier-nop-rewrite"),
       consan_enum(E::InlineBarrierIdScopeRewrite, "inline-barrier-id-scope-rewrite"),
       consan_enum(E::InlineBarrierParticipantCountRewrite,
@@ -124,8 +121,7 @@ namespace {
       consan_enum(E::TrampolineMoiFenceRecord, "trampoline-moi-fence-record"),
       consan_enum(E::InlineMalformedBarrierAbort, "inline-malformed-barrier-abort"),
       consan_enum(E::TrampolineScPerturbation, "trampoline-sc-perturbation"),
-      consan_enum(E::InlineScalarClauseNopRewrite, "inline-scalar-clause-nop-rewrite"),
-      consan_enum(E::TrampolineNop, "trampoline-nop"));
+      consan_enum(E::InlineScalarClauseNopRewrite, "inline-scalar-clause-nop-rewrite"));
   return vocabulary.name(kind).data();
 }
 

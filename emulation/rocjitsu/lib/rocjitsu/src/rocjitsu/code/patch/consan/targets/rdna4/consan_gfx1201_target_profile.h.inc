@@ -23,6 +23,5 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   profile.moi_access.dynamic_stack_uses_scalar_reservoir = true;
   profile.moi_access.lazy_workgroup_shadow = true;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral;
-  profile.supports_sc_inline_flat_trap_rewrite = true;
   return profile;
 }();

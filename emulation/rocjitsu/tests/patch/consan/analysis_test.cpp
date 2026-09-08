@@ -4942,7 +4942,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
               sizeof(nonzero_leave));
   ConSanPatchInfo fake_leave_accounting;
   fake_leave_accounting.phase = ConSanPatchPhase::Instrumentation;
-  fake_leave_accounting.kind = ConSanPatchKind::InlineNopRewrite;
+  fake_leave_accounting.kind = ConSanPatchKind::InlineBarrierNopRewrite;
   fake_leave_accounting.anchor_offset = leave_offset;
   fake_leave_accounting.trampoline_offset = leave_offset;
   fake_leave_accounting.original_size = sizeof(uint32_t);

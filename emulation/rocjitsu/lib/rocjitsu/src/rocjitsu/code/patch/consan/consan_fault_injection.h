@@ -24,11 +24,4 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                                     bool require_applicable_plan, bool require_exactly_one_applied,
                                     ConSanTransformArtifacts &result);
 
-void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               bool force_trampoline, ConSanTransformArtifacts &result);
-void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  ConSanTransformArtifacts &result);
-void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                ConSanTransformArtifacts &result);
-
 } // namespace rocjitsu

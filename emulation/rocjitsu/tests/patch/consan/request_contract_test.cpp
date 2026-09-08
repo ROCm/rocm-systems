@@ -720,11 +720,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   transform.max_patches = 23;
   transform.max_patches_is_expert_limit = false;
   ConSanDebugOverrides debug;
-  debug.probe_nop = true;
-  debug.probe_trampoline_nop = true;
-  debug.probe_endpgm = true;
-  debug.probe_lds_endpgm = true;
-  debug.probe_flat_trap = true;
   debug.abort_unmatched_barrier_wait = true;
   debug.test_force_vgpr_spill = true;
   debug.test_force_private_epoch = true;
@@ -757,11 +752,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   EXPECT_EQ(options.patched_image_growth_limit.absolute_bytes, 1234u);
   EXPECT_EQ(options.max_patches, 23u);
   EXPECT_FALSE(options.max_patches_is_expert_limit);
-  EXPECT_TRUE(options.probe_nop);
-  EXPECT_TRUE(options.probe_trampoline_nop);
-  EXPECT_TRUE(options.probe_endpgm);
-  EXPECT_TRUE(options.probe_lds_endpgm);
-  EXPECT_TRUE(options.probe_flat_trap);
   EXPECT_TRUE(options.abort_unmatched_barrier_wait);
   EXPECT_EQ(options.test_kernel_name_filter, "kernel");
   EXPECT_EQ(options.scratch_vgpr, 1);

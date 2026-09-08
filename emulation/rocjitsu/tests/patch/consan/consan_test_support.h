@@ -3291,7 +3291,6 @@ std::array<ConSanTransformProfile, 4> all_consan_transform_profiles() {
   supercollider.flavor = ConSanFlavor::SuperCollider;
   supercollider.probe_lds_check_trap = true;
   supercollider.probe_flat_check_trap = true;
-  supercollider.probe_trampoline_nop = true;
   supercollider.max_patches = 8;
 
   return {{{"supercollider", std::move(supercollider)},

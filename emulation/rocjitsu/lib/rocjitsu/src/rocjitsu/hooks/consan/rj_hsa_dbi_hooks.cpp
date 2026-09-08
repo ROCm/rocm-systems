@@ -2036,9 +2036,8 @@ public:
         "installed ConSan hook flavor=%s moi_engine=%s policy=%s moi_profile=%s delay_nops=%u "
         "fail_closed=%s "
         "require_patch=%s "
-        "probe_nop=%s probe_trampoline_nop=%s probe_endpgm=%s probe_lds_endpgm=%s "
         "check_trap_mode=%s sc_report_mode=%s probe_lds_check_trap=%s "
-        "probe_flat_check_trap=%s probe_flat_trap=%s "
+        "probe_flat_check_trap=%s "
         "fault_drop_barrier=%s fault_reservation_timeout_ms=%u "
         "moi_init_owner_epoch=%s moi_track_barriers=%s "
         "moi_track_atomics=%s moi_dynamic_access_records=%s moi_require_records=%s "
@@ -2060,11 +2059,9 @@ public:
         rocjitsu::consan_moi_engine_name(config.moi_engine), hook_policy_name(config.policy),
         config.flavor == rocjitsu::ConSanFlavor::Moi ? kMoiStandardProfile.data() : "none",
         config.delay_nops, config.fail_closed ? "true" : "false",
-        config.require_patch ? "true" : "false", config.probe_nop ? "true" : "false",
-        config.probe_trampoline_nop ? "true" : "false", config.probe_endpgm ? "true" : "false",
-        config.probe_lds_endpgm ? "true" : "false", check_trap_mode_name(config.check_trap_mode),
+        config.require_patch ? "true" : "false", check_trap_mode_name(config.check_trap_mode),
         sc_report_mode_name(config.sc_report_mode), config.probe_lds_check_trap ? "true" : "false",
-        config.probe_flat_check_trap ? "true" : "false", config.probe_flat_trap ? "true" : "false",
+        config.probe_flat_check_trap ? "true" : "false",
         config.fault_drop_barrier ? "true" : "false", config.fault_reservation_timeout_ms,
         config.moi_init_owner_epoch ? "true" : "false",
         config.moi_track_barriers ? "true" : "false", config.moi_track_atomics ? "true" : "false",
@@ -2117,15 +2114,7 @@ public:
         : config.probe_lds_check_trap                                 ? "proof-lds-check-trap"
         : config.probe_flat_check_trap
             ? "proof-flat-check-trap"
-            : (config.probe_flat_trap
-                   ? "proof-flat-trap"
-                   : (config.probe_lds_endpgm
-                          ? "proof-lds-endpgm"
-                          : (config.probe_endpgm
-                                 ? "proof-endpgm"
-                                 : (config.probe_trampoline_nop
-                                        ? "proof-trampoline-nop"
-                                        : (config.probe_nop ? "proof-nop" : "pass-through"))))));
+            : "pass-through");
     if (config.fault_allow_destructive_incomplete_barrier_drop) {
       log_message(kLogInfo, "ConSan destructive control incomplete_barrier_drop=true "
                             "containment=external-runner-required");
@@ -3984,9 +3973,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     log_message(
         kLogInfo,
         "ConSan inventory reader=%llu flavor=%s moi_engine=%s bytes=%zu modified=%s "
-        "delay_nops=%u fail_closed=%s probe_nop=%s probe_trampoline_nop=%s "
-        "probe_endpgm=%s probe_lds_endpgm=%s check_trap_mode=%s probe_lds_check_trap=%s "
-        "probe_flat_check_trap=%s probe_flat_trap=%s fault_drop_barrier=%s "
+        "delay_nops=%u fail_closed=%s check_trap_mode=%s probe_lds_check_trap=%s "
+        "probe_flat_check_trap=%s fault_drop_barrier=%s "
         "moi_init_owner_epoch=%s moi_track_barriers=%s moi_track_atomics=%s "
         "moi_dynamic_access_records=%s "
         "fault_barrier_index=%u "
@@ -4007,12 +3995,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false",
         config->delay_nops, config->fail_closed ? "true" : "false",
-        config->probe_nop ? "true" : "false", config->probe_trampoline_nop ? "true" : "false",
-        config->probe_endpgm ? "true" : "false", config->probe_lds_endpgm ? "true" : "false",
         check_trap_mode_name(config->check_trap_mode),
         config->probe_lds_check_trap ? "true" : "false",
         config->probe_flat_check_trap ? "true" : "false",
-        config->probe_flat_trap ? "true" : "false", config->fault_drop_barrier ? "true" : "false",
+        config->fault_drop_barrier ? "true" : "false",
         config->moi_init_owner_epoch ? "true" : "false",
         config->moi_track_barriers ? "true" : "false", config->moi_track_atomics ? "true" : "false",
         config->moi_dynamic_access_records ? "true" : "false", config->fault_barrier_index,

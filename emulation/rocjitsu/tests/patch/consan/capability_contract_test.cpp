@@ -68,7 +68,6 @@ struct ExpectedTargetProfile {
   uint8_t flat_compare_swap_data_pair_alignment;
   bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
-  bool supports_sc_inline_flat_trap_rewrite;
   bool requires_sc_runtime_flat_group_gate;
   bool requires_raw_memory_order_qualifier;
 };
@@ -147,7 +146,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = false,
     },
@@ -224,7 +222,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = false,
     },
@@ -294,7 +291,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = true,
     },
@@ -377,7 +373,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .supports_sc_inline_flat_trap_rewrite = true,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = true,
     },
@@ -465,7 +460,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
-        .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = true,
         .requires_raw_memory_order_qualifier = true,
     },
@@ -525,8 +519,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
             expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
-  EXPECT_EQ(actual.supports_sc_inline_flat_trap_rewrite,
-            expected.supports_sc_inline_flat_trap_rewrite);
   EXPECT_EQ(actual.requires_sc_runtime_flat_group_gate,
             expected.requires_sc_runtime_flat_group_gate);
   EXPECT_EQ(actual.requires_raw_memory_order_qualifier,
@@ -662,8 +654,6 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("two-address relocation split outside CDNA5", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });
-  expect_invalid("SC inline FLAT trap outside RDNA4",
-                 [](auto &profiles) { profiles[0].supports_sc_inline_flat_trap_rewrite = true; });
   expect_invalid("SC runtime group gate without selectable VGPR banks",
                  [](auto &profiles) { profiles[0].requires_sc_runtime_flat_group_gate = true; });
   expect_invalid("raw memory-order qualifier disagrees with encoding",

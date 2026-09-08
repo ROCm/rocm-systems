@@ -408,7 +408,7 @@ TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
   ConSanTransformArtifacts result;
   result.coverage_ledger = ConSanCoverageLedger(plan);
   ConSanPatchInfo unrelated_patch;
-  unrelated_patch.kind = ConSanPatchKind::InlineNopRewrite;
+  unrelated_patch.kind = ConSanPatchKind::InlineBarrierNopRewrite;
   unrelated_patch.anchor_offset = plan.probe_intents[0].physical_site.original_text_offset;
   result.patches.push_back(std::move(unrelated_patch));
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending)

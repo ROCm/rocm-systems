@@ -1527,7 +1527,7 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
     std::memcpy(result.replacement.data() + text_file_offset + anchor, &replacement_word,
                 sizeof(replacement_word));
     ConSanPatchInfo patch;
-    patch.kind = ConSanPatchKind::InlineNopRewrite;
+    patch.kind = ConSanPatchKind::InlineBarrierNopRewrite;
     patch.anchor_offset = anchor;
     patch.original_size = sizeof(uint32_t);
     result.patches.push_back(std::move(patch));

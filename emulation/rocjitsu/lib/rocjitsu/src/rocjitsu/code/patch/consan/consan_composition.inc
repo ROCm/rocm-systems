@@ -297,10 +297,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     instrument_result.mark_modified();
     return instrument_result;
   case ConSanTransformOutcome::Unsupported:
-    if (instrument_options.flavor == ConSanFlavor::SuperCollider && !instrument_options.probe_nop &&
-        !instrument_options.probe_trampoline_nop && !instrument_options.probe_endpgm &&
-        !instrument_options.probe_lds_endpgm && !instrument_options.probe_lds_check_trap &&
-        !instrument_options.probe_flat_check_trap && !instrument_options.probe_flat_trap &&
+    if (instrument_options.flavor == ConSanFlavor::SuperCollider &&
+        !instrument_options.probe_lds_check_trap && !instrument_options.probe_flat_check_trap &&
         instrument_options.sc_perturb_kind == ConSanPerturbationKind::None) {
       // The second pass may classify the intentionally weakened image as a
       // preflight skip. With no instrumentation request, that is not a
@@ -520,14 +518,7 @@ lower_consan_stage(std::span<const uint8_t> code_object_bytes, const ConSanOptio
         }
       }
     }
-  } else if (!has_perturbation && options.probe_flat_trap)
-    try_apply_flat_trap_patch(*code_object, *target_profile, options, result);
-  else if (!has_perturbation && options.probe_lds_endpgm)
-    try_apply_lds_endpgm_patch(*code_object, arch, result);
-  else if (!has_perturbation && options.probe_endpgm)
-    try_apply_proof_endpgm_patch(*code_object, arch, result);
-  else if (!has_perturbation && (options.probe_nop || options.probe_trampoline_nop))
-    try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
+  }
 
   if (!result.staged_text_fragments.empty() && result.errors.empty()) {
     const std::string_view subject = options.probe_lds_check_trap && options.probe_flat_check_trap
