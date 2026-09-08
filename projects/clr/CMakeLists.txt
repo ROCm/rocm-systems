@@ -45,6 +45,25 @@ option(CLR_BUILD_OCL "Build OCL" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 
+# Strict warnings default to OFF
+option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" OFF)
+
+# Single source of truth for strict-warning flags. First-party targets opt in
+# via target_link_libraries(<tgt> PRIVATE clr_warnings). When CLR_ENABLE_WERROR
+# is OFF the target carries no flags, so linking it is always safe.
+add_library(clr_warnings INTERFACE)
+if(CLR_ENABLE_WERROR AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(clr_warnings INTERFACE
+        -Wall -Werror -Wno-error=deprecated-declarations)
+    # GCC <= 11 ignores [[maybe_unused]] on non-static data members and emits
+    # -Wattributes ("attribute ignored"), which -Werror promotes to an error. The
+    # attribute is still required for Clang's -Wunused-private-field, so silence
+    # the spurious GCC diagnostic. (GCC 12+ handles the attribute correctly.)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(clr_warnings INTERFACE -Wno-attributes)
+    endif()
+endif()
+
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")

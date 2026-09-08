@@ -568,7 +568,7 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
 
   // Only copy partial name if size of `dest` is smaller than size of `src` including
   // trailing zero byte
-  const auto memcpySize = (len <= (nameLen + 1) ? (len - 1) : nameLen);
+  const auto memcpySize = (static_cast<size_t>(len) <= (nameLen + 1) ? (len - 1) : nameLen);
   ::memcpy(name, info.boardName_, memcpySize);
   name[memcpySize] = '\0';
 
@@ -639,11 +639,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0600 deviceProps = {0};
+  hipDeviceProp_tR0600 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
-  ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
+  ::snprintf(deviceProps.name, sizeof(deviceProps.name), "%s", info.boardName_);
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
@@ -849,7 +849,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0000 deviceProps = {0};
+  hipDeviceProp_tR0000 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();

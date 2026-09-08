@@ -5,7 +5,7 @@
  */
 
 /**
- *  @file  amd_detail/hip_vector_types.h
+ *  @file  amd_detail/amd_hip_vector_types.h
  *  @brief Defines the different newt vector types for HIP runtime.
  */
 

@@ -28,15 +28,13 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
   IHIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
 
   for (cl_int i = 0; i < count; ++i) {
-    DeviceProp currentProp = {0};
+    DeviceProp currentProp = {};
     cl_uint validPropCount = 0;
     cl_uint matchedCount = 0;
-    hipError_t err = hipSuccess;
-
     if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>) {
-      err = ihipGetDeviceProperties(&currentProp, i);
+      (void)ihipGetDeviceProperties(&currentProp, i);
     } else {
-      err = hip::hipGetDevicePropertiesR0000(&currentProp, i);
+      (void)hip::hipGetDevicePropertiesR0000(&currentProp, i);
     }
 
     if (properties->major != 0) {
@@ -158,7 +156,7 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
   }
 
   // FIXME: should we cache the props, or just select from deviceHandle->info_?
-  hipDeviceProp_tR0600 prop = {0};
+  hipDeviceProp_tR0600 prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
 
   constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
@@ -665,7 +663,7 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
   if (maxWidthInElements == nullptr || fmtDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hipDeviceProp_tR0600 prop = {0};
+  hipDeviceProp_tR0600 prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   // Calculate element size according to fmtDesc
   size_t elementSize =

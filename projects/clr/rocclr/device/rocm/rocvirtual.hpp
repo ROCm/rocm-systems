@@ -28,7 +28,7 @@
 namespace amd::roc {
 class Device;
 class Memory;
-struct ProfilingSignal;
+class ProfilingSignal;
 class Timestamp;
 
 constexpr static uint64_t kInvalidAqlSlot = std::numeric_limits<uint64_t>::max();
@@ -534,16 +534,16 @@ class VirtualGPU : public device::VirtualDevice {
 
   void updateCommandsState(amd::Command* list) const;
 
-  void submitReadMemory(amd::ReadMemoryCommand& cmd);
-  void submitWriteMemory(amd::WriteMemoryCommand& cmd);
-  void submitCopyMemory(amd::CopyMemoryCommand& cmd);
-  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
-  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
-  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
-  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
-  void submitMapMemory(amd::MapMemoryCommand& cmd);
-  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
-  void submitKernel(amd::NDRangeKernelCommand& cmd);
+  void submitReadMemory(amd::ReadMemoryCommand& cmd) override;
+  void submitWriteMemory(amd::WriteMemoryCommand& cmd) override;
+  void submitCopyMemory(amd::CopyMemoryCommand& cmd) override;
+  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) override;
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) override;
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) override;
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) override;
+  void submitMapMemory(amd::MapMemoryCommand& cmd) override;
+  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) override;
+  void submitKernel(amd::NDRangeKernelCommand& cmd) override;
   bool submitKernelInternal(
       const amd::NDRangeContainer& sizes,                  //!< Workload sizes
       const amd::Kernel& kernel,                           //!< Kernel for execution
@@ -553,33 +553,33 @@ class VirtualGPU : public device::VirtualDevice {
       amd::NDRangeKernelCommand* vcmd = nullptr,           //!< Original launch command
       hsa_kernel_dispatch_packet_t* aql_packet = nullptr,  //!< Scheduler launch
       bool attach_signal = false);
-  void submitNativeFn(amd::NativeFnCommand& cmd);
-  void submitMarker(amd::Marker& cmd);
-  void submitAccumulate(amd::AccumulateCommand& cmd);
-  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
-  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
-  void submitPerfCounter(amd::PerfCounterCommand& cmd);
+  void submitNativeFn(amd::NativeFnCommand& cmd) override;
+  void submitMarker(amd::Marker& cmd) override;
+  void submitAccumulate(amd::AccumulateCommand& cmd) override;
+  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd) override;
+  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd) override;
+  void submitPerfCounter(amd::PerfCounterCommand& cmd) override;
 
-  void flush(amd::Command* list = nullptr, bool wait = false);
-  void submitFillMemory(amd::FillMemoryCommand& cmd);
-  void submitStreamOperation(amd::StreamOperationCommand& cmd);
-  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
-  void submitVirtualMap(amd::VirtualMapCommand& cmd);
-  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd);
+  void flush(amd::Command* list = nullptr, bool wait = false) override;
+  void submitFillMemory(amd::FillMemoryCommand& cmd) override;
+  void submitStreamOperation(amd::StreamOperationCommand& cmd) override;
+  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) override;
+  void submitVirtualMap(amd::VirtualMapCommand& cmd) override;
+  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd) override;
 
-  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd);
-  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd);
-  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd);
-  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd);
-  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd);
-  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
-  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
-  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd);
-  virtual void submitSignal(amd::SignalCommand& cmd) {}
-  virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) {}
+  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd) override;
+  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) override;
+  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) override;
+  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) override;
+  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd) override;
+  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) override;
+  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) override;
+  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) override;
+  void submitSignal(amd::SignalCommand& cmd) override {}
+  void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) override {}
 
-  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
-  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
+  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) override {}
+  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) override {}
 
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
@@ -664,12 +664,12 @@ class VirtualGPU : public device::VirtualDevice {
   void* allocKernArg(size_t size, size_t alignment);
   //! Returns the size of one managed kernarg pool chunk.
   size_t KernArgPoolChunkSize() const;
-  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  bool isFenceDirty() const override { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
-  void HiddenHeapInit();
-  uint64_t getQueueID();
+  void HiddenHeapInit() override;
+  uint64_t getQueueID() override;
 
   //! Add completion signal to the scheduler queue thread's event list.
   //! Wakes the scheduler queue thread if it's sleeping.

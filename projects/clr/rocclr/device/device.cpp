@@ -600,7 +600,7 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
 void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
 
-  for (const auto it : IpcHandleMemObjMap_) {
+  for (const auto& it : IpcHandleMemObjMap_) {
     if (it.second == v) {
       IpcHandleMemObjMap_.erase(it.first);
       break;
@@ -938,8 +938,8 @@ Device::Device()
       blitProgram_(nullptr),
       context_(nullptr),
       heap_buffer_(nullptr),
-      initial_heap_buffer_(nullptr),
       arena_mem_obj_(nullptr),
+      initial_heap_buffer_(nullptr),
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
       index_(0) {

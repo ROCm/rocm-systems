@@ -177,7 +177,7 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
     if (free_mapped <= unmap_threshold_) {
       return;
     }
-    if (i >= mapped_mem_.size()) {
+    if (static_cast<size_t>(i) >= mapped_mem_.size()) {
       assert(false);
       LogError("VM heap allocation is beyond the range!");
       return;

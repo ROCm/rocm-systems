@@ -776,12 +776,10 @@ hipError_t Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
     visited.insert(node->GetID());
 
     // Check if device ID changed from previous node in path
-    bool device_changed = false;
     int current_device_id = node->GetDeviceId();
     if (!current_path.empty()) {
       int prev_device_id = current_path.back()->GetDeviceId();
       if (prev_device_id != current_device_id) {
-        device_changed = true;
         // Save current path before device change
         savePath(std::move(current_path), prev_device_id);
         current_path.clear();
@@ -1063,7 +1061,7 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
     return hipSuccess;
   }
 
-  if (devId < 0 || devId >= g_devices.size() || g_devices[devId] == nullptr) {
+  if (devId < 0 || static_cast<size_t>(devId) >= g_devices.size() || g_devices[devId] == nullptr) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Invalid device ID %d for stream creation",
             devId);
     return hipErrorInvalidDevice;
@@ -1653,7 +1651,7 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
   UpdateStreams(launch_stream);
 
   if (max_streams_ == 1 && captureDeviceId_ != launch_stream->DeviceId()) {
-    for (int i = 0; i < topoOrder_.size(); i++) {
+    for (size_t i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
       status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
       if (status != hipSuccess) {
@@ -2176,7 +2174,7 @@ hipError_t GraphExecSegmented::CaptureAQLPackets() {
   std::unordered_map<int, size_t> kernArgSizeForGraph;
   // Reserve space for all available devices and Initialize to 0
   kernArgSizeForGraph.reserve(g_devices.size());
-  for (int devId = 0; devId < g_devices.size(); devId++) {
+  for (size_t devId = 0; devId < g_devices.size(); devId++) {
     kernArgSizeForGraph[devId] = 0;
   }
   GetKernelArgSizeForGraph(kernArgSizeForGraph);
@@ -3037,7 +3035,7 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
     wait_list.push_back(last_command);
     // Check if the graph has multiple root nodes
     for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
-      if ((base_stream != i) && (roots_[i] != nullptr)) {
+      if ((static_cast<uint32_t>(base_stream) != i) && (roots_[i] != nullptr)) {
         // Wait for the app's queue
         auto start_marker = new amd::Marker(*streams_[i], true, wait_list);
         start_marker->enqueue();
@@ -3070,7 +3068,7 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
     if (leafs_[i] != nullptr) {
       for (auto command : leafs_[i]->GetCommands()) {
-        if (base_stream != i) {
+        if (static_cast<uint32_t>(base_stream) != i) {
           wait_list.push_back(command);
         } else {
           command->release();
@@ -3368,7 +3366,6 @@ void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set
 
 // ================================================================================================
 bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device* device) {
-  bool bStatus = true;
   assert(pool_size > 0);
   address graph_kernarg_base;
   if (device->info().largeBar_) {

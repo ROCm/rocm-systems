@@ -53,9 +53,9 @@ class Memory : public device::Memory {
   virtual bool create(bool local_alloc = false) = 0;
 
   // Pins system memory associated with this memory object.
-  bool pinSystemMemory(void* hostPtr,  // System memory address
-                       size_t size     // Size of allocated system memory
-                       ) override;
+  [[nodiscard]] bool pinSystemMemory(void* hostPtr,  // System memory address
+                                     size_t size     // Size of allocated system memory
+                                     ) override;
 
   //! Updates device memory from the owner's host allocation
   void syncCacheFromHost(VirtualGPU& gpu,  //!< Virtual GPU device object

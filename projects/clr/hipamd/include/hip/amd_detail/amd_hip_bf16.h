@@ -154,7 +154,7 @@ typedef struct __attribute__((aligned(4))) {
 } __hip_bfloat162_raw;
 
 /**
- * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT
+ * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT Bfloat16 Struct
  * \ingroup HIP_INTRINSIC_BFLOAT16
  * \brief Struct to represent a 16 bit brain floating point number.
  * @{
@@ -327,7 +327,7 @@ typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
 #endif
 
 /**
- * \defgroup HIP_INTRINSIC_BFLOAT162_STRUCT
+ * \defgroup HIP_INTRINSIC_BFLOAT162_STRUCT Bfloat162 Struct
  * \ingroup HIP_INTRINSIC_BFLOAT16
  * \brief Struct to represent a two 16 bit brain floating point number.
  * @{

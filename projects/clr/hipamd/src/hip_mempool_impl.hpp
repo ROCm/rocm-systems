@@ -52,7 +52,7 @@ struct MemoryTimestamp {
   /// Wait for memory to be available
   void Wait() {
     if (event_ != nullptr) {
-      auto hip_error = event_->synchronize();
+      (void)event_->synchronize();
     }
   }
   /// Returns if memory object is safe for reuse

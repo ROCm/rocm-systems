@@ -458,16 +458,14 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
               AMD_SERIALIZE_KERNEL | (HIP_LAUNCH_BLOCKING << 1)),
       kernel_(kernel),
       sizes_(sizes),
+      parameters_(nullptr),
       sharedMemBytes_(sharedMemBytes),
       extraParam_(extraParam),
       gridId_(gridId),
       numGrids_(numGrids),
       prevGridSum_(prevGridSum),
       allGridSum_(allGridSum),
-      firstDevice_(firstDevice),
-      parameters_(nullptr) {
-  auto& device = queue.device();
-  auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
+      firstDevice_(firstDevice) {
   if (cooperativeGroups()) {
     setNumWorkgroups();
   }
@@ -693,8 +691,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 
 // =================================================================================================
 int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
-                                                      size_t kernArgsSize) {
-  const amd::Device& device = queue()->device();
+                                                        size_t kernArgsSize) {
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
     return CL_OUT_OF_RESOURCES;

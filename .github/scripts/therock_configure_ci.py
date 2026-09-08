@@ -422,6 +422,9 @@ def retrieve_projects(args):
         tests = config.get("projects_to_test", "")
         if tests:
             merged_tests.update(t.strip() for t in tests.split(","))
+        if (project == "runtimes" or project == "all") and args.get("platform") == "linux":
+            flags.append("-Dhip-tests_CMAKE_ARGS='-DHIP_TESTS_ENABLE_WERROR=ON'")
+            flags.append("-Dhip-clr_CMAKE_ARGS='-DCLR_ENABLE_WERROR=ON'")
     if enable_all:
         final_flags_list = ["-DTHEROCK_ENABLE_ALL=ON"]
     else:
