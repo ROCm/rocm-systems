@@ -129,14 +129,27 @@ class TestResult(str, Enum):
     RESULT_SKIPPED = "SKIPPED"
 
 
+# Google Test's own "nothing was selected" banner, e.g. a --gtest_filter that
+# matches no test. Exit status is 0 and no per-test line is printed, so this is
+# the only positive evidence that the run executed nothing.
+_GTEST_RAN_NOTHING_RE = re.compile(
+    r"Running 0 tests from 0 test (?:suites|cases)|0 tests from 0 test (?:suites|cases) ran"
+)
+
+
 def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
     """
     Map gtest process exit + stdout/stderr to a TestResult string.
 
     Google Test returns exit 0 when failures are absent, including when all
-    selected tests are SKIPPED. Prefer ``infer_gtest_result_from_json_file`` when
-    ``--gtest_output=json:…`` is used; this function is the stdout fallback (e.g.
-    ``[  SKIPPED ]`` / ``[  OK ]`` patterns).
+    selected tests are SKIPPED and when the filter selected nothing at all.
+    A filter that matches no test must not report PASSED -- that turns a typo'd
+    or renamed test_filter into a silent green result. Report it SKIPPED, which
+    is what the pytest path already does for "no tests collected".
+
+    Prefer ``infer_gtest_result_from_json_file`` when ``--gtest_output=json:…``
+    is used; this function is the stdout fallback (e.g. ``[  SKIPPED ]`` /
+    ``[  OK ]`` patterns).
     """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
@@ -151,6 +164,8 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     if has_ok:
         return TestResult.RESULT_PASSED.value
     if has_skipped:
+        return TestResult.RESULT_SKIPPED.value
+    if _GTEST_RAN_NOTHING_RE.search(out):
         return TestResult.RESULT_SKIPPED.value
     return TestResult.RESULT_PASSED.value
 
@@ -202,7 +217,9 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
         return TestResult.RESULT_PASSED.value
     if stats["skipped"]:
         return TestResult.RESULT_SKIPPED.value
-    return TestResult.RESULT_PASSED.value
+    # No leaf test in the report: the filter selected nothing. Reporting PASSED
+    # here would turn a typo'd or renamed test_filter into a silent green.
+    return TestResult.RESULT_SKIPPED.value
 
 
 def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
