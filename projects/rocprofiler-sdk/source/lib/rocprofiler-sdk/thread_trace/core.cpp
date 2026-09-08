@@ -79,8 +79,7 @@ struct cbdata_t
     const rocprofiler_user_data_t*                  userdata   = nullptr;
     uint64_t                                        next_chunk = 0;
 
-    rocprofiler_thread_trace_timestamp_t start_timestamp{};
-    rocprofiler_thread_trace_timestamp_t end_timestamp{};
+    aqlprofile_handle_t handle{};
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -101,6 +100,9 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
+    // Clock storage is per XCC; select it using this callback's shader engine.
+    auto clock = hsa::get_gpu_clock(cb_data.handle, shader);
+
     auto shader_data             = rocprofiler_thread_trace_shader_data_t{};
     shader_data.size             = sizeof(shader_data);
     shader_data.data             = buffer;
@@ -110,8 +112,8 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
-    shader_data.start_timestamp  = cb_data.start_timestamp;
-    shader_data.end_timestamp    = cb_data.end_timestamp;
+    shader_data.start_timestamp  = convert_timestamp(cb_data.agent, clock.start);
+    shader_data.end_timestamp    = convert_timestamp(cb_data.agent, clock.latest);
 
     cb_data.cb_fn(shader_data, *cb_data.userdata);
     // The iterator guarantees the last chunk is tagged with END; here we just
@@ -246,13 +248,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
-    int se_id   = 0;
-    for(auto mask = params.shader_engine_mask; (mask & 1) == 0; mask >>= 1)
-        ++se_id;
-
-    auto clock            = hsa::get_gpu_clock(handle, se_id);
-    cb_dt.start_timestamp = convert_timestamp(agent_id, clock.start);
-    cb_dt.end_timestamp   = convert_timestamp(agent_id, clock.latest);
+    cb_dt.handle = handle;
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;

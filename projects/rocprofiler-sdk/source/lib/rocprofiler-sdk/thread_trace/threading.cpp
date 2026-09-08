@@ -200,14 +200,14 @@ producer_loop(
         }
     };
 
-    auto send_to_consumer = [&](void*    src,
-                                size_t   size,
-                                int      flags,
-                                size_t   slot_idx,
-                                bool     isHeader    = false,
-                                uint64_t read_offset = 0,
-                                rocprofiler_thread_trace_timestamp_t start_ts = {},
-                                rocprofiler_thread_trace_timestamp_t end_ts = {}) {
+    auto send_to_consumer = [&](void*                                src,
+                                size_t                               size,
+                                int                                  flags,
+                                size_t                               slot_idx,
+                                bool                                 isHeader    = false,
+                                uint64_t                             read_offset = 0,
+                                rocprofiler_thread_trace_timestamp_t start_ts    = {},
+                                rocprofiler_thread_trace_timestamp_t end_ts      = {}) {
         auto t0 = std::chrono::system_clock::now();
 
         auto& buffer       = buffers[slot_idx];
@@ -217,7 +217,7 @@ producer_loop(
         buffer.chunk_index = next_chunk_index++;
         buffer.read_offset = read_offset;
         buffer.start_timestamp = start_ts;
-        buffer.end_timestamp = end_ts;
+        buffer.end_timestamp   = end_ts;
 
         if(!isHeader)
             parameters.copy_data_fn(queue, buffer.memory, src, size);
@@ -253,9 +253,8 @@ producer_loop(
     auto iterate_trace = [&]() {
         size_t idx  = wait_for_free_slot();
         auto   wptr = iterate_data(buffer_packet);
-        auto clock = buffer_packet.get_gpu_clock();
-        if(current_ts.gpu_clock == 0)
-            current_ts = convert_timestamp(queue.agent_id, clock.start);
+        auto   clock = buffer_packet.get_gpu_clock();
+        if(current_ts.gpu_clock == 0) current_ts = convert_timestamp(queue.agent_id, clock.start);
         auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
         buffer_packet.reset_current_buffer();
         int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
@@ -273,7 +272,6 @@ producer_loop(
         }
         ROCP_INFO << "Iterate data with size: " << wptr.size;
         send_to_consumer(wptr.data, wptr.size, flags, idx, false, 0, current_ts, end_ts);
-        current_ts = end_ts;
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
@@ -362,8 +360,14 @@ producer_loop(
                 slot_idx = wait_for_free_slot();
             }
 
-            send_to_consumer(
-                status->data, buffer_size, flags, slot_idx, false, status->read_offset, current_ts, swap_ts);
+            send_to_consumer(status->data,
+                             buffer_size,
+                             flags,
+                             slot_idx,
+                             false,
+                             status->read_offset,
+                             current_ts,
+                             swap_ts);
             current_ts = swap_ts;
 
             if(cpu_full)
